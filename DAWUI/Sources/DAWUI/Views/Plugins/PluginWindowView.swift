@@ -434,6 +434,18 @@ struct NativePluginView: NSViewControllerRepresentable {
 
 // MARK: - Generic Plugin Parameter View
 
+private enum AUPresetLoadError: LocalizedError {
+    case invalidFile, incompatiblePlugin, missingARIAState
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidFile: return "This is not a valid AU preset property list."
+        case .incompatiblePlugin: return "This preset belongs to a different Audio Unit."
+        case .missingARIAState: return "The preset contains no ARIA instrument state."
+        }
+    }
+}
+
 struct GenericPluginParameterView: View {
     let plugin: LoadedPlugin
     var onRequestNativeUI: (() -> Void)?
@@ -442,7 +454,56 @@ struct GenericPluginParameterView: View {
     @State private var parameterValues: [AUParameterAddress: Float] = [:]
     @State private var isLoading: Bool = true
     @State private var retryCount: Int = 0
+    @State private var presetStatus: String?
+    @State private var presetError: String?
     
+    /// Restore a Logic/Audio Unit .aupreset via AUAudioUnit.fullState.
+    /// This is a diagnostic path for ARIA's editor crash, not a custom SFZ loader.
+    private func chooseAUPreset() {
+        let panel = NSOpenPanel()
+        panel.allowedFileTypes = ["aupreset"]
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        loadAUPreset(from: url)
+    }
+
+    private func loadAUPreset(from url: URL) {
+        presetStatus = nil
+        presetError = nil
+        do {
+            let data = try Data(contentsOf: url)
+            let plist = try PropertyListSerialization.propertyList(
+                from: data, options: [], format: nil
+            )
+            guard let state = plist as? [String: Any] else {
+                throw AUPresetLoadError.invalidFile
+            }
+            // Avoid applying another instrument's opaque state to ARIA.
+            let component = plugin.audioUnit.auAudioUnit.componentDescription
+            for (key, expected) in [
+                ("type", component.componentType),
+                ("subtype", component.componentSubType),
+                ("manufacturer", component.componentManufacturer)
+            ] {
+                guard let value = state[key] as? NSNumber,
+                      value.uint32Value == expected else {
+                    throw AUPresetLoadError.incompatiblePlugin
+                }
+            }
+            guard state["AriaData"] is Data else {
+                throw AUPresetLoadError.missingARIAState
+            }
+            plugin.audioUnit.auAudioUnit.fullState = state
+            presetStatus = "Applied \\(url.lastPathComponent). Try playing your MIDI keyboard."
+            print("[ARIA Preset] Applied AU fullState from \\(url.lastPathComponent)")
+        } catch {
+            presetError = "Could not load preset: \\(error.localizedDescription)"
+            print("[ARIA Preset] Error: \\(error)")
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -464,7 +525,23 @@ struct GenericPluginParameterView: View {
                     .help("Refresh parameters")
                 }
                 .padding(.bottom, 8)
-                
+
+                if plugin.identifier.name.localizedCaseInsensitiveContains("aria") {
+                    HStack(spacing: 12) {
+                        Button("Load AU Preset…") { chooseAUPreset() }
+                            .buttonStyle(.borderedProminent)
+                        Text("Load a saved ARIA configuration without opening its native editor.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    if let presetStatus {
+                        Text(presetStatus).font(.caption).foregroundColor(.green)
+                    }
+                    if let presetError {
+                        Text(presetError).font(.caption).foregroundColor(.red)
+                    }
+                }
+
                 if parameters.isEmpty && !isLoading {
                     VStack(spacing: 16) {
                         Image(systemName: "slider.horizontal.3")
