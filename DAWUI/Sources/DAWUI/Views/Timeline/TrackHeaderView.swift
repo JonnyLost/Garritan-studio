@@ -554,41 +554,9 @@ struct InstrumentBrowserSheet: View {
             loadError = "No ARIA instrument on this track."
             return
         }
-        let instant = program.library == "Garritan Instant Orchestra"
-        let sourceName = instant ? "Blending Textures/Evolving Orchestra" :
-            "Standard/05 Keyboards/Concert Pianos/Intimate D"
-        let fileName = instant ? "Evolving Orchestra.aupreset" : "Intimate Piano.aupreset"
-        let template = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Audio/Presets/Garritan/ARIA Player/" + fileName)
-        let temp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("Garritan-Track-" + UUID().uuidString + ".aupreset")
-        defer { try? FileManager.default.removeItem(at: temp) }
         do {
-            try GarritanNativePreset.generateNativePreset(
-                template, temp, program.programName,
-                templateName: sourceName, bankID: instant ? "2007" : "2013")
-            let data = try Data(contentsOf: temp)
-            guard let state = try PropertyListSerialization.propertyList(
-                from: data, options: [], format: nil) as? [String: Any],
-                  state["AriaData"] is Data else {
-                throw NSError(domain: "GarritanTrack", code: 1,
-                              userInfo: [NSLocalizedDescriptionKey: "Invalid ARIA preset"])
-            }
-            let component = unit.auAudioUnit.componentDescription
-            for (key, expected) in [
-                ("type", component.componentType),
-                ("subtype", component.componentSubType),
-                ("manufacturer", component.componentManufacturer)
-            ] {
-                guard let value = state[key] as? NSNumber,
-                      value.uint32Value == expected else {
-                    throw NSError(domain: "GarritanTrack", code: 2,
-                                  userInfo: [NSLocalizedDescriptionKey: "Preset does not match track plugin"])
-                }
-            }
-            unit.auAudioUnit.fullState = state
+            try TrackGarritanLoader.apply(program, to: unit)
             isPresented = false
-            print("[Garritan Track] Applied " + program.programName)
         } catch {
             loadError = error.localizedDescription
         }
@@ -921,4 +889,41 @@ private struct TrackGarritanProgram {
     let programName: String
     var id: String { library + ":" + programName }
     var name: String { String(programName.split(separator: "/").last ?? Substring(programName)) }
+}
+
+private enum TrackGarritanLoader {
+    static func apply(_ program: TrackGarritanProgram, to unit: AVAudioUnit) throws {
+        let instant = program.library == "Garritan Instant Orchestra"
+        let sourceName = instant ? "Blending Textures/Evolving Orchestra" :
+        "Standard/05 Keyboards/Concert Pianos/Intimate D"
+        let fileName = instant ? "Evolving Orchestra.aupreset" : "Intimate Piano.aupreset"
+        let template = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Audio/Presets/Garritan/ARIA Player/" + fileName)
+        let temp = FileManager.default.temporaryDirectory
+        .appendingPathComponent("Garritan-Track-" + UUID().uuidString + ".aupreset")
+        defer { try? FileManager.default.removeItem(at: temp) }
+        try GarritanNativePreset.generateNativePreset(
+            template, temp, program.programName,
+            templateName: sourceName, bankID: instant ? "2007" : "2013")
+        let data = try Data(contentsOf: temp)
+        guard let state = try PropertyListSerialization.propertyList(
+            from: data, options: [], format: nil) as? [String: Any],
+              state["AriaData"] is Data else {
+            throw NSError(domain: "GarritanTrack", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "Invalid ARIA preset"])
+        }
+        let component = unit.auAudioUnit.componentDescription
+        for (key, expected) in [
+            ("type", component.componentType),
+            ("subtype", component.componentSubType),
+            ("manufacturer", component.componentManufacturer)
+        ] {
+            guard let value = state[key] as? NSNumber,
+                  value.uint32Value == expected else {
+                throw NSError(domain: "GarritanTrack", code: 2,
+                              userInfo: [NSLocalizedDescriptionKey: "Preset does not match track plugin"])
+            }
+        }
+        unit.auAudioUnit.fullState = state
+    }
 }
