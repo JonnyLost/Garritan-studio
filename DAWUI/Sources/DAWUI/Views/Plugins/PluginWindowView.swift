@@ -3,6 +3,7 @@ import AppKit
 import AVFoundation
 import CoreAudioKit
 import DAWCore
+import FoundationXML
 
 // MARK: - Plugin Window Manager
 
@@ -435,6 +436,48 @@ struct NativePluginView: NSViewControllerRepresentable {
 // MARK: - Generic Plugin Parameter View
 
 
+// The GPO5 Standard bank is authoritative for SFZ-file -> ARIA-program names.
+// In particular, "Flute Solo V.sfz" maps to ".../Flute Solo Vib", not ".../V".
+private final class GPO5BankReader: NSObject, XMLParserDelegate {
+    private(set) var programs: [String: String] = [:]
+    private var currentProgram: String?
+    private let bankURL: URL
+
+    init(bankURL: URL) { self.bankURL = bankURL }
+
+    func parser(_ parser: XMLParser, didStartElement elementName: String,
+                namespaceURI: String?, qualifiedName qName: String?,
+                attributes attributeDict: [String: String]) {
+        if elementName == "AriaProgram" {
+            currentProgram = attributeDict["name"]
+        } else if elementName == "AriaElement",
+                  let name = currentProgram, let path = attributeDict["path"] {
+            let file = bankURL.deletingLastPathComponent()
+                .appendingPathComponent(path).standardizedFileURL.path
+            programs[file] = name
+        }
+    }
+
+    func parser(_ parser: XMLParser, didEndElement elementName: String,
+                namespaceURI: String?, qualifiedName qName: String?) {
+        if elementName == "AriaProgram" { currentProgram = nil }
+    }
+
+    static func load() -> [String: String] {
+        let url = URL(fileURLWithPath:
+            "/Library/Application Support/Garritan/Garritan Personal Orchestra 5/Banks/Standard/Personal Orchestra 5.bank.xml")
+        guard let parser = XMLParser(contentsOf: url) else { return [:] }
+        let reader = GPO5BankReader(bankURL: url)
+        parser.delegate = reader
+        if !parser.parse() {
+            print("[Garritan Browser] Could not parse GPO5 bank: \\(parser.parserError?.localizedDescription ?? "unknown error")")
+            return [:]
+        }
+        print("[Garritan Browser] Found \\(reader.programs.count) GPO5 Standard bank mappings")
+        return reader.programs
+    }
+}
+
 private struct GarritanInstrumentEntry: Identifiable {
     enum Source { case preset, sfz }
     let url: URL
@@ -442,6 +485,7 @@ private struct GarritanInstrumentEntry: Identifiable {
     let family: String
     let group: String
     let source: Source
+    var ariaProgramName: String? = nil
     var id: String { url.path }
     var name: String { url.deletingPathExtension().lastPathComponent }
 
@@ -493,6 +537,7 @@ private struct GarritanInstrumentEntry: Identifiable {
             "Garritan World Instruments",
             "Garritan Harps"
         ]
+        let gpo5Programs = GPO5BankReader.load()
         for library in knownLibraries {
             let instruments = garritanRoot.appendingPathComponent(library, isDirectory: true)
                 .appendingPathComponent("Instruments", isDirectory: true)
@@ -514,7 +559,9 @@ private struct GarritanInstrumentEntry: Identifiable {
                 guard url.pathExtension.lowercased() == "sfz" else { continue }
                 let group = directories.first ?? "Instruments"
                 results.append(Self(url: url, library: library, family: family(for: relative),
-                                    group: group, source: .sfz))
+                                    group: group, source: .sfz,
+                                    ariaProgramName: library == "Garritan Personal Orchestra 5" ?
+                                        gpo5Programs[url.standardizedFileURL.path] : nil))
             }
         }
         return results.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
@@ -525,7 +572,7 @@ private struct GarritanInstrumentEntry: Identifiable {
 /// can be loaded; SFZ entries remain browse-only until ARIA loading is validated.
 private struct GarritanPresetBrowser: View {
     let onLoad: (URL) -> Void
-    let onLoadVerifiedOboe: () -> Void
+    let onLoadMappedInstrument: (String) -> Void
     @State private var entries: [GarritanInstrumentEntry] = []
     @State private var search = ""
     @State private var family = "All"
@@ -597,12 +644,10 @@ private struct GarritanPresetBrowser: View {
                                 Spacer()
                                 if entry.source == .preset {
                                     Button("Load") { onLoad(entry.url) }.buttonStyle(.bordered)
-                                } else if entry.library == "Garritan Personal Orchestra 5" &&
-                                            entry.name == "Oboe 1 Modern Solo" &&
-                                            entry.url.pathExtension.lowercased() == "sfz" {
-                                    Button("Load") { onLoadVerifiedOboe() }
+                                } else if let ariaName = entry.ariaProgramName {
+                                    Button("Load (Test)") { onLoadMappedInstrument(ariaName) }
                                         .buttonStyle(.bordered)
-                                        .help("Load the verified GPO5 oboe through a generated ARIA state")
+                                        .help("Experimental GPO5 Standard bank instrument load")
                                 } else {
                                     Text("Catalog only").font(.caption2).foregroundColor(.secondary)
                                 }
@@ -611,7 +656,7 @@ private struct GarritanPresetBrowser: View {
                     }
                 }.frame(maxHeight: 270)
             }
-            Text("Saved AU presets load normally. GPO5 Oboe 1 Modern Solo supports experimental one-click loading; other SFZ entries remain catalog-only.")
+            Text("GPO5 Standard-bank mappings support experimental Load (Test). Verify each sound by ear; other SFZ entries remain catalog-only.")
                 .font(.caption2).foregroundColor(.secondary)
         }
         .padding(12)
@@ -693,7 +738,7 @@ struct GenericPluginParameterView: View {
 
     /// Experimental, reversible instrument switch using the known-good piano AU preset.
     /// The script operates on a temporary file; the original preset is never modified.
-    private func testGeneratedOboeState() {
+    private func loadMappedGPO5Instrument(_ instrumentName: String) {
         presetStatus = nil
         presetError = nil
         let piano = FileManager.default.homeDirectoryForCurrentUser
@@ -718,18 +763,18 @@ struct GenericPluginParameterView: View {
             slot = root.find("./Slot[@id='0']")
             if slot is None or slot.get('name') != 'Standard/05 Keyboards/Concert Pianos/Intimate D' or slot.get('bankId') != '2013':
                 raise ValueError('Piano template does not match the verified configuration')
-            slot.set('name', 'Standard/01 Woodwinds/02 Oboes and English Horns/Oboe 1 Modern Solo')
+            slot.set('name', sys.argv[3])
             encoded = ET.tostring(root, encoding='utf-8', xml_declaration=True)
             preset['AriaData'] = b'CEGP' + struct.pack('<I', len(encoded)) + zlib.compress(encoded)
             with open(destination, 'wb') as f:
                 plistlib.dump(preset, f)
             """
             let temp = FileManager.default.temporaryDirectory
-                .appendingPathComponent("Garritan-Experimental-Oboe-\\(UUID().uuidString).aupreset")
+                .appendingPathComponent("Garritan-Experimental-GPO5-\\(UUID().uuidString).aupreset")
             defer { try? FileManager.default.removeItem(at: temp) }
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-            process.arguments = ["-c", script, piano.path, temp.path]
+            process.arguments = ["-c", script, piano.path, temp.path, instrumentName]
             let errors = Pipe()
             process.standardError = errors
             try process.run()
@@ -741,7 +786,7 @@ struct GenericPluginParameterView: View {
             }
             loadAUPreset(from: temp)
             if presetError == nil {
-                presetStatus = "Experimental oboe state applied. Play your keyboard to verify the sound."
+                presetStatus = "Experimental GPO5 state applied: \\(instrumentName). Play your keyboard to verify."
             }
         } catch {
             presetError = "Experimental oboe test failed: \\(error.localizedDescription)"
@@ -771,9 +816,9 @@ struct GenericPluginParameterView: View {
                 .padding(.bottom, 8)
 
                 if plugin.identifier.name.localizedCaseInsensitiveContains("aria") {
-                    GarritanPresetBrowser(onLoad: loadAUPreset, onLoadVerifiedOboe: testGeneratedOboeState)
+                    GarritanPresetBrowser(onLoad: loadAUPreset, onLoadMappedInstrument: loadMappedGPO5Instrument)
                     Button("Test Generated Oboe (Experimental)") {
-                        testGeneratedOboeState()
+                        loadMappedGPO5Instrument("Standard/01 Woodwinds/02 Oboes and English Horns/Oboe 1 Modern Solo")
                     }
                     .buttonStyle(.bordered)
                     .help("Generate a temporary ARIA oboe preset from the verified piano state; originals remain unchanged.")
