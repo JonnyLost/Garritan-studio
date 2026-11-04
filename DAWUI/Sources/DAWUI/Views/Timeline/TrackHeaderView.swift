@@ -393,6 +393,22 @@ struct InstrumentBrowserSheet: View {
     @State private var isScanning = false
     @State private var instruments: [PluginDescription] = []
     @State private var loadError: String?
+    @State private var programs: [TrackGarritanProgram] = []
+    @State private var selectedLibrary = "Garritan Personal Orchestra 5"
+    private var trackARIA: AVAudioUnit? {
+        guard let track = viewModel.project.track(withID: trackID),
+              let id = track.instrumentSlot?.pluginID,
+              id.name.localizedCaseInsensitiveContains("aria"),
+              id.manufacturer.localizedCaseInsensitiveContains("garr"),
+              let instrument = viewModel.playbackEngine.instrument(for: trackID),
+              case .auInstrument(let unit, _) = instrument else { return nil }
+        return unit
+    }
+    private var matchingPrograms: [TrackGarritanProgram] {
+        programs.filter { $0.library == selectedLibrary &&
+            (searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(searchText) ||
+             $0.programName.localizedCaseInsensitiveContains(searchText)) }
+    }
     
     var body: some View {
         VStack(spacing: 0) {
@@ -436,7 +452,22 @@ struct InstrumentBrowserSheet: View {
             
             Divider()
             
-            if isLoading {
+            if trackARIA != nil && !isLoading {
+                Picker("Library", selection: $selectedLibrary) {
+                    Text("GPO5").tag("Garritan Personal Orchestra 5")
+                    Text("Instant Orchestra").tag("Garritan Instant Orchestra")
+                }.padding(.horizontal)
+                List(matchingPrograms, id: \.id) { program in
+                    Button {
+                        applyProgram(program)
+                    } label: {
+                        VStack(alignment: .leading) {
+                            Text(program.name)
+                            Text(program.programName).font(.caption).foregroundColor(.secondary)
+                        }
+                    }.buttonStyle(.plain)
+                }
+            } else if isLoading {
                 VStack {
                     ProgressView()
                     Text("Loading instrument...")
@@ -499,11 +530,70 @@ struct InstrumentBrowserSheet: View {
         }
         .frame(width: 400, height: 500)
         .onAppear {
-            // Always scan on appear
-            scanForPlugins()
+            if trackARIA != nil { discoverPrograms() }
+            else { scanForPlugins() }
         }
     }
     
+    private func discoverPrograms() {
+        let banks: [(String, String, String?)] = [
+            ("Garritan Personal Orchestra 5",
+             "/Library/Application Support/Garritan/Garritan Personal Orchestra 5/Banks/Standard/Personal Orchestra 5.bank.xml", "Standard/"),
+            ("Garritan Instant Orchestra",
+             "/Library/Application Support/Garritan/Garritan Instant Orchestra/Banks/Standard/Instant Orchestra.bank.xml", nil)
+        ]
+        programs = banks.flatMap { library, path, prefix in
+            GPO5BankReader.loadStandardPrograms(bankPath: path, requiredPrefix: prefix).map {
+                TrackGarritanProgram(library: library, programName: $0.name)
+            }
+        }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    private func applyProgram(_ program: TrackGarritanProgram) {
+        guard let unit = trackARIA else {
+            loadError = "No ARIA instrument on this track."
+            return
+        }
+        let instant = program.library == "Garritan Instant Orchestra"
+        let sourceName = instant ? "Blending Textures/Evolving Orchestra" :
+            "Standard/05 Keyboards/Concert Pianos/Intimate D"
+        let fileName = instant ? "Evolving Orchestra.aupreset" : "Intimate Piano.aupreset"
+        let template = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Audio/Presets/Garritan/ARIA Player/" + fileName)
+        let temp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Garritan-Track-" + UUID().uuidString + ".aupreset")
+        defer { try? FileManager.default.removeItem(at: temp) }
+        do {
+            try GarritanNativePreset.generateNativePreset(
+                template, temp, program.programName,
+                templateName: sourceName, bankID: instant ? "2007" : "2013")
+            let data = try Data(contentsOf: temp)
+            guard let state = try PropertyListSerialization.propertyList(
+                from: data, options: [], format: nil) as? [String: Any],
+                  state["AriaData"] is Data else {
+                throw NSError(domain: "GarritanTrack", code: 1,
+                              userInfo: [NSLocalizedDescriptionKey: "Invalid ARIA preset"])
+            }
+            let component = unit.auAudioUnit.componentDescription
+            for (key, expected) in [
+                ("type", component.componentType),
+                ("subtype", component.componentSubType),
+                ("manufacturer", component.componentManufacturer)
+            ] {
+                guard let value = state[key] as? NSNumber,
+                      value.uint32Value == expected else {
+                    throw NSError(domain: "GarritanTrack", code: 2,
+                                  userInfo: [NSLocalizedDescriptionKey: "Preset does not match track plugin"])
+                }
+            }
+            unit.auAudioUnit.fullState = state
+            isPresented = false
+            print("[Garritan Track] Applied " + program.programName)
+        } catch {
+            loadError = error.localizedDescription
+        }
+    }
+
     private func scanForPlugins() {
         isScanning = true
         Task {
@@ -824,4 +914,11 @@ struct AudioInputSelector: View {
         updatedTrack.inputSource = source
         viewModel.updateTrack(updatedTrack, description: "Set Audio Input")
     }
+}
+
+private struct TrackGarritanProgram {
+    let library: String
+    let programName: String
+    var id: String { library + ":" + programName }
+    var name: String { String(programName.split(separator: "/").last ?? Substring(programName)) }
 }
