@@ -434,6 +434,140 @@ struct NativePluginView: NSViewControllerRepresentable {
 
 // MARK: - Generic Plugin Parameter View
 
+
+private struct GarritanPresetEntry: Identifiable {
+    let url: URL
+    let library: String
+    let family: String
+    var id: String { url.path }
+    var name: String { url.deletingPathExtension().lastPathComponent }
+
+    static func discover() -> [Self] {
+        let root = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Audio/Presets/Garritan", isDirectory: true)
+        guard let walker = FileManager.default.enumerator(
+            at: root, includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+        var entries: [Self] = []
+        for case let url as URL in walker {
+            guard url.pathExtension.lowercased() == "aupreset" else { continue }
+            let relative = url.path.replacingOccurrences(of: root.path + "/", with: "")
+            let folders = relative.split(separator: "/").map(String.init)
+            let library = folders.count > 2 ? folders[1] : "Saved presets"
+            let words = (relative + " " + url.lastPathComponent).lowercased()
+            let family: String
+            if words.contains("violin") || words.contains("viola") || words.contains("cello") || words.contains("bass") || words.contains("string") || words.contains("harp") {
+                family = "Strings"
+            } else if words.contains("horn") || words.contains("trumpet") || words.contains("trombone") || words.contains("tuba") || words.contains("brass") {
+                family = "Brass"
+            } else if words.contains("flute") || words.contains("oboe") || words.contains("clarinet") || words.contains("bassoon") || words.contains("woodwind") {
+                family = "Woodwinds"
+            } else if words.contains("drum") || words.contains("timpani") || words.contains("cymbal") || words.contains("percussion") {
+                family = "Percussion"
+            } else if words.contains("piano") || words.contains("keyboard") || words.contains("organ") || words.contains("celesta") {
+                family = "Keyboards"
+            } else {
+                family = "Other"
+            }
+            entries.append(Self(url: url, library: library, family: family))
+        }
+        return entries.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+}
+
+/// First version: discover user-saved AU presets, not proprietary Garritan patches.
+/// Reuses the verified fullState restoration path; no native ARIA editor is opened.
+private struct GarritanPresetBrowser: View {
+    let onLoad: (URL) -> Void
+    @State private var entries: [GarritanPresetEntry] = []
+    @State private var search = ""
+    @State private var family = "All"
+    @State private var library = "All libraries"
+    @State private var favorites: Set<String> = []
+    @State private var selectedPath: String?
+
+    private let families = ["All", "Strings", "Brass", "Woodwinds", "Percussion", "Keyboards", "Other"]
+
+    private var libraries: [String] {
+        ["All libraries"] + Array(Set(entries.map(\.library))).sorted()
+    }
+    private var visible: [GarritanPresetEntry] {
+        entries.filter { entry in
+            (family == "All" || entry.family == family) &&
+            (library == "All libraries" || entry.library == library) &&
+            (search.isEmpty || entry.name.localizedCaseInsensitiveContains(search) ||
+             entry.family.localizedCaseInsensitiveContains(search) ||
+             entry.library.localizedCaseInsensitiveContains(search))
+        }.sorted {
+            let first = favorites.contains($0.id) ? 0 : 1
+            let second = favorites.contains($1.id) ? 0 : 1
+            return first == second ? $0.name < $1.name : first < second
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Garritan Instruments", systemImage: "pianokeys")
+                    .font(.headline)
+                Spacer()
+                Button { entries = GarritanPresetEntry.discover() } label: {
+                    Label("Rescan", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+            }
+            TextField("Search saved instruments", text: $search)
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                Picker("Family", selection: $family) {
+                    ForEach(families, id: \.self) { Text($0).tag($0) }
+                }
+                Picker("Library", selection: $library) {
+                    ForEach(libraries, id: \.self) { Text($0).tag($0) }
+                }
+            }
+            if entries.isEmpty {
+                Text("No saved Garritan AU presets found. Save an instrument from Logic Pro, then click Rescan.")
+                    .font(.caption).foregroundColor(.secondary)
+            } else if visible.isEmpty {
+                Text("No instruments match these filters.")
+                    .font(.caption).foregroundColor(.secondary)
+            } else {
+                ForEach(visible) { entry in
+                    HStack {
+                        Button {
+                            if favorites.contains(entry.id) { favorites.remove(entry.id) }
+                            else { favorites.insert(entry.id) }
+                        } label: {
+                            Image(systemName: favorites.contains(entry.id) ? "star.fill" : "star")
+                        }
+                        .buttonStyle(.borderless)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(entry.name).fontWeight(.medium)
+                            Text("\(entry.family) · \(entry.library)")
+                                .font(.caption).foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Button("Load") {
+                            selectedPath = entry.id
+                            onLoad(entry.url)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .padding(.vertical, 3)
+                }
+            }
+            Text("Loads saved .aupreset files through ARIA. Patch discovery from installed GPO5 libraries is planned, not yet implemented.")
+                .font(.caption2).foregroundColor(.secondary)
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.07))
+        .cornerRadius(10)
+        .onAppear { entries = GarritanPresetEntry.discover() }
+    }
+}
+
 private enum AUPresetLoadError: LocalizedError {
     case invalidFile, incompatiblePlugin, missingARIAState
 
@@ -527,6 +661,7 @@ struct GenericPluginParameterView: View {
                 .padding(.bottom, 8)
 
                 if plugin.identifier.name.localizedCaseInsensitiveContains("aria") {
+                    GarritanPresetBrowser(onLoad: loadAUPreset)
                     HStack(spacing: 12) {
                         Button("Load AU Preset…") { chooseAUPreset() }
                             .buttonStyle(.borderedProminent)
