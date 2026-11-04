@@ -43,6 +43,16 @@ public final class PluginWindowManager: ObservableObject {
             openWindows.removeValue(forKey: plugin.id)
         }
         
+        // ARIA's custom Audio Unit editor currently crashes inside its own
+        // view creation on this host. Avoid requesting it while testing the
+        // safe generic parameter editor. This does not affect audio loading.
+        if plugin.identifier.name.localizedCaseInsensitiveContains("aria") &&
+           plugin.identifier.manufacturer.localizedCaseInsensitiveContains("garr") {
+            print("[PluginWindow] ARIA diagnostic: opening generic parameters without requesting native editor")
+            createPluginWindow(for: plugin, trackName: trackName, nativeViewController: nil, allowNativeEditor: false)
+            return
+        }
+
         print("[PluginWindow] Creating new window for \(plugin.name)")
         
         // Always request a fresh native view controller.
@@ -109,7 +119,8 @@ public final class PluginWindowManager: ObservableObject {
     private func createPluginWindow(
         for plugin: LoadedPlugin,
         trackName: String,
-        nativeViewController: NSViewController?
+        nativeViewController: NSViewController?,
+        allowNativeEditor: Bool = true
     ) {
         let hasNativeUI = (nativeViewController != nil)
         
@@ -170,6 +181,7 @@ public final class PluginWindowManager: ObservableObject {
             let contentView = PluginWindowContentView(
                 plugin: plugin,
                 initialNativeViewController: nil,
+                allowNativeEditor: allowNativeEditor,
                 onClose: { [weak self] in
                     self?.closePluginWindow(id: plugin.id)
                 }
@@ -261,6 +273,7 @@ public struct PluginWindowInfo: Identifiable {
 struct PluginWindowContentView: View {
     let plugin: LoadedPlugin
     var initialNativeViewController: NSViewController?
+    var allowNativeEditor: Bool = true
     let onClose: () -> Void
     
     @State private var bypassEnabled: Bool = false
@@ -268,9 +281,10 @@ struct PluginWindowContentView: View {
     @State private var nativeViewController: NSViewController?
     @State private var isLoadingNativeUI: Bool = false
     
-    init(plugin: LoadedPlugin, initialNativeViewController: NSViewController? = nil, onClose: @escaping () -> Void) {
+    init(plugin: LoadedPlugin, initialNativeViewController: NSViewController? = nil, allowNativeEditor: Bool = true, onClose: @escaping () -> Void) {
         self.plugin = plugin
         self.initialNativeViewController = initialNativeViewController
+        self.allowNativeEditor = allowNativeEditor
         self.onClose = onClose
     }
     
@@ -286,7 +300,7 @@ struct PluginWindowContentView: View {
                     Divider()
                     GenericPluginParameterView(
                         plugin: plugin,
-                        onRequestNativeUI: loadNativeUI
+                        onRequestNativeUI: allowNativeEditor ? loadNativeUI : nil
                     )
                 }
             }
@@ -297,8 +311,8 @@ struct PluginWindowContentView: View {
             if let vc = initialNativeViewController {
                 nativeViewController = vc
                 showNativeUI = true
-            } else {
-                // Try to load native UI
+            } else if allowNativeEditor {
+                // Try to load native UI only for plugins known to be safe.
                 loadNativeUI()
             }
         }
@@ -343,7 +357,7 @@ struct PluginWindowContentView: View {
     }
     
     private func loadNativeUI() {
-        guard !isLoadingNativeUI else { return }
+        guard allowNativeEditor, !isLoadingNativeUI else { return }
         isLoadingNativeUI = true
         
         plugin.audioUnit.auAudioUnit.requestViewController { vc in
@@ -469,6 +483,7 @@ struct GenericPluginParameterView: View {
                             Button("Load Plugin UI") {
                                 onRequestNativeUI?()
                             }
+                            .disabled(onRequestNativeUI == nil)
                             .buttonStyle(.borderedProminent)
                             
                             Button("Retry Parameters") {
