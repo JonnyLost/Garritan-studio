@@ -706,7 +706,7 @@ struct MIDIOutputSelector: View {
     let track: Track
     @ObservedObject var viewModel: ProjectViewModel
     @Binding var showBrowser: Bool
-    @State private var garritanPrograms: [TrackGarritanProgram] = []
+    private var garritanPrograms: [TrackGarritanProgram] { TrackGarritanCatalog.programs }
     @State private var loadError: String?
 
     private var ariaUnit: AVAudioUnit? {
@@ -758,21 +758,6 @@ struct MIDIOutputSelector: View {
         }
     }
 
-    private func discoverGarritanPrograms() {
-        let banks: [(library: String, path: String, prefix: String?)] = [
-            ("Garritan Personal Orchestra 5",
-             "/Library/Application Support/Garritan/Garritan Personal Orchestra 5/Banks/Standard/Personal Orchestra 5.bank.xml", "Standard/"),
-            ("Garritan Instant Orchestra",
-             "/Library/Application Support/Garritan/Garritan Instant Orchestra/Banks/Standard/Instant Orchestra.bank.xml", nil)
-        ]
-        garritanPrograms = banks.flatMap { bank in
-            GPO5BankReader.loadStandardPrograms(bankPath: bank.path, requiredPrefix: bank.prefix).map {
-                TrackGarritanProgram(library: bank.library, programName: $0.name)
-            }
-        }
-    }
-
-    
     private var currentDestinationLabel: String {
         switch track.midiOutput {
         case .rackInstrument(let id, let channel):
@@ -1017,4 +1002,24 @@ private enum TrackGarritanLoader {
         }
         unit.auAudioUnit.fullState = state
     }
+}
+
+private enum TrackGarritanCatalog {
+    // Load the installed banks on first access, including when ARIA was added
+    // after the track header was created. Avoid relying on SwiftUI onAppear.
+    static let programs: [TrackGarritanProgram] = {
+        let banks: [(library: String, path: String, prefix: String?)] = [
+            ("Garritan Personal Orchestra 5",
+             "/Library/Application Support/Garritan/Garritan Personal Orchestra 5/Banks/Standard/Personal Orchestra 5.bank.xml", "Standard/"),
+            ("Garritan Instant Orchestra",
+             "/Library/Application Support/Garritan/Garritan Instant Orchestra/Banks/Standard/Instant Orchestra.bank.xml", nil)
+        ]
+        let result = banks.flatMap { bank in
+            GPO5BankReader.loadStandardPrograms(bankPath: bank.path, requiredPrefix: bank.prefix).map {
+                TrackGarritanProgram(library: bank.library, programName: $0.name)
+            }
+        }
+        print("[Garritan Track Menu] Catalog contains " + String(result.count) + " programs")
+        return result
+    }()
 }
