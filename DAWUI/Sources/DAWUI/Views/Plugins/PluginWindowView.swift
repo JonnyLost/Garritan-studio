@@ -435,89 +435,131 @@ struct NativePluginView: NSViewControllerRepresentable {
 // MARK: - Generic Plugin Parameter View
 
 
-private struct GarritanPresetEntry: Identifiable {
+private struct GarritanInstrumentEntry: Identifiable {
+    enum Source { case preset, sfz }
     let url: URL
     let library: String
     let family: String
+    let group: String
+    let source: Source
     var id: String { url.path }
     var name: String { url.deletingPathExtension().lastPathComponent }
 
-    static func discover() -> [Self] {
-        let root = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Audio/Presets/Garritan", isDirectory: true)
-        guard let walker = FileManager.default.enumerator(
-            at: root, includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else { return [] }
-        var entries: [Self] = []
-        for case let url as URL in walker {
-            guard url.pathExtension.lowercased() == "aupreset" else { continue }
-            let relative = url.path.replacingOccurrences(of: root.path + "/", with: "")
-            let folders = relative.split(separator: "/").map(String.init)
-            let library = folders.count > 2 ? folders[1] : "Saved presets"
-            let words = (relative + " " + url.lastPathComponent).lowercased()
-            let family: String
-            if words.contains("violin") || words.contains("viola") || words.contains("cello") || words.contains("bass") || words.contains("string") || words.contains("harp") {
-                family = "Strings"
-            } else if words.contains("horn") || words.contains("trumpet") || words.contains("trombone") || words.contains("tuba") || words.contains("brass") {
-                family = "Brass"
-            } else if words.contains("flute") || words.contains("oboe") || words.contains("clarinet") || words.contains("bassoon") || words.contains("woodwind") {
-                family = "Woodwinds"
-            } else if words.contains("drum") || words.contains("timpani") || words.contains("cymbal") || words.contains("percussion") {
-                family = "Percussion"
-            } else if words.contains("piano") || words.contains("keyboard") || words.contains("organ") || words.contains("celesta") {
-                family = "Keyboards"
-            } else {
-                family = "Other"
-            }
-            entries.append(Self(url: url, library: library, family: family))
+    static func family(for relativePath: String) -> String {
+        let text = relativePath.lowercased()
+        if text.contains("woodwind") || text.contains("flute") || text.contains("oboe") ||
+            text.contains("clarinet") || text.contains("bassoon") || text.contains("saxophone") {
+            return "Woodwinds"
         }
-        return entries.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        if text.contains("brass") || text.contains("trumpet") || text.contains("trombone") ||
+            text.contains("french horn") || text.contains("tuba") {
+            return "Brass"
+        }
+        if text.contains("percussion") || text.contains("timpani") || text.contains("drum") ||
+            text.contains("cymbal") || text.contains("mallet") {
+            return "Percussion"
+        }
+        if text.contains("keyboard") || text.contains("piano") || text.contains("organ") ||
+            text.contains("celesta") || text.contains("harpsichord") {
+            return "Keyboards"
+        }
+        if text.contains("string") || text.contains("violin") || text.contains("viola") ||
+            text.contains("cello") || text.contains("bass") || text.contains("harp") {
+            return "Strings"
+        }
+        return "Other"
+    }
+
+    static func discover() -> [Self] {
+        let manager = FileManager.default
+        var results: [Self] = []
+        let presetRoot = manager.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Audio/Presets/Garritan", isDirectory: true)
+        if let walker = manager.enumerator(at: presetRoot, includingPropertiesForKeys: nil,
+                                           options: [.skipsHiddenFiles]) {
+            for case let url as URL in walker where url.pathExtension.lowercased() == "aupreset" {
+                let relative = String(url.path.dropFirst(presetRoot.path.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                let parts = relative.split(separator: "/").map(String.init)
+                let library = parts.count > 2 ? parts[1] : "Saved presets"
+                results.append(Self(url: url, library: library, family: family(for: relative),
+                                    group: "Saved presets", source: .preset))
+            }
+        }
+
+        let garritanRoot = URL(fileURLWithPath: "/Library/Application Support/Garritan", isDirectory: true)
+        let knownLibraries = [
+            "Garritan Personal Orchestra 5",
+            "Garritan Instant Orchestra",
+            "Garritan World Instruments",
+            "Garritan Harps"
+        ]
+        for library in knownLibraries {
+            let instruments = garritanRoot.appendingPathComponent(library, isDirectory: true)
+                .appendingPathComponent("Instruments", isDirectory: true)
+            guard let walker = manager.enumerator(at: instruments, includingPropertiesForKeys: nil,
+                                                   options: [.skipsHiddenFiles]) else { continue }
+            for case let url as URL in walker {
+                let relative = String(url.path.dropFirst(instruments.path.count))
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                let parts = relative.split(separator: "/").map(String.init)
+                let directories = Array(parts.dropLast())
+                // Supporting mapping and include definitions are not user-facing patches.
+                if directories.contains(where: {
+                    let name = $0.lowercased()
+                    return name == "include" || name.contains("mapping")
+                }) {
+                    walker.skipDescendants()
+                    continue
+                }
+                guard url.pathExtension.lowercased() == "sfz" else { continue }
+                let group = directories.first ?? "Instruments"
+                results.append(Self(url: url, library: library, family: family(for: relative),
+                                    group: group, source: .sfz))
+            }
+        }
+        return results.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 }
 
-/// First version: discover user-saved AU presets, not proprietary Garritan patches.
-/// Reuses the verified fullState restoration path; no native ARIA editor is opened.
+/// Browses installed SFZ definitions and saved AU presets. Only verified AU presets
+/// can be loaded; SFZ entries remain browse-only until ARIA loading is validated.
 private struct GarritanPresetBrowser: View {
     let onLoad: (URL) -> Void
-    @State private var entries: [GarritanPresetEntry] = []
+    @State private var entries: [GarritanInstrumentEntry] = []
     @State private var search = ""
     @State private var family = "All"
     @State private var library = "All libraries"
     @State private var favorites: Set<String> = []
-    @State private var selectedPath: String?
 
     private let families = ["All", "Strings", "Brass", "Woodwinds", "Percussion", "Keyboards", "Other"]
-
     private var libraries: [String] {
         ["All libraries"] + Array(Set(entries.map(\.library))).sorted()
     }
-    private var visible: [GarritanPresetEntry] {
+    private var visible: [GarritanInstrumentEntry] {
         entries.filter { entry in
             (family == "All" || entry.family == family) &&
             (library == "All libraries" || entry.library == library) &&
             (search.isEmpty || entry.name.localizedCaseInsensitiveContains(search) ||
+             entry.group.localizedCaseInsensitiveContains(search) ||
              entry.family.localizedCaseInsensitiveContains(search) ||
              entry.library.localizedCaseInsensitiveContains(search))
         }.sorted {
             let first = favorites.contains($0.id) ? 0 : 1
             let second = favorites.contains($1.id) ? 0 : 1
-            return first == second ? $0.name < $1.name : first < second
+            return first == second ? $0.name.localizedStandardCompare($1.name) == .orderedAscending : first < second
         }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("Garritan Instruments", systemImage: "pianokeys")
-                    .font(.headline)
+                Label("Garritan Instruments", systemImage: "pianokeys").font(.headline)
                 Spacer()
-                Button { entries = GarritanPresetEntry.discover() } label: {
+                Button { entries = GarritanInstrumentEntry.discover() } label: {
                     Label("Rescan", systemImage: "arrow.clockwise")
-                }
-                .buttonStyle(.borderless)
+                }.buttonStyle(.borderless)
             }
-            TextField("Search saved instruments", text: $search)
+            TextField("Search installed instruments and presets", text: $search)
                 .textFieldStyle(.roundedBorder)
             HStack {
                 Picker("Family", selection: $family) {
@@ -527,44 +569,48 @@ private struct GarritanPresetBrowser: View {
                     ForEach(libraries, id: \.self) { Text($0).tag($0) }
                 }
             }
+            Text("\(visible.count) matching instruments · \(entries.count) discovered")
+                .font(.caption).foregroundColor(.secondary)
             if entries.isEmpty {
-                Text("No saved Garritan AU presets found. Save an instrument from Logic Pro, then click Rescan.")
+                Text("No Garritan instruments found. Check the installation and click Rescan.")
                     .font(.caption).foregroundColor(.secondary)
             } else if visible.isEmpty {
                 Text("No instruments match these filters.")
                     .font(.caption).foregroundColor(.secondary)
             } else {
-                ForEach(visible) { entry in
-                    HStack {
-                        Button {
-                            if favorites.contains(entry.id) { favorites.remove(entry.id) }
-                            else { favorites.insert(entry.id) }
-                        } label: {
-                            Image(systemName: favorites.contains(entry.id) ? "star.fill" : "star")
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 6) {
+                        ForEach(visible) { entry in
+                            HStack {
+                                Button {
+                                    if favorites.contains(entry.id) { favorites.remove(entry.id) }
+                                    else { favorites.insert(entry.id) }
+                                } label: {
+                                    Image(systemName: favorites.contains(entry.id) ? "star.fill" : "star")
+                                }.buttonStyle(.borderless)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(entry.name).fontWeight(.medium)
+                                    Text("\(entry.family) · \(entry.library) · \(entry.group)")
+                                        .font(.caption).foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                if entry.source == .preset {
+                                    Button("Load") { onLoad(entry.url) }.buttonStyle(.bordered)
+                                } else {
+                                    Text("Catalog only").font(.caption2).foregroundColor(.secondary)
+                                }
+                            }.padding(.vertical, 3)
                         }
-                        .buttonStyle(.borderless)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(entry.name).fontWeight(.medium)
-                            Text("\(entry.family) · \(entry.library)")
-                                .font(.caption).foregroundColor(.secondary)
-                        }
-                        Spacer()
-                        Button("Load") {
-                            selectedPath = entry.id
-                            onLoad(entry.url)
-                        }
-                        .buttonStyle(.bordered)
                     }
-                    .padding(.vertical, 3)
-                }
+                }.frame(maxHeight: 270)
             }
-            Text("Loads saved .aupreset files through ARIA. Patch discovery from installed GPO5 libraries is planned, not yet implemented.")
+            Text("Saved AU presets can load now. Installed SFZ entries are browse-only until direct ARIA loading is verified.")
                 .font(.caption2).foregroundColor(.secondary)
         }
         .padding(12)
         .background(Color.secondary.opacity(0.07))
         .cornerRadius(10)
-        .onAppear { entries = GarritanPresetEntry.discover() }
+        .onAppear { entries = GarritanInstrumentEntry.discover() }
     }
 }
 
