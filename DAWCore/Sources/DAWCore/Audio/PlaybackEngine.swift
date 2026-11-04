@@ -754,6 +754,47 @@ public final class PlaybackEngine: ObservableObject {
         print("[PlaybackEngine] V-Rack input monitoring stopped")
     }
 
+    // Diagnostic taps are installed only when live MIDI is first routed.
+    // A tap observes audio without changing the mixer graph.
+    private var audioDiagnosticInstalled = false
+    private var audioDiagnosticFrameCounters: [String: Int] = [:]
+
+    private func installAudioDiagnosticTap(on node: AVAudioNode, label: String) {
+        let format = node.outputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            print("[Audio Diagnostic] \\(label): invalid output format \\(format)")
+            return
+        }
+        // A node can have only one tap per bus. If another feature already
+        // installed a tap, don't interfere with it.
+        node.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+            guard let channels = buffer.floatChannelData else { return }
+            let frames = Int(buffer.frameLength)
+            guard frames > 0 else { return }
+            var peak: Float = 0
+            for channel in 0..<Int(buffer.format.channelCount) {
+                for frame in 0..<frames {
+                    peak = max(peak, abs(channels[channel][frame]))
+                }
+            }
+            // Throttle to roughly one log line per second per node.
+            let rate = max(1, Int(buffer.format.sampleRate))
+            // This callback is on the render thread; avoid printing here.
+            // Capture a simple sample and log on the main queue.
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                let count = (self.audioDiagnosticFrameCounters[label] ?? 0) + frames
+                if count >= rate {
+                    self.audioDiagnosticFrameCounters[label] = 0
+                    print(String(format: "[Audio Diagnostic] %@ peak=%.6f (%@)", label, peak, peak > 0.0001 ? "SIGNAL" : "SILENT"))
+                } else {
+                    self.audioDiagnosticFrameCounters[label] = count
+                }
+            }
+        }
+        print("[Audio Diagnostic] Installed tap: \\(label)")
+    }
+
     /// Debug: Check audio engine state and play a test tone
     public func debugAudioPath(for trackID: TrackID) {
         print("[DEBUG] ========================================")
@@ -762,6 +803,18 @@ public final class PlaybackEngine: ObservableObject {
         print("[DEBUG] Master volume: \(audioEngine.masterVolume)")
         
         if let trackNode = audioEngine.trackNode(for: trackID) {
+            if !audioDiagnosticInstalled {
+                audioDiagnosticInstalled = true
+                // Probe the instrument's output mixer, track output, and master.
+                // This helps distinguish instrument silence from downstream routing.
+                if let mixer = instrumentMixers[trackID] {
+                    installAudioDiagnosticTap(on: mixer, label: "Post instrument")
+                } else {
+                    print("[Audio Diagnostic] No converter mixer for this track")
+                }
+                installAudioDiagnosticTap(on: trackNode.outputMixer, label: "Track output")
+                installAudioDiagnosticTap(on: audioEngine.engine.mainMixerNode, label: "Master output")
+            }
             print("[DEBUG] Track node found")
             print("[DEBUG] Input mixer volume: \(trackNode.inputMixer.outputVolume)")
             print("[DEBUG] Gain node volume: \(trackNode.gainNode.outputVolume)")
