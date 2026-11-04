@@ -555,8 +555,8 @@ private struct GarritanInstrumentEntry: Identifiable {
     }
 }
 
-/// Browses installed SFZ definitions and saved AU presets. Only verified AU presets
-/// can be loaded; SFZ entries remain browse-only until ARIA loading is validated.
+/// Browses installed SFZ definitions and saved AU presets. GPO5 Standard-bank
+/// instruments support direct loading; unmapped SFZ entries are catalog-only.
 private struct GarritanPresetBrowser: View {
     let onLoad: (URL) -> Void
     let onLoadMappedInstrument: (String) -> Void
@@ -632,9 +632,9 @@ private struct GarritanPresetBrowser: View {
                                 if entry.source == .preset {
                                     Button("Load") { onLoad(entry.url) }.buttonStyle(.bordered)
                                 } else if let ariaName = entry.ariaProgramName {
-                                    Button("Load (Test)") { onLoadMappedInstrument(ariaName) }
+                                    Button("Load") { onLoadMappedInstrument(ariaName) }
                                         .buttonStyle(.bordered)
-                                        .help("Experimental GPO5 Standard bank instrument load")
+                                        .help("Load GPO5 instrument using its Standard-bank mapping")
                                 } else {
                                     Text("Catalog only").font(.caption2).foregroundColor(.secondary)
                                 }
@@ -643,7 +643,7 @@ private struct GarritanPresetBrowser: View {
                     }
                 }.frame(maxHeight: 270)
             }
-            Text("GPO5 Standard-bank mappings support experimental Load (Test). Verify each sound by ear; other SFZ entries remain catalog-only.")
+            Text("GPO5 Standard-bank instruments can be loaded directly. Other SFZ entries remain catalog-only.")
                 .font(.caption2).foregroundColor(.secondary)
         }
         .padding(12)
@@ -800,7 +800,7 @@ struct GenericPluginParameterView: View {
             try generateNativePreset(piano, nativeTemp, instrumentName)
             loadAUPreset(from: nativeTemp)
             if presetError == nil {
-                presetStatus = "Native Swift GPO5 state applied: \(instrumentName)"
+                presetStatus = "Loaded GPO5: \(instrumentName.split(separator: "/").last.map(String.init) ?? instrumentName) (native Swift)"
                 print("[Garritan Browser] Native Swift loaded " + instrumentName)
                 return
             }
@@ -847,7 +847,7 @@ struct GenericPluginParameterView: View {
             }
             loadAUPreset(from: temp)
             if presetError == nil {
-                presetStatus = "Experimental GPO5 state applied: \(instrumentName). Play your keyboard to verify."
+                presetStatus = "Loaded GPO5: \(instrumentName.split(separator: "/").last.map(String.init) ?? instrumentName) (Python fallback)"
             }
         } catch {
             presetError = "Experimental GPO5 load failed: \(error.localizedDescription)"
@@ -878,12 +878,6 @@ struct GenericPluginParameterView: View {
 
                 if plugin.identifier.name.localizedCaseInsensitiveContains("aria") {
                     GarritanPresetBrowser(onLoad: loadAUPreset, onLoadMappedInstrument: loadMappedGPO5Instrument)
-                    Button("Test Generated Oboe (Experimental)") {
-                        loadMappedGPO5Instrument("Standard/01 Woodwinds/02 Oboes and English Horns/Oboe 1 Modern Solo")
-                    }
-                    .buttonStyle(.bordered)
-                    .help("Generate a temporary ARIA oboe preset from the verified piano state; originals remain unchanged.")
-
                     HStack(spacing: 12) {
                         Button("Load AU Preset…") { chooseAUPreset() }
                             .buttonStyle(.borderedProminent)
