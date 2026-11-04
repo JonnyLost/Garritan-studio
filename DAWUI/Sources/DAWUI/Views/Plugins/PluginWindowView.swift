@@ -448,7 +448,7 @@ private enum GPO5BankReader {
             print("[Garritan Browser] GPO5 bank file unavailable")
             return [:]
         }
-        let pattern = #"<AriaProgram\\b[^>]*\\bname="([^"]+)"[^>]*>\\s*<AriaElement\\b[^>]*\\bpath="([^"]+)"[^>]*/>"#
+        let pattern = #"<AriaProgram\b[^>]*\bname="([^"]+)"[^>]*>\s*<AriaElement\b[^>]*\bpath="([^"]+)"[^>]*/>"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [:] }
         let nsSource = source as NSString
         var mappings: [String: String] = [:]
@@ -459,7 +459,7 @@ private enum GPO5BankReader {
                 .appendingPathComponent(relativePath).standardizedFileURL.path
             mappings[file] = name
         }
-        print("[Garritan Browser] Found \\(mappings.count) GPO5 Standard bank mappings")
+        print("[Garritan Browser] Found " + String(mappings.count) + " GPO5 Standard bank mappings")
         return mappings
     }
 }
