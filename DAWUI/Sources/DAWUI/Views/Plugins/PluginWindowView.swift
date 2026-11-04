@@ -3,6 +3,7 @@ import AppKit
 import AVFoundation
 import CoreAudioKit
 import DAWCore
+import Compression
 
 // MARK: - Plugin Window Manager
 
@@ -724,6 +725,64 @@ struct GenericPluginParameterView: View {
 
     /// Experimental, reversible instrument switch using the known-good piano AU preset.
     /// The script operates on a temporary file; the original preset is never modified.
+
+    private enum NativeStateError: Error { case invalidState, invalidTemplate, compressionFailed }
+
+    private func generateNativePreset(_ source: URL, _ destination: URL, _ name: String) throws {
+        let input = try Data(contentsOf: source)
+        guard var plist = try PropertyListSerialization.propertyList(from: input, options: [], format: nil) as? [String: Any],
+              let blob = plist["AriaData"] as? Data else { throw NativeStateError.invalidState }
+        let bytes = [UInt8](blob)
+        guard bytes.count > 14, Array(bytes.prefix(4)) == Array("CEGP".utf8) else {
+            throw NativeStateError.invalidState
+        }
+        let expected = Int(UInt32(bytes[4]) | UInt32(bytes[5]) << 8 |
+                           UInt32(bytes[6]) << 16 | UInt32(bytes[7]) << 24)
+        guard expected > 0 && expected < 8_000_000 else { throw NativeStateError.invalidState }
+        let compressed = Array(bytes[10..<(bytes.count - 4)])
+        var plain = [UInt8](repeating: 0, count: expected)
+        let decoded = compressed.withUnsafeBufferPointer { src in
+            plain.withUnsafeMutableBufferPointer { dst in
+                compression_decode_buffer(dst.baseAddress!, dst.count, src.baseAddress!,
+                                          src.count, nil, COMPRESSION_ZLIB)
+            }
+        }
+        guard decoded == expected, let xml = String(bytes: plain, encoding: .utf8) else {
+            throw NativeStateError.invalidState
+        }
+        let original = "name=" + String(UnicodeScalar(34)!) +
+            "Standard/05 Keyboards/Concert Pianos/Intimate D" + String(UnicodeScalar(34)!)
+        let replacement = "name=" + String(UnicodeScalar(34)!) + name + String(UnicodeScalar(34)!)
+        guard xml.contains(original), xml.contains("bankId=" + String(UnicodeScalar(34)!) + "2013"),
+              !name.contains("&"), !name.contains("<"), !name.contains(String(UnicodeScalar(34)!)) else {
+            throw NativeStateError.invalidTemplate
+        }
+        let updated = Array(xml.replacingOccurrences(of: original, with: replacement).utf8)
+        var deflated = [UInt8](repeating: 0, count: max(1024, updated.count * 2 + 128))
+        let encoded = updated.withUnsafeBufferPointer { src in
+            deflated.withUnsafeMutableBufferPointer { dst in
+                compression_encode_buffer(dst.baseAddress!, dst.count, src.baseAddress!,
+                                          src.count, nil, COMPRESSION_ZLIB)
+            }
+        }
+        guard encoded > 0 else { throw NativeStateError.compressionFailed }
+        var a: UInt32 = 1
+        var b: UInt32 = 0
+        for byte in updated { a = (a + UInt32(byte)) % 65521; b = (b + a) % 65521 }
+        let adler = b << 16 | a
+        let count = UInt32(updated.count)
+        var result = Array("CEGP".utf8)
+        result += [UInt8(truncatingIfNeeded: count), UInt8(truncatingIfNeeded: count >> 8),
+                   UInt8(truncatingIfNeeded: count >> 16), UInt8(truncatingIfNeeded: count >> 24)]
+        result += [0x78, 0x9c]
+        result += deflated.prefix(encoded)
+        result += [UInt8(truncatingIfNeeded: adler >> 24), UInt8(truncatingIfNeeded: adler >> 16),
+                   UInt8(truncatingIfNeeded: adler >> 8), UInt8(truncatingIfNeeded: adler)]
+        plist["AriaData"] = Data(result)
+        let output = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try output.write(to: destination, options: .atomic)
+    }
+
     private func loadMappedGPO5Instrument(_ instrumentName: String) {
         presetStatus = nil
         presetError = nil
@@ -732,6 +791,22 @@ struct GenericPluginParameterView: View {
         guard FileManager.default.fileExists(atPath: piano.path) else {
             presetError = "Intimate Piano.aupreset was not found."
             return
+        }
+
+        let nativeTemp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Garritan-Native-\(UUID().uuidString).aupreset")
+        defer { try? FileManager.default.removeItem(at: nativeTemp) }
+        do {
+            try generateNativePreset(piano, nativeTemp, instrumentName)
+            loadAUPreset(from: nativeTemp)
+            if presetError == nil {
+                presetStatus = "Native Swift GPO5 state applied: \(instrumentName)"
+                print("[Garritan Browser] Native Swift loaded " + instrumentName)
+                return
+            }
+            print("[Garritan Browser] Native state rejected; using Python fallback")
+        } catch {
+            print("[Garritan Browser] Native generation failed: " + String(describing: error))
         }
         do {
             let script = """
