@@ -684,6 +684,63 @@ struct GenericPluginParameterView: View {
         }
     }
 
+    /// Experimental, reversible instrument switch using the known-good piano AU preset.
+    /// The script operates on a temporary file; the original preset is never modified.
+    private func testGeneratedOboeState() {
+        presetStatus = nil
+        presetError = nil
+        let piano = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Audio/Presets/Garritan/ARIA Player/Intimate Piano.aupreset")
+        guard FileManager.default.fileExists(atPath: piano.path) else {
+            presetError = "Intimate Piano.aupreset was not found."
+            return
+        }
+        do {
+            let script = """
+            import plistlib, zlib, struct, sys, xml.etree.ElementTree as ET
+            source, destination = sys.argv[1:]
+            with open(source, 'rb') as f:
+                preset = plistlib.load(f)
+            blob = preset['AriaData']
+            if blob[:4] != b'CEGP':
+                raise ValueError('Unexpected ARIA state header')
+            xml = zlib.decompress(blob[8:])
+            if len(xml) != struct.unpack('<I', blob[4:8])[0]:
+                raise ValueError('ARIA uncompressed size mismatch')
+            root = ET.fromstring(xml)
+            slot = root.find("./Slot[@id='0']")
+            if slot is None or slot.get('name') != 'Standard/05 Keyboards/Concert Pianos/Intimate D' or slot.get('bankId') != '2013':
+                raise ValueError('Piano template does not match the verified configuration')
+            slot.set('name', 'Standard/01 Woodwinds/02 Oboes and English Horns/Oboe 1 Modern Solo')
+            encoded = ET.tostring(root, encoding='utf-8', xml_declaration=True)
+            preset['AriaData'] = b'CEGP' + struct.pack('<I', len(encoded)) + zlib.compress(encoded)
+            with open(destination, 'wb') as f:
+                plistlib.dump(preset, f)
+            """
+            let temp = FileManager.default.temporaryDirectory
+                .appendingPathComponent("Garritan-Experimental-Oboe-\\(UUID().uuidString).aupreset")
+            defer { try? FileManager.default.removeItem(at: temp) }
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+            process.arguments = ["-c", script, piano.path, temp.path]
+            let errors = Pipe()
+            process.standardError = errors
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else {
+                let message = String(data: errors.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "Unknown error"
+                presetError = "Could not generate experimental preset: \\(message)"
+                return
+            }
+            loadAUPreset(from: temp)
+            if presetError == nil {
+                presetStatus = "Experimental oboe state applied. Play your keyboard to verify the sound."
+            }
+        } catch {
+            presetError = "Experimental oboe test failed: \\(error.localizedDescription)"
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -708,6 +765,12 @@ struct GenericPluginParameterView: View {
 
                 if plugin.identifier.name.localizedCaseInsensitiveContains("aria") {
                     GarritanPresetBrowser(onLoad: loadAUPreset)
+                    Button("Test Generated Oboe (Experimental)") {
+                        testGeneratedOboeState()
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Generate a temporary ARIA oboe preset from the verified piano state; originals remain unchanged.")
+
                     HStack(spacing: 12) {
                         Button("Load AU Preset…") { chooseAUPreset() }
                             .buttonStyle(.borderedProminent)
