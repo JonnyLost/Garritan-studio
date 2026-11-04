@@ -525,6 +525,7 @@ private struct GarritanInstrumentEntry: Identifiable {
 /// can be loaded; SFZ entries remain browse-only until ARIA loading is validated.
 private struct GarritanPresetBrowser: View {
     let onLoad: (URL) -> Void
+    let onLoadVerifiedOboe: () -> Void
     @State private var entries: [GarritanInstrumentEntry] = []
     @State private var search = ""
     @State private var family = "All"
@@ -596,6 +597,12 @@ private struct GarritanPresetBrowser: View {
                                 Spacer()
                                 if entry.source == .preset {
                                     Button("Load") { onLoad(entry.url) }.buttonStyle(.bordered)
+                                } else if entry.library == "Garritan Personal Orchestra 5" &&
+                                            entry.name == "Oboe 1 Modern Solo" &&
+                                            entry.url.pathExtension.lowercased() == "sfz" {
+                                    Button("Load") { onLoadVerifiedOboe() }
+                                        .buttonStyle(.bordered)
+                                        .help("Load the verified GPO5 oboe through a generated ARIA state")
                                 } else {
                                     Text("Catalog only").font(.caption2).foregroundColor(.secondary)
                                 }
@@ -604,7 +611,7 @@ private struct GarritanPresetBrowser: View {
                     }
                 }.frame(maxHeight: 270)
             }
-            Text("Saved AU presets can load now. Installed SFZ entries are browse-only until direct ARIA loading is verified.")
+            Text("Saved AU presets load normally. GPO5 Oboe 1 Modern Solo supports experimental one-click loading; other SFZ entries remain catalog-only.")
                 .font(.caption2).foregroundColor(.secondary)
         }
         .padding(12)
@@ -764,7 +771,7 @@ struct GenericPluginParameterView: View {
                 .padding(.bottom, 8)
 
                 if plugin.identifier.name.localizedCaseInsensitiveContains("aria") {
-                    GarritanPresetBrowser(onLoad: loadAUPreset)
+                    GarritanPresetBrowser(onLoad: loadAUPreset, onLoadVerifiedOboe: testGeneratedOboeState)
                     Button("Test Generated Oboe (Experimental)") {
                         testGeneratedOboeState()
                     }
