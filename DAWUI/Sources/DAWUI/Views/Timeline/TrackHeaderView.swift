@@ -54,7 +54,7 @@ struct TrackHeaderView: View {
                             )
                             
                             // MIDI Output selector (for routing to V-Rack)
-                            MIDIOutputSelector(track: track, viewModel: viewModel)
+                            MIDIOutputSelector(track: track, viewModel: viewModel, showBrowser: $showInstrumentBrowser)
                         }
                     } else if track.type == .audio {
                         // Audio track with input selector
@@ -331,13 +331,7 @@ struct InstrumentSlotButton: View {
     
     var body: some View {
         Button(action: {
-            if track.instrumentSlot?.pluginID != nil {
-                // Open instrument UI
-                openInstrumentUI()
-            } else {
-                // Show browser to select instrument
-                showBrowser = true
-            }
+            showBrowser = true
         }) {
             HStack(spacing: 4) {
                 Image(systemName: "pianokeys")
@@ -361,7 +355,8 @@ struct InstrumentSlotButton: View {
         .buttonStyle(.plain)
         .contextMenu {
             if track.instrumentSlot?.pluginID != nil {
-                Button("Open Instrument") { openInstrumentUI() }
+                Button("Browse / Change Instrument...") { showBrowser = true }
+                Button("Open Instrument Controls...") { openInstrumentUI() }
                 Divider()
                 Button("Remove Instrument", role: .destructive) { removeInstrument() }
             } else {
@@ -652,6 +647,7 @@ struct MIDIActivityIndicator: View {
 struct MIDIOutputSelector: View {
     let track: Track
     @ObservedObject var viewModel: ProjectViewModel
+    @Binding var showBrowser: Bool
     
     private var currentDestinationLabel: String {
         switch track.midiOutput {
@@ -667,6 +663,8 @@ struct MIDIOutputSelector: View {
     
     var body: some View {
         Menu {
+            Button("Browse / Change Track Instrument...") { showBrowser = true }
+            Divider()
             // Track instrument option
             Button(action: {
                 setMIDIOutput(.trackInstrument)
