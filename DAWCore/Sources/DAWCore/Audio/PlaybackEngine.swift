@@ -762,7 +762,7 @@ public final class PlaybackEngine: ObservableObject {
     private func installAudioDiagnosticTap(on node: AVAudioNode, label: String) {
         let format = node.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
-            print("[Audio Diagnostic] \\(label): invalid output format \\(format)")
+            print("[Audio Diagnostic] \(label): invalid output format \(format)")
             return
         }
         // A node can have only one tap per bus. If another feature already
@@ -792,7 +792,7 @@ public final class PlaybackEngine: ObservableObject {
                 }
             }
         }
-        print("[Audio Diagnostic] Installed tap: \\(label)")
+        print("[Audio Diagnostic] Installed tap: \(label)")
     }
 
     /// Debug: Check audio engine state and play a test tone
