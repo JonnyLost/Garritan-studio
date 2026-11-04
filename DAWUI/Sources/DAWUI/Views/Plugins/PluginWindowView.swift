@@ -3,7 +3,6 @@ import AppKit
 import AVFoundation
 import CoreAudioKit
 import DAWCore
-import FoundationXML
 
 // MARK: - Plugin Window Manager
 
@@ -470,7 +469,7 @@ private final class GPO5BankReader: NSObject, XMLParserDelegate {
         let reader = GPO5BankReader(bankURL: url)
         parser.delegate = reader
         if !parser.parse() {
-            print("[Garritan Browser] Could not parse GPO5 bank: \\(parser.parserError?.localizedDescription ?? "unknown error")")
+            print("[Garritan Browser] Could not parse GPO5 bank")
             return [:]
         }
         print("[Garritan Browser] Found \\(reader.programs.count) GPO5 Standard bank mappings")
