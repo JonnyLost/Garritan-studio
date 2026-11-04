@@ -441,27 +441,46 @@ struct NativePluginView: NSViewControllerRepresentable {
 // ARIA .bank.xml contains unescaped macro definitions (e.g. <midi> inside
 // attributes), so a strict XMLParser can reject it. Extract only the
 // AriaProgram/AriaElement declarations, which are well-defined single lines.
+// Read ARIA program declarations directly. The bank contains ARIA macro syntax
+// that is not strictly XML, so parse the program blocks rather than the whole file.
 private enum GPO5BankReader {
-    static func loadProgramMappings() -> [String: String] {
+    struct Program {
+        let name: String
+        let sfzFiles: [URL]
+    }
+
+    static func loadStandardPrograms() -> [Program] {
         let bankURL = URL(fileURLWithPath:
             "/Library/Application Support/Garritan/Garritan Personal Orchestra 5/Banks/Standard/Personal Orchestra 5.bank.xml")
         guard let source = try? String(contentsOf: bankURL, encoding: .utf8) else {
-            print("[Garritan Browser] GPO5 bank file unavailable")
-            return [:]
+            print("[Garritan Browser] GPO5 Standard bank unavailable")
+            return []
         }
-        let pattern = #"<AriaProgram\b[^>]*\bname="([^"]+)"[^>]*>\s*<AriaElement\b[^>]*\bpath="([^"]+)"[^>]*/>"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [:] }
-        let nsSource = source as NSString
-        var mappings: [String: String] = [:]
-        for match in regex.matches(in: source, range: NSRange(location: 0, length: nsSource.length)) {
-            let name = nsSource.substring(with: match.range(at: 1))
-            let relativePath = nsSource.substring(with: match.range(at: 2))
-            let file = bankURL.deletingLastPathComponent()
-                .appendingPathComponent(relativePath).standardizedFileURL.path
-            mappings[file] = name
+        let programPattern = #"<AriaProgram\b[^>]*\bname="([^"]+)"[^>]*>([\s\S]*?)</AriaProgram>"#
+        let elementPattern = #"<AriaElement\b[^>]*\bpath="([^"]+)""#
+        guard let programs = try? NSRegularExpression(pattern: programPattern),
+              let elements = try? NSRegularExpression(pattern: elementPattern) else { return [] }
+        let text = source as NSString
+        var result: [Program] = []
+        var seen = Set<String>()
+        for match in programs.matches(in: source, range: NSRange(location: 0, length: text.length)) {
+            let name = text.substring(with: match.range(at: 1))
+            guard name.hasPrefix("Standard/"), seen.insert(name).inserted else { continue }
+            let bodyRange = match.range(at: 2)
+            let files: [URL] = elements.matches(in: source, range: bodyRange).map { element in
+                let relative = text.substring(with: element.range(at: 1))
+                return bankURL.deletingLastPathComponent()
+                    .appendingPathComponent(relative).standardizedFileURL
+            }
+            // Programs can reference multiple SFZ layers; don't require exactly one.
+            guard !files.isEmpty, files.allSatisfy({
+                FileManager.default.fileExists(atPath: $0.path)
+            }) else { continue }
+            result.append(Program(name: name, sfzFiles: files))
         }
-        print("[Garritan Browser] Found " + String(mappings.count) + " GPO5 Standard bank mappings")
-        return mappings
+        print("[Garritan Browser] Found " + String(result.count) +
+              " loadable GPO5 Standard programs")
+        return result
     }
 }
 
@@ -473,8 +492,9 @@ private struct GarritanInstrumentEntry: Identifiable {
     let group: String
     let source: Source
     var ariaProgramName: String? = nil
-    var id: String { url.path }
-    var name: String { url.deletingPathExtension().lastPathComponent }
+    var displayName: String? = nil
+    var id: String { ariaProgramName.map { library + ":" + $0 } ?? url.path }
+    var name: String { displayName ?? url.deletingPathExtension().lastPathComponent }
 
     static func family(for relativePath: String) -> String {
         let text = relativePath.lowercased()
@@ -524,8 +544,22 @@ private struct GarritanInstrumentEntry: Identifiable {
             "Garritan World Instruments",
             "Garritan Harps"
         ]
-        let gpo5Programs = GPO5BankReader.loadProgramMappings()
+        // GPO5 is now cataloged from ARIA programs, not filesystem SFZ entries.
+        for program in GPO5BankReader.loadStandardPrograms() {
+            let components = program.name.split(separator: "/").map(String.init)
+            let displayName = components.last ?? program.name
+            let group = components.dropFirst().dropLast().joined(separator: " / ")
+            results.append(Self(url: program.sfzFiles[0],
+                                library: "Garritan Personal Orchestra 5",
+                                family: family(for: program.name),
+                                group: group,
+                                source: .sfz,
+                                ariaProgramName: program.name,
+                                displayName: displayName))
+        }
         for library in knownLibraries {
+            // GPO5 programs have already been loaded from the authoritative bank.
+            if library == "Garritan Personal Orchestra 5" { continue }
             let instruments = garritanRoot.appendingPathComponent(library, isDirectory: true)
                 .appendingPathComponent("Instruments", isDirectory: true)
             guard let walker = manager.enumerator(at: instruments, includingPropertiesForKeys: nil,
@@ -544,20 +578,9 @@ private struct GarritanInstrumentEntry: Identifiable {
                     continue
                 }
                 guard url.pathExtension.lowercased() == "sfz" else { continue }
-                // The SFZ directory also contains implementation components, e.g.
-                // "Mod 1 Baroque Plenum Mappings.sfz", which are not ARIA patches.
-                // For GPO5 show only SFZ files actually referenced by a Standard
-                // bank AriaProgram. Preserve catalog-only entries in other libraries
-                // until their bank definitions are integrated.
-                if library == "Garritan Personal Orchestra 5" &&
-                    gpo5Programs[url.standardizedFileURL.path] == nil {
-                    continue
-                }
                 let group = directories.first ?? "Instruments"
                 results.append(Self(url: url, library: library, family: family(for: relative),
-                                    group: group, source: .sfz,
-                                    ariaProgramName: library == "Garritan Personal Orchestra 5" ?
-                                        gpo5Programs[url.standardizedFileURL.path] : nil))
+                                    group: group, source: .sfz))
             }
         }
         return results.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
@@ -652,7 +675,7 @@ private struct GarritanPresetBrowser: View {
                     }
                 }.frame(maxHeight: 270)
             }
-            Text("Showing GPO5 Standard-bank programs; internal SFZ components are hidden. Other libraries remain catalog-only.")
+            Text("GPO5 instruments come from ARIA Standard-bank programs. Other libraries remain catalog-only.")
                 .font(.caption2).foregroundColor(.secondary)
         }
         .padding(12)
