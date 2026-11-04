@@ -462,7 +462,7 @@ private final class GPO5BankReader: NSObject, XMLParserDelegate {
         if elementName == "AriaProgram" { currentProgram = nil }
     }
 
-    static func load() -> [String: String] {
+    static func loadProgramMappings() -> [String: String] {
         let url = URL(fileURLWithPath:
             "/Library/Application Support/Garritan/Garritan Personal Orchestra 5/Banks/Standard/Personal Orchestra 5.bank.xml")
         guard let parser = XMLParser(contentsOf: url) else { return [:] }
@@ -536,7 +536,7 @@ private struct GarritanInstrumentEntry: Identifiable {
             "Garritan World Instruments",
             "Garritan Harps"
         ]
-        let gpo5Programs = GPO5BankReader.load()
+        let gpo5Programs = GPO5BankReader.loadProgramMappings()
         for library in knownLibraries {
             let instruments = garritanRoot.appendingPathComponent(library, isDirectory: true)
                 .appendingPathComponent("Instruments", isDirectory: true)
