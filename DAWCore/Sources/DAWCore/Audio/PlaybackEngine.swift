@@ -819,6 +819,23 @@ public final class PlaybackEngine: ObservableObject {
             print("[DEBUG] Input mixer volume: \(trackNode.inputMixer.outputVolume)")
             print("[DEBUG] Gain node volume: \(trackNode.gainNode.outputVolume)")
             print("[DEBUG] Output mixer volume: \(trackNode.outputMixer.outputVolume)")
+            // Inspect actual AVAudioEngine graph edges; a running engine does
+            // not guarantee that every instrument is connected to the output.
+            let stages: [(String, AVAudioNode)] = [
+                ("Input mixer", trackNode.inputMixer),
+                ("Gain mixer", trackNode.gainNode),
+                ("Panner mixer", trackNode.pannerNode),
+                ("Track output", trackNode.outputMixer),
+                ("Master mixer", audioEngine.engine.mainMixerNode)
+            ]
+            for (name, node) in stages {
+                let edges = audioEngine.engine.outputConnectionPoints(for: node, outputBus: 0)
+                let destinations = edges.map { String(describing: type(of: $0.node)) + " bus=" + String($0.bus) }
+                print("[Audio Graph] \(name): \(edges.count) output connection(s) -> \(destinations)")
+                print("[Audio Graph] \(name): format=\(node.outputFormat(forBus: 0)), volume=\((node as? AVAudioMixerNode)?.outputVolume ?? -1)")
+            }
+            print("[Audio Graph] Engine output format: \(audioEngine.engine.outputNode.inputFormat(forBus: 0))")
+
         } else {
             print("[DEBUG] No track node!")
         }
@@ -832,6 +849,10 @@ public final class PlaybackEngine: ObservableObject {
                 print("[DEBUG] AU manufacturer: \(au.manufacturerName)")
                 let connections = audioEngine.engine.outputConnectionPoints(for: au, outputBus: 0)
                 print("[DEBUG] AU has \(connections.count) output connections")
+                for edge in connections {
+                    print("[Audio Graph] Instrument -> \(type(of: edge.node)) bus=\(edge.bus)")
+                }
+                print("[Audio Graph] Instrument render resources allocated: \(au.auAudioUnit.renderResourcesAllocated)")
                 
                 // Check scheduleMIDIEventBlock
                 if au.auAudioUnit.scheduleMIDIEventBlock != nil {
