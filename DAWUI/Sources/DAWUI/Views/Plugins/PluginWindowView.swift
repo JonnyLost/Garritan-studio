@@ -449,9 +449,8 @@ private enum GPO5BankReader {
         let sfzFiles: [URL]
     }
 
-    static func loadStandardPrograms() -> [Program] {
-        let bankURL = URL(fileURLWithPath:
-            "/Library/Application Support/Garritan/Garritan Personal Orchestra 5/Banks/Standard/Personal Orchestra 5.bank.xml")
+    static func loadStandardPrograms(bankPath: String, requiredPrefix: String? = nil) -> [Program] {
+        let bankURL = URL(fileURLWithPath: bankPath)
         guard let source = try? String(contentsOf: bankURL, encoding: .utf8) else {
             print("[Garritan Browser] GPO5 Standard bank unavailable")
             return []
@@ -465,7 +464,7 @@ private enum GPO5BankReader {
         var seen = Set<String>()
         for match in programs.matches(in: source, range: NSRange(location: 0, length: text.length)) {
             let name = text.substring(with: match.range(at: 1))
-            guard name.hasPrefix("Standard/"), seen.insert(name).inserted else { continue }
+            guard (requiredPrefix == nil || name.hasPrefix(requiredPrefix!)), seen.insert(name).inserted else { continue }
             let bodyRange = match.range(at: 2)
             let files: [URL] = elements.matches(in: source, range: bodyRange).map { element in
                 let relative = text.substring(with: element.range(at: 1))
@@ -479,7 +478,7 @@ private enum GPO5BankReader {
             result.append(Program(name: name, sfzFiles: files))
         }
         print("[Garritan Browser] Found " + String(result.count) +
-              " loadable GPO5 Standard programs")
+              " loadable programs from " + bankURL.lastPathComponent)
         return result
     }
 }
@@ -545,7 +544,7 @@ private struct GarritanInstrumentEntry: Identifiable {
             "Garritan Harps"
         ]
         // GPO5 is now cataloged from ARIA programs, not filesystem SFZ entries.
-        for program in GPO5BankReader.loadStandardPrograms() {
+        for program in GPO5BankReader.loadStandardPrograms(bankPath: "/Library/Application Support/Garritan/Garritan Personal Orchestra 5/Banks/Standard/Personal Orchestra 5.bank.xml", requiredPrefix: "Standard/") {
             let components = program.name.split(separator: "/").map(String.init)
             let displayName = components.last ?? program.name
             let group = components.dropFirst().dropLast().joined(separator: " / ")
@@ -557,9 +556,20 @@ private struct GarritanInstrumentEntry: Identifiable {
                                 ariaProgramName: program.name,
                                 displayName: displayName))
         }
+        for program in GPO5BankReader.loadStandardPrograms(
+            bankPath: "/Library/Application Support/Garritan/Garritan Instant Orchestra/Banks/Standard/Instant Orchestra.bank.xml") {
+            let parts = program.name.split(separator: "/").map(String.init)
+            results.append(Self(url: program.sfzFiles[0],
+                                library: "Garritan Instant Orchestra",
+                                family: family(for: program.name),
+                                group: parts.dropLast().joined(separator: " / "),
+                                source: .sfz,
+                                ariaProgramName: program.name,
+                                displayName: parts.last ?? program.name))
+        }
         for library in knownLibraries {
             // GPO5 programs have already been loaded from the authoritative bank.
-            if library == "Garritan Personal Orchestra 5" { continue }
+            if library == "Garritan Personal Orchestra 5" || library == "Garritan Instant Orchestra" { continue }
             let instruments = garritanRoot.appendingPathComponent(library, isDirectory: true)
                 .appendingPathComponent("Instruments", isDirectory: true)
             guard let walker = manager.enumerator(at: instruments, includingPropertiesForKeys: nil,
@@ -591,7 +601,7 @@ private struct GarritanInstrumentEntry: Identifiable {
 /// instruments support direct loading; unmapped SFZ entries are catalog-only.
 private struct GarritanPresetBrowser: View {
     let onLoad: (URL) -> Void
-    let onLoadMappedInstrument: (String) -> Void
+    let onLoadMappedInstrument: (String, String) -> Void
     @State private var entries: [GarritanInstrumentEntry] = []
     @State private var search = ""
     @State private var family = "All"
@@ -664,7 +674,7 @@ private struct GarritanPresetBrowser: View {
                                 if entry.source == .preset {
                                     Button("Load") { onLoad(entry.url) }.buttonStyle(.bordered)
                                 } else if let ariaName = entry.ariaProgramName {
-                                    Button("Load") { onLoadMappedInstrument(ariaName) }
+                                    Button("Load") { onLoadMappedInstrument(entry.library, ariaName) }
                                         .buttonStyle(.bordered)
                                         .help("Load GPO5 instrument using its Standard-bank mapping")
                                 } else {
@@ -675,7 +685,7 @@ private struct GarritanPresetBrowser: View {
                     }
                 }.frame(maxHeight: 270)
             }
-            Text("GPO5 instruments come from ARIA Standard-bank programs. Other libraries remain catalog-only.")
+            Text("GPO5 and Instant Orchestra use ARIA Standard-bank programs. Other libraries remain catalog-only.")
                 .font(.caption2).foregroundColor(.secondary)
         }
         .padding(12)
@@ -760,7 +770,7 @@ struct GenericPluginParameterView: View {
 
     private enum NativeStateError: Error { case invalidState, invalidTemplate, compressionFailed }
 
-    private func generateNativePreset(_ source: URL, _ destination: URL, _ name: String) throws {
+    private func generateNativePreset(_ source: URL, _ destination: URL, _ name: String, templateName: String, bankID: String) throws {
         let input = try Data(contentsOf: source)
         guard var plist = try PropertyListSerialization.propertyList(from: input, options: [], format: nil) as? [String: Any],
               let blob = plist["AriaData"] as? Data else { throw NativeStateError.invalidState }
@@ -783,9 +793,9 @@ struct GenericPluginParameterView: View {
             throw NativeStateError.invalidState
         }
         let original = "name=" + String(UnicodeScalar(34)!) +
-            "Standard/05 Keyboards/Concert Pianos/Intimate D" + String(UnicodeScalar(34)!)
+            templateName + String(UnicodeScalar(34)!)
         let replacement = "name=" + String(UnicodeScalar(34)!) + name + String(UnicodeScalar(34)!)
-        guard xml.contains(original), xml.contains("bankId=" + String(UnicodeScalar(34)!) + "2013"),
+        guard xml.contains(original), xml.contains("bankId=" + String(UnicodeScalar(34)!) + bankID + String(UnicodeScalar(34)!)),
               !name.contains("&"), !name.contains("<"), !name.contains(String(UnicodeScalar(34)!)) else {
             throw NativeStateError.invalidTemplate
         }
@@ -815,13 +825,26 @@ struct GenericPluginParameterView: View {
         try output.write(to: destination, options: .atomic)
     }
 
-    private func loadMappedGPO5Instrument(_ instrumentName: String) {
+    private func loadMappedGPO5Instrument(_ library: String, _ instrumentName: String) {
         presetStatus = nil
         presetError = nil
         let piano = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Audio/Presets/Garritan/ARIA Player/Intimate Piano.aupreset")
-        guard FileManager.default.fileExists(atPath: piano.path) else {
-            presetError = "Intimate Piano.aupreset was not found."
+        let isInstantOrchestra = library == "Garritan Instant Orchestra"
+        let template = isInstantOrchestra
+            ? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
+                "Library/Audio/Presets/Garritan/ARIA Player/Evolving Orchestra.aupreset")
+            : piano
+        let templateName = isInstantOrchestra
+            ? "Blending Textures/Evolving Orchestra"
+            : "Standard/05 Keyboards/Concert Pianos/Intimate D"
+        let bankID = isInstantOrchestra ? "2007" : "2013"
+        guard library == "Garritan Personal Orchestra 5" || isInstantOrchestra else {
+            presetError = "This library is not yet supported for direct loading."
+            return
+        }
+        guard FileManager.default.fileExists(atPath: template.path) else {
+            presetError = "Missing verified template: " + template.lastPathComponent
             return
         }
 
@@ -829,16 +852,20 @@ struct GenericPluginParameterView: View {
             .appendingPathComponent("Garritan-Native-\(UUID().uuidString).aupreset")
         defer { try? FileManager.default.removeItem(at: nativeTemp) }
         do {
-            try generateNativePreset(piano, nativeTemp, instrumentName)
+            try generateNativePreset(template, nativeTemp, instrumentName, templateName: templateName, bankID: bankID)
             loadAUPreset(from: nativeTemp)
             if presetError == nil {
-                presetStatus = "Loaded GPO5: \(instrumentName.split(separator: "/").last.map(String.init) ?? instrumentName) (native Swift)"
+                presetStatus = "Loaded \(isInstantOrchestra ? "Instant Orchestra" : "GPO5"): \(instrumentName.split(separator: "/").last.map(String.init) ?? instrumentName) (native Swift)"
                 print("[Garritan Browser] Native Swift loaded " + instrumentName)
                 return
             }
             print("[Garritan Browser] Native state rejected; using Python fallback")
         } catch {
             print("[Garritan Browser] Native generation failed: " + String(describing: error))
+        }
+        if isInstantOrchestra {
+            presetError = "Native Instant Orchestra loading failed. GPO5 Python fallback is not applicable."
+            return
         }
         do {
             let script = """
