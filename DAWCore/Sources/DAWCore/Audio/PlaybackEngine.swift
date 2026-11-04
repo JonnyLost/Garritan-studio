@@ -306,6 +306,17 @@ public final class PlaybackEngine: ObservableObject {
         if let trackNode = audioEngine.trackNode(for: trackID) {
             audioEngine.engine.connect(converterMixer, to: trackNode.inputMixer, format: engineFormat)
             print("[PlaybackEngine] Connected converterMixer -> trackNode.inputMixer (engine format: \(engineFormat.sampleRate) Hz)")
+            // Ensure the track is still connected to the master after the AU
+            // graph has been reconfigured. A disconnected track output leaves
+            // the instrument outside the render path and produces silence.
+            let master = audioEngine.engine.mainMixerNode
+            let outputEdges = audioEngine.engine.outputConnectionPoints(for: trackNode.outputMixer, outputBus: 0)
+            if !outputEdges.contains(where: { $0.node === master }) {
+                audioEngine.engine.connect(trackNode.outputMixer, to: master, format: engineFormat)
+                print("[PlaybackEngine] Reconnected track output -> master mixer")
+            }
+            let verifiedEdges = audioEngine.engine.outputConnectionPoints(for: trackNode.outputMixer, outputBus: 0)
+            print("[PlaybackEngine] Track output -> master verified: \(verifiedEdges.contains(where: { $0.node === master }))")
             print("[PlaybackEngine] Track inputMixer volume: \(trackNode.inputMixer.outputVolume)")
             converterMixer.outputVolume = 1.0
             print("[PlaybackEngine] Converter mixer volume: \(converterMixer.outputVolume)")
