@@ -736,7 +736,7 @@ struct GenericPluginParameterView: View {
         do {
             let script = """
             import plistlib, zlib, struct, sys, xml.etree.ElementTree as ET
-            source, destination = sys.argv[1:]
+            source, destination, instrument = sys.argv[1:]
             with open(source, 'rb') as f:
                 preset = plistlib.load(f)
             blob = preset['AriaData']
@@ -749,14 +749,14 @@ struct GenericPluginParameterView: View {
             slot = root.find("./Slot[@id='0']")
             if slot is None or slot.get('name') != 'Standard/05 Keyboards/Concert Pianos/Intimate D' or slot.get('bankId') != '2013':
                 raise ValueError('Piano template does not match the verified configuration')
-            slot.set('name', sys.argv[3])
+            slot.set('name', instrument)
             encoded = ET.tostring(root, encoding='utf-8', xml_declaration=True)
             preset['AriaData'] = b'CEGP' + struct.pack('<I', len(encoded)) + zlib.compress(encoded)
             with open(destination, 'wb') as f:
                 plistlib.dump(preset, f)
             """
             let temp = FileManager.default.temporaryDirectory
-                .appendingPathComponent("Garritan-Experimental-GPO5-\\(UUID().uuidString).aupreset")
+                .appendingPathComponent("Garritan-Experimental-GPO5-\(UUID().uuidString).aupreset")
             defer { try? FileManager.default.removeItem(at: temp) }
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
@@ -767,15 +767,15 @@ struct GenericPluginParameterView: View {
             process.waitUntilExit()
             guard process.terminationStatus == 0 else {
                 let message = String(data: errors.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "Unknown error"
-                presetError = "Could not generate experimental preset: \\(message)"
+                presetError = "Could not generate experimental preset: \(message)"
                 return
             }
             loadAUPreset(from: temp)
             if presetError == nil {
-                presetStatus = "Experimental GPO5 state applied: \\(instrumentName). Play your keyboard to verify."
+                presetStatus = "Experimental GPO5 state applied: \(instrumentName). Play your keyboard to verify."
             }
         } catch {
-            presetError = "Experimental oboe test failed: \\(error.localizedDescription)"
+            presetError = "Experimental GPO5 load failed: \(error.localizedDescription)"
         }
     }
 
