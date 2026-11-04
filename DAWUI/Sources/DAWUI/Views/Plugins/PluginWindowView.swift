@@ -544,6 +544,15 @@ private struct GarritanInstrumentEntry: Identifiable {
                     continue
                 }
                 guard url.pathExtension.lowercased() == "sfz" else { continue }
+                // The SFZ directory also contains implementation components, e.g.
+                // "Mod 1 Baroque Plenum Mappings.sfz", which are not ARIA patches.
+                // For GPO5 show only SFZ files actually referenced by a Standard
+                // bank AriaProgram. Preserve catalog-only entries in other libraries
+                // until their bank definitions are integrated.
+                if library == "Garritan Personal Orchestra 5" &&
+                    gpo5Programs[url.standardizedFileURL.path] == nil {
+                    continue
+                }
                 let group = directories.first ?? "Instruments"
                 results.append(Self(url: url, library: library, family: family(for: relative),
                                     group: group, source: .sfz,
@@ -643,7 +652,7 @@ private struct GarritanPresetBrowser: View {
                     }
                 }.frame(maxHeight: 270)
             }
-            Text("GPO5 Standard-bank instruments can be loaded directly. Other SFZ entries remain catalog-only.")
+            Text("Showing GPO5 Standard-bank programs; internal SFZ components are hidden. Other libraries remain catalog-only.")
                 .font(.caption2).foregroundColor(.secondary)
         }
         .padding(12)
