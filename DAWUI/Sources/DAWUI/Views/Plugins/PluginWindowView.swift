@@ -443,7 +443,7 @@ struct NativePluginView: NSViewControllerRepresentable {
 // AriaProgram/AriaElement declarations, which are well-defined single lines.
 // Read ARIA program declarations directly. The bank contains ARIA macro syntax
 // that is not strictly XML, so parse the program blocks rather than the whole file.
-private enum GPO5BankReader {
+enum GPO5BankReader {
     struct Program {
         let name: String
         let sfzFiles: [URL]
