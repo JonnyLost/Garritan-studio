@@ -706,6 +706,72 @@ struct MIDIOutputSelector: View {
     let track: Track
     @ObservedObject var viewModel: ProjectViewModel
     @Binding var showBrowser: Bool
+    @State private var garritanPrograms: [TrackGarritanProgram] = []
+    @State private var loadError: String?
+
+    private var ariaUnit: AVAudioUnit? {
+        guard let id = track.instrumentSlot?.pluginID,
+              id.name.localizedCaseInsensitiveContains("aria"),
+              id.manufacturer.localizedCaseInsensitiveContains("garr"),
+              let instrument = viewModel.playbackEngine.instrument(for: track.id),
+              case .auInstrument(let unit, _) = instrument else { return nil }
+        return unit
+    }
+
+    private let scoreSections = [
+        "Woodwinds", "Brass", "Percussion", "Harp & Keyboards", "Strings", "Choir & Other"
+    ]
+
+    private func scoreSection(_ program: TrackGarritanProgram) -> String {
+        let parts = program.programName.lowercased().split(separator: "/").map(String.init)
+        let category = parts.count > 1 ? parts[program.library == "Garritan Personal Orchestra 5" ? 1 : 0] : program.programName.lowercased()
+        if category.contains("woodwind") || category.contains("flute") ||
+           category.contains("oboe") || category.contains("clarinet") ||
+           category.contains("bassoon") || category.contains("sax") ||
+           category.contains("wind patches") { return "Woodwinds" }
+        if category.contains("brass") || category.contains("horn") ||
+           category.contains("trumpet") || category.contains("trombone") ||
+           category.contains("tuba") { return "Brass" }
+        if category.contains("percussion") || category.contains("drum") ||
+           category.contains("timpani") || category.contains("mallet") { return "Percussion" }
+        if category.contains("keyboard") || category.contains("harp") ||
+           category.contains("piano") || category.contains("organ") { return "Harp & Keyboards" }
+        if category.contains("string") || category.contains("violin") ||
+           category.contains("viola") || category.contains("cello") { return "Strings" }
+        return "Choir & Other"
+    }
+
+    private func folder(_ program: TrackGarritanProgram) -> String {
+        let parts = program.programName.split(separator: "/").map(String.init)
+        let index = program.library == "Garritan Personal Orchestra 5" ? 2 : 1
+        if parts.count > index + 1 { return parts[index] }
+        return "Other Instruments"
+    }
+
+    private func loadPatch(_ program: TrackGarritanProgram) {
+        guard let unit = ariaUnit else { return }
+        do {
+            try TrackGarritanLoader.apply(program, to: unit)
+            print("[Garritan Track Menu] Loaded " + program.programName)
+        } catch {
+            loadError = error.localizedDescription
+        }
+    }
+
+    private func discoverGarritanPrograms() {
+        let banks: [(library: String, path: String, prefix: String?)] = [
+            ("Garritan Personal Orchestra 5",
+             "/Library/Application Support/Garritan/Garritan Personal Orchestra 5/Banks/Standard/Personal Orchestra 5.bank.xml", "Standard/"),
+            ("Garritan Instant Orchestra",
+             "/Library/Application Support/Garritan/Garritan Instant Orchestra/Banks/Standard/Instant Orchestra.bank.xml", nil)
+        ]
+        garritanPrograms = banks.flatMap { bank in
+            GPO5BankReader.loadStandardPrograms(bankPath: bank.path, requiredPrefix: bank.prefix).map {
+                TrackGarritanProgram(library: bank.library, programName: $0.name)
+            }
+        }
+    }
+
     
     private var currentDestinationLabel: String {
         switch track.midiOutput {
@@ -721,6 +787,31 @@ struct MIDIOutputSelector: View {
     
     var body: some View {
         Menu {
+            if ariaUnit != nil {
+                ForEach(["Garritan Personal Orchestra 5", "Garritan Instant Orchestra"], id: \.self) { library in
+                    Menu(library == "Garritan Personal Orchestra 5" ? "GPO5" : "Instant Orchestra") {
+                        ForEach(scoreSections, id: \.self) { section in
+                            let patches = garritanPrograms.filter {
+                                $0.library == library && scoreSection($0) == section
+                            }
+                            if !patches.isEmpty {
+                                Menu(section) {
+                                    ForEach(Array(Set(patches.map { folder($0) })).sorted(), id: \.self) { group in
+                                        Menu(group) {
+                                            ForEach(patches.filter { folder($0) == group }
+                                                .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending },
+                                                id: \.id) { program in
+                                                Button(program.name) { loadPatch(program) }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Divider()
+            }
             Button("Browse / Change Track Instrument...") { showBrowser = true }
             Divider()
             // Track instrument option
