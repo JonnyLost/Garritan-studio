@@ -437,43 +437,30 @@ struct NativePluginView: NSViewControllerRepresentable {
 
 // The GPO5 Standard bank is authoritative for SFZ-file -> ARIA-program names.
 // In particular, "Flute Solo V.sfz" maps to ".../Flute Solo Vib", not ".../V".
-private final class GPO5BankReader: NSObject, XMLParserDelegate {
-    private(set) var programs: [String: String] = [:]
-    private var currentProgram: String?
-    private let bankURL: URL
-
-    init(bankURL: URL) { self.bankURL = bankURL }
-
-    func parser(_ parser: XMLParser, didStartElement elementName: String,
-                namespaceURI: String?, qualifiedName qName: String?,
-                attributes attributeDict: [String: String]) {
-        if elementName == "AriaProgram" {
-            currentProgram = attributeDict["name"]
-        } else if elementName == "AriaElement",
-                  let name = currentProgram, let path = attributeDict["path"] {
-            let file = bankURL.deletingLastPathComponent()
-                .appendingPathComponent(path).standardizedFileURL.path
-            programs[file] = name
-        }
-    }
-
-    func parser(_ parser: XMLParser, didEndElement elementName: String,
-                namespaceURI: String?, qualifiedName qName: String?) {
-        if elementName == "AriaProgram" { currentProgram = nil }
-    }
-
+// ARIA .bank.xml contains unescaped macro definitions (e.g. <midi> inside
+// attributes), so a strict XMLParser can reject it. Extract only the
+// AriaProgram/AriaElement declarations, which are well-defined single lines.
+private enum GPO5BankReader {
     static func loadProgramMappings() -> [String: String] {
-        let url = URL(fileURLWithPath:
+        let bankURL = URL(fileURLWithPath:
             "/Library/Application Support/Garritan/Garritan Personal Orchestra 5/Banks/Standard/Personal Orchestra 5.bank.xml")
-        guard let parser = XMLParser(contentsOf: url) else { return [:] }
-        let reader = GPO5BankReader(bankURL: url)
-        parser.delegate = reader
-        if !parser.parse() {
-            print("[Garritan Browser] Could not parse GPO5 bank")
+        guard let source = try? String(contentsOf: bankURL, encoding: .utf8) else {
+            print("[Garritan Browser] GPO5 bank file unavailable")
             return [:]
         }
-        print("[Garritan Browser] Found \\(reader.programs.count) GPO5 Standard bank mappings")
-        return reader.programs
+        let pattern = #"<AriaProgram\\b[^>]*\\bname="([^"]+)"[^>]*>\\s*<AriaElement\\b[^>]*\\bpath="([^"]+)"[^>]*/>"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [:] }
+        let nsSource = source as NSString
+        var mappings: [String: String] = [:]
+        for match in regex.matches(in: source, range: NSRange(location: 0, length: nsSource.length)) {
+            let name = nsSource.substring(with: match.range(at: 1))
+            let relativePath = nsSource.substring(with: match.range(at: 2))
+            let file = bankURL.deletingLastPathComponent()
+                .appendingPathComponent(relativePath).standardizedFileURL.path
+            mappings[file] = name
+        }
+        print("[Garritan Browser] Found \\(mappings.count) GPO5 Standard bank mappings")
+        return mappings
     }
 }
 
