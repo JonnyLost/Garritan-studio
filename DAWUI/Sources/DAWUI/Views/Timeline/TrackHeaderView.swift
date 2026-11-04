@@ -590,11 +590,14 @@ struct InstrumentBrowserSheet: View {
                     log("Step 4 DONE: Playback engine loaded")
                     
                     await MainActor.run {
-                        log("Step 5: Opening plugin window...")
-                        // Open the instrument UI
-                        PluginWindowManager.shared.openPluginWindow(for: loadedPlugin, trackName: track.name)
+                        // Do not automatically create the Audio Unit editor.
+                        // ARIA Player can crash inside its custom editor on macOS
+                        // even after the audio unit itself has loaded successfully.
+                        // The instrument slot remains clickable to open the editor
+                        // manually after we verify that audio/MIDI hosting works.
+                        log("Step 5: Skipping automatic plugin editor (diagnostic mode)")
                         isPresented = false
-                        log("Step 5 DONE: Window opened, closing browser")
+                        log("Step 5 DONE: Instrument loaded; browser closed without opening editor")
                     }
                 } else {
                     log("ERROR: Track not found for ID: \(trackID)")
