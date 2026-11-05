@@ -125,37 +125,29 @@ struct ClipView: View {
     
     var body: some View {
         ZStack(alignment: .topLeading) {
-            // Clip background - NO border for MIDI, filled for audio
-            if !isMIDIClip {
-                // Audio clips: filled background with border
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(clipColor.opacity(0.3))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 4)
-                            .strokeBorder(isSelected ? Color.accentColor : clipColor, lineWidth: isSelected ? 2 : 1)
-                    )
-            }
-            
-            // Clip content
-            if isMIDIClip {
-                // MIDI: just the notes, no border, no padding, no label
+            // Give MIDI and audio clips a visible, selectable region surface.
+            RoundedRectangle(cornerRadius: 4)
+                .fill(clipColor.opacity(isMIDIClip ? 0.18 : 0.3))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 4)
+                        .strokeBorder(isSelected ? Color.accentColor : clipColor.opacity(0.85),
+                                      lineWidth: isSelected ? 2 : 1)
+                )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(clip.name)
+                    .font(.caption2)
+                    .fontWeight(.medium)
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                    .padding(.horizontal, 5)
+                    .padding(.top, 2)
+
                 clipContentPreview
-            } else {
-                // Audio: name + waveform
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(clip.name)
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundColor(.primary)
-                        .lineLimit(1)
-                        .padding(.horizontal, 4)
-                        .padding(.top, 2)
-                    
-                    clipContentPreview
-                        .padding(.horizontal, 2)
-                }
+                    .padding(.horizontal, 3)
+                    .frame(maxHeight: .infinity)
             }
-            
+
             // Muted overlay (audio only)
             if clip.isMuted && !isMIDIClip {
                 RoundedRectangle(cornerRadius: 4)
