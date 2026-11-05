@@ -749,12 +749,17 @@ struct MIDIOutputSelector: View {
     }
 
     private func loadPatch(_ program: TrackGarritanProgram) {
-        guard let unit = ariaUnit else { return }
-        do {
-            try TrackGarritanLoader.apply(program, to: unit)
-            print("[Garritan Track Menu] Loaded " + program.programName)
-        } catch {
-            loadError = error.localizedDescription
+        // A native AU fullState restore can be reentrant while AppKit is tracking
+        // a nested NSMenu. Defer until the menu action has unwound, matching the
+        // working plugin-controls window's normal button-based loading context.
+        DispatchQueue.main.async {
+            guard let unit = ariaUnit else { return }
+            do {
+                try TrackGarritanLoader.apply(program, to: unit)
+                print("[Garritan Track Menu] Loaded (deferred) " + program.programName)
+            } catch {
+                loadError = error.localizedDescription
+            }
         }
     }
 
