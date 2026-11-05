@@ -677,6 +677,68 @@ public final class ProjectViewModel: ObservableObject {
         print("[Edit] Duplicated clip '\(clip.name)' to beat \(toBeat)")
     }
     
+    /// Split a MIDI clip at the current playhead, preserving notes that cross the cut.
+    public func splitMIDIClip(_ clipID: ClipID, on trackID: TrackID) {
+        guard var track = project.track(withID: trackID),
+              let index = track.clips.firstIndex(where: { $0.id == clipID }) else { return }
+        let original = track.clips[index]
+        guard case .midi(let midi) = original.content else { return }
+
+        let tempo = transportState.tempo.bpm
+        let startBeat = original.timeRange.start.beats(atTempo: tempo)
+        let durationBeats = original.timeRange.duration.beats(atTempo: tempo)
+        let cutBeat = transportState.playheadBeats - startBeat
+        guard cutBeat > 0.0001, cutBeat < durationBeats - 0.0001 else { return }
+
+        let cutPosition = TimePosition(beats: startBeat + cutBeat,
+                                       tempo: tempo,
+                                       sampleRate: transportState.sampleRate)
+        var left = original
+        var right = original
+        right.id = ClipID()
+        right.name = original.name + " (split)"
+        left.timeRange = TimeRange(start: original.timeRange.start, end: cutPosition)
+        right.timeRange = TimeRange(start: cutPosition, end: original.timeRange.end)
+
+        var leftEvents: [MIDIEvent] = []
+        var rightEvents: [MIDIEvent] = []
+        for event in midi.events {
+            if case .note(let note) = event.type,
+               event.beatPosition < cutBeat,
+               event.beatPosition + note.duration > cutBeat {
+                var leftEvent = event
+                var leftNote = note
+                leftNote.duration = cutBeat - event.beatPosition
+                leftEvent.type = .note(leftNote)
+                leftEvents.append(leftEvent)
+
+                var rightEvent = event
+                rightEvent.id = UUID()
+                rightEvent.beatPosition = 0
+                var rightNote = note
+                rightNote.duration = event.beatPosition + note.duration - cutBeat
+                rightEvent.type = .note(rightNote)
+                rightEvents.append(rightEvent)
+            } else if event.beatPosition < cutBeat {
+                leftEvents.append(event)
+            } else {
+                var shifted = event
+                shifted.beatPosition -= cutBeat
+                rightEvents.append(shifted)
+            }
+        }
+        var leftMIDI = midi
+        var rightMIDI = midi
+        leftMIDI.events = leftEvents
+        rightMIDI.events = rightEvents
+        left.content = .midi(leftMIDI)
+        right.content = .midi(rightMIDI)
+        track.clips[index] = left
+        track.clips.insert(right, at: index + 1)
+        updateTrack(track, description: "Split MIDI Region")
+        selectedClipIDs = [right.id]
+    }
+
     // MARK: - Clipboard Operations
     
     private var clipboardClips: [Clip] = []
