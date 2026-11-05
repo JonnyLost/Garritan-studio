@@ -739,6 +739,31 @@ public final class ProjectViewModel: ObservableObject {
         selectedClipIDs = [right.id]
     }
 
+    /// Trim the left boundary while preserving all MIDI events, including hidden ones.
+    /// Event positions are relative to the clip start, so compensate them when
+    /// changing the start to keep the notes at their original absolute beats.
+    public func trimMIDIClipLeft(_ clipID: ClipID, on trackID: TrackID, toBeat startBeat: Double) {
+        guard var track = project.track(withID: trackID),
+              let index = track.clips.firstIndex(where: { $0.id == clipID }),
+              case .midi(var midi) = track.clips[index].content else { return }
+        let clip = track.clips[index]
+        let tempo = transportState.tempo.bpm
+        let oldStart = clip.timeRange.start.beats(atTempo: tempo)
+        let end = clip.timeRange.end.beats(atTempo: tempo)
+        let newStart = min(max(0, startBeat), end - 0.25)
+        let delta = newStart - oldStart
+        guard abs(delta) > 0.001 else { return }
+
+        for i in midi.events.indices {
+            midi.events[i].beatPosition -= delta
+        }
+        let position = TimePosition(beats: newStart, tempo: tempo,
+                                    sampleRate: transportState.sampleRate)
+        track.clips[index].timeRange = TimeRange(start: position, end: clip.timeRange.end)
+        track.clips[index].content = .midi(midi)
+        updateTrack(track, description: "Trim MIDI Region Start")
+    }
+
     /// Resize a MIDI region's right boundary without deleting its MIDI events.
     public func trimMIDIClipRight(_ clipID: ClipID, on trackID: TrackID, toBeat endBeat: Double) {
         guard var track = project.track(withID: trackID),
