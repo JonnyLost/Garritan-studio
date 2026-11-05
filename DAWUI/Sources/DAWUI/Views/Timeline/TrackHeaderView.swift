@@ -389,6 +389,7 @@ struct InstrumentBrowserSheet: View {
     @Binding var isPresented: Bool
     
     @State private var searchText = ""
+    @FocusState private var searchHasFocus: Bool
     @State private var isLoading = false
     @State private var isScanning = false
     @State private var instruments: [PluginDescription] = []
@@ -446,6 +447,7 @@ struct InstrumentBrowserSheet: View {
                     .foregroundColor(.secondary)
                 TextField("Search instruments...", text: $searchText)
                     .textFieldStyle(.plain)
+                    .focused($searchHasFocus)
             }
             .padding(.horizontal)
             .padding(.vertical, 8)
@@ -532,6 +534,12 @@ struct InstrumentBrowserSheet: View {
         .onAppear {
             if trackARIA != nil { discoverPrograms() }
             else { scanForPlugins() }
+            // Give the sheet time to become key before assigning text focus.
+            DispatchQueue.main.async {
+                NSApp.activate(ignoringOtherApps: true)
+                NSApp.keyWindow?.makeKey()
+                searchHasFocus = true
+            }
         }
     }
     
