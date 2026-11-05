@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import UniformTypeIdentifiers
 import DAWCore
 import DAWUI
@@ -16,11 +17,22 @@ extension UTType {
 @main
 struct DAWApp: App {
     @StateObject private var appState = AppState()
-    
+
+    init() {
+        // 'swift run DAWApp' launches an unbundled executable. Ensure macOS
+        // treats it as a foreground app so its windows can receive keyboard focus.
+        NSApplication.shared.setActivationPolicy(.regular)
+    }
+
     var body: some Scene {
         // Main document window
         WindowGroup {
             MainWindowView(project: appState.currentProject)
+                .onAppear {
+                    DispatchQueue.main.async {
+                        NSApplication.shared.activate(ignoringOtherApps: true)
+                    }
+                }
                 .environmentObject(appState)
                 .id(appState.projectID)  // Force view recreation when project changes
                 .onReceive(NotificationCenter.default.publisher(for: .projectDidChange)) { notification in
