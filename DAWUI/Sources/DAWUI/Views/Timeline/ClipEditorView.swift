@@ -385,8 +385,9 @@ struct ClipContextMenuModifier: ViewModifier {
             }
             
             Button("Split at Playhead") {
-                // Split functionality
+                viewModel.splitMIDIClip(clip.id, on: trackID)
             }
+            .disabled(!clip.content.isMIDI)
             
             Divider()
             
