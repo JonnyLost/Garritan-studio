@@ -739,6 +739,22 @@ public final class ProjectViewModel: ObservableObject {
         selectedClipIDs = [right.id]
     }
 
+    /// Resize a MIDI region's right boundary without deleting its MIDI events.
+    public func trimMIDIClipRight(_ clipID: ClipID, on trackID: TrackID, toBeat endBeat: Double) {
+        guard var track = project.track(withID: trackID),
+              let index = track.clips.firstIndex(where: { $0.id == clipID }),
+              track.clips[index].content.isMIDI else { return }
+        let clip = track.clips[index]
+        let tempo = transportState.tempo.bpm
+        let startBeat = clip.timeRange.start.beats(atTempo: tempo)
+        let newEnd = max(startBeat + 0.25, endBeat)
+        guard abs(newEnd - clip.timeRange.end.beats(atTempo: tempo)) > 0.001 else { return }
+        let endPosition = TimePosition(beats: newEnd, tempo: tempo,
+                                       sampleRate: transportState.sampleRate)
+        track.clips[index].timeRange = TimeRange(start: clip.timeRange.start, end: endPosition)
+        updateTrack(track, description: "Trim MIDI Region")
+    }
+
     // MARK: - Clipboard Operations
     
     private var clipboardClips: [Clip] = []
