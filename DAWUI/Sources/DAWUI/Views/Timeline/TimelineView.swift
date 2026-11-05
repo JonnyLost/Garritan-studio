@@ -177,7 +177,9 @@ struct ClipView: View {
             }
         }
         .frame(height: height)
+        // MIDI clips draw only notes, but their entire region must be hit-testable.
         .contentShape(Rectangle())
+        .clipContextMenu(clip: clip, trackID: track.id, viewModel: viewModel)
         .gesture(clipDragGesture)
         .simultaneousGesture(
             TapGesture(count: 2)
