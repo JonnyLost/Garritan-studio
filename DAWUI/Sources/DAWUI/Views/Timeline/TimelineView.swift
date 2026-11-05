@@ -58,6 +58,19 @@ struct TimelineTrackRow: View {
             // Track background
             Rectangle()
                 .fill(isSelected ? Color.accentColor.opacity(0.1) : Color.clear)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    withAnimation(.none) {
+                        viewModel.selectAndArmTrack(track.id)
+                    }
+                }
+                .contextMenu {
+                    if track.type == .midi || track.type == .instrument {
+                        Button("Create MIDI Clip") {
+                            viewModel.createMIDIClip(on: track.id, at: TimePosition(), duration: 4.0)
+                        }
+                    }
+                }
             
             // Clips
             ForEach(track.clips) { clip in
@@ -70,25 +83,11 @@ struct TimelineTrackRow: View {
                     clipWidth: width,
                     onDoubleClick: { onDoubleClick?(clip) }
                 )
+                .frame(width: width, height: height - 6)
                 .offset(x: clipX(for: clip), y: 3)
-                .frame(width: width)
             }
         }
         .frame(height: height)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            // Instant selection with piano roll follow (no animation delay)
-            withAnimation(.none) {
-                viewModel.selectAndArmTrack(track.id)
-            }
-        }
-        .contextMenu {
-            if track.type == .midi || track.type == .instrument {
-                Button("Create MIDI Clip") {
-                    viewModel.createMIDIClip(on: track.id, at: TimePosition(), duration: 4.0)
-                }
-            }
-        }
     }
     
     private var isSelected: Bool {
@@ -168,7 +167,7 @@ struct ClipView: View {
                 }
             }
         }
-        .frame(height: height)
+        .frame(width: clipWidth, height: height)
         // MIDI clips draw only notes, but their entire region must be hit-testable.
         .contentShape(Rectangle())
         .clipContextMenu(clip: clip, trackID: track.id, viewModel: viewModel)
@@ -272,7 +271,8 @@ struct ClipView: View {
                 clipWidth: clipWidth,
                 noteColor: clipColor
             )
-            .frame(height: height)
+            .frame(width: max(1, clipWidth - 6), height: max(1, height - 22))
+            .clipped()
             
         case .empty:
             // Empty placeholder clip
