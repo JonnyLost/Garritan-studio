@@ -2195,14 +2195,21 @@ public enum TrackInstrument {
     public func startNoteSampleAccurate(_ note: UInt8, velocity: UInt8, channel: UInt8, sampleOffset: AUEventSampleTime) {
         switch self {
         case .auInstrument(let au, _):
-            // Prefer scheduleMIDIEventBlock for sample-accurate timing
+            // ARIA AUv2: test the direct MusicDevice path for live note delivery.
+            // Some versions may not process scheduled note-off events reliably.
+            // Fall back to the scheduler if the direct call is unsupported.
+            if au.name.localizedCaseInsensitiveContains("ARIA") {
+                let status = UInt32(0x90 | (channel & 0x0F))
+                let result = MusicDeviceMIDIEvent(au.audioUnit, status, UInt32(note), UInt32(velocity), 0)
+                if result == noErr { return }
+                print("[ARIA MIDI] Direct note-on failed (OSStatus \\(result)); trying scheduler")
+            }
             if let block = au.auAudioUnit.scheduleMIDIEventBlock {
                 var noteOnData: [UInt8] = [0x90 | (channel & 0x0F), note, velocity]
                 noteOnData.withUnsafeMutableBufferPointer { buffer in
                     block(sampleOffset, 0, 3, buffer.baseAddress!)
                 }
             } else {
-                // Fallback to MusicDeviceMIDIEvent (not sample-accurate)
                 let status = UInt32(0x90 | (channel & 0x0F))
                 MusicDeviceMIDIEvent(au.audioUnit, status, UInt32(note), UInt32(velocity), 0)
             }
@@ -2220,14 +2227,19 @@ public enum TrackInstrument {
     public func stopNoteSampleAccurate(_ note: UInt8, channel: UInt8, sampleOffset: AUEventSampleTime) {
         switch self {
         case .auInstrument(let au, _):
-            // Prefer scheduleMIDIEventBlock for sample-accurate timing
+            // Match ARIA note-offs to the same direct MusicDevice path as note-ons.
+            if au.name.localizedCaseInsensitiveContains("ARIA") {
+                let status = UInt32(0x80 | (channel & 0x0F))
+                let result = MusicDeviceMIDIEvent(au.audioUnit, status, UInt32(note), 0, 0)
+                if result == noErr { return }
+                print("[ARIA MIDI] Direct note-off failed (OSStatus \\(result)); trying scheduler")
+            }
             if let block = au.auAudioUnit.scheduleMIDIEventBlock {
                 var noteOffData: [UInt8] = [0x80 | (channel & 0x0F), note, 0]
                 noteOffData.withUnsafeMutableBufferPointer { buffer in
                     block(sampleOffset, 0, 3, buffer.baseAddress!)
                 }
             } else {
-                // Fallback to MusicDeviceMIDIEvent (not sample-accurate)
                 let status = UInt32(0x80 | (channel & 0x0F))
                 MusicDeviceMIDIEvent(au.audioUnit, status, UInt32(note), 0, 0)
             }
