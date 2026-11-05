@@ -169,6 +169,30 @@ struct ClipView: View {
             }
         }
         .frame(width: clipWidth, height: height)
+        .overlay(alignment: .leading) {
+            if isMIDIClip {
+                Rectangle()
+                    .fill(Color.white.opacity(0.16))
+                    .frame(width: 9)
+                    .contentShape(Rectangle())
+                    .onHover { hovering in
+                        if hovering { NSCursor.resizeLeftRight.push() }
+                        else { NSCursor.pop() }
+                    }
+                    .gesture(
+                        DragGesture(minimumDistance: 2)
+                            .onEnded { value in
+                                let tempo = viewModel.transportState.tempo.bpm
+                                let start = clip.timeRange.start.beats(atTempo: tempo)
+                                var newStart = start + Double(value.translation.width / viewModel.pixelsPerBeat)
+                                if !NSEvent.modifierFlags.contains(.command) {
+                                    newStart = round(newStart)
+                                }
+                                viewModel.trimMIDIClipLeft(clip.id, on: track.id, toBeat: newStart)
+                            }
+                    )
+            }
+        }
         .overlay(alignment: .trailing) {
             if isMIDIClip {
                 Rectangle()
