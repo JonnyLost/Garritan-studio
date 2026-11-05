@@ -708,6 +708,8 @@ struct MIDIOutputSelector: View {
     @Binding var showBrowser: Bool
     private var garritanPrograms: [TrackGarritanProgram] { TrackGarritanCatalog.programs }
     @State private var loadError: String?
+    @State private var pendingMenuProgram: TrackGarritanProgram?
+    @State private var showMenuLoadConfirmation = false
 
     private var ariaUnit: AVAudioUnit? {
         guard let id = track.instrumentSlot?.pluginID,
@@ -749,17 +751,21 @@ struct MIDIOutputSelector: View {
     }
 
     private func loadPatch(_ program: TrackGarritanProgram) {
-        // A native AU fullState restore can be reentrant while AppKit is tracking
-        // a nested NSMenu. Defer until the menu action has unwound, matching the
-        // working plugin-controls window's normal button-based loading context.
-        DispatchQueue.main.async {
-            guard let unit = ariaUnit else { return }
-            do {
-                try TrackGarritanLoader.apply(program, to: unit)
-                print("[Garritan Track Menu] Loaded (deferred) " + program.programName)
-            } catch {
-                loadError = error.localizedDescription
-            }
+        // Never restore AU fullState inside a nested macOS menu callback.
+        // The separate searchable picker works, so use a separate confirmation
+        // dialog action as the safe context for the same shared loader.
+        pendingMenuProgram = program
+        showMenuLoadConfirmation = true
+    }
+
+    private func confirmMenuPatchLoad() {
+        guard let program = pendingMenuProgram, let unit = ariaUnit else { return }
+        pendingMenuProgram = nil
+        do {
+            try TrackGarritanLoader.apply(program, to: unit)
+            print("[Garritan Track Menu] Loaded (confirmed) " + program.programName)
+        } catch {
+            loadError = error.localizedDescription
         }
     }
 
@@ -850,6 +856,24 @@ struct MIDIOutputSelector: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
+        .confirmationDialog(
+            "Load \(pendingMenuProgram?.name ?? "instrument")?",
+            isPresented: $showMenuLoadConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Load Instrument") { confirmMenuPatchLoad() }
+            Button("Cancel", role: .cancel) { pendingMenuProgram = nil }
+        } message: {
+            Text("Load the selected Garritan patch into ARIA Player.")
+        }
+        .alert("Garritan Load Failed", isPresented: Binding(
+            get: { loadError != nil },
+            set: { if !$0 { loadError = nil } }
+        )) {
+            Button("OK", role: .cancel) { loadError = nil }
+        } message: {
+            Text(loadError ?? "")
+        }
     }
     
     private func setMIDIOutput(_ destination: MIDIOutputDestination) {
