@@ -116,6 +116,7 @@ struct ClipView: View {
     @State private var isDragging = false
     @State private var dragOffset: CGSize = .zero
     @State private var isCopying = false  // Option key held during drag
+    @State private var trimPreviewWidth: CGFloat? = nil
     
     private var isMIDIClip: Bool {
         if case .midi = clip.content { return true }
@@ -168,6 +169,35 @@ struct ClipView: View {
             }
         }
         .frame(width: clipWidth, height: height)
+        .overlay(alignment: .trailing) {
+            if isMIDIClip {
+                Rectangle()
+                    .fill(Color.white.opacity(0.16))
+                    .frame(width: 9)
+                    .contentShape(Rectangle())
+                    .onHover { hovering in
+                        if hovering { NSCursor.resizeLeftRight.push() }
+                        else { NSCursor.pop() }
+                    }
+                    .gesture(
+                        DragGesture(minimumDistance: 2)
+                            .onChanged { value in
+                                trimPreviewWidth = max(12, clipWidth + value.translation.width)
+                            }
+                            .onEnded { value in
+                                let tempo = viewModel.transportState.tempo.bpm
+                                let start = clip.timeRange.start.beats(atTempo: tempo)
+                                var end = start + Double(max(12, clipWidth + value.translation.width) / viewModel.pixelsPerBeat)
+                                if !NSEvent.modifierFlags.contains(.command) {
+                                    end = round(end)
+                                }
+                                trimPreviewWidth = nil
+                                viewModel.trimMIDIClipRight(clip.id, on: track.id, toBeat: end)
+                            }
+                    )
+                    .offset(x: (trimPreviewWidth ?? clipWidth) - clipWidth)
+            }
+        }
         // MIDI clips draw only notes, but their entire region must be hit-testable.
         .contentShape(Rectangle())
         .clipContextMenu(clip: clip, trackID: track.id, viewModel: viewModel)
