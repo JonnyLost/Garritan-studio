@@ -814,18 +814,8 @@ public final class PlaybackEngine: ObservableObject {
         print("[DEBUG] Master volume: \(audioEngine.masterVolume)")
         
         if let trackNode = audioEngine.trackNode(for: trackID) {
-            if !audioDiagnosticInstalled {
-                audioDiagnosticInstalled = true
-                // Probe the instrument's output mixer, track output, and master.
-                // This helps distinguish instrument silence from downstream routing.
-                if let mixer = instrumentMixers[trackID] {
-                    installAudioDiagnosticTap(on: mixer, label: "Post instrument")
-                } else {
-                    print("[Audio Diagnostic] No converter mixer for this track")
-                }
-                installAudioDiagnosticTap(on: trackNode.outputMixer, label: "Track output")
-                installAudioDiagnosticTap(on: audioEngine.engine.mainMixerNode, label: "Master output")
-            }
+            // Continuous audio diagnostic taps disabled: avoid per-buffer scanning
+            // and main-thread dispatch while playing live MIDI.
             print("[DEBUG] Track node found")
             print("[DEBUG] Input mixer volume: \(trackNode.inputMixer.outputVolume)")
             print("[DEBUG] Gain node volume: \(trackNode.gainNode.outputVolume)")
