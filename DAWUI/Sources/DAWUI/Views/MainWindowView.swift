@@ -550,12 +550,6 @@ public struct MainWindowView: View {
         if let firstTrack = viewModel.project.tracks.first {
             viewModel.selectTrack(firstTrack.id)
         }
-        if let midiTrack = viewModel.project.tracks.first(where: { $0.type == .midi }) {
-            if midiTrack.clips.isEmpty {
-                viewModel.createMIDIClip(on: midiTrack.id, at: TimePosition(), duration: 4.0)
-            }
-        }
-
         // Setup MIDI
         Task {
             await viewModel.setupMIDI()
