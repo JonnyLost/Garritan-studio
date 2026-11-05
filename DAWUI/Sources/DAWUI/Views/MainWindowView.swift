@@ -1729,8 +1729,9 @@ struct TrackLaneView: View {
                 )
                 .offset(x: clipX(for: clip), y: 3)
                 .frame(width: width)
-                // For MIDI tracks, let clicks pass through to the track lane
-                .allowsHitTesting(!isMIDITrack)
+                // Regions must receive clicks, context menus, and drag gestures
+                // on MIDI tracks as well as audio tracks.
+                .allowsHitTesting(true)
             }
             
             // Live recording waveform overlay (for audio tracks)
