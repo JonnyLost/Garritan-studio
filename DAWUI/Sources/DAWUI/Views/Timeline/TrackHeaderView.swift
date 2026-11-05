@@ -706,10 +706,6 @@ struct MIDIOutputSelector: View {
     let track: Track
     @ObservedObject var viewModel: ProjectViewModel
     @Binding var showBrowser: Bool
-    private var garritanPrograms: [TrackGarritanProgram] { TrackGarritanCatalog.programs }
-    @State private var loadError: String?
-    @State private var pendingMenuProgram: TrackGarritanProgram?
-    @State private var showMenuLoadConfirmation = false
 
     private var ariaUnit: AVAudioUnit? {
         guard let id = track.instrumentSlot?.pluginID,
@@ -718,55 +714,6 @@ struct MIDIOutputSelector: View {
               let instrument = viewModel.playbackEngine.instrument(for: track.id),
               case .auInstrument(let unit, _) = instrument else { return nil }
         return unit
-    }
-
-    private let scoreSections = [
-        "Woodwinds", "Brass", "Percussion", "Harp & Keyboards", "Strings", "Choir & Other"
-    ]
-
-    private func scoreSection(_ program: TrackGarritanProgram) -> String {
-        let parts = program.programName.lowercased().split(separator: "/").map(String.init)
-        let category = parts.count > 1 ? parts[program.library == "Garritan Personal Orchestra 5" ? 1 : 0] : program.programName.lowercased()
-        if category.contains("woodwind") || category.contains("flute") ||
-           category.contains("oboe") || category.contains("clarinet") ||
-           category.contains("bassoon") || category.contains("sax") ||
-           category.contains("wind patches") { return "Woodwinds" }
-        if category.contains("brass") || category.contains("horn") ||
-           category.contains("trumpet") || category.contains("trombone") ||
-           category.contains("tuba") { return "Brass" }
-        if category.contains("percussion") || category.contains("drum") ||
-           category.contains("timpani") || category.contains("mallet") { return "Percussion" }
-        if category.contains("keyboard") || category.contains("harp") ||
-           category.contains("piano") || category.contains("organ") { return "Harp & Keyboards" }
-        if category.contains("string") || category.contains("violin") ||
-           category.contains("viola") || category.contains("cello") { return "Strings" }
-        return "Choir & Other"
-    }
-
-    private func folder(_ program: TrackGarritanProgram) -> String {
-        let parts = program.programName.split(separator: "/").map(String.init)
-        let index = program.library == "Garritan Personal Orchestra 5" ? 2 : 1
-        if parts.count > index + 1 { return parts[index] }
-        return "Other Instruments"
-    }
-
-    private func loadPatch(_ program: TrackGarritanProgram) {
-        // Never restore AU fullState inside a nested macOS menu callback.
-        // The separate searchable picker works, so use a separate confirmation
-        // dialog action as the safe context for the same shared loader.
-        pendingMenuProgram = program
-        showMenuLoadConfirmation = true
-    }
-
-    private func confirmMenuPatchLoad() {
-        guard let program = pendingMenuProgram, let unit = ariaUnit else { return }
-        pendingMenuProgram = nil
-        do {
-            try TrackGarritanLoader.apply(program, to: unit)
-            print("[Garritan Track Menu] Loaded (confirmed) " + program.programName)
-        } catch {
-            loadError = error.localizedDescription
-        }
     }
 
     private var currentDestinationLabel: String {
@@ -783,31 +730,8 @@ struct MIDIOutputSelector: View {
     
     var body: some View {
         Menu {
-            if ariaUnit != nil {
-                ForEach(["Garritan Personal Orchestra 5", "Garritan Instant Orchestra"], id: \.self) { library in
-                    Menu(library == "Garritan Personal Orchestra 5" ? "GPO5" : "Instant Orchestra") {
-                        ForEach(scoreSections, id: \.self) { section in
-                            let patches = garritanPrograms.filter {
-                                $0.library == library && scoreSection($0) == section
-                            }
-                            if !patches.isEmpty {
-                                Menu(section) {
-                                    ForEach(Array(Set(patches.map { folder($0) })).sorted(), id: \.self) { group in
-                                        Menu(group) {
-                                            ForEach(patches.filter { folder($0) == group }
-                                                .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending },
-                                                id: \.id) { program in
-                                                Button(program.name) { loadPatch(program) }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                Divider()
-            }
+            // Direct patch selection is temporarily disabled: the cascading menu
+            // corrupts ARIA playback, while the separate instrument picker works.
             Button("Browse / Change Track Instrument...") { showBrowser = true }
             Divider()
             // Track instrument option
@@ -856,24 +780,6 @@ struct MIDIOutputSelector: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
-        .confirmationDialog(
-            "Load \(pendingMenuProgram?.name ?? "instrument")?",
-            isPresented: $showMenuLoadConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Load Instrument") { confirmMenuPatchLoad() }
-            Button("Cancel", role: .cancel) { pendingMenuProgram = nil }
-        } message: {
-            Text("Load the selected Garritan patch into ARIA Player.")
-        }
-        .alert("Garritan Load Failed", isPresented: Binding(
-            get: { loadError != nil },
-            set: { if !$0 { loadError = nil } }
-        )) {
-            Button("OK", role: .cancel) { loadError = nil }
-        } message: {
-            Text(loadError ?? "")
-        }
     }
     
     private func setMIDIOutput(_ destination: MIDIOutputDestination) {
