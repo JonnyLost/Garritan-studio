@@ -633,6 +633,35 @@ public final class ProjectViewModel: ObservableObject {
     
     // MARK: - Clip Movement & Duplication
     
+    /// Move or copy a MIDI region between compatible tracks in one edit.
+    /// MIDI event positions stay relative to the region, so notes are preserved.
+    public func transferMIDIClip(_ clipID: ClipID, from sourceID: TrackID,
+                                 to destinationID: TrackID, atBeat beat: Double,
+                                 copy: Bool) {
+        guard let sourceIndex = project.tracks.firstIndex(where: { $0.id == sourceID }),
+              let destinationIndex = project.tracks.firstIndex(where: { $0.id == destinationID }),
+              let clipIndex = project.tracks[sourceIndex].clips.firstIndex(where: { $0.id == clipID }),
+              [.midi, .instrument].contains(project.tracks[destinationIndex].type),
+              case .midi = project.tracks[sourceIndex].clips[clipIndex].content else { return }
+
+        var region = project.tracks[sourceIndex].clips[clipIndex]
+        let start = TimePosition(beats: max(0, beat), tempo: transportState.tempo.bpm,
+                                 sampleRate: transportState.sampleRate)
+        let duration = region.timeRange.duration
+        let end = TimePosition(samples: start.samples + duration.samples,
+                               sampleRate: transportState.sampleRate)
+        region.timeRange = TimeRange(start: start, end: end)
+        if copy {
+            region.id = ClipID()
+            region.name += " Copy"
+        } else {
+            project.tracks[sourceIndex].clips.remove(at: clipIndex)
+        }
+        project.tracks[destinationIndex].clips.append(region)
+        selectedClipIDs = [region.id]
+        print("[Edit] \(copy ? "Copied" : "Moved") MIDI region to \(project.tracks[destinationIndex].name)")
+    }
+
     /// Move a clip to a new beat position
     public func moveClip(_ clipID: ClipID, on trackID: TrackID, toBeat: Double) {
         guard let trackIndex = project.tracks.firstIndex(where: { $0.id == trackID }),
