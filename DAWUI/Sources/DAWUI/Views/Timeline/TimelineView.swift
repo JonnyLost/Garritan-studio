@@ -252,7 +252,8 @@ struct ClipView: View {
             .onChanged { value in
                 isDragging = true
                 // Direct assignment for smooth, immediate visual feedback
-                dragOffset = CGSize(width: value.translation.width, height: 0)
+                dragOffset = CGSize(width: value.translation.width,
+                                    height: isMIDIClip ? value.translation.height : 0)
                 
                 // Check for Option key (copy mode)
                 isCopying = NSEvent.modifierFlags.contains(.option)
@@ -279,17 +280,26 @@ struct ClipView: View {
                 isDragging = false
                 dragOffset = .zero
                 
-                // Only move if position actually changed
-                if abs(newBeat - currentBeat) > 0.01 {
+                if isMIDIClip, abs(value.translation.height) >= 40,
+                   let sourceIndex = viewModel.project.tracks.firstIndex(where: { $0.id == track.id }) {
+                    // Track lanes in MainWindowView are 80 points tall.
+                    let targetIndex = sourceIndex + Int(round(value.translation.height / 80.0))
+                    if viewModel.project.tracks.indices.contains(targetIndex) {
+                        let target = viewModel.project.tracks[targetIndex]
+                        if target.type == .midi || target.type == .instrument {
+                            viewModel.transferMIDIClip(clip.id, from: track.id,
+                                                       to: target.id, atBeat: newBeat,
+                                                       copy: isCopying)
+                        }
+                    }
+                } else if abs(value.translation.height) < 40 && abs(newBeat - currentBeat) > 0.01 {
                     if isCopying {
-                        // Option+drag: duplicate the clip at new position
                         viewModel.duplicateClip(clip.id, on: track.id, toBeat: newBeat)
                     } else {
-                        // Regular drag: move the clip
                         viewModel.moveClip(clip.id, on: track.id, toBeat: newBeat)
                     }
                 }
-                
+
                 isCopying = false
             }
     }
