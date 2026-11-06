@@ -257,6 +257,19 @@ struct ClipView: View {
                 
                 // Check for Option key (copy mode)
                 isCopying = NSEvent.modifierFlags.contains(.option)
+                if isMIDIClip, abs(value.translation.height) >= 40,
+                   let sourceIndex = viewModel.project.tracks.firstIndex(where: { $0.id == track.id }) {
+                    let targetIndex = sourceIndex + Int(round(value.translation.height / 80.0))
+                    if viewModel.project.tracks.indices.contains(targetIndex) {
+                        let candidate = viewModel.project.tracks[targetIndex]
+                        viewModel.midiDragTargetID = (candidate.type == .midi || candidate.type == .instrument)
+                            ? candidate.id : nil
+                    } else {
+                        viewModel.midiDragTargetID = nil
+                    }
+                } else {
+                    viewModel.midiDragTargetID = nil
+                }
             }
             .onEnded { value in
                 guard isDragging else { return }
@@ -279,6 +292,7 @@ struct ClipView: View {
                 // Reset visual state first
                 isDragging = false
                 dragOffset = .zero
+                viewModel.midiDragTargetID = nil
                 
                 if isMIDIClip, abs(value.translation.height) >= 40,
                    let sourceIndex = viewModel.project.tracks.firstIndex(where: { $0.id == track.id }) {
