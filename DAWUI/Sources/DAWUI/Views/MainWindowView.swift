@@ -1750,7 +1750,16 @@ struct TrackLaneView: View {
             }
         }
         .frame(height: height)
-        .background(viewModel.selectedTrackID == track.id ? Color.accentColor.opacity(0.05) : Color.clear)
+.background(viewModel.midiDragTargetID == track.id
+                    ? Color.green.opacity(0.18)
+                    : (viewModel.selectedTrackID == track.id ? Color.accentColor.opacity(0.05) : Color.clear))
+        .overlay {
+            if viewModel.midiDragTargetID == track.id {
+                RoundedRectangle(cornerRadius: 3)
+                    .strokeBorder(Color.green.opacity(0.9), lineWidth: 2)
+                    .allowsHitTesting(false)
+            }
+        }
         .contentShape(Rectangle())
         // Single click: select track instantly (no double-click delay)
         .onTapGesture {
