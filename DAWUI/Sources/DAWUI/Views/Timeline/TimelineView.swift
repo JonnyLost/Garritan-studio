@@ -117,6 +117,7 @@ struct ClipView: View {
     @State private var dragOffset: CGSize = .zero
     @State private var isCopying = false  // Option key held during drag
     @State private var trimPreviewWidth: CGFloat? = nil
+    @State private var isTrimmingRight = false
     
     private var isMIDIClip: Bool {
         if case .midi = clip.content { return true }
@@ -206,6 +207,7 @@ struct ClipView: View {
                     .gesture(
                         DragGesture(minimumDistance: 2)
                             .onChanged { value in
+                                isTrimmingRight = true
                                 // Resize the actual region surface; no detached handle preview.
                                 trimPreviewWidth = max(12, clipWidth + value.translation.width)
                             }
@@ -218,6 +220,7 @@ struct ClipView: View {
                                 }
                                 trimPreviewWidth = nil
                                 viewModel.trimMIDIClipRight(clip.id, on: track.id, toBeat: end)
+                                isTrimmingRight = false
                             }
                     )
             }
@@ -250,6 +253,7 @@ struct ClipView: View {
     private var clipDragGesture: some Gesture {
         DragGesture(minimumDistance: 3, coordinateSpace: .local)
             .onChanged { value in
+                guard !isTrimmingRight else { return }
                 isDragging = true
                 // Direct assignment for smooth, immediate visual feedback
                 dragOffset = CGSize(width: value.translation.width,
@@ -272,7 +276,12 @@ struct ClipView: View {
                 }
             }
             .onEnded { value in
-                guard isDragging else { return }
+                guard isDragging && !isTrimmingRight else {
+                    isDragging = false
+                    dragOffset = .zero
+                    isCopying = false
+                    return
+                }
                 
                 // Calculate new beat position
                 let dragBeats = value.translation.width / viewModel.pixelsPerBeat
