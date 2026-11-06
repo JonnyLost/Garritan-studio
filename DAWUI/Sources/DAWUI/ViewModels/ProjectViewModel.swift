@@ -25,6 +25,9 @@ public final class ProjectViewModel: ObservableObject {
     @Published public private(set) var selectedClipIDs: Set<ClipID> = []
     @Published public private(set) var isModified: Bool = false
     
+    /// Transient MIDI drag destination; nil for invalid or inactive drops.
+    @Published public var midiDragTargetID: TrackID?
+
     // Timeline state
     @Published public var zoomLevel: Double = 1.0
     @Published public var scrollOffset: CGPoint = .zero
