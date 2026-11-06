@@ -1722,7 +1722,7 @@ struct TrackLaneView: View {
                     clipWidth: width
                 )
                 .offset(x: clipX(for: clip), y: 3)
-                .frame(width: width)
+                .frame(width: width, alignment: .leading)
                 // Regions must receive clicks, context menus, and drag gestures
                 // on MIDI tracks as well as audio tracks.
                 .allowsHitTesting(true)
