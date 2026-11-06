@@ -765,6 +765,44 @@ struct GenericPluginParameterView: View {
         }
     }
 
+    /// Save the currently loaded ARIA Audio Unit state as a native .aupreset.
+    /// This does not convert .aria files; it captures the live AU instance.
+    private func saveAUPreset() {
+        presetStatus = nil
+        presetError = nil
+        let unit = plugin.audioUnit.auAudioUnit
+        guard var state = unit.fullState, state["AriaData"] is Data else {
+            presetError = "ARIA did not provide instrument state. Load an instrument into this ARIA instance first."
+            return
+        }
+        let component = unit.componentDescription
+        state["type"] = NSNumber(value: component.componentType)
+        state["subtype"] = NSNumber(value: component.componentSubType)
+        state["manufacturer"] = NSNumber(value: component.componentManufacturer)
+        guard PropertyListSerialization.propertyList(state, isValidFor: .xml) else {
+            presetError = "ARIA returned state that cannot be saved as an AU preset."
+            return
+        }
+        let directory = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Audio/Presets/Garritan/ARIA Player", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let panel = NSSavePanel()
+            panel.title = "Save ARIA Audio Unit Preset"
+            panel.directoryURL = directory
+            panel.nameFieldStringValue = "ARIA Instrument.aupreset"
+            panel.allowedContentTypes = [.init(filenameExtension: "aupreset")!]
+            panel.canCreateDirectories = true
+            guard panel.runModal() == .OK, let destination = panel.url else { return }
+            let data = try PropertyListSerialization.data(fromPropertyList: state, format: .xml, options: 0)
+            try data.write(to: destination, options: .atomic)
+            presetStatus = "Saved ARIA AU preset: " + destination.lastPathComponent
+            print("[ARIA Preset] Saved AU fullState to " + destination.path)
+        } catch {
+            presetError = "Could not save ARIA AU preset: " + error.localizedDescription
+        }
+    }
+
     /// Experimental, reversible instrument switch using the known-good piano AU preset.
     /// The script operates on a temporary file; the original preset is never modified.
 
@@ -883,6 +921,8 @@ struct GenericPluginParameterView: View {
                     HStack(spacing: 12) {
                         Button("Load AU Preset…") { chooseAUPreset() }
                             .buttonStyle(.borderedProminent)
+                        Button("Save AU Preset…") { saveAUPreset() }
+                            .buttonStyle(.bordered)
                         Text("Load a saved ARIA configuration without opening its native editor.")
                             .font(.caption)
                             .foregroundColor(.secondary)
