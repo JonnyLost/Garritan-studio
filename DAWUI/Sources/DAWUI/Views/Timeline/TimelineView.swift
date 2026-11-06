@@ -168,7 +168,7 @@ struct ClipView: View {
                 }
             }
         }
-        .frame(width: clipWidth, height: height)
+        .frame(width: trimPreviewWidth ?? clipWidth, height: height)
         .overlay(alignment: .leading) {
             if isMIDIClip {
                 Rectangle()
@@ -206,6 +206,7 @@ struct ClipView: View {
                     .gesture(
                         DragGesture(minimumDistance: 2)
                             .onChanged { value in
+                                // Resize the actual region surface; no detached handle preview.
                                 trimPreviewWidth = max(12, clipWidth + value.translation.width)
                             }
                             .onEnded { value in
@@ -219,7 +220,6 @@ struct ClipView: View {
                                 viewModel.trimMIDIClipRight(clip.id, on: track.id, toBeat: end)
                             }
                     )
-                    .offset(x: (trimPreviewWidth ?? clipWidth) - clipWidth)
             }
         }
         // MIDI clips draw only notes, but their entire region must be hit-testable.
