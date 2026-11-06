@@ -83,7 +83,7 @@ struct TimelineTrackRow: View {
                     clipWidth: width,
                     onDoubleClick: { onDoubleClick?(clip) }
                 )
-                .frame(width: width, height: height - 6)
+                .frame(width: width, height: height - 6, alignment: .leading)
                 .offset(x: clipX(for: clip), y: 3)
             }
         }
