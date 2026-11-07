@@ -2,8 +2,7 @@ import AVFoundation
 import AudioToolbox
 
 /// In-process Audio Unit wrapper for StereoPositionProcessor.
-/// This is deliberately separate from the existing track graph until macOS
-/// compilation and render-format negotiation have been verified.
+/// Registered as an in-process effect for AVAudioEngine track insertion.
 public final class StereoPositionAudioUnit: AUAudioUnit {
     private var inputBus: AUAudioUnitBus!
     private var outputBus: AUAudioUnitBus!
@@ -11,6 +10,28 @@ public final class StereoPositionAudioUnit: AUAudioUnit {
     private var outputs: AUAudioUnitBusArray!
     private var positionParameter: AUParameter!
     private var processor = StereoPositionProcessor()
+
+    public static let componentDescription = AudioComponentDescription(
+        componentType: kAudioUnitType_Effect,
+        componentSubType: 0x4753504E, // 'GSPN'
+        componentManufacturer: 0x4752544E, // 'GRTN'
+        componentFlags: 0,
+        componentFlagsMask: 0
+    )
+
+    private static var registered = false
+
+    /// Register before creating any AVAudioUnitEffect instances.
+    public static func registerIfNeeded() {
+        guard !registered else { return }
+        AUAudioUnit.registerSubclass(
+            StereoPositionAudioUnit.self,
+            as: componentDescription,
+            name: "Garritan Studio: Stereo Position",
+            version: UInt32(1)
+        )
+        registered = true
+    }
 
     public override var inputBusses: AUAudioUnitBusArray { inputs }
     public override var outputBusses: AUAudioUnitBusArray { outputs }
@@ -32,6 +53,7 @@ public final class StereoPositionAudioUnit: AUAudioUnit {
         )
         parameterTree = AUParameterTree.createTree(withChildren: [positionParameter])
         positionParameter.value = 0
+
     }
 
     public override var internalRenderBlock: AUInternalRenderBlock {
