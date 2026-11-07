@@ -474,6 +474,7 @@ struct InstrumentBrowserSheet: View {
     @State private var selectedRackSlot = 0
     @State private var inspectedRackSlots: [ARIARackSlot] = []
     @State private var rackInspectionSucceeded = false
+    @State private var rackLoadTarget: Int? = nil
     // Visual rack only: ARIA's individual slot state is not exposed here yet.
     // Do not infer a slot assignment from the track's AU instrument identity.
 
@@ -562,7 +563,7 @@ struct InstrumentBrowserSheet: View {
                 .tint(workspacePage == 1 ? Color.accentColor : Color.secondary)
                 Spacer()
                 if workspacePage == 1 {
-                    Text("16-slot layout preview")
+                    Text("Experimental slot loading")
                         .font(.caption).foregroundColor(.secondary)
                 }
             }
@@ -673,7 +674,7 @@ struct InstrumentBrowserSheet: View {
                             Button {
                                 applyProgram(program)
                             } label: {
-                                Label("Load Instrument", systemImage: "arrow.down.to.line")
+                                Label(rackLoadTarget.map { "Load into Slot \($0 + 1) (Experimental)" } ?? "Load Instrument", systemImage: "arrow.down.to.line")
                                     .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.borderedProminent)
@@ -834,14 +835,24 @@ struct InstrumentBrowserSheet: View {
                              : "Could not decode ARIA slot state."))
                         .font(.caption)
                         .textSelection(.enabled)
-                    Text("Read-only inspection. Slot editing and routing are not enabled.")
+                    Text("Experimental slot loading; MIDI routing controls are not enabled.")
                         .font(.caption2).foregroundColor(.secondary)
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
-                Button("Browse Instruments") { workspacePage = 0 }
+                Button("Load into Slot \(selectedRackSlot + 1)…") {
+                    rackLoadTarget = selectedRackSlot
+                    workspacePage = 0
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!rackInspectionSucceeded ||
+                          inspectedRackSlots.contains(where: { $0.number == selectedRackSlot }))
+                Button("Browse Instruments") {
+                    rackLoadTarget = nil
+                    workspacePage = 0
+                }
                     .buttonStyle(.bordered)
             }
         }
@@ -881,8 +892,15 @@ struct InstrumentBrowserSheet: View {
             return
         }
         do {
-            try TrackGarritanLoader.apply(program, to: unit)
-            isPresented = false
+            if let target = rackLoadTarget {
+                try ARIARackSlotLoader.load(program, slot: target, unit: unit)
+                rackLoadTarget = nil
+                workspacePage = 1
+                refreshRackInspection()
+            } else {
+                try TrackGarritanLoader.apply(program, to: unit)
+                isPresented = false
+            }
         } catch {
             loadError = error.localizedDescription
         }
@@ -1262,6 +1280,126 @@ private enum TrackGarritanLoader {
             }
         }
         unit.auAudioUnit.fullState = state
+    }
+}
+
+
+private enum ARIARackSlotLoader {
+    enum Failure: LocalizedError {
+        case invalidState, occupied, missingTemplateSlot, rejected
+        var errorDescription: String? {
+            switch self {
+            case .invalidState: return "ARIA state could not be decoded safely."
+            case .occupied: return "The selected slot already contains an instrument."
+            case .missingTemplateSlot: return "The verified preset has no single instrument slot."
+            case .rejected: return "ARIA did not confirm the new instrument. Previous state restored."
+            }
+        }
+    }
+    private static func decode(_ data: Data) throws -> String {
+        let bytes = [UInt8](data)
+        guard bytes.count > 14, Array(bytes.prefix(4)) == Array("CEGP".utf8) else { throw Failure.invalidState }
+        let length = Int(UInt32(bytes[4]) | UInt32(bytes[5]) << 8 |
+                         UInt32(bytes[6]) << 16 | UInt32(bytes[7]) << 24)
+        guard length > 0 && length < 8_000_000 else { throw Failure.invalidState }
+        let compressed = Array(bytes[10..<(bytes.count - 4)])
+        var plain = [UInt8](repeating: 0, count: length)
+        let count = compressed.withUnsafeBufferPointer { src in
+            plain.withUnsafeMutableBufferPointer { dst in
+                compression_decode_buffer(dst.baseAddress!, dst.count, src.baseAddress!,
+                                          src.count, nil, COMPRESSION_ZLIB)
+            }
+        }
+        guard count == length, let xml = String(bytes: plain, encoding: .utf8) else { throw Failure.invalidState }
+        return xml
+    }
+    private static func encode(_ xml: String) throws -> Data {
+        let input = Array(xml.utf8)
+        var compressed = [UInt8](repeating: 0, count: max(1024, input.count * 2 + 128))
+        let count = input.withUnsafeBufferPointer { src in
+            compressed.withUnsafeMutableBufferPointer { dst in
+                compression_encode_buffer(dst.baseAddress!, dst.count, src.baseAddress!,
+                                          src.count, nil, COMPRESSION_ZLIB)
+            }
+        }
+        guard count > 0 else { throw Failure.invalidState }
+        var a: UInt32 = 1
+        var b: UInt32 = 0
+        for byte in input { a = (a + UInt32(byte)) % 65521; b = (b + a) % 65521 }
+        let checksum = b << 16 | a
+        let length = UInt32(input.count)
+        var bytes = Array("CEGP".utf8)
+        bytes += [UInt8(truncatingIfNeeded: length), UInt8(truncatingIfNeeded: length >> 8),
+                  UInt8(truncatingIfNeeded: length >> 16), UInt8(truncatingIfNeeded: length >> 24)]
+        bytes += [0x78, 0x9c]
+        bytes += compressed.prefix(count)
+        bytes += [UInt8(truncatingIfNeeded: checksum >> 24), UInt8(truncatingIfNeeded: checksum >> 16),
+                  UInt8(truncatingIfNeeded: checksum >> 8), UInt8(truncatingIfNeeded: checksum)]
+        return Data(bytes)
+    }
+    private static func tags(_ xml: String) throws -> [String] {
+        let regex = try NSRegularExpression(pattern: #"<Slot\b[^>]*\/>"#)
+        return regex.matches(in: xml, range: NSRange(xml.startIndex..<xml.endIndex, in: xml))
+            .compactMap { Range($0.range, in: xml).map { String(xml[$0]) } }
+    }
+    private static func attribute(_ name: String, from tag: String) -> String? {
+        let regex = try? NSRegularExpression(pattern: #"\b"# + name + #"="([^"]*)""#)
+        guard let match = regex?.firstMatch(in: tag, range: NSRange(tag.startIndex..<tag.endIndex, in: tag)),
+              let range = Range(match.range(at: 1), in: tag) else { return nil }
+        return String(tag[range])
+    }
+    private static func replaceAttribute(_ name: String, value: String, in tag: String) throws -> String {
+        let regex = try NSRegularExpression(pattern: #"\b"# + name + #"="[^"]*""#)
+        let range = NSRange(tag.startIndex..<tag.endIndex, in: tag)
+        guard regex.firstMatch(in: tag, range: range) != nil else { throw Failure.invalidState }
+        return regex.stringByReplacingMatches(in: tag, range: range,
+                                               withTemplate: name + "=\"" + value + "\"")
+    }
+    static func load(_ program: TrackGarritanProgram, slot: Int, unit: AVAudioUnit) throws {
+        guard (0..<16).contains(slot), let original = unit.auAudioUnit.fullState,
+              let originalBlob = original["AriaData"] as? Data else { throw Failure.invalidState }
+        let current = try decode(originalBlob)
+        let existing = try tags(current)
+        guard !existing.contains(where: { Int(attribute("id", from: $0) ?? "") == slot }) else {
+            throw Failure.occupied
+        }
+        let instant = program.library == "Garritan Instant Orchestra"
+        let sourceName = instant ? "Blending Textures/Evolving Orchestra" :
+            "Standard/05 Keyboards/Concert Pianos/Intimate D"
+        let filename = instant ? "Evolving Orchestra.aupreset" : "Intimate Piano.aupreset"
+        let template = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Audio/Presets/Garritan/ARIA Player/" + filename)
+        let temporary = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Garritan-Rack-" + UUID().uuidString + ".aupreset")
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        try GarritanNativePreset.generateNativePreset(template, temporary, program.programName,
+            templateName: sourceName, bankID: instant ? "2007" : "2013")
+        let data = try Data(contentsOf: temporary)
+        guard let preset = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              let blob = preset["AriaData"] as? Data else { throw Failure.invalidState }
+        let candidate = try tags(decode(blob))
+        guard candidate.count == 1 else { throw Failure.missingTemplateSlot }
+        var newTag = try replaceAttribute("id", value: String(slot), in: candidate[0])
+        newTag = try replaceAttribute("channel", value: String(slot), in: newTag)
+        guard let insertion = current.range(of: "<EffectSlot") ?? current.range(of: "</AriaSave>") else {
+            throw Failure.invalidState
+        }
+        var updated = current
+        updated.insert(contentsOf: "  " + newTag + "\n", at: insertion.lowerBound)
+        guard XMLParser(data: Data(updated.utf8)).parse(),
+              try tags(updated).count == existing.count + 1 else { throw Failure.invalidState }
+        var newState = original
+        newState["AriaData"] = try encode(updated)
+        unit.auAudioUnit.fullState = newState
+        let observed = ARIARackStateReader.inspect(unit)
+        let oldIDs = Set(existing.compactMap { Int(attribute("id", from: $0) ?? "") })
+        let observedIDs = Set(observed?.map(\.number) ?? [])
+        guard observed?.first(where: { $0.number == slot })?.patch == program.programName,
+              oldIDs.isSubset(of: observedIDs) else {
+            unit.auAudioUnit.fullState = original
+            throw Failure.rejected
+        }
+        print("[ARIA Rack] Loaded \(program.programName) into slot \(slot + 1)")
     }
 }
 
