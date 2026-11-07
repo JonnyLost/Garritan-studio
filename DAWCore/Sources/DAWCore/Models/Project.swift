@@ -340,13 +340,8 @@ public enum ProjectFactory {
         var project = Project(name: name, sampleRate: sampleRate)
         
         if includeDefaultTracks {
-            // Add one audio track and four MIDI tracks by default
-            project.addTrack(Track(
-                name: "Audio 1",
-                type: .audio,
-                color: .blue
-            ))
-            
+            // Composer-first default: four MIDI tracks, no audio track.
+            // Audio tracks remain available from the Track menu.
             project.addTrack(Track(
                 name: "Midi 1",
                 type: .midi,
