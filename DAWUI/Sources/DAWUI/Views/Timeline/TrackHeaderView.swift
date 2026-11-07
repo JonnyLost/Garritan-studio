@@ -395,6 +395,10 @@ private final class ARIARackXMLReader: NSObject, XMLParserDelegate {
     func parser(_ parser: XMLParser, didStartElement elementName: String,
                 namespaceURI: String?, qualifiedName qName: String?,
                 attributes: [String: String]) {
+        if elementName.localizedCaseInsensitiveContains("instrument") ||
+           elementName.localizedCaseInsensitiveContains("slot") {
+            print("[ARIA Rack] XML element: \(elementName); attributes: \(attributes)")
+        }
         guard elementName == "InstrumentSlot" else { return }
         let slotNumber = Int(attributes["id"] ?? "") ?? -1
         guard (0..<16).contains(slotNumber) else { return }
@@ -407,7 +411,16 @@ private final class ARIARackXMLReader: NSObject, XMLParserDelegate {
 
 private enum ARIARackStateReader {
     static func inspect(_ unit: AVAudioUnit) -> [ARIARackSlot]? {
-        guard let blob = unit.auAudioUnit.fullState?["AriaData"] as? Data else { return nil }
+        guard let state = unit.auAudioUnit.fullState else {
+            print("[ARIA Rack] AU fullState unavailable")
+            return nil
+        }
+        print("[ARIA Rack] AU state keys: \(state.keys.sorted())")
+        guard let blob = state["AriaData"] as? Data else {
+            print("[ARIA Rack] No AriaData in fullState")
+            return nil
+        }
+        print("[ARIA Rack] AriaData bytes: \(blob.count)")
         let bytes = [UInt8](blob)
         guard bytes.count > 14, Array(bytes.prefix(4)) == Array("CEGP".utf8) else { return nil }
         let expected = Int(UInt32(bytes[4]) | UInt32(bytes[5]) << 8 |
@@ -421,11 +434,19 @@ private enum ARIARackStateReader {
                                           src.count, nil, COMPRESSION_ZLIB)
             }
         }
-        guard decoded == expected else { return nil }
+        guard decoded == expected else {
+            print("[ARIA Rack] Decompression failed: decoded \(decoded), expected \(expected)")
+            return nil
+        }
+        print("[ARIA Rack] Decoded XML bytes: \(decoded)")
         let reader = ARIARackXMLReader()
         let parser = XMLParser(data: Data(plain))
         parser.delegate = reader
-        guard parser.parse() else { return nil }
+        guard parser.parse() else {
+            print("[ARIA Rack] XML parsing failed: \(parser.parserError?.localizedDescription ?? "unknown")")
+            return nil
+        }
+        print("[ARIA Rack] Parsed occupied slots: \(reader.slots.count)")
         return reader.slots
     }
 }
@@ -830,9 +851,11 @@ struct InstrumentBrowserSheet: View {
         if let unit = trackARIA, let slots = ARIARackStateReader.inspect(unit) {
             inspectedRackSlots = slots
             rackInspectionSucceeded = true
+            print("[ARIA Rack] Refresh succeeded, slots: \(slots.count)")
         } else {
             inspectedRackSlots = []
             rackInspectionSucceeded = false
+            print("[ARIA Rack] Refresh failed: ARIA unavailable or state unreadable")
         }
     }
 
