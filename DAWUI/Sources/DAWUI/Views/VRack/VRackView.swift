@@ -248,6 +248,8 @@ public struct VRackView: View {
                     unit = loaded.audioUnit
                 }
                 try TrackGarritanLoader.apply(program, to: unit)
+                // ARIA program loading can reset its internal fader.
+                viewModel.restoreInstrumentLevel(for: trackID)
                 // Store the catalog choice and the actual ARIA state on the track.
                 if var updated = viewModel.project.track(withID: trackID) {
                     let oldName = updated.name
