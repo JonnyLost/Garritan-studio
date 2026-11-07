@@ -530,6 +530,20 @@ public final class ProjectViewModel: ObservableObject {
         updateTrack(track, description: "Change MIDI Output Channel")
     }
 
+    /// Update a track's stage position without changing its existing audio routing.
+    public func setTrackStagePosition(id: TrackID, pan: Float, zone: Int) {
+        guard var track = project.track(withID: id) else { return }
+        track.pan = min(1, max(-1, pan))
+        track.stageReverbZone = min(5, max(1, zone))
+        updateTrack(track, description: "Move Instrument on Stage")
+    }
+
+    public func setTrackStageZone(id: TrackID, zone: Int) {
+        guard var track = project.track(withID: id) else { return }
+        track.stageReverbZone = min(5, max(1, zone))
+        updateTrack(track, description: "Change Stage Reverb Zone")
+    }
+
     public func setTrackPan(id: TrackID, pan: Float) {
         guard var track = project.track(withID: id) else { return }
         track.pan = pan
