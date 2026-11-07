@@ -476,13 +476,15 @@ struct InstrumentBrowserSheet: View {
                 } label: {
                     Label("Instrument Browser", systemImage: "square.grid.2x2")
                 }
-                .buttonStyle(workspacePage == 0 ? .borderedProminent : .bordered)
+                .buttonStyle(.bordered)
+                .tint(workspacePage == 0 ? Color.accentColor : Color.secondary)
                 Button {
                     workspacePage = 1
                 } label: {
                     Label("ARIA Rack", systemImage: "slider.horizontal.3")
                 }
-                .buttonStyle(workspacePage == 1 ? .borderedProminent : .bordered)
+                .buttonStyle(.bordered)
+                .tint(workspacePage == 1 ? Color.accentColor : Color.secondary)
                 Spacer()
                 if workspacePage == 1 {
                     Text("16-slot layout preview")
