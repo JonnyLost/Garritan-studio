@@ -243,7 +243,7 @@ public struct VRackView: View {
                         catalog.first(where: { $0.id == id })?.name
                     }
                     let isDefaultName = oldName.range(
-                        of: #"^Midi \\d+$"#, options: [.regularExpression, .caseInsensitive]
+                        of: #"^Midi \d+$"#, options: [.regularExpression, .caseInsensitive]
                     ) != nil
                     if isDefaultName || (previousDefaultName != nil && oldName == previousDefaultName) {
                         updated.name = instrument.name
