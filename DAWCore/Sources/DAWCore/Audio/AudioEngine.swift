@@ -157,9 +157,16 @@ public final class AudioEngine: ObservableObject {
             sampleRate: sampleRate
         )
         
+        // Instantiate the in-process stereo positioning effect. If unavailable,
+        // preserve the original mixer pan path instead of losing audio.
+        StereoPositionAudioUnit.registerIfNeeded()
+        let stereoEffect = AVAudioUnitEffect(audioComponentDescription: StereoPositionAudioUnit.componentDescription)
+        trackNode.stereoPositionNode = stereoEffect
+
         // Attach nodes to engine
         engine.attach(trackNode.inputMixer)
         engine.attach(trackNode.gainNode)
+        engine.attach(stereoEffect)
         engine.attach(trackNode.pannerNode)
         engine.attach(trackNode.outputMixer)
         
@@ -170,7 +177,8 @@ public final class AudioEngine: ObservableObject {
         )!
         
         engine.connect(trackNode.inputMixer, to: trackNode.gainNode, format: format)
-        engine.connect(trackNode.gainNode, to: trackNode.pannerNode, format: format)
+        engine.connect(trackNode.gainNode, to: stereoEffect, format: format)
+        engine.connect(stereoEffect, to: trackNode.pannerNode, format: format)
         engine.connect(trackNode.pannerNode, to: trackNode.outputMixer, format: format)
         engine.connect(trackNode.outputMixer, to: masterMixer, format: format)
         
@@ -189,11 +197,13 @@ public final class AudioEngine: ObservableObject {
         // Disconnect and detach all nodes
         engine.disconnectNodeOutput(trackNode.inputMixer)
         engine.disconnectNodeOutput(trackNode.gainNode)
+        if let effect = trackNode.stereoPositionNode { engine.disconnectNodeOutput(effect) }
         engine.disconnectNodeOutput(trackNode.pannerNode)
         engine.disconnectNodeOutput(trackNode.outputMixer)
         
         engine.detach(trackNode.inputMixer)
         engine.detach(trackNode.gainNode)
+        if let effect = trackNode.stereoPositionNode { engine.detach(effect) }
         engine.detach(trackNode.pannerNode)
         engine.detach(trackNode.outputMixer)
         
@@ -315,7 +325,12 @@ public final class AudioEngine: ObservableObject {
         }
         
         engine.connect(previousNode, to: trackNode.gainNode, format: format)
-        engine.connect(trackNode.gainNode, to: trackNode.pannerNode, format: format)
+        if let effect = trackNode.stereoPositionNode {
+            engine.connect(trackNode.gainNode, to: effect, format: format)
+            engine.connect(effect, to: trackNode.pannerNode, format: format)
+        } else {
+            engine.connect(trackNode.gainNode, to: trackNode.pannerNode, format: format)
+        }
         engine.connect(trackNode.pannerNode, to: trackNode.outputMixer, format: format)
     }
     
@@ -684,6 +699,7 @@ public final class TrackAudioNode {
     public let inputMixer: AVAudioMixerNode
     public let gainNode: AVAudioMixerNode
     public let pannerNode: AVAudioMixerNode
+    public var stereoPositionNode: AVAudioUnitEffect?
     public let outputMixer: AVAudioMixerNode
     
     // Plugin chain (Audio Units)
@@ -712,7 +728,14 @@ public final class TrackAudioNode {
     }
     
     public func setPan(_ pan: Float) {
-        pannerNode.pan = pan
+        if let parameter = stereoPositionNode?.auAudioUnit.parameterTree?.parameter(withAddress: 0) {
+            // The mixer must remain centered: otherwise its stereo balance
+            // would undo the processor's stereo-preserving position.
+            pannerNode.pan = 0
+            parameter.value = pan.isFinite ? min(1, max(-1, pan)) : 0
+        } else {
+            pannerNode.pan = pan
+        }
     }
     
     public func setMuted(_ muted: Bool) {
