@@ -200,6 +200,12 @@ public struct MainWindowView: View {
             // Stop keyboard monitor when view disappears (e.g., project reload)
             keyMonitor.stop()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .performUndo)) { _ in
+            viewModel.undo()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .performRedo)) { _ in
+            viewModel.redo()
+        }
         .onReceive(viewModel.transportState.$smoothPlayheadBeats) { beats in
             playheadPosition = beats
         }
