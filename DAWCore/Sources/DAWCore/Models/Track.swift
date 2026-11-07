@@ -41,6 +41,9 @@ public struct Track: Identifiable, Codable, Sendable {
     // Audio properties
     public var volume: Float       // 0.0 to 1.0 (linear), displayed as dB
     public var pan: Float          // -1.0 (left) to 1.0 (right)
+    /// Stage reverb zone, 1 (front/dry) through 5 (back/wet).
+    /// Optional so existing projects decode without migration.
+    public var stageReverbZone: Int?
     public var isMuted: Bool
     public var isSolo: Bool
     public var isArmed: Bool       // Record armed
@@ -91,6 +94,7 @@ public struct Track: Identifiable, Codable, Sendable {
         self.color = color
         self.volume = 0.7937  // -2 dB default
         self.pan = 0.0
+        self.stageReverbZone = nil
         self.isMuted = false
         self.isSolo = false
         self.isArmed = false
