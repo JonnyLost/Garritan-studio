@@ -657,10 +657,16 @@ public final class ProjectViewModel: ObservableObject {
         if copy {
             region.id = ClipID()
             region.name += " Copy"
+            undoManager.registerAction(AddClipAction(trackID: destinationID, clip: region),
+                                       project: &project)
         } else {
-            project.tracks[sourceIndex].clips.remove(at: clipIndex)
+            undoManager.beginGrouping(name: "Move MIDI Region")
+            undoManager.registerAction(RemoveClipAction(from: project, trackID: sourceID,
+                                                        clipID: clipID), project: &project)
+            undoManager.registerAction(AddClipAction(trackID: destinationID, clip: region),
+                                       project: &project)
+            undoManager.endGrouping()
         }
-        project.tracks[destinationIndex].clips.append(region)
         selectedClipIDs = [region.id]
         print("[Edit] \(copy ? "Copied" : "Moved") MIDI region to \(project.tracks[destinationIndex].name)")
     }
@@ -681,7 +687,9 @@ public final class ProjectViewModel: ObservableObject {
             sampleRate: transportState.sampleRate
         )
         
-        project.tracks[trackIndex].clips[clipIndex].timeRange = TimeRange(start: newStart, end: newEnd)
+        undoManager.registerAction(MoveClipAction(trackID: trackID, clipID: clipID,
+                                                  from: clip.timeRange.start, to: newStart),
+                                   project: &project)
         print("[Edit] Moved clip '\(clip.name)' to beat \(toBeat)")
     }
     
@@ -704,7 +712,8 @@ public final class ProjectViewModel: ObservableObject {
         newClip.name = "\(clip.name) Copy"
         newClip.timeRange = TimeRange(start: newStart, end: newEnd)
 
-        project.tracks[trackIndex].clips.append(newClip)
+        undoManager.registerAction(AddClipAction(trackID: trackID, clip: newClip),
+                                   project: &project)
         selectedClipIDs = [newClip.id]
         print("[Edit] Duplicated clip '\(clip.name)' to beat \(toBeat)")
     }
