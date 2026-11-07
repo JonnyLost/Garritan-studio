@@ -533,14 +533,15 @@ public final class ProjectViewModel: ObservableObject {
     /// Update a track's stage position without changing its existing audio routing.
     public func setTrackStagePosition(id: TrackID, pan: Float, zone: Int) {
         guard var track = project.track(withID: id) else { return }
-        track.pan = min(1, max(-1, pan))
-        track.stageReverbZone = min(5, max(1, zone))
+        track.pan = zone == 0 ? 0 : min(1, max(-1, pan))
+        track.stageReverbZone = min(5, max(0, zone))
         updateTrack(track, description: "Move Instrument on Stage")
     }
 
     public func setTrackStageZone(id: TrackID, zone: Int) {
         guard var track = project.track(withID: id) else { return }
-        track.stageReverbZone = min(5, max(1, zone))
+        track.stageReverbZone = min(5, max(0, zone))
+        if zone == 0 { track.pan = 0 }
         updateTrack(track, description: "Change Stage Reverb Zone")
     }
 
