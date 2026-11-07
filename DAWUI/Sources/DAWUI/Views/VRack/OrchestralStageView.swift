@@ -240,45 +240,62 @@ struct OrchestralStageView: View {
             }
         }
         .stroke(
-            zone.isMultiple(of: 2) ? Color.blue.opacity(0.18) : Color.teal.opacity(0.18),
-            style: StrokeStyle(lineWidth: 72 * scale, lineCap: .butt)
+            zoneColor(zone).opacity(0.10),
+            style: StrokeStyle(lineWidth: 74 * scale, lineCap: .butt)
         )
         .overlay(
             Text("L\(zone)")
-                .font(.system(size: max(9, 13 * scale), weight: .bold))
+                .font(.system(size: 13 * scale, weight: .bold))
                 .foregroundStyle(.secondary)
-                .position(stagePoint(pan: -0.98, zone: zone, width: width))
+                .position(stagePoint(pan: -0.99, zone: zone, width: width))
         )
     }
 
+    // Each instrument section is an individual annular sector rather than
+    // a label sitting on a broad stripe. The seating chart is a guide only.
     private func seatingSection(_ section: SeatSection, width: CGFloat) -> some View {
         let point = stagePoint(pan: section.pan, zone: section.zone, width: width)
-        let boundary = section.pan - section.span / 2
-        let inner = stagePoint(pan: boundary, zone: section.zone, width: width)
-        let outerRadiusZone = min(5, section.zone + 1)
-        let outer = stagePoint(pan: boundary, zone: outerRadiusZone, width: width)
         let scale = stageScale(width)
         return ZStack {
-            Path { path in
-                path.move(to: inner)
-                if section.zone < 5 {
-                    path.addLine(to: outer)
-                } else {
-                    let dx = inner.x - width / 2
-                    let dy = inner.y - 535 * scale
-                    path.addLine(to: CGPoint(x: inner.x + dx * 0.09, y: inner.y + dy * 0.09))
-                }
-            }
-            .stroke(Color.white.opacity(0.22), lineWidth: max(0.5, scale))
+            sectionOutline(section, width: width)
+                .fill(zoneColor(section.zone).opacity(0.15))
+            sectionOutline(section, width: width)
+                .stroke(zoneColor(section.zone).opacity(0.65), lineWidth: 1.3 * scale)
             Text(section.name)
-                .font(.system(size: max(8, 12 * scale), weight: .medium))
-                .foregroundStyle(.primary.opacity(0.8))
+                .font(.system(size: 12 * scale, weight: .medium))
+                .foregroundStyle(.primary.opacity(0.9))
                 .lineLimit(1)
                 .minimumScaleFactor(0.65)
-                .frame(width: max(35, section.span * 115 * scale))
+                .frame(width: max(42, section.span * 190 * scale))
                 .position(point)
                 .allowsHitTesting(false)
         }
+    }
+
+    private func sectionOutline(_ section: SeatSection, width: CGFloat) -> Path {
+        let centerX = width / 2
+        let centerY = 535 * stageScale(width)
+        let scale = stageScale(width)
+        let innerRadius = CGFloat(105 + (section.zone - 1) * 83 - 34) * scale
+        let outerRadius = CGFloat(105 + (section.zone - 1) * 83 + 34) * scale
+        let start = (section.pan - section.span / 2) * (.pi / 2)
+        let end = (section.pan + section.span / 2) * (.pi / 2)
+        var path = Path()
+        let segments = 16
+        for step in 0...segments {
+            let angle = start + (end - start) * CGFloat(step) / CGFloat(segments)
+            let point = CGPoint(x: centerX + sin(angle) * outerRadius,
+                                y: centerY - cos(angle) * outerRadius)
+            if step == 0 { path.move(to: point) }
+            else { path.addLine(to: point) }
+        }
+        for step in (0...segments).reversed() {
+            let angle = start + (end - start) * CGFloat(step) / CGFloat(segments)
+            path.addLine(to: CGPoint(x: centerX + sin(angle) * innerRadius,
+                                     y: centerY - cos(angle) * innerRadius))
+        }
+        path.closeSubpath()
+        return path
     }
 
     private func curvedMarker(_ track: Track, width: CGFloat) -> some View {
