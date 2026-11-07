@@ -16,6 +16,7 @@ public struct MainWindowView: View {
 
     @State private var mixerHeight: CGFloat = 280
     @State private var pianoRollHeight: CGFloat = 500
+    @State private var showStageWorkspace = false
     @State private var showCreateClipDialog: Bool = false
     @State private var createClipTrackID: TrackID?
     @State private var horizontalScrollOffset: CGFloat = 0
@@ -83,7 +84,9 @@ public struct MainWindowView: View {
             HStack(spacing: 0) {
                 // V-Rack sidebar (left side)
                 if showVRack {
-                    VRackView(viewModel: viewModel)
+                    VRackView(viewModel: viewModel, openStageWorkspace: {
+                        showStageWorkspace = true
+                    })
                         .frame(width: composerDrawerWidth)
                     Rectangle()
                         .fill(Color(nsColor: .separatorColor))
@@ -116,12 +119,12 @@ public struct MainWindowView: View {
                 }
             }
             
-                if viewModel.showMixer || viewModel.showPianoRoll {
+                if showStageWorkspace || viewModel.showMixer || viewModel.showPianoRoll {
                 // Draggable resize handle
-                ResizeHandle(height: viewModel.showPianoRoll ? $pianoRollHeight : $mixerHeight)
+                ResizeHandle(height: (showStageWorkspace || viewModel.showPianoRoll) ? $pianoRollHeight : $mixerHeight)
                 
                 bottomPanel
-                    .frame(height: viewModel.showPianoRoll ? pianoRollHeight : mixerHeight)
+                    .frame(height: (showStageWorkspace || viewModel.showPianoRoll) ? pianoRollHeight : mixerHeight)
                     .simultaneousGesture(
                         TapGesture().onEnded { _ in
                             NSApp.keyWindow?.makeFirstResponder(nil)
@@ -419,7 +422,30 @@ public struct MainWindowView: View {
     
     @ViewBuilder
     private var bottomPanel: some View {
-        if viewModel.showPianoRoll {
+        if showStageWorkspace {
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Orchestral Stage").font(.headline)
+                    Spacer()
+                    Button("Piano Roll") {
+                        showStageWorkspace = false
+                        viewModel.showPianoRoll = true
+                    }
+                    .buttonStyle(.borderless)
+                    Button {
+                        showStageWorkspace = false
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Close Stage workspace")
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                Divider()
+                OrchestralStageView(viewModel: viewModel)
+            }
+        } else if viewModel.showPianoRoll {
             // Piano roll panel - show track-based MIDI editor
             if let trackID = viewModel.selectedTrackID,
                let track = viewModel.project.track(withID: trackID),
@@ -512,12 +538,24 @@ public struct MainWindowView: View {
             }
             .help("Toggle Instruments Panel")
 
-            Toggle(isOn: $viewModel.showPianoRoll) {
+            Toggle(isOn: Binding(
+                get: { viewModel.showPianoRoll && !showStageWorkspace },
+                set: { enabled in
+                    showStageWorkspace = false
+                    viewModel.showPianoRoll = enabled
+                }
+            )) {
                 Image(systemName: "rectangle.split.3x1")
             }
             .help("Toggle MIDI Editor Panel")
             
-            Toggle(isOn: $viewModel.showMixer) {
+            Toggle(isOn: Binding(
+                get: { viewModel.showMixer && !showStageWorkspace },
+                set: { enabled in
+                    showStageWorkspace = false
+                    viewModel.showMixer = enabled
+                }
+            )) {
                 Image(systemName: "slider.horizontal.3")
             }
             .help("Toggle Mixer Panel")
