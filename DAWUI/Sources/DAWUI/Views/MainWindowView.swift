@@ -443,7 +443,7 @@ public struct MainWindowView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
                 Divider()
-                OrchestralStageView(viewModel: viewModel)
+                OrchestralStageView(viewModel: viewModel, expanded: true)
             }
         } else if viewModel.showPianoRoll {
             // Piano roll panel - show track-based MIDI editor
