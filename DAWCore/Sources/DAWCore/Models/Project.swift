@@ -283,7 +283,7 @@ public struct DAWState: Codable, Sendable {
     public var openPluginWindows: [OpenPluginWindow]
     
     public init(
-        showVRack: Bool = false,
+        showVRack: Bool = true,
         showMixer: Bool = false,
         showInspector: Bool = false,
         zoomLevel: Double = 1.0,
