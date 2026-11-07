@@ -21,12 +21,12 @@ struct OrchestralStageView: View {
 
                 GeometryReader { proxy in
                     if expanded {
-                        curvedStageCanvas(width: proxy.size.width)
+                        fittedCurvedStage(availableWidth: proxy.size.width)
                     } else {
                         stageCanvas(width: proxy.size.width)
                     }
                 }
-                .frame(height: expanded ? 560 : 250)
+                .frame(height: expanded ? 345 : 250)
 
                 HStack {
                     Text("LEFT").frame(maxWidth: .infinity, alignment: .leading)
@@ -42,6 +42,24 @@ struct OrchestralStageView: View {
             }
             .padding(12)
         }
+    }
+
+    // Fit the complete 1000x560 drawing into the lower editor. Unlike the
+    // previous width-only scaling, this also respects the editor's height.
+    // Scale the entire drawing as one unit so labels and drag targets stay
+    // aligned with the arcs.
+    private func fittedCurvedStage(availableWidth: CGFloat) -> some View {
+        let referenceWidth: CGFloat = 1000
+        let referenceHeight: CGFloat = 560
+        let availableHeight: CGFloat = 345
+        let scale = min(
+            (availableWidth - 16) / referenceWidth,
+            (availableHeight - 12) / referenceHeight
+        )
+        return curvedStageCanvas(width: referenceWidth)
+            .frame(width: referenceWidth, height: referenceHeight)
+            .scaleEffect(scale, anchor: .center)
+            .frame(width: availableWidth, height: availableHeight)
     }
 
     // Seating map transcribed from the original sketch. These are visual
