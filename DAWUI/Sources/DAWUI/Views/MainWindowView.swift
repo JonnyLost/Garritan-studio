@@ -1852,6 +1852,7 @@ struct TrackInspectorSection: View {
     @ObservedObject var viewModel: ProjectViewModel
     @ObservedObject var audioRecorder: AudioRecorder
     @State private var trackName: String = ""
+    @State private var showGarritanBrowser = false
     @State private var availableInputs: [AudioInputDevice] = []
     @State private var selectedInputID: AudioDeviceID = 0
     @State private var selectedChannelID: String = "default-stereo"
@@ -1910,6 +1911,57 @@ struct TrackInspectorSection: View {
                 }
             }
             
+            // Garritan Studio instrument workspace — reuses the proven track browser.
+            if track.type == .midi || track.type == .instrument {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("Instrument", systemImage: "pianokeys")
+                        .font(.headline)
+                    HStack(spacing: 8) {
+                        Image(systemName: track.instrumentSlot?.pluginID == nil
+                              ? "pianokeys" : "waveform")
+                            .foregroundColor(.accentColor)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(track.instrumentSlot?.pluginID?.name ?? "No instrument loaded")
+                                .font(.subheadline.weight(.medium))
+                                .lineLimit(2)
+                            Text(track.instrumentSlot?.pluginID == nil
+                                 ? "Choose a Garritan instrument for this track."
+                                 : "Instrument assigned to this track")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    Button {
+                        showGarritanBrowser = true
+                    } label: {
+                        Label(track.instrumentSlot?.pluginID == nil
+                              ? "Choose Instrument…" : "Browse / Change…",
+                              systemImage: "square.grid.2x2")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    if let pluginID = track.instrumentSlot?.pluginID {
+                        Button {
+                            if let loaded = viewModel.pluginHost.loadedPlugins.values.first(where: {
+                                $0.identifier == pluginID
+                            }) {
+                                PluginWindowManager.shared.openPluginWindow(
+                                    for: loaded, trackName: track.name)
+                            }
+                        } label: {
+                            Label("Instrument Controls…", systemImage: "slider.horizontal.3")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.accentColor.opacity(0.07))
+                .cornerRadius(9)
+                Divider()
+            }
+
             // MIDI Output section (only for MIDI/instrument tracks)
             if track.type == .midi || track.type == .instrument {
                 Divider()
@@ -2074,6 +2126,11 @@ struct TrackInspectorSection: View {
         .onChange(of: track.id) { _, _ in
             trackName = track.name
             refreshInputs()
+        }
+        .sheet(isPresented: $showGarritanBrowser) {
+            InstrumentBrowserSheet(viewModel: viewModel,
+                                   trackID: track.id,
+                                   isPresented: $showGarritanBrowser)
         }
     }
     
