@@ -914,7 +914,7 @@ public struct TrackPianoRollView: View {
                         pitch: UInt8(pitch),
                         noteHeight: noteHeight,
                         onPress: { viewModel.playNotePreview(pitch: UInt8(pitch)) },
-                        onRelease: { }
+                        onRelease: { viewModel.stopNotePreview(pitch: UInt8(pitch)) }
                     )
                 }
             }
