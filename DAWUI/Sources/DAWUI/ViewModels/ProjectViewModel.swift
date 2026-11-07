@@ -1271,7 +1271,7 @@ public final class ProjectViewModel: ObservableObject {
     }
     
     /// Open the plugin UI for a rack instrument
-    public func openRackInstrumentUI(_ rackID: UUID) {
+    public func openRackInstrumentUI(_ rackID: UUID, preferNativeARIA: Bool = false) {
         guard let instrument = project.vRack.instrument(withID: rackID),
               instrument.pluginSlot.pluginID != nil else {
             print("[V-Rack] Cannot open UI - no instrument or plugin not set for rack \(rackID)")
@@ -1286,7 +1286,7 @@ public final class ProjectViewModel: ObservableObject {
             return
         }
 
-        PluginWindowManager.shared.openPluginWindow(for: loadedPlugin, trackName: instrument.name)
+        PluginWindowManager.shared.openPluginWindow(for: loadedPlugin, trackName: instrument.name, preferNativeARIA: preferNativeARIA)
     }
     
     // MARK: - Plugin State Management
