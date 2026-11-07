@@ -19,7 +19,7 @@ public struct MainWindowView: View {
     @State private var showCreateClipDialog: Bool = false
     @State private var createClipTrackID: TrackID?
     @State private var horizontalScrollOffset: CGFloat = 0
-    @State private var showVRack: Bool = false
+    @State private var showVRack: Bool = true
     @State private var composerDrawerWidth: CGFloat = 360
     @State private var drawerDragStartWidth: CGFloat?
     
