@@ -1,5 +1,6 @@
 import SwiftUI
 import DAWCore
+import AVFoundation
 
 // MARK: - Multifunction Composer Drawer
 
@@ -32,8 +33,7 @@ public struct VRackView: View {
     @State private var libraryFilter = "All Libraries"
     @State private var familyFilter = "All"
     @State private var catalog: [DrawerInstrument] = []
-    @State private var showTrackBrowser = false
-    @State private var browserTrackID: TrackID?
+    @State private var isLoadingInstrument = false
     @State private var selectedInstrumentID: String?
     @State private var pickerError: String?
 
@@ -180,17 +180,56 @@ public struct VRackView: View {
     }
 
     private func chooseInstrument(_ instrument: DrawerInstrument) {
-        selectedInstrumentID = instrument.id
+        guard !isLoadingInstrument else { return }
         guard let trackID = viewModel.selectedTrackID,
               let track = viewModel.project.track(withID: trackID),
               track.type == .midi || track.type == .instrument else {
             pickerError = "Select a MIDI or instrument track first."
             return
         }
-        // Reuse the existing track instrument workspace rather than bypassing
-        // its verified ARIA loading and error handling.
-        browserTrackID = trackID
-        showTrackBrowser = true
+        pickerError = nil
+        isLoadingInstrument = true
+        Task { @MainActor in
+            defer { isLoadingInstrument = false }
+            do {
+                let program = TrackGarritanProgram(library: instrument.library, programName: instrument.path)
+                let unit: AVAudioUnit
+                if let existing = viewModel.playbackEngine.instrument(for: trackID),
+                   case .auInstrument(let loadedUnit, _) = existing,
+                   let pluginID = track.instrumentSlot?.pluginID,
+                   pluginID.name.localizedCaseInsensitiveContains("aria"),
+                   pluginID.manufacturer.localizedCaseInsensitiveContains("garr") {
+                    unit = loadedUnit
+                } else {
+                    // Discover ARIA using the same host used by the original instrument browser.
+                    await viewModel.pluginHost.scanForPlugins()
+                    guard let description = viewModel.pluginHost.availableInstruments.first(where: {
+                        $0.identifier.name.localizedCaseInsensitiveContains("aria") &&
+                        $0.identifier.manufacturer.localizedCaseInsensitiveContains("garr")
+                    }) else {
+                        throw NSError(domain: "GarritanPicker", code: 1,
+                                      userInfo: [NSLocalizedDescriptionKey: "Garritan ARIA Player was not found."])
+                    }
+                    let format = AVAudioFormat(standardFormatWithSampleRate: viewModel.audioEngine.sampleRate, channels: 2)!
+                    let loaded = try await viewModel.pluginHost.loadPlugin(
+                        identifier: description.identifier, format: format)
+                    try await viewModel.playbackEngine.loadInstrument(
+                        loaded.audioUnit, for: trackID, pluginID: loaded.id)
+                    if var updated = viewModel.project.track(withID: trackID) {
+                        updated.instrumentSlot = PluginSlot(pluginID: description.identifier, isEnabled: true)
+                        viewModel.updateTrack(updated, description: "Load ARIA Instrument")
+                    }
+                    unit = loaded.audioUnit
+                }
+                try TrackGarritanLoader.apply(program, to: unit)
+                selectedInstrumentID = instrument.id
+                pickerError = nil
+                print("[Instrument Picker] Loaded \\(instrument.name) on track \\(trackID)")
+            } catch {
+                pickerError = error.localizedDescription
+                print("[Instrument Picker] Load failed: \\(error)")
+            }
+        }
     }
 
     private var instrumentsPanel: some View {
@@ -230,6 +269,11 @@ public struct VRackView: View {
                 .frame(maxWidth: .infinity)
             }
             .padding(10)
+            if isLoadingInstrument {
+                ProgressView("Loading instrument…")
+                    .controlSize(.small)
+                    .padding(.horizontal, 10)
+            }
             if let pickerError {
                 Text(pickerError).font(.caption).foregroundColor(.red).padding(.horizontal, 10)
             }
@@ -290,11 +334,6 @@ public struct VRackView: View {
             .padding(9)
         }
         .onAppear { if catalog.isEmpty { discoverCatalog() } }
-        .sheet(isPresented: $showTrackBrowser) {
-            if let trackID = browserTrackID {
-                InstrumentBrowserSheet(viewModel: viewModel, trackID: trackID, isPresented: $showTrackBrowser)
-            }
-        }
     }
 
 }
