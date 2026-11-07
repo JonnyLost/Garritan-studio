@@ -32,6 +32,7 @@ public struct VRackView: View {
     @State private var searchText = ""
     @State private var libraryFilter = "All Libraries"
     @State private var familyFilter = "All"
+    @State private var instrumentSet = "Core Orchestra"
     @State private var catalog: [DrawerInstrument] = []
     @State private var isLoadingInstrument = false
     @State private var selectedInstrumentID: String?
@@ -151,10 +152,23 @@ public struct VRackView: View {
 
     private let scoreFamilies = ["Woodwinds", "Brass", "Percussion", "Keys", "Choir", "Strings", "Synth", "World", "Other"]
 
+    /// Hide only numbered individual players in orchestral families.
+    private func isIndividualPlayer(_ instrument: DrawerInstrument) -> Bool {
+        guard instrument.library == "Garritan Personal Orchestra 5",
+              ["Woodwinds", "Brass", "Strings", "Choir"].contains(instrument.category) else {
+            return false
+        }
+        return instrument.name.range(
+            of: #"(?:^|[\s_-])(?:Plr|Player)\s*\d+\b"#,
+            options: [.regularExpression, .caseInsensitive]
+        ) != nil
+    }
+
     private var filteredCatalog: [DrawerInstrument] {
         catalog.filter { instrument in
             (libraryFilter == "All Libraries" || instrument.library == libraryFilter) &&
             (familyFilter == "All" || instrument.category == familyFilter) &&
+            (instrumentSet == "Complete" || !isIndividualPlayer(instrument)) &&
             (searchText.isEmpty || instrument.name.localizedCaseInsensitiveContains(searchText) ||
              instrument.path.localizedCaseInsensitiveContains(searchText))
         }.sorted { lhs, rhs in
@@ -267,6 +281,13 @@ public struct VRackView: View {
                 }
                 .labelsHidden()
                 .frame(maxWidth: .infinity)
+                Picker("Instrument Set", selection: $instrumentSet) {
+                    Text("Core Orchestra").tag("Core Orchestra")
+                    Text("Complete").tag("Complete")
+                }
+                .labelsHidden()
+                .frame(maxWidth: .infinity)
+                .help("Core Orchestra hides numbered individual players; Complete shows the full catalog.")
             }
             .padding(10)
             if isLoadingInstrument {
