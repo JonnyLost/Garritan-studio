@@ -487,6 +487,23 @@ public final class ProjectViewModel: ObservableObject {
         }
     }
     
+    /// Sends ARIA mixer volume (CC7), independent of Studio's audio fader.
+    public func setInstrumentLevel(id: TrackID, value: UInt8) {
+        guard value <= 127, var track = project.track(withID: id) else { return }
+        track.instrumentLevelCC7 = value
+        updateTrack(track, description: "Change Instrument Level")
+        playbackEngine.instrument(for: id)?.sendController(7, value: value, channel: track.instrumentLevelChannel ?? 0)
+    }
+
+    public func setInstrumentLevelChannel(id: TrackID, channel: UInt8) {
+        guard channel < 16, var track = project.track(withID: id) else { return }
+        track.instrumentLevelChannel = channel
+        updateTrack(track, description: "Change Instrument Level Channel")
+        if let level = track.instrumentLevelCC7 {
+            playbackEngine.instrument(for: id)?.sendController(7, value: level, channel: channel)
+        }
+    }
+
     public func setTrackVolume(id: TrackID, volume: Float) {
         guard var track = project.track(withID: id) else { return }
         track.volume = volume
