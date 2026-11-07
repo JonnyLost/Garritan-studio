@@ -189,18 +189,26 @@ public struct VRackView: View {
         }
     }
 
+    @MainActor private static var cachedCatalog: [DrawerInstrument]?
+
     private func discoverCatalog() {
+        if let cached = Self.cachedCatalog {
+            catalog = cached
+            return
+        }
         let banks: [(String, String, String?)] = [
             ("Garritan Personal Orchestra 5",
              "/Library/Application Support/Garritan/Garritan Personal Orchestra 5/Banks/Standard/Personal Orchestra 5.bank.xml", "Standard/"),
             ("Garritan Instant Orchestra",
              "/Library/Application Support/Garritan/Garritan Instant Orchestra/Banks/Standard/Instant Orchestra.bank.xml", nil)
         ]
-        catalog = banks.flatMap { library, path, prefix in
+        let loaded = banks.flatMap { library, path, prefix in
             GPO5BankReader.loadStandardPrograms(bankPath: path, requiredPrefix: prefix).map {
                 DrawerInstrument(library: library, path: $0.name)
             }
         }
+        Self.cachedCatalog = loaded
+        catalog = loaded
     }
 
     private func chooseInstrument(_ instrument: DrawerInstrument) {
@@ -226,7 +234,12 @@ public struct VRackView: View {
                     unit = loadedUnit
                 } else {
                     // Discover ARIA using the same host used by the original instrument browser.
-                    await viewModel.pluginHost.scanForPlugins()
+                    if !viewModel.pluginHost.availableInstruments.contains(where: {
+                        $0.identifier.name.localizedCaseInsensitiveContains("aria") &&
+                        $0.identifier.manufacturer.localizedCaseInsensitiveContains("garr")
+                    }) {
+                        await viewModel.pluginHost.scanForPlugins()
+                    }
                     guard let description = viewModel.pluginHost.availableInstruments.first(where: {
                         $0.identifier.name.localizedCaseInsensitiveContains("aria") &&
                         $0.identifier.manufacturer.localizedCaseInsensitiveContains("garr")
@@ -254,7 +267,7 @@ public struct VRackView: View {
                         catalog.first(where: { $0.id == id })?.name
                     }
                     let isDefaultName = oldName.range(
-                        of: #"^Midi \d+$"#, options: [.regularExpression, .caseInsensitive]
+                        of: #"^(?:Midi|Instrument) \d+$"#, options: [.regularExpression, .caseInsensitive]
                     ) != nil
                     if isDefaultName || (previousDefaultName != nil && oldName == previousDefaultName) {
                         updated.name = instrument.name
