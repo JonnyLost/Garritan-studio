@@ -26,7 +26,7 @@ public final class PluginWindowManager: ObservableObject {
     
     private init() {}
     
-    public func openPluginWindow(for plugin: LoadedPlugin, trackName: String) {
+    public func openPluginWindow(for plugin: LoadedPlugin, trackName: String, preferNativeARIA: Bool = false) {
         // Check if window already exists and is still valid
         if let existingController = windowControllers[plugin.id],
            let window = existingController.window,
@@ -47,7 +47,7 @@ public final class PluginWindowManager: ObservableObject {
         // ARIA's custom Audio Unit editor currently crashes inside its own
         // view creation on this host. Avoid requesting it while testing the
         // safe generic parameter editor. This does not affect audio loading.
-        if plugin.identifier.name.localizedCaseInsensitiveContains("aria") &&
+        if !preferNativeARIA && plugin.identifier.name.localizedCaseInsensitiveContains("aria") &&
            plugin.identifier.manufacturer.localizedCaseInsensitiveContains("garr") {
             print("[PluginWindow] ARIA diagnostic: opening generic parameters without requesting native editor")
             createPluginWindow(for: plugin, trackName: trackName, nativeViewController: nil, allowNativeEditor: false)
