@@ -13,6 +13,14 @@ struct OrchestralStageView: View {
     }
 
     var body: some View {
+        if expanded {
+            expandedWorkspace
+        } else {
+            compactWorkspace
+        }
+    }
+
+    private var compactWorkspace: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Orchestral Stage").font(.headline)
@@ -20,13 +28,9 @@ struct OrchestralStageView: View {
                     .font(.caption).foregroundStyle(.secondary)
 
                 GeometryReader { proxy in
-                    if expanded {
-                        fittedCurvedStage(availableWidth: proxy.size.width)
-                    } else {
-                        stageCanvas(width: proxy.size.width)
-                    }
+                    stageCanvas(width: proxy.size.width)
                 }
-                .frame(height: expanded ? 345 : 250)
+                .frame(height: 250)
 
                 HStack {
                     Text("LEFT").frame(maxWidth: .infinity, alignment: .leading)
@@ -44,18 +48,101 @@ struct OrchestralStageView: View {
         }
     }
 
-    // Fit the complete 1000x560 drawing into the lower editor. Unlike the
-    // previous width-only scaling, this also respects the editor's height.
-    // Scale the entire drawing as one unit so labels and drag targets stay
-    // aligned with the arcs.
-    private func fittedCurvedStage(availableWidth: CGFloat) -> some View {
+    // The diagram and inspector have independent widths, so labels and
+    // controls no longer stretch across the full editor.
+    private var expandedWorkspace: some View {
+        GeometryReader { geometry in
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Label("Orchestra seating", systemImage: "music.note.list")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Text("CONCERT HALL")
+                            .font(.system(size: 10, weight: .medium))
+                            .tracking(1.5)
+                            .foregroundStyle(.secondary)
+                    }
+                    fittedCurvedStage(
+                        availableWidth: max(300, geometry.size.width - 294),
+                        availableHeight: max(220, geometry.size.height - 66)
+                    )
+                    HStack(spacing: 14) {
+                        Text("AUDIENCE LEFT")
+                        Spacer()
+                        Text("L1 DRY  ·  L5 WET")
+                        Spacer()
+                        Text("AUDIENCE RIGHT")
+                    }
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 14) {
+                    Label("Instrument position", systemImage: "slider.horizontal.3")
+                        .font(.subheadline.weight(.semibold))
+                    selectedTrackControls
+                    Divider()
+                    Text("REVERB ZONES")
+                        .font(.system(size: 10, weight: .semibold))
+                        .tracking(1.2)
+                        .foregroundStyle(.secondary)
+                    ForEach(1...5, id: \.self) { zone in
+                        HStack(spacing: 9) {
+                            Circle()
+                                .fill(zoneColor(zone))
+                                .frame(width: 9, height: 9)
+                            Text("L\(zone)")
+                                .font(.caption.weight(.semibold))
+                                .frame(width: 24, alignment: .leading)
+                            Text(zoneDescription(zone))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Divider()
+                    Text("All instruments share the same stage. Reverb sends will be connected to the hall engine later.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
+                .padding(14)
+                .frame(width: 246, alignment: .leading)
+                .background(Color(nsColor: .controlBackgroundColor).opacity(0.65))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            .padding(12)
+        }
+    }
+
+    private func zoneDescription(_ zone: Int) -> String {
+        switch zone {
+        case 1: return "Close / direct"
+        case 2: return "Light ambience"
+        case 3: return "Balanced room"
+        case 4: return "Distant"
+        default: return "Deep hall"
+        }
+    }
+
+    private func zoneColor(_ zone: Int) -> Color {
+        switch zone {
+        case 1: return Color(red: 0.35, green: 0.65, blue: 0.55)
+        case 2: return Color(red: 0.40, green: 0.60, blue: 0.70)
+        case 3: return Color(red: 0.65, green: 0.59, blue: 0.45)
+        case 4: return Color(red: 0.48, green: 0.55, blue: 0.71)
+        default: return Color(red: 0.50, green: 0.48, blue: 0.66)
+        }
+    }
+
+    private func fittedCurvedStage(availableWidth: CGFloat, availableHeight: CGFloat) -> some View {
         let referenceWidth: CGFloat = 1000
         let referenceHeight: CGFloat = 560
-        let availableHeight: CGFloat = 345
-        let scale = min(
-            (availableWidth - 16) / referenceWidth,
+        let scale = max(0.1, min(
+            (availableWidth - 12) / referenceWidth,
             (availableHeight - 12) / referenceHeight
-        )
+        ))
         return curvedStageCanvas(width: referenceWidth)
             .frame(width: referenceWidth, height: referenceHeight)
             .scaleEffect(scale, anchor: .center)
