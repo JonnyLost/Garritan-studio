@@ -488,6 +488,15 @@ public final class ProjectViewModel: ObservableObject {
     }
     
     /// Sends ARIA mixer volume (CC7), independent of Studio's audio fader.
+    /// Reapply a saved instrument mixer level after the AU has loaded its state.
+    /// A nil level means Studio has never overridden ARIA's internal fader.
+    public func restoreInstrumentLevel(for trackID: TrackID) {
+        guard let track = project.track(withID: trackID),
+              let level = track.instrumentLevelCC7 else { return }
+        playbackEngine.instrument(for: trackID)?.sendController(
+            7, value: level, channel: track.instrumentLevelChannel ?? 0)
+    }
+
     public func setInstrumentLevel(id: TrackID, value: UInt8) {
         guard value <= 127, var track = project.track(withID: id) else { return }
         track.instrumentLevelCC7 = value
@@ -1393,6 +1402,7 @@ public final class ProjectViewModel: ObservableObject {
                        from: data, options: [], format: nil) as? [String: Any] {
                     loaded.audioUnit.auAudioUnit.fullState = state
                 }
+                restoreInstrumentLevel(for: track.id)
                 print("[PluginState] Restored Garritan track: \\(track.name)")
             } catch {
                 print("[PluginState] Could not restore Garritan track \\(track.name): \\(error)")
