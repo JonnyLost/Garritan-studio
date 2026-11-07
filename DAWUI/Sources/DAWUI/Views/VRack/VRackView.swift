@@ -77,7 +77,7 @@ public struct VRackView: View {
                 case .instruments:
                     instrumentsPanel
                 case .channel:
-                    upcomingPanel(title: "Channel", symbol: "slider.horizontal.3", detail: "Selected-track controls will appear here.")
+                    channelInspector
                 case .stage:
                     upcomingPanel(title: "Stage", symbol: "circle.grid.cross", detail: "Drag instruments to position them on the stage.")
                 case .articulations:
@@ -272,6 +272,100 @@ public struct VRackView: View {
             } catch {
                 pickerError = error.localizedDescription
                 print("[Instrument Picker] Load failed: \\(error)")
+            }
+        }
+    }
+
+    // Studio-level controls: intentionally independent of ARIA's own mixer.
+    private var channelInspector: some View {
+        Group {
+            if let id = viewModel.selectedTrackID,
+               let track = viewModel.project.track(withID: id) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("CHANNEL")
+                                .font(.caption.bold())
+                                .foregroundStyle(.secondary)
+                            Text(track.name)
+                                .font(.headline)
+                                .lineLimit(2)
+                            Text(track.garritanProgramID?.components(separatedBy: ":").last?.components(separatedBy: "/").last ?? "No instrument loaded")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                        Divider()
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("Volume")
+                                Spacer()
+                                Text(String(format: "%.0f%%", track.volume * 100))
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                            }
+                            Slider(value: Binding(
+                                get: { Double(viewModel.project.track(withID: id)?.volume ?? 1) },
+                                set: { viewModel.setTrackVolume(id: id, volume: Float($0)) }
+                            ), in: 0...1)
+                        }
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("Pan")
+                                Spacer()
+                                Text(track.pan == 0 ? "Center" : String(format: "%.0f%% %@", abs(track.pan) * 100, track.pan < 0 ? "L" : "R"))
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                            }
+                            Slider(value: Binding(
+                                get: { Double(viewModel.project.track(withID: id)?.pan ?? 0) },
+                                set: { viewModel.setTrackPan(id: id, pan: Float($0)) }
+                            ), in: -1...1)
+                            Button("Center Pan") { viewModel.setTrackPan(id: id, pan: 0) }
+                                .font(.caption)
+                                .buttonStyle(.borderless)
+                        }
+                        HStack(spacing: 12) {
+                            Toggle("Mute", isOn: Binding(
+                                get: { viewModel.project.track(withID: id)?.isMuted ?? false },
+                                set: { newValue in
+                                    if (viewModel.project.track(withID: id)?.isMuted ?? false) != newValue {
+                                        viewModel.toggleTrackMute(id: id)
+                                    }
+                                }
+                            ))
+                            Toggle("Solo", isOn: Binding(
+                                get: { viewModel.project.track(withID: id)?.isSolo ?? false },
+                                set: { newValue in
+                                    if (viewModel.project.track(withID: id)?.isSolo ?? false) != newValue {
+                                        viewModel.toggleTrackSolo(id: id)
+                                    }
+                                }
+                            ))
+                        }
+                        .toggleStyle(.checkbox)
+                        Divider()
+                        if selectedARIAID == id {
+                            Button {
+                                viewModel.openTrackInstrumentUI(id, preferNativeARIA: true)
+                            } label: {
+                                Label("Open ARIA Player", systemImage: "slider.horizontal.3")
+                            }
+                            .buttonStyle(.bordered)
+                        } else {
+                            Text("Choose an instrument in the Instruments tab to enable plugin controls.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text("Room and stage positioning will be project-level controls, independent of the instrument library.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                ContentUnavailableView("No Track Selected", systemImage: "slider.horizontal.3", description: Text("Select a track to inspect its channel."))
             }
         }
     }
