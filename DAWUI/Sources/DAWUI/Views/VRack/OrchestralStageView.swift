@@ -5,6 +5,7 @@ import DAWCore
 /// controls existing track pan; L1-L5 are persisted room-send zones (audio later).
 struct OrchestralStageView: View {
     @ObservedObject var viewModel: ProjectViewModel
+    @State private var dragOrigins: [TrackID: CGPoint] = [:]
 
     private var instrumentTracks: [Track] {
         viewModel.project.tracks.filter { $0.type == .midi || $0.type == .instrument }
@@ -93,18 +94,39 @@ struct OrchestralStageView: View {
             .gesture(
                 DragGesture(minimumDistance: 3)
                     .onChanged { value in
-                        // DragGesture coordinates are local to the marker. Use
-                        // translation against the model's current marker position.
-                        let proposedX = x + value.translation.width
-                        let normalized = (proposedX - 18) / usableWidth
-                        let rawPan = normalized * 2 - 1
-                        let clamped = min(CGFloat(1), max(CGFloat(-1), rawPan))
-                        let proposedY = y + value.translation.height
-                        let rawZone = (proposedY - 35) / 43
-                        let zone = min(5, max(1, Int(rawZone.rounded()) + 1))
-                        viewModel.setTrackStagePosition(id: track.id, pan: Float(clamped), zone: zone)
+                        moveMarker(
+                            trackID: track.id,
+                            current: CGPoint(x: x, y: y),
+                            translation: value.translation,
+                            usableWidth: usableWidth
+                        )
+                    }
+                    .onEnded { _ in
+                        dragOrigins.removeValue(forKey: track.id)
                     }
             )
+    }
+
+    private func moveMarker(
+        trackID: TrackID,
+        current: CGPoint,
+        translation: CGSize,
+        usableWidth: CGFloat
+    ) {
+        // The model updates continuously while dragging, so capture the first
+        // coordinate only once; otherwise every update compounds translation.
+        if dragOrigins[trackID] == nil {
+            dragOrigins[trackID] = current
+        }
+        guard let start = dragOrigins[trackID] else { return }
+        let proposedX = start.x + translation.width
+        let normalized = (proposedX - 18) / usableWidth
+        let rawPan = normalized * 2 - 1
+        let clamped = min(CGFloat(1), max(CGFloat(-1), rawPan))
+        let proposedY = start.y + translation.height
+        let rawZone = (proposedY - 35) / 43
+        let zone = min(5, max(1, Int(rawZone.rounded()) + 1))
+        viewModel.setTrackStagePosition(id: trackID, pan: Float(clamped), zone: zone)
     }
 
     @ViewBuilder
