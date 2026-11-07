@@ -20,6 +20,8 @@ public struct MainWindowView: View {
     @State private var createClipTrackID: TrackID?
     @State private var horizontalScrollOffset: CGFloat = 0
     @State private var showVRack: Bool = false
+    @State private var composerDrawerWidth: CGFloat = 360
+    @State private var drawerDragStartWidth: CGFloat?
     
     // AI Generation Mode (Generative Fill)
     @State private var isAIGenerationMode: Bool = false
@@ -82,8 +84,21 @@ public struct MainWindowView: View {
                 // V-Rack sidebar (left side)
                 if showVRack {
                     VRackView(viewModel: viewModel)
-                        .frame(width: 220)
-                    Divider()
+                        .frame(width: composerDrawerWidth)
+                    Rectangle()
+                        .fill(Color(nsColor: .separatorColor))
+                        .frame(width: 5)
+                        .contentShape(Rectangle())
+                        .help("Drag to resize the composer drawer")
+                        .gesture(
+                            DragGesture(minimumDistance: 2)
+                                .onChanged { value in
+                                    let startingWidth = drawerDragStartWidth ?? composerDrawerWidth
+                                    if drawerDragStartWidth == nil { drawerDragStartWidth = startingWidth }
+                                    composerDrawerWidth = min(600, max(270, startingWidth + value.translation.width))
+                                }
+                                .onEnded { _ in drawerDragStartWidth = nil }
+                        )
                 }
                 
                 arrangeView
