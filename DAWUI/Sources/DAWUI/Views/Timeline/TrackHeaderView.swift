@@ -398,6 +398,11 @@ struct InstrumentBrowserSheet: View {
     @State private var selectedLibrary = "Garritan Personal Orchestra 5"
     @State private var selectedFamily = "All"
     @State private var selectedProgramID: String?
+    @State private var workspacePage = 0
+    @State private var selectedRackSlot = 0
+    // Visual rack only: ARIA's individual slot state is not exposed here yet.
+    // Do not infer a slot assignment from the track's AU instrument identity.
+
     private var trackARIA: AVAudioUnit? {
         guard let track = viewModel.project.track(withID: trackID),
               let id = track.instrumentSlot?.pluginID,
@@ -465,6 +470,29 @@ struct InstrumentBrowserSheet: View {
             }
 
             Divider()
+            HStack(spacing: 8) {
+                Button {
+                    workspacePage = 0
+                } label: {
+                    Label("Instrument Browser", systemImage: "square.grid.2x2")
+                }
+                .buttonStyle(workspacePage == 0 ? .borderedProminent : .bordered)
+                Button {
+                    workspacePage = 1
+                } label: {
+                    Label("ARIA Rack", systemImage: "slider.horizontal.3")
+                }
+                .buttonStyle(workspacePage == 1 ? .borderedProminent : .bordered)
+                Spacer()
+                if workspacePage == 1 {
+                    Text("16-slot layout preview")
+                        .font(.caption).foregroundColor(.secondary)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 9)
+            Divider()
+            if workspacePage == 0 {
             HStack {
                 Image(systemName: "magnifyingglass").foregroundColor(.secondary)
                 TextField("Search instruments and categories…", text: $searchText)
@@ -481,7 +509,10 @@ struct InstrumentBrowserSheet: View {
             .cornerRadius(8)
             .padding(.horizontal, 16)
 
-            if trackARIA != nil && !isLoading {
+            }
+            if workspacePage == 1 {
+                ariaRackPreview
+            } else if trackARIA != nil && !isLoading {
                 HStack(spacing: 0) {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("LIBRARIES").font(.caption2.weight(.bold)).foregroundColor(.secondary)
@@ -656,6 +687,78 @@ struct InstrumentBrowserSheet: View {
         }
     }
     
+    private var ariaRackPreview: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("ARIA Instrument Rack").font(.title3.weight(.semibold))
+                    Text("A visual foundation for ARIA's 16 instrument slots.")
+                        .font(.caption).foregroundColor(.secondary)
+                }
+                Spacer()
+                Label(trackARIA == nil ? "ARIA not loaded" : "ARIA connected",
+                      systemImage: trackARIA == nil ? "circle.dashed" : "checkmark.circle")
+                    .font(.caption)
+                    .foregroundColor(trackARIA == nil ? .secondary : .green)
+            }
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4),
+                      spacing: 10) {
+                ForEach(0..<16, id: \.self) { index in
+                    Button {
+                        selectedRackSlot = index
+                    } label: {
+                        VStack(alignment: .leading, spacing: 9) {
+                            HStack {
+                                Text(String(format: "%02d", index + 1))
+                                    .font(.caption.monospacedDigit().weight(.bold))
+                                Spacer()
+                                Image(systemName: "pianokeys")
+                                    .foregroundColor(.secondary)
+                            }
+                            Text("Slot not inspected")
+                                .font(.subheadline.weight(.medium))
+                                .lineLimit(1)
+                            Text("MIDI Ch \(index + 1) · proposed")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(selectedRackSlot == index
+                                    ? Color.accentColor.opacity(0.15)
+                                    : Color.primary.opacity(0.045))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 9)
+                                .strokeBorder(selectedRackSlot == index
+                                              ? Color.accentColor : Color.secondary.opacity(0.15),
+                                              lineWidth: selectedRackSlot == index ? 2 : 1)
+                        }
+                        .cornerRadius(9)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            Divider()
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "info.circle")
+                    .foregroundColor(.accentColor)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Slot \(selectedRackSlot + 1) · inspection pending")
+                        .font(.headline)
+                    Text("This is a layout preview, not a readout of ARIA's current patches. Slot loading, MIDI routing, volume, pan and effects will be connected to verified ARIA state in later steps. Existing instrument loading remains in the Browser.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Button("Browse Instruments") { workspacePage = 0 }
+                    .buttonStyle(.bordered)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
     private func discoverPrograms() {
         let banks: [(String, String, String?)] = [
             ("Garritan Personal Orchestra 5",
