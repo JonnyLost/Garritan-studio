@@ -334,6 +334,7 @@ public final class ProjectViewModel: ObservableObject {
             print("Failed to create track node: \(error)")
         }
         
+        audioEngine.updateSoloState(tracks: project.tracks)
         selectedTrackID = track.id
     }
     
@@ -447,6 +448,7 @@ public final class ProjectViewModel: ObservableObject {
         
         // Update audio engine
         audioEngine.updateTrackParameters(for: track)
+        audioEngine.updateSoloState(tracks: project.tracks)
     }
     
     public func selectTrack(_ id: TrackID?) {
@@ -504,14 +506,12 @@ public final class ProjectViewModel: ObservableObject {
         guard var track = project.track(withID: id) else { return }
         track.isMuted.toggle()
         updateTrack(track, description: track.isMuted ? "Mute Track" : "Unmute Track")
-        audioEngine.updateSoloState(tracks: project.tracks)
     }
     
     public func toggleTrackSolo(id: TrackID) {
         guard var track = project.track(withID: id) else { return }
         track.isSolo.toggle()
         updateTrack(track, description: track.isSolo ? "Solo Track" : "Unsolo Track")
-        audioEngine.updateSoloState(tracks: project.tracks)
     }
     
     public func toggleTrackArm(id: TrackID) {
