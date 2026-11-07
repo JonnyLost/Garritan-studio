@@ -35,7 +35,6 @@ public struct VRackView: View {
     @State private var instrumentSet = "Core Orchestra"
     @State private var catalog: [DrawerInstrument] = []
     @State private var isLoadingInstrument = false
-    @State private var selectedInstrumentID: String?
     @State private var pickerError: String?
 
 
@@ -236,7 +235,25 @@ public struct VRackView: View {
                     unit = loaded.audioUnit
                 }
                 try TrackGarritanLoader.apply(program, to: unit)
-                selectedInstrumentID = instrument.id
+                // Store the catalog choice and the actual ARIA state on the track.
+                if var updated = viewModel.project.track(withID: trackID) {
+                    let oldName = updated.name
+                    let oldProgram = updated.garritanProgramID
+                    let previousDefaultName = oldProgram.flatMap { id in
+                        catalog.first(where: { $0.id == id })?.name
+                    }
+                    let isDefaultName = oldName.range(
+                        of: #"^Midi \\d+$"#, options: [.regularExpression, .caseInsensitive]
+                    ) != nil
+                    if isDefaultName || (previousDefaultName != nil && oldName == previousDefaultName) {
+                        updated.name = instrument.name
+                    }
+                    updated.garritanProgramID = instrument.id
+                    updated.instrumentSlot?.stateData = try PropertyListSerialization.data(
+                        fromPropertyList: unit.auAudioUnit.fullState ?? [:],
+                        format: .binary, options: 0)
+                    viewModel.updateTrack(updated, description: "Assign Garritan Instrument")
+                }
                 pickerError = nil
                 print("[Instrument Picker] Loaded \\(instrument.name) on track \\(trackID)")
             } catch {
@@ -332,7 +349,7 @@ public struct VRackView: View {
                                     }
                                     .padding(.horizontal, 10)
                                     .padding(.vertical, 5)
-                                    .background(selectedInstrumentID == instrument.id ? Color.accentColor.opacity(0.15) : Color.clear)
+                                    .background(viewModel.selectedTrackID.flatMap { viewModel.project.track(withID: $0)?.garritanProgramID } == instrument.id ? Color.accentColor.opacity(0.15) : Color.clear)
                                 }
                                 .buttonStyle(.plain)
                             }
