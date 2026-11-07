@@ -396,6 +396,8 @@ struct InstrumentBrowserSheet: View {
     @State private var loadError: String?
     @State private var programs: [TrackGarritanProgram] = []
     @State private var selectedLibrary = "Garritan Personal Orchestra 5"
+    @State private var selectedFamily = "All"
+    @State private var selectedProgramID: String?
     private var trackARIA: AVAudioUnit? {
         guard let track = viewModel.project.track(withID: trackID),
               let id = track.instrumentSlot?.pluginID,
@@ -405,69 +407,178 @@ struct InstrumentBrowserSheet: View {
               case .auInstrument(let unit, _) = instrument else { return nil }
         return unit
     }
+    private var libraryPrograms: [TrackGarritanProgram] {
+        programs.filter { $0.library == selectedLibrary }
+    }
+    private func family(of program: TrackGarritanProgram) -> String {
+        let components = program.programName.split(separator: "/").map(String.init)
+        let first = components.first == "Standard" ? 1 : 0
+        return components.count > first + 1 ? components[first] : "Other"
+    }
+    private var families: [String] {
+        ["All"] + Array(Set(libraryPrograms.map { family(of: $0) })).sorted()
+    }
     private var matchingPrograms: [TrackGarritanProgram] {
-        programs.filter { $0.library == selectedLibrary &&
+        libraryPrograms.filter {
+            (selectedFamily == "All" || family(of: $0) == selectedFamily) &&
             (searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(searchText) ||
-             $0.programName.localizedCaseInsensitiveContains(searchText)) }
+             $0.programName.localizedCaseInsensitiveContains(searchText))
+        }
+    }
+    private var selectedProgram: TrackGarritanProgram? {
+        matchingPrograms.first { $0.id == selectedProgramID }
     }
     
     var body: some View {
         VStack(spacing: 0) {
-            // Header
-            HStack {
-                Text("Select Instrument")
-                    .font(.headline)
+            HStack(spacing: 12) {
+                Image(systemName: "pianokeys")
+                    .font(.title2)
+                    .foregroundColor(.accentColor)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Garritan Instrument Workspace")
+                        .font(.title3.weight(.semibold))
+                    Text("Browse libraries, explore families, and load a patch into your track.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
                 Spacer()
-                Button("Cancel") { isPresented = false }
+                Text(viewModel.project.track(withID: trackID)?.name ?? "MIDI Track")
+                    .font(.caption.weight(.medium))
+                    .foregroundColor(.secondary)
+                Button("Done") { isPresented = false }
             }
-            .padding()
-            
-            // Show error if present
+            .padding(16)
+
             if let error = loadError {
                 HStack {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundColor(.red)
-                    Text(error)
-                        .foregroundColor(.red)
-                        .font(.caption)
+                    Text(error).font(.caption).foregroundColor(.red)
                     Spacer()
                     Button("Dismiss") { loadError = nil }
-                        .font(.caption)
                 }
-                .padding(.horizontal)
-                .padding(.vertical, 4)
+                .padding(10)
                 .background(Color.red.opacity(0.1))
+                .cornerRadius(8)
+                .padding(.horizontal, 16)
             }
-            
+
             Divider()
-            
-            // Search
             HStack {
-                Image(systemName: "magnifyingglass")
-                    .foregroundColor(.secondary)
-                TextField("Search instruments...", text: $searchText)
+                Image(systemName: "magnifyingglass").foregroundColor(.secondary)
+                TextField("Search instruments and categories…", text: $searchText)
                     .textFieldStyle(.plain)
                     .focused($searchHasFocus)
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-            
-            Divider()
-            
-            if trackARIA != nil && !isLoading {
-                Picker("Library", selection: $selectedLibrary) {
-                    Text("GPO5").tag("Garritan Personal Orchestra 5")
-                    Text("Instant Orchestra").tag("Garritan Instant Orchestra")
-                }.padding(.horizontal)
-                List(matchingPrograms, id: \.id) { program in
-                    Button {
-                        applyProgram(program)
-                    } label: {
-                        VStack(alignment: .leading) {
-                            Text(program.name)
-                            Text(program.programName).font(.caption).foregroundColor(.secondary)
-                        }
+                if !searchText.isEmpty {
+                    Button { searchText = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
                     }.buttonStyle(.plain)
+                }
+            }
+            .padding(12)
+            .background(Color.primary.opacity(0.055))
+            .cornerRadius(8)
+            .padding(.horizontal, 16)
+
+            if trackARIA != nil && !isLoading {
+                HStack(spacing: 0) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("LIBRARIES").font(.caption2.weight(.bold)).foregroundColor(.secondary)
+                        ForEach(["Garritan Personal Orchestra 5", "Garritan Instant Orchestra"], id: \.self) { library in
+                            Button {
+                                selectedLibrary = library
+                                selectedFamily = "All"
+                                selectedProgramID = nil
+                            } label: {
+                                HStack {
+                                    Image(systemName: "books.vertical")
+                                    Text(library == "Garritan Personal Orchestra 5" ? "Personal Orchestra 5" : "Instant Orchestra")
+                                    Spacer()
+                                }
+                                .padding(8)
+                                .background(selectedLibrary == library ? Color.accentColor.opacity(0.18) : Color.clear)
+                                .cornerRadius(7)
+                            }.buttonStyle(.plain)
+                        }
+                        Divider()
+                        Text("FAMILIES").font(.caption2.weight(.bold)).foregroundColor(.secondary)
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 2) {
+                                ForEach(families, id: \.self) { family in
+                                    Button {
+                                        selectedFamily = family
+                                        selectedProgramID = nil
+                                    } label: {
+                                        HStack {
+                                            Text(family).lineLimit(1)
+                                            Spacer()
+                                        }
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 6)
+                                        .background(selectedFamily == family ? Color.accentColor.opacity(0.18) : Color.clear)
+                                        .cornerRadius(6)
+                                    }.buttonStyle(.plain)
+                                }
+                            }
+                        }
+                    }
+                    .padding(14)
+                    .frame(width: 220, maxHeight: .infinity, alignment: .topLeading)
+                    .background(Color.primary.opacity(0.035))
+                    Divider()
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text(selectedFamily == "All" ? "All Instruments" : selectedFamily)
+                                .font(.headline)
+                            Spacer()
+                            Text("\(matchingPrograms.count) patches")
+                                .font(.caption).foregroundColor(.secondary)
+                        }.padding(.horizontal, 12).padding(.top, 12)
+                        List(matchingPrograms, id: \.id, selection: $selectedProgramID) { program in
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(program.name).font(.system(size: 13, weight: .medium))
+                                Text(program.programName).font(.caption2)
+                                    .foregroundColor(.secondary).lineLimit(1)
+                            }
+                            .tag(program.id)
+                        }
+                        .listStyle(.inset)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    Divider()
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("INSTRUMENT DETAILS")
+                            .font(.caption2.weight(.bold)).foregroundColor(.secondary)
+                        if let program = selectedProgram {
+                            Image(systemName: "music.note.list")
+                                .font(.system(size: 40)).foregroundColor(.accentColor)
+                            Text(program.name).font(.title3.weight(.semibold))
+                            Text(program.library).font(.caption).foregroundColor(.secondary)
+                            Divider()
+                            Text("Bank path").font(.caption.weight(.medium))
+                            Text(program.programName)
+                                .font(.caption).foregroundColor(.secondary)
+                                .textSelection(.enabled)
+                            Spacer()
+                            Button {
+                                applyProgram(program)
+                            } label: {
+                                Label("Load Instrument", systemImage: "arrow.down.to.line")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                        } else {
+                            Spacer()
+                            Image(systemName: "music.note")
+                                .font(.largeTitle).foregroundColor(.secondary)
+                            Text("Select a patch to see its details")
+                                .font(.callout).foregroundColor(.secondary)
+                            Spacer()
+                        }
+                    }
+                    .padding(16)
+                    .frame(width: 235, maxHeight: .infinity, alignment: .topLeading)
                 }
             } else if isLoading {
                 VStack {
@@ -530,7 +641,7 @@ struct InstrumentBrowserSheet: View {
                 }
             }
         }
-        .frame(width: 400, height: 500)
+        .frame(width: 920, height: 610)
         .onAppear {
             if trackARIA != nil { discoverPrograms() }
             else { scanForPlugins() }
