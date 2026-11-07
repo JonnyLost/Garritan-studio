@@ -41,7 +41,7 @@ struct OrchestralStageView: View {
 
                 selectedTrackControls
 
-                Text("Zones are saved with the project. Shared concert-hall reverb will be connected separately.")
+                Text("Zones control the shared concert-hall reverb send.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
             .padding(12)
@@ -102,7 +102,7 @@ struct OrchestralStageView: View {
                         }
                     }
                     Divider()
-                    Text("All instruments share the same stage. Reverb sends will be connected to the hall engine later.")
+                    Text("All instruments share one concert-hall reverb. Moving toward L5 increases the wet send; the conductor stays dry.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 0)
