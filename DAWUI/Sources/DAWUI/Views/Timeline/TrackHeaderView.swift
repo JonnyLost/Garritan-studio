@@ -399,12 +399,14 @@ private final class ARIARackXMLReader: NSObject, XMLParserDelegate {
            elementName.localizedCaseInsensitiveContains("slot") {
             print("[ARIA Rack] XML element: \(elementName); attributes: \(attributes)")
         }
-        guard elementName == "InstrumentSlot" else { return }
+        guard elementName == "Slot" else { return }
         let slotNumber = Int(attributes["id"] ?? "") ?? -1
         guard (0..<16).contains(slotNumber) else { return }
         let patch = attributes["name"] ?? ""
         guard !patch.isEmpty else { return }
-        let channel = attributes["midiChannel"] ?? attributes["channel"]
+        let channel = (attributes["channel"] ?? attributes["midiChannel"])
+            .flatMap { Int($0) }
+            .map { String($0 + 1) }
         slots.append(ARIARackSlot(number: slotNumber, patch: patch, midiChannel: channel))
     }
 }
