@@ -309,6 +309,7 @@ public struct VRackView: View {
                                 set: { viewModel.setTrackVolume(id: id, volume: Float($0)) }
                             ), in: 0...1)
                         }
+                        ChannelStereoMeter(engine: viewModel.audioEngine, trackID: id)
                         VStack(alignment: .leading, spacing: 6) {
                             Text("MIDI Output")
                                 .font(.subheadline)
@@ -743,5 +744,44 @@ struct RackPluginBrowserSheet: View {
                 }
             }
         }
+    }
+}
+
+
+// MARK: - Channel Meter
+
+/// Read-only stereo peaks measured after the track's gain, pan and mute stages.
+private struct ChannelStereoMeter: View {
+    @ObservedObject var engine: AudioEngine
+    let trackID: TrackID
+
+    var body: some View {
+        let levels = engine.trackPeakLevels[trackID] ?? [0, 0]
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text("Stereo Level")
+                Spacer()
+                Text("L / R")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption)
+            ForEach(0..<2, id: \.self) { channel in
+                HStack(spacing: 7) {
+                    Text(channel == 0 ? "L" : "R")
+                        .font(.caption2.monospaced())
+                        .frame(width: 12)
+                    GeometryReader { geometry in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.secondary.opacity(0.15))
+                            Capsule()
+                                .fill(levels[channel] > 0.9 ? Color.orange : Color.green)
+                                .frame(width: geometry.size.width * CGFloat(levels[channel]))
+                        }
+                    }
+                    .frame(height: 7)
+                }
+            }
+        }
+        .accessibilityLabel("Stereo track output levels")
     }
 }
