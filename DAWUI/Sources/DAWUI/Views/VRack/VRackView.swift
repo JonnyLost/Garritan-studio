@@ -36,7 +36,6 @@ public struct VRackView: View {
     @State private var catalog: [DrawerInstrument] = []
     @State private var isLoadingInstrument = false
     @State private var pickerError: String?
-    @State private var showNativeARIAWarning = false
 
 
     public init(viewModel: ProjectViewModel) {
@@ -88,16 +87,6 @@ public struct VRackView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Color(nsColor: .controlBackgroundColor))
-        .alert("Open Original ARIA Player?", isPresented: $showNativeARIAWarning) {
-            Button("Cancel", role: .cancel) {}
-            Button("Open Anyway") {
-                if let id = selectedARIAID {
-                    viewModel.openTrackInstrumentUI(id, preferNativeARIA: true)
-                }
-            }
-        } message: {
-            Text("ARIA's original editor has crashed Studio on this Mac. Save your project before trying it. Generic Plugin Controls are safer.")
-        }
         .sheet(isPresented: $showPluginBrowser) {
             if let rackID = selectedRackInstrumentID {
                 RackPluginBrowserSheet(
@@ -313,7 +302,7 @@ public struct VRackView: View {
                             viewModel.openTrackInstrumentUI(trackID)
                         }
                         Button("Open Original ARIA Player…") {
-                            showNativeARIAWarning = true
+                            viewModel.openTrackInstrumentUI(trackID, preferNativeARIA: true)
                         }
                     } label: {
                         Image(systemName: "slider.horizontal.3")
