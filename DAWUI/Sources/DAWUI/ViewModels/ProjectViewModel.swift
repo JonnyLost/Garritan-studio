@@ -36,8 +36,8 @@ public final class ProjectViewModel: ObservableObject {
     // UI state
     @Published public var showMixer: Bool = false
     @Published public var showInspector: Bool = false
-    @Published public var showPianoRoll: Bool = true
-    @Published public var showAIAssistant: Bool = true
+    @Published public var showPianoRoll: Bool = false
+    @Published public var showAIAssistant: Bool = false
     @Published public var editingClipID: ClipID?
     @Published public var editingTrackID: TrackID?
 
