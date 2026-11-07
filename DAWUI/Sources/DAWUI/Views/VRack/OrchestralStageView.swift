@@ -243,7 +243,7 @@ struct OrchestralStageView: View {
                     .font(.system(size: 23 * scale, weight: .medium))
                     .foregroundStyle(Color.white.opacity(0.88))
             }
-            Text("CONDUCTOR")
+            Text("CONDUCTOR · DRY")
                 .font(.system(size: 12 * scale, weight: .semibold))
                 .tracking(1.2 * scale)
                 .foregroundStyle(.secondary)
@@ -322,11 +322,10 @@ struct OrchestralStageView: View {
     }
 
     private func curvedMarker(_ track: Track, width: CGFloat) -> some View {
-        let point = stagePoint(
-            pan: CGFloat(track.pan),
-            zone: track.stageReverbZone ?? 1,
-            width: width
-        )
+        let isConductor = track.stageReverbZone == 0
+        let point = isConductor
+            ? CGPoint(x: width / 2, y: 477 * stageScale(width))
+            : stagePoint(pan: CGFloat(track.pan), zone: track.stageReverbZone ?? 1, width: width)
         return Circle()
             .fill(viewModel.selectedTrackID == track.id ? Color.accentColor : Color.orange)
             .frame(width: 25, height: 25)
@@ -337,7 +336,7 @@ struct OrchestralStageView: View {
                     .foregroundStyle(.white)
             )
             .position(point)
-            .help("\(track.name) — L\(track.stageReverbZone ?? 1)")
+            .help(track.stageReverbZone == 0 ? "\(track.name) — Conductor (center, dry)" : "\(track.name) — L\(track.stageReverbZone ?? 1)")
             .onTapGesture { viewModel.selectTrack(track.id) }
             .gesture(
                 DragGesture(minimumDistance: 3)
@@ -367,8 +366,13 @@ struct OrchestralStageView: View {
         let angle = atan2(dx, dy)
         let pan = Float(min(CGFloat(1), max(CGFloat(-1), angle / (.pi / 2))))
         let radius = hypot(dx, dy)
-        let zone = min(5, max(1, Int(((radius - 105) / 83).rounded()) + 1))
-        viewModel.setTrackStagePosition(id: trackID, pan: pan, zone: zone)
+        // Drop inside the innermost string arc to snap to the conductor.
+        if radius < 72 {
+            viewModel.setTrackStagePosition(id: trackID, pan: 0, zone: 0)
+        } else {
+            let zone = min(5, max(1, Int(((radius - 105) / 83).rounded()) + 1))
+            viewModel.setTrackStagePosition(id: trackID, pan: pan, zone: zone)
+        }
     }
 
     private func stageCanvas(width: CGFloat) -> some View {
@@ -408,7 +412,7 @@ struct OrchestralStageView: View {
     private func marker(_ track: Track, width: CGFloat) -> some View {
         let usableWidth = max(CGFloat(1), width - 36)
         let x = CGFloat(18) + CGFloat((track.pan + 1) / 2) * usableWidth
-        let y = CGFloat(35 + ((track.stageReverbZone ?? 1) - 1) * 43)
+        let y = CGFloat(35 + (max(1, track.stageReverbZone ?? 1) - 1) * 43)
         let selected = viewModel.selectedTrackID == track.id
 
         return Circle()
@@ -471,16 +475,18 @@ struct OrchestralStageView: View {
             HStack {
                 Text("Pan")
                 Slider(value: panBinding(for: id), in: -1...1)
+                    .disabled(track.stageReverbZone == 0)
                 Text("\(Int(track.pan * 100))")
                     .monospacedDigit()
                     .frame(width: 36)
             }
             Picker("Reverb zone", selection: zoneBinding(for: id)) {
+                Text("Conductor · Dry").tag(0)
                 ForEach(1...5, id: \.self) { zone in
                     Text("L\(zone)").tag(zone)
                 }
             }
-            Text("L1 = least reverb · L5 = most reverb")
+            Text("Conductor = center / dry · L1–L5 = increasing reverb")
                 .font(.caption2).foregroundStyle(.secondary)
         } else {
             Text("Select a MIDI or instrument track to edit its stage position.")
