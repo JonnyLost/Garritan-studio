@@ -524,7 +524,8 @@ struct InstrumentBrowserSheet: View {
                         }
                     }
                     .padding(14)
-                    .frame(width: 220, maxHeight: .infinity, alignment: .topLeading)
+                    .frame(width: 220)
+                    .frame(maxHeight: .infinity, alignment: .topLeading)
                     .background(Color.primary.opacity(0.035))
                     Divider()
                     VStack(alignment: .leading, spacing: 8) {
@@ -578,7 +579,8 @@ struct InstrumentBrowserSheet: View {
                         }
                     }
                     .padding(16)
-                    .frame(width: 235, maxHeight: .infinity, alignment: .topLeading)
+                    .frame(width: 235)
+                    .frame(maxHeight: .infinity, alignment: .topLeading)
                 }
             } else if isLoading {
                 VStack {
