@@ -1289,6 +1289,23 @@ public final class ProjectViewModel: ObservableObject {
         PluginWindowManager.shared.openPluginWindow(for: loadedPlugin, trackName: instrument.name, preferNativeARIA: preferNativeARIA)
     }
     
+    /// Open the plugin instance already attached to the selected track.
+    /// Never instantiate a second ARIA Player just to display its controls.
+    public func openTrackInstrumentUI(_ trackID: TrackID, preferNativeARIA: Bool = false) {
+        guard let track = project.track(withID: trackID),
+              let pluginID = track.instrumentSlot?.pluginID,
+              pluginID.name.localizedCaseInsensitiveContains("aria"),
+              pluginID.manufacturer.localizedCaseInsensitiveContains("garr"),
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .auInstrument(_, let loadedID) = instrument,
+              let loadedPlugin = pluginHost.loadedPlugins[loadedID] else {
+            print("[Track ARIA] Cannot open controls: no loaded ARIA instance on track")
+            return
+        }
+        PluginWindowManager.shared.openPluginWindow(
+            for: loadedPlugin, trackName: track.name, preferNativeARIA: preferNativeARIA)
+    }
+
     // MARK: - Plugin State Management
     
     /// Save all loaded plugin states to project before saving
