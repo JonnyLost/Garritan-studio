@@ -1375,7 +1375,7 @@ private enum ARIARackSlotLoader {
         try GarritanNativePreset.generateNativePreset(template, temporary, program.programName,
             templateName: sourceName, bankID: instant ? "2007" : "2013")
         let data = try Data(contentsOf: temporary)
-        guard let preset = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+        guard let preset = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
               let blob = preset["AriaData"] as? Data else { throw Failure.invalidState }
         let candidate = try tags(decode(blob))
         guard candidate.count == 1 else { throw Failure.missingTemplateSlot }
