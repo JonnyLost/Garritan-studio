@@ -175,7 +175,8 @@ struct ClipView: View {
         .overlay(alignment: .leading) {
             if isMIDIClip {
                 Rectangle()
-                    .fill(Color.white.opacity(0.16))
+                    // The region border is the visible handle; keep a clear hit target.
+                    .fill(Color.clear)
                     .frame(width: 9)
                     .contentShape(Rectangle())
                     .onHover { hovering in
@@ -199,7 +200,8 @@ struct ClipView: View {
         .overlay(alignment: .trailing) {
             if isMIDIClip {
                 Rectangle()
-                    .fill(Color.white.opacity(0.16))
+                    // The region border is the visible handle; keep a clear hit target.
+                    .fill(Color.clear)
                     .frame(width: 9)
                     .contentShape(Rectangle())
                     .onHover { hovering in
