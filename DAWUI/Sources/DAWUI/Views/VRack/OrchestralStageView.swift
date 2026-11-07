@@ -41,7 +41,7 @@ struct OrchestralStageView: View {
 
                 selectedTrackControls
 
-                Text("Zones control the shared concert-hall reverb send.")
+                Text("Zones are saved with the project. Hall audio processing is temporarily disabled.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
             .padding(12)
@@ -102,7 +102,7 @@ struct OrchestralStageView: View {
                         }
                     }
                     Divider()
-                    Text("All instruments share one concert-hall reverb. Moving toward L5 increases the wet send; the conductor stays dry.")
+                    Text("All instruments share the same stage. Reverb zones are saved but audio processing is temporarily disabled while we investigate startup.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 0)
