@@ -1338,7 +1338,11 @@ private enum ARIARackSlotLoader {
         return Data(bytes)
     }
     private static func tags(_ xml: String) throws -> [String] {
-        let regex = try NSRegularExpression(pattern: #"<Slot\b[^>]*\/>"#)
+        // ARIA uses both self-closing <Slot ... /> and expanded
+        // <Slot ...> ... </Slot> forms. Preserve the complete element,
+        // including any nested instrument settings.
+        let regex = try NSRegularExpression(
+            pattern: #"<Slot\b[^>]*(?:/>|>[\s\S]*?</Slot>)"#)
         return regex.matches(in: xml, range: NSRange(xml.startIndex..<xml.endIndex, in: xml))
             .compactMap { Range($0.range, in: xml).map { String(xml[$0]) } }
     }
