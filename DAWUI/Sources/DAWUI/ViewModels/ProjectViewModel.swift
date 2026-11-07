@@ -496,6 +496,14 @@ public final class ProjectViewModel: ObservableObject {
         playbackEngine.updateTrackVolume(id, volume: volume)
     }
     
+    /// nil = All MIDI channels; otherwise filter to the selected zero-based channel.
+    public func setTrackMIDIOutputChannel(id: TrackID, channel: UInt8?) {
+        guard channel == nil || channel! < 16,
+              var track = project.track(withID: id) else { return }
+        track.midiOutputChannel = channel
+        updateTrack(track, description: "Change MIDI Output Channel")
+    }
+
     public func setTrackPan(id: TrackID, pan: Float) {
         guard var track = project.track(withID: id) else { return }
         track.pan = pan
