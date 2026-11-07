@@ -329,7 +329,7 @@ public struct VRackView: View {
                     .help("Instrument library")
                     Picker("Family", selection: $familyFilter) {
                         Text("All Families").tag("All")
-                        ForEach(scoreFamilies, id: \\.self) { family in
+                        ForEach(scoreFamilies, id: \.self) { family in
                             Text(family).tag(family)
                         }
                     }
