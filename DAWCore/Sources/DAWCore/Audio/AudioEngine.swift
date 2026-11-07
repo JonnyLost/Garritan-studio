@@ -44,6 +44,12 @@ public final class AudioEngine: ObservableObject {
     public let engine: AVAudioEngine
     private var trackNodes: [TrackID: TrackAudioNode] = [:]
     private var masterMixer: AVAudioMixerNode
+    
+    // Stage reverb experiment, step 1: create and attach the processor only.
+    // No input/output connections or track sends are installed yet.
+    // Keeping the established dry signal path untouched makes startup
+    // behavior independently testable before introducing audio routing.
+    private let concertHallReverb = AVAudioUnitReverb()
 
     /// Post-fader stereo peak levels (linear 0...1), refreshed approximately 20 times/sec.
     @Published public private(set) var trackPeakLevels: [TrackID: [Float]] = [:]
@@ -83,6 +89,11 @@ public final class AudioEngine: ObservableObject {
     public init() {
         self.engine = AVAudioEngine()
         self.masterMixer = engine.mainMixerNode
+        
+        concertHallReverb.loadFactoryPreset(.mediumHall)
+        concertHallReverb.wetDryMix = 100
+        engine.attach(concertHallReverb)
+        print("[ConcertHall] Reverb processor attached (unconnected; dry routing unchanged)")
         
         // Get sample rate from output
         sampleRate = engine.outputNode.outputFormat(forBus: 0).sampleRate
