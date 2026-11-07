@@ -60,6 +60,7 @@ public struct TrackPianoRollView: View {
     
     // Note audition during drag
     @State private var lastAuditionedPitch: Int? = nil
+    @State private var pressedCanvasPitch: Int? = nil
     
     // Modifier key states
     @State private var isCopyingNotes: Bool = false
@@ -963,9 +964,21 @@ public struct TrackPianoRollView: View {
             DragGesture(minimumDistance: 0)
                 .onChanged { value in
                     let pitch = pitchFromY(value.location.y)
-                    if pitch >= 0 && pitch <= 127 {
-                        viewModel.playNotePreview(pitch: UInt8(pitch))
+                    let validPitch = (0...127).contains(pitch) ? pitch : nil
+                    guard validPitch != pressedCanvasPitch else { return }
+                    if let previous = pressedCanvasPitch {
+                        viewModel.stopNotePreview(pitch: UInt8(previous))
                     }
+                    pressedCanvasPitch = validPitch
+                    if let current = validPitch {
+                        viewModel.playNotePreview(pitch: UInt8(current))
+                    }
+                }
+                .onEnded { _ in
+                    if let pitch = pressedCanvasPitch {
+                        viewModel.stopNotePreview(pitch: UInt8(pitch))
+                    }
+                    pressedCanvasPitch = nil
                 }
         )
     }
