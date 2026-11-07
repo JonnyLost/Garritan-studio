@@ -93,7 +93,16 @@ public final class AudioEngine: ObservableObject {
         concertHallReverb.loadFactoryPreset(.mediumHall)
         concertHallReverb.wetDryMix = 100
         engine.attach(concertHallReverb)
-        print("[ConcertHall] Reverb processor attached (unconnected; dry routing unchanged)")
+
+        // Stage reverb experiment, step 2: connect only the wet output.
+        // No track or send is connected to the reverb input, so existing
+        // instruments continue using their original dry signal path.
+        let hallOutputFormat = AVAudioFormat(
+            standardFormatWithSampleRate: sampleRate,
+            channels: 2
+        )!
+        engine.connect(concertHallReverb, to: masterMixer, format: hallOutputFormat)
+        print("[ConcertHall] Reverb output connected to master; input remains disconnected")
         
         // Get sample rate from output
         sampleRate = engine.outputNode.outputFormat(forBus: 0).sampleRate
