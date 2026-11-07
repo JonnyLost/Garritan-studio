@@ -1337,6 +1337,24 @@ public final class ProjectViewModel: ObservableObject {
         // First scan for plugins so we have them available
         await pluginHost.scanForPlugins()
         
+        // Restore track-level Garritan instruments as well as V-Rack instruments.
+        for track in project.tracks where track.garritanProgramID != nil {
+            guard let slot = track.instrumentSlot, let pluginID = slot.pluginID else { continue }
+            do {
+                let format = AVAudioFormat(standardFormatWithSampleRate: audioEngine.sampleRate, channels: 2)!
+                let loaded = try await pluginHost.loadPlugin(identifier: pluginID, format: format)
+                try await playbackEngine.loadInstrument(loaded.audioUnit, for: track.id, pluginID: loaded.id)
+                if let data = slot.stateData,
+                   let state = try PropertyListSerialization.propertyList(
+                       from: data, options: [], format: nil) as? [String: Any] {
+                    loaded.audioUnit.auAudioUnit.fullState = state
+                }
+                print("[PluginState] Restored Garritan track: \\(track.name)")
+            } catch {
+                print("[PluginState] Could not restore Garritan track \\(track.name): \\(error)")
+            }
+        }
+
         // Restore rack instrument plugin states
         for instrument in project.vRack.instruments {
             guard let pluginID = instrument.pluginSlot.pluginID else { 
