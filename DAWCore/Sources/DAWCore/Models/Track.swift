@@ -54,6 +54,8 @@ public struct Track: Identifiable, Codable, Sendable {
     
     // Instrument (for MIDI/instrument tracks)
     public var instrumentSlot: PluginSlot?
+    /// Selected Garritan catalog entry (library:path), persisted per track.
+    public var garritanProgramID: String?
     
     // MIDI Output Routing (for MIDI tracks)
     // Determines where MIDI is sent: track instrument or V-Rack
@@ -89,6 +91,7 @@ public struct Track: Identifiable, Codable, Sendable {
         self.outputBus = nil
         self.clips = []
         self.instrumentSlot = nil
+        self.garritanProgramID = nil
         self.midiOutput = nil  // Default: use track instrument
         self.pluginSlots = []
         self.automationLanes = [
