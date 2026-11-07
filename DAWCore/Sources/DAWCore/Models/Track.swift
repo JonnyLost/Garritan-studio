@@ -63,6 +63,10 @@ public struct Track: Identifiable, Codable, Sendable {
     /// nil = All (preserve source MIDI channel); 0...15 = only that channel.
     /// Optional for backward-compatible decoding of existing projects.
     public var midiOutputChannel: UInt8?
+    /// Optional ARIA instrument mixer level (MIDI CC7, 0...127).
+    public var instrumentLevelCC7: UInt8?
+    /// Zero-based MIDI channel used by the instrument-level control.
+    public var instrumentLevelChannel: UInt8?
     
     // Effect Plugins (insert effects)
     public var pluginSlots: [PluginSlot]
@@ -97,6 +101,8 @@ public struct Track: Identifiable, Codable, Sendable {
         self.garritanProgramID = nil
         self.midiOutput = nil  // Default: use track instrument
         self.midiOutputChannel = nil  // All channels
+        self.instrumentLevelCC7 = nil  // Do not override ARIA's existing level until edited
+        self.instrumentLevelChannel = nil  // Channel 1
         self.pluginSlots = []
         self.automationLanes = [
             AutomationLane(parameter: .volume),
