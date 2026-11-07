@@ -1164,9 +1164,6 @@ public final class PlaybackEngine: ObservableObject {
     /// Process a single MIDI event with sample-accurate timing
     /// Called from midiProcessingQueue - NOT the audio thread
     private func processEventSampleAccurate(_ scheduled: ScheduledEvent, sampleOffset: AUEventSampleTime) {
-        // All preserves each event's channel. A selected channel filters events.
-        if let selectedChannel = project?.track(withID: scheduled.trackID)?.midiOutputChannel,
-           scheduled.event.channel != selectedChannel { return }
         // Determine the instrument and channel based on midiOutput routing
         let (instrument, channel): (TrackInstrument?, UInt8) = {
             switch scheduled.midiOutput {
