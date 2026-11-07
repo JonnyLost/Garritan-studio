@@ -26,6 +26,7 @@ private enum ComposerDrawerMode: String, CaseIterable, Identifiable {
 /// Sidebar panel for managing V-Rack instruments
 public struct VRackView: View {
     @ObservedObject var viewModel: ProjectViewModel
+    var openStageWorkspace: (() -> Void)?
     @State private var showPluginBrowser = false
     @State private var selectedRackInstrumentID: UUID?
     @State private var mode: ComposerDrawerMode = .instruments
@@ -38,8 +39,9 @@ public struct VRackView: View {
     @State private var pickerError: String?
 
 
-    public init(viewModel: ProjectViewModel) {
+    public init(viewModel: ProjectViewModel, openStageWorkspace: (() -> Void)? = nil) {
         self.viewModel = viewModel
+        self.openStageWorkspace = openStageWorkspace
     }
 
     public var body: some View {
@@ -48,6 +50,7 @@ public struct VRackView: View {
                 ForEach(ComposerDrawerMode.allCases) { option in
                     Button {
                         mode = option
+                        if option == .stage { openStageWorkspace?() }
                     } label: {
                         VStack(spacing: 5) {
                             Image(systemName: option.symbol)
