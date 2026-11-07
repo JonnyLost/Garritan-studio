@@ -1,6 +1,25 @@
 import SwiftUI
 import DAWCore
 
+// MARK: - Multifunction Composer Drawer
+
+private enum ComposerDrawerMode: String, CaseIterable, Identifiable {
+    case instruments = "Instruments"
+    case channel = "Channel"
+    case stage = "Stage"
+    case articulations = "Articulations"
+
+    var id: String { rawValue }
+    var symbol: String {
+        switch self {
+        case .instruments: return "music.note.list"
+        case .channel: return "slider.horizontal.3"
+        case .stage: return "circle.grid.cross"
+        case .articulations: return "music.quarternote.3"
+        }
+    }
+}
+
 // MARK: - V-Rack Sidebar View
 
 /// Sidebar panel for managing V-Rack instruments
@@ -8,17 +27,92 @@ public struct VRackView: View {
     @ObservedObject var viewModel: ProjectViewModel
     @State private var showPluginBrowser = false
     @State private var selectedRackInstrumentID: UUID?
-    
+    @State private var mode: ComposerDrawerMode = .instruments
+
     public init(viewModel: ProjectViewModel) {
         self.viewModel = viewModel
     }
-    
+
     public var body: some View {
+        HStack(spacing: 0) {
+            VStack(spacing: 4) {
+                ForEach(ComposerDrawerMode.allCases) { option in
+                    Button {
+                        mode = option
+                    } label: {
+                        VStack(spacing: 5) {
+                            Image(systemName: option.symbol)
+                                .font(.system(size: 17))
+                            Text(option.rawValue)
+                                .font(.system(size: 9))
+                        }
+                        .foregroundColor(mode == option ? .white : .secondary)
+                        .frame(width: 68, height: 58)
+                        .background(mode == option ? Color.accentColor : Color.clear)
+                        .cornerRadius(9)
+                    }
+                    .buttonStyle(.plain)
+                    .help(option.rawValue)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 5)
+            .padding(.top, 8)
+            .frame(width: 78)
+            .background(Color(nsColor: .windowBackgroundColor))
+
+            Divider()
+
+            Group {
+                switch mode {
+                case .instruments:
+                    instrumentsPanel
+                case .channel:
+                    upcomingPanel(title: "Channel", symbol: "slider.horizontal.3", detail: "Selected-track controls will appear here.")
+                case .stage:
+                    upcomingPanel(title: "Stage", symbol: "circle.grid.cross", detail: "Drag instruments to position them on the stage.")
+                case .articulations:
+                    upcomingPanel(title: "Articulations", symbol: "music.quarternote.3", detail: "Playing techniques and expressions for the selected track.")
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .background(Color(nsColor: .controlBackgroundColor))
+        .sheet(isPresented: $showPluginBrowser) {
+            if let rackID = selectedRackInstrumentID {
+                RackPluginBrowserSheet(
+                    viewModel: viewModel,
+                    rackInstrumentID: rackID,
+                    isPresented: $showPluginBrowser
+                )
+            }
+        }
+    }
+
+    private func upcomingPanel(title: String, symbol: String, detail: String) -> some View {
+        VStack(spacing: 14) {
+            Image(systemName: symbol)
+                .font(.system(size: 32))
+                .foregroundColor(.secondary)
+            Text(title).font(.headline)
+            Text(detail)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var instrumentsPanel: some View {
         VStack(spacing: 0) {
-            // Header
             HStack {
-                Text("Instruments")
-                    .font(.headline)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Instruments").font(.headline)
+                    Text("Shared instrument rack")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
                 Spacer()
                 Button(action: { viewModel.addRackInstrument() }) {
                     Image(systemName: "plus")
@@ -27,27 +121,20 @@ public struct VRackView: View {
                 .help("Add Rack Instrument")
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(Color(nsColor: .windowBackgroundColor))
-            
+            .padding(.vertical, 10)
             Divider()
-            
-            // Instrument List
             if viewModel.project.vRack.instruments.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "pianokeys")
                         .font(.system(size: 32))
                         .foregroundColor(.secondary)
-                    Text("No Instruments")
+                    Text("No Rack Instruments")
                         .font(.caption)
-                        .foregroundColor(.secondary)
-                    Text("Click + to add a multi-timbral instrument")
+                    Text("Click + to load a shared instrument.")
                         .font(.caption2)
                         .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding()
             } else {
                 ScrollView {
                     LazyVStack(spacing: 1) {
@@ -66,17 +153,6 @@ public struct VRackView: View {
                     }
                     .padding(.vertical, 4)
                 }
-            }
-        }
-        .frame(minWidth: 200)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .sheet(isPresented: $showPluginBrowser) {
-            if let rackID = selectedRackInstrumentID {
-                RackPluginBrowserSheet(
-                    viewModel: viewModel,
-                    rackInstrumentID: rackID,
-                    isPresented: $showPluginBrowser
-                )
             }
         }
     }
