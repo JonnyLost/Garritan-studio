@@ -321,6 +321,15 @@ public struct VRackView: View {
                                 get: { Double(viewModel.project.track(withID: id)?.pan ?? 0) },
                                 set: { viewModel.setTrackPan(id: id, pan: Float($0)) }
                             ), in: -1...1)
+                            HStack {
+                                Text("L")
+                                Spacer()
+                                Text("C")
+                                Spacer()
+                                Text("R")
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                             Button("Center Pan") { viewModel.setTrackPan(id: id, pan: 0) }
                                 .font(.caption)
                                 .buttonStyle(.borderless)
