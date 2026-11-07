@@ -203,7 +203,7 @@ public final class AudioEngine: ObservableObject {
         trackNode.setVolume(track.volume)
         trackNode.setPan(track.pan)
         trackNode.setMuted(track.isMuted)
-        trackNode.setHallSend(zone: track.stageReverbZone ?? 0)
+        trackNode.setHallSend(zone: track.stageReverbZone ?? 1)
         
         trackNodes[track.id] = trackNode
         installTrackMeter(for: trackNode)
