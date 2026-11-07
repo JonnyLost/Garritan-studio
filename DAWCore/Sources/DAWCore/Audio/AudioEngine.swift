@@ -44,6 +44,9 @@ public final class AudioEngine: ObservableObject {
     public let engine: AVAudioEngine
     private var trackNodes: [TrackID: TrackAudioNode] = [:]
     private var masterMixer: AVAudioMixerNode
+
+    /// Post-fader stereo peak levels (linear 0...1), refreshed approximately 20 times/sec.
+    @Published public private(set) var trackPeakLevels: [TrackID: [Float]] = [:]
     
     @Published public private(set) var isRunning: Bool = false
     @Published public private(set) var sampleRate: Double = 44100
@@ -188,12 +191,43 @@ public final class AudioEngine: ObservableObject {
         trackNode.setMuted(track.isMuted)
         
         trackNodes[track.id] = trackNode
+        installTrackMeter(for: trackNode)
+    }
+
+    /// Meter after volume, mute and stereo positioning, without modifying audio.
+    private func installTrackMeter(for trackNode: TrackAudioNode) {
+        let id = trackNode.trackID
+        let format = trackNode.outputMixer.outputFormat(forBus: 0)
+        guard format.channelCount >= 2, format.commonFormat == .pcmFormatFloat32 else { return }
+        var framesSinceUpdate: AVAudioFrameCount = 0
+        let refreshFrames = AVAudioFrameCount(max(1, format.sampleRate / 20))
+        trackNode.outputMixer.installTap(onBus: 0, bufferSize: 512, format: format) { [weak self] buffer, _ in
+            framesSinceUpdate += buffer.frameLength
+            guard framesSinceUpdate >= refreshFrames else { return }
+            framesSinceUpdate = 0
+            guard let channels = buffer.floatChannelData else { return }
+            let count = Int(buffer.frameLength)
+            guard count > 0 else { return }
+            var peaks: [Float] = [0, 0]
+            for channel in 0..<2 {
+                let samples = channels[channel]
+                var peak: Float = 0
+                for frame in 0..<count { peak = max(peak, abs(samples[frame])) }
+                peaks[channel] = min(1, peak)
+            }
+            DispatchQueue.main.async { [weak self] in
+                self?.trackPeakLevels[id] = peaks
+            }
+        }
     }
     
     /// Remove audio nodes for a track
     public func removeTrackNode(for trackID: TrackID) {
         guard let trackNode = trackNodes[trackID] else { return }
         
+        // Remove metering tap before detaching the output node.
+        trackNode.outputMixer.removeTap(onBus: 0)
+        trackPeakLevels.removeValue(forKey: trackID)
         // Disconnect and detach all nodes
         engine.disconnectNodeOutput(trackNode.inputMixer)
         engine.disconnectNodeOutput(trackNode.gainNode)
