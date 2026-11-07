@@ -44,8 +44,6 @@ public final class AudioEngine: ObservableObject {
     public let engine: AVAudioEngine
     private var trackNodes: [TrackID: TrackAudioNode] = [:]
     private var masterMixer: AVAudioMixerNode
-    private let hallInputMixer = AVAudioMixerNode()
-    private let hallReverb = AVAudioUnitReverb()
 
     /// Post-fader stereo peak levels (linear 0...1), refreshed approximately 20 times/sec.
     @Published public private(set) var trackPeakLevels: [TrackID: [Float]] = [:]
@@ -85,13 +83,6 @@ public final class AudioEngine: ObservableObject {
     public init() {
         self.engine = AVAudioEngine()
         self.masterMixer = engine.mainMixerNode
-        engine.attach(hallInputMixer)
-        engine.attach(hallReverb)
-        hallReverb.loadFactoryPreset(.mediumHall)
-        hallReverb.wetDryMix = 100
-        let hallFormat = AVAudioFormat(standardFormatWithSampleRate: engine.outputNode.outputFormat(forBus: 0).sampleRate, channels: 2)!
-        engine.connect(hallInputMixer, to: hallReverb, format: hallFormat)
-        engine.connect(hallReverb, to: masterMixer, format: hallFormat)
         
         // Get sample rate from output
         sampleRate = engine.outputNode.outputFormat(forBus: 0).sampleRate
@@ -181,7 +172,6 @@ public final class AudioEngine: ObservableObject {
         engine.attach(stereoEffect)
         engine.attach(trackNode.pannerNode)
         engine.attach(trackNode.outputMixer)
-        engine.attach(trackNode.hallSendMixer)
         
         // Connect: input -> plugins -> gain -> panner -> output
         let format = AVAudioFormat(
@@ -193,17 +183,12 @@ public final class AudioEngine: ObservableObject {
         engine.connect(trackNode.gainNode, to: stereoEffect, format: format)
         engine.connect(stereoEffect, to: trackNode.pannerNode, format: format)
         engine.connect(trackNode.pannerNode, to: trackNode.outputMixer, format: format)
-        engine.connect(trackNode.outputMixer, to: [
-            AVAudioConnectionPoint(node: masterMixer, bus: 0),
-            AVAudioConnectionPoint(node: trackNode.hallSendMixer, bus: 0)
-        ], fromBus: 0, format: format)
-        engine.connect(trackNode.hallSendMixer, to: hallInputMixer, format: format)
+        engine.connect(trackNode.outputMixer, to: masterMixer, format: format)
         
         // Set initial values
         trackNode.setVolume(track.volume)
         trackNode.setPan(track.pan)
         trackNode.setMuted(track.isMuted)
-        trackNode.setHallSend(zone: track.stageReverbZone ?? 1)
         
         trackNodes[track.id] = trackNode
         installTrackMeter(for: trackNode)
@@ -249,14 +234,12 @@ public final class AudioEngine: ObservableObject {
         if let effect = trackNode.stereoPositionNode { engine.disconnectNodeOutput(effect) }
         engine.disconnectNodeOutput(trackNode.pannerNode)
         engine.disconnectNodeOutput(trackNode.outputMixer)
-        engine.disconnectNodeOutput(trackNode.hallSendMixer)
         
         engine.detach(trackNode.inputMixer)
         engine.detach(trackNode.gainNode)
         if let effect = trackNode.stereoPositionNode { engine.detach(effect) }
         engine.detach(trackNode.pannerNode)
         engine.detach(trackNode.outputMixer)
-        engine.detach(trackNode.hallSendMixer)
         
         // Detach plugin nodes
         for auNode in trackNode.pluginNodes {
@@ -752,7 +735,6 @@ public final class TrackAudioNode {
     public let pannerNode: AVAudioMixerNode
     public var stereoPositionNode: AVAudioUnitEffect?
     public let outputMixer: AVAudioMixerNode
-    public let hallSendMixer: AVAudioMixerNode
     
     // Plugin chain (Audio Units)
     public var pluginNodes: [AVAudioUnit] = []
@@ -772,7 +754,6 @@ public final class TrackAudioNode {
         self.gainNode = AVAudioMixerNode()
         self.pannerNode = AVAudioMixerNode()
         self.outputMixer = AVAudioMixerNode()
-        self.hallSendMixer = AVAudioMixerNode()
     }
     
     public func setVolume(_ volume: Float) {
@@ -791,14 +772,6 @@ public final class TrackAudioNode {
         }
     }
     
-    public func setHallSend(zone: Int) {
-        // Send only the wet signal to the shared hall. The direct path remains
-        // untouched, and the conductor (0) has no hall send.
-        let levels: [Float] = [0, 0.12, 0.20, 0.30, 0.43, 0.58]
-        let index = min(5, max(0, zone))
-        hallSendMixer.outputVolume = levels[index]
-    }
-
     public func setMuted(_ muted: Bool) {
         self.isMuted = muted
         updateOutputVolume()
