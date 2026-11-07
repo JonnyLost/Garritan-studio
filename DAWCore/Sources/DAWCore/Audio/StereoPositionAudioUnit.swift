@@ -10,12 +10,10 @@ public final class StereoPositionAudioUnit: AUAudioUnit {
     private var inputs: AUAudioUnitBusArray!
     private var outputs: AUAudioUnitBusArray!
     private var positionParameter: AUParameter!
-    private var parameters: AUParameterTree!
     private var processor = StereoPositionProcessor()
 
     public override var inputBusses: AUAudioUnitBusArray { inputs }
     public override var outputBusses: AUAudioUnitBusArray { outputs }
-    public override var parameterTree: AUParameterTree? { parameters }
     public override var canProcessInPlace: Bool { true }
 
     public override init(componentDescription: AudioComponentDescription,
@@ -32,12 +30,12 @@ public final class StereoPositionAudioUnit: AUAudioUnit {
             flags: [.flag_IsReadable, .flag_IsWritable],
             valueStrings: nil, dependentParameters: nil
         )
-        parameters = AUParameterTree.createTree(withChildren: [positionParameter])
+        parameterTree = AUParameterTree.createTree(withChildren: [positionParameter])
         positionParameter.value = 0
     }
 
     public override var internalRenderBlock: AUInternalRenderBlock {
-        return { [self] actionFlags, timestamp, frameCount, _, outputData, pullInputBlock in
+        return { [self] actionFlags, timestamp, frameCount, _, outputData, _, pullInputBlock in
             guard let pullInputBlock else { return kAudioUnitErr_NoConnection }
             let status = pullInputBlock(actionFlags, timestamp, frameCount, 0, outputData)
             guard status == noErr else { return status }
