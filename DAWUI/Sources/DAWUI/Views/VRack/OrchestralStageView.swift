@@ -220,13 +220,36 @@ struct OrchestralStageView: View {
             ForEach(instrumentTracks) { track in
                 curvedMarker(track, width: width)
             }
-            Text("CONDUCTOR")
-                .font(.system(size: max(9, 12 * stageScale(width)), weight: .semibold))
-                .foregroundStyle(.secondary)
-                .position(x: width / 2, y: 548 * stageScale(width))
+            conductorPodium(width: width)
         }
         .frame(height: 560 * stageScale(width))
         .clipped()
+    }
+
+    // The conductor occupies the open center of the front string arc,
+    // rather than appearing as a label below the drawing.
+    private func conductorPodium(width: CGFloat) -> some View {
+        let scale = stageScale(width)
+        return VStack(spacing: 5 * scale) {
+            ZStack {
+                Circle()
+                    .fill(Color(red: 0.19, green: 0.25, blue: 0.31))
+                    .frame(width: 47 * scale, height: 47 * scale)
+                Circle()
+                    .stroke(Color(red: 0.73, green: 0.78, blue: 0.82).opacity(0.8),
+                            lineWidth: 2 * scale)
+                    .frame(width: 47 * scale, height: 47 * scale)
+                Image(systemName: "figure.stand")
+                    .font(.system(size: 23 * scale, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(0.88))
+            }
+            Text("CONDUCTOR")
+                .font(.system(size: 12 * scale, weight: .semibold))
+                .tracking(1.2 * scale)
+                .foregroundStyle(.secondary)
+        }
+        .position(x: width / 2, y: 493 * scale)
+        .allowsHitTesting(false)
     }
 
     private func orchestralBand(_ zone: Int, width: CGFloat) -> some View {
