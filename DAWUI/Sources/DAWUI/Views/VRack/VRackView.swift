@@ -36,6 +36,7 @@ public struct VRackView: View {
     @State private var catalog: [DrawerInstrument] = []
     @State private var isLoadingInstrument = false
     @State private var pickerError: String?
+    @State private var showNativeARIAWarning = false
 
 
     public init(viewModel: ProjectViewModel) {
@@ -87,6 +88,16 @@ public struct VRackView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Color(nsColor: .controlBackgroundColor))
+        .alert("Open Original ARIA Player?", isPresented: $showNativeARIAWarning) {
+            Button("Cancel", role: .cancel) {}
+            Button("Open Anyway") {
+                if let id = selectedARIAID {
+                    viewModel.openTrackInstrumentUI(id, preferNativeARIA: true)
+                }
+            }
+        } message: {
+            Text("ARIA's original editor has crashed Studio on this Mac. Save your project before trying it. Generic Plugin Controls are safer.")
+        }
         .sheet(isPresented: $showPluginBrowser) {
             if let rackID = selectedRackInstrumentID {
                 RackPluginBrowserSheet(
@@ -263,6 +274,17 @@ public struct VRackView: View {
         }
     }
 
+    private var selectedARIAID: TrackID? {
+        guard let id = viewModel.selectedTrackID,
+              let track = viewModel.project.track(withID: id),
+              let plugin = track.instrumentSlot?.pluginID,
+              plugin.name.localizedCaseInsensitiveContains("aria"),
+              plugin.manufacturer.localizedCaseInsensitiveContains("garr"),
+              let loaded = viewModel.playbackEngine.instrument(for: id),
+              case .auInstrument = loaded else { return nil }
+        return id
+    }
+
     private var instrumentsPanel: some View {
         VStack(spacing: 0) {
             HStack {
@@ -272,6 +294,21 @@ public struct VRackView: View {
                         .font(.system(size: 10)).foregroundColor(.secondary)
                 }
                 Spacer()
+                if let trackID = selectedARIAID {
+                    Menu {
+                        Button("Open Plugin Controls") {
+                            viewModel.openTrackInstrumentUI(trackID)
+                        }
+                        Button("Open Original ARIA Player…") {
+                            showNativeARIAWarning = true
+                        }
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .help("ARIA controls for the selected track")
+                }
                 Button { viewModel.addRackInstrument() } label: {
                     Image(systemName: "plus.square.on.square")
                 }
@@ -280,33 +317,35 @@ public struct VRackView: View {
             }
             .padding(12)
             Divider()
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 TextField("Search instruments", text: $searchText)
                     .textFieldStyle(.roundedBorder)
-                Picker("Library", selection: $libraryFilter) {
-                    Text("All Libraries").tag("All Libraries")
-                    Text("GPO5").tag("Garritan Personal Orchestra 5")
-                    Text("Instant Orchestra").tag("Garritan Instant Orchestra")
-                }
-                .labelsHidden()
-                .frame(maxWidth: .infinity)
-                Picker("Family", selection: $familyFilter) {
-                    Text("All Families").tag("All")
-                    ForEach(scoreFamilies, id: \.self) { family in
-                        Text(family).tag(family)
+                HStack(spacing: 5) {
+                    Picker("Library", selection: $libraryFilter) {
+                        Text("All").tag("All Libraries")
+                        Text("GPO5").tag("Garritan Personal Orchestra 5")
+                        Text("Instant").tag("Garritan Instant Orchestra")
                     }
+                    .help("Instrument library")
+                    Picker("Family", selection: $familyFilter) {
+                        Text("All Families").tag("All")
+                        ForEach(scoreFamilies, id: \\.self) { family in
+                            Text(family).tag(family)
+                        }
+                    }
+                    .help("Instrument family")
+                    Picker("Instrument Set", selection: $instrumentSet) {
+                        Text("Core").tag("Core Orchestra")
+                        Text("Complete").tag("Complete")
+                    }
+                    .help("Core Orchestra hides numbered players; Complete shows all instruments")
                 }
                 .labelsHidden()
+                .controlSize(.small)
                 .frame(maxWidth: .infinity)
-                Picker("Instrument Set", selection: $instrumentSet) {
-                    Text("Core Orchestra").tag("Core Orchestra")
-                    Text("Complete").tag("Complete")
-                }
-                .labelsHidden()
-                .frame(maxWidth: .infinity)
-                .help("Core Orchestra hides numbered individual players; Complete shows the full catalog.")
             }
-            .padding(10)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
             if isLoadingInstrument {
                 ProgressView("Loading instrument…")
                     .controlSize(.small)
