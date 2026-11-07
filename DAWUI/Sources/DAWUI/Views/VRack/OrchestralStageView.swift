@@ -26,7 +26,7 @@ struct OrchestralStageView: View {
                         stageCanvas(width: proxy.size.width)
                     }
                 }
-                .frame(height: expanded ? 430 : 250)
+                .frame(height: expanded ? 560 : 250)
 
                 HStack {
                     Text("LEFT").frame(maxWidth: .infinity, alignment: .leading)
@@ -44,8 +44,63 @@ struct OrchestralStageView: View {
         }
     }
 
-    // Semicircular seating around a conductor, based on the user's
-    // hand-drawn orchestral seating and five acoustic zones.
+    // Seating map transcribed from the original sketch. These are visual
+    // section guides, not project tracks or automatic instrument assignments.
+    private struct SeatSection: Identifiable {
+        let name: String
+        let zone: Int
+        let pan: CGFloat
+        let span: CGFloat
+        var id: String { "\(zone)-\(name)" }
+    }
+
+    private let seating: [SeatSection] = [
+        .init(name: "Violin I", zone: 1, pan: -0.77, span: 0.40),
+        .init(name: "Violin II", zone: 1, pan: -0.37, span: 0.35),
+        .init(name: "Viola", zone: 1, pan: 0.00, span: 0.34),
+        .init(name: "Cello", zone: 1, pan: 0.40, span: 0.37),
+        .init(name: "Basses", zone: 1, pan: 0.78, span: 0.39),
+        .init(name: "Harp", zone: 2, pan: -0.86, span: 0.23),
+        .init(name: "Picc.", zone: 2, pan: -0.64, span: 0.18),
+        .init(name: "Flutes", zone: 2, pan: -0.38, span: 0.31),
+        .init(name: "Oboes", zone: 2, pan: -0.05, span: 0.29),
+        .init(name: "Eng. Horn", zone: 2, pan: 0.21, span: 0.22),
+        .init(name: "Bassoons", zone: 2, pan: 0.51, span: 0.36),
+        .init(name: "Timp.", zone: 2, pan: 0.87, span: 0.21),
+        .init(name: "World Drums", zone: 3, pan: -0.88, span: 0.22),
+        .init(name: "Clarinet", zone: 3, pan: -0.62, span: 0.27),
+        .init(name: "Trumpets", zone: 3, pan: -0.25, span: 0.36),
+        .init(name: "Horns", zone: 3, pan: 0.10, span: 0.30),
+        .init(name: "Trombones", zone: 3, pan: 0.48, span: 0.35),
+        .init(name: "Tuba", zone: 3, pan: 0.83, span: 0.25),
+        .init(name: "Taiko", zone: 4, pan: -0.88, span: 0.24),
+        .init(name: "Snare / Cym.", zone: 4, pan: -0.54, span: 0.35),
+        .init(name: "Aux. Perc.", zone: 4, pan: -0.12, span: 0.35),
+        .init(name: "World Drums", zone: 4, pan: 0.38, span: 0.40),
+        .init(name: "Taiko", zone: 4, pan: 0.84, span: 0.25),
+        .init(name: "Sopranos", zone: 5, pan: -0.82, span: 0.29),
+        .init(name: "Altos", zone: 5, pan: -0.43, span: 0.30),
+        .init(name: "Choir / Organ", zone: 5, pan: 0.0, span: 0.46),
+        .init(name: "Tenors", zone: 5, pan: 0.43, span: 0.30),
+        .init(name: "Basses", zone: 5, pan: 0.82, span: 0.29)
+    ]
+
+    // All geometry is in a 1000 x 560 reference canvas. The complete stage
+    // scales with its width instead of being clipped by a fixed-height editor.
+    private func stageScale(_ width: CGFloat) -> CGFloat {
+        width / 1000
+    }
+
+    private func stagePoint(pan: CGFloat, zone: Int, width: CGFloat) -> CGPoint {
+        let angle = pan * (.pi / 2)
+        let radius = CGFloat(105 + (zone - 1) * 83)
+        let scale = stageScale(width)
+        return CGPoint(
+            x: width / 2 + sin(angle) * radius * scale,
+            y: (535 - cos(angle) * radius) * scale
+        )
+    }
+
     private func curvedStageCanvas(width: CGFloat) -> some View {
         ZStack {
             RoundedRectangle(cornerRadius: 12)
@@ -54,88 +109,71 @@ struct OrchestralStageView: View {
             ForEach((1...5).reversed(), id: \.self) { zone in
                 orchestralBand(zone, width: width)
             }
-
-            // Suggested section positions are visual references, not extra tracks.
-            sectionLabel("VIOLINS I", pan: -0.77, zone: 1, width: width)
-            sectionLabel("VIOLINS II", pan: -0.40, zone: 1, width: width)
-            sectionLabel("VIOLAS", pan: 0.02, zone: 1, width: width)
-            sectionLabel("CELLOS", pan: 0.45, zone: 1, width: width)
-            sectionLabel("BASSES", pan: 0.82, zone: 1, width: width)
-
-            sectionLabel("FLUTES", pan: -0.62, zone: 2, width: width)
-            sectionLabel("OBOES", pan: -0.22, zone: 2, width: width)
-            sectionLabel("CLARINETS", pan: 0.18, zone: 2, width: width)
-            sectionLabel("BASSOONS", pan: 0.57, zone: 2, width: width)
-
-            sectionLabel("HORNS", pan: -0.55, zone: 3, width: width)
-            sectionLabel("TRUMPETS", pan: -0.06, zone: 3, width: width)
-            sectionLabel("TROMBONES", pan: 0.38, zone: 3, width: width)
-            sectionLabel("TUBA", pan: 0.79, zone: 3, width: width)
-
-            sectionLabel("PERCUSSION", pan: -0.58, zone: 4, width: width)
-            sectionLabel("TIMPANI", pan: 0.46, zone: 4, width: width)
-            sectionLabel("CHOIR / ORGAN", pan: 0, zone: 5, width: width)
-
+            ForEach(seating) { section in
+                seatingSection(section, width: width)
+            }
             ForEach(instrumentTracks) { track in
                 curvedMarker(track, width: width)
             }
-
             Text("CONDUCTOR")
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: max(9, 12 * stageScale(width)), weight: .semibold))
                 .foregroundStyle(.secondary)
-                .position(x: width / 2, y: 408)
+                .position(x: width / 2, y: 548 * stageScale(width))
         }
+        .frame(height: 560 * stageScale(width))
         .clipped()
     }
 
-    // Use a flattened half-circle so it remains legible at typical editor widths.
-    // Angles are relative to the vertical axis: -90° left, +90° right.
-    private func stagePoint(pan: CGFloat, zone: Int, width: CGFloat) -> CGPoint {
-        let angle = pan * (.pi / 2)
-        let radius = CGFloat(72 + (zone - 1) * 65)
-        let horizontalScale = min(CGFloat(1.35), max(CGFloat(0.65), width / 730))
-        return CGPoint(
-            x: width / 2 + sin(angle) * radius * horizontalScale,
-            y: 405 - cos(angle) * radius
-        )
-    }
-
     private func orchestralBand(_ zone: Int, width: CGFloat) -> some View {
-        let radius = CGFloat(72 + (zone - 1) * 65)
-        let scale = min(CGFloat(1.35), max(CGFloat(0.65), width / 730))
+        let scale = stageScale(width)
         return Path { path in
-            for step in 0...90 {
-                let pan = CGFloat(step) / 45 - 1
-                let angle = pan * (.pi / 2)
-                let point = CGPoint(
-                    x: width / 2 + sin(angle) * radius * scale,
-                    y: 405 - cos(angle) * radius
-                )
+            for step in 0...120 {
+                let pan = CGFloat(step) / 60 - 1
+                let point = stagePoint(pan: pan, zone: zone, width: width)
                 if step == 0 { path.move(to: point) }
                 else { path.addLine(to: point) }
             }
         }
         .stroke(
-            zone.isMultiple(of: 2) ? Color.blue.opacity(0.17) : Color.teal.opacity(0.17),
-            style: StrokeStyle(lineWidth: 52, lineCap: .butt)
+            zone.isMultiple(of: 2) ? Color.blue.opacity(0.18) : Color.teal.opacity(0.18),
+            style: StrokeStyle(lineWidth: 72 * scale, lineCap: .butt)
         )
         .overlay(
             Text("L\(zone)")
-                .font(.caption2).bold()
+                .font(.system(size: max(9, 13 * scale), weight: .bold))
                 .foregroundStyle(.secondary)
-                .position(x: width / 2, y: 405 - radius)
+                .position(stagePoint(pan: -0.98, zone: zone, width: width))
         )
     }
 
-    private func sectionLabel(_ title: String, pan: CGFloat, zone: Int, width: CGFloat) -> some View {
-        let point = stagePoint(pan: pan, zone: zone, width: width)
-        return Text(title)
-            .font(.system(size: 9, weight: .medium))
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .minimumScaleFactor(0.7)
-            .position(x: point.x, y: point.y)
-            .allowsHitTesting(false)
+    private func seatingSection(_ section: SeatSection, width: CGFloat) -> some View {
+        let point = stagePoint(pan: section.pan, zone: section.zone, width: width)
+        let boundary = section.pan - section.span / 2
+        let inner = stagePoint(pan: boundary, zone: section.zone, width: width)
+        let outerRadiusZone = min(5, section.zone + 1)
+        let outer = stagePoint(pan: boundary, zone: outerRadiusZone, width: width)
+        let scale = stageScale(width)
+        return ZStack {
+            Path { path in
+                path.move(to: inner)
+                if section.zone < 5 {
+                    path.addLine(to: outer)
+                } else {
+                    let dx = inner.x - width / 2
+                    let dy = inner.y - 535 * scale
+                    path.addLine(to: CGPoint(x: inner.x + dx * 0.09, y: inner.y + dy * 0.09))
+                }
+            }
+            .stroke(Color.white.opacity(0.22), lineWidth: max(0.5, scale))
+            Text(section.name)
+                .font(.system(size: max(8, 12 * scale), weight: .medium))
+                .foregroundStyle(.primary.opacity(0.8))
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+                .frame(width: max(35, section.span * 115 * scale))
+                .position(point)
+                .allowsHitTesting(false)
+        }
     }
 
     private func curvedMarker(_ track: Track, width: CGFloat) -> some View {
@@ -178,13 +216,13 @@ struct OrchestralStageView: View {
     ) {
         if dragOrigins[trackID] == nil { dragOrigins[trackID] = current }
         guard let start = dragOrigins[trackID] else { return }
-        let scale = min(CGFloat(1.35), max(CGFloat(0.65), width / 730))
+        let scale = stageScale(width)
         let dx = (start.x + translation.width - width / 2) / scale
-        let dy = max(CGFloat(0.001), 405 - (start.y + translation.height))
+        let dy = max(CGFloat(0.001), 535 - (start.y + translation.height) / scale)
         let angle = atan2(dx, dy)
         let pan = Float(min(CGFloat(1), max(CGFloat(-1), angle / (.pi / 2))))
         let radius = hypot(dx, dy)
-        let zone = min(5, max(1, Int(((radius - 72) / 65).rounded()) + 1))
+        let zone = min(5, max(1, Int(((radius - 105) / 83).rounded()) + 1))
         viewModel.setTrackStagePosition(id: trackID, pan: pan, zone: zone)
     }
 
