@@ -79,7 +79,7 @@ public struct VRackView: View {
                 case .channel:
                     channelInspector
                 case .stage:
-                    upcomingPanel(title: "Stage", symbol: "circle.grid.cross", detail: "Drag instruments to position them on the stage.")
+                    stagePanel
                 case .articulations:
                     upcomingPanel(title: "Articulations", symbol: "music.quarternote.3", detail: "Playing techniques and expressions for the selected track.")
                 }
@@ -95,6 +95,99 @@ public struct VRackView: View {
                     isPresented: $showPluginBrowser
                 )
             }
+        }
+    }
+
+    // MARK: - Orchestral Stage v1
+    // Horizontal placement controls the existing stereo pan processor.
+    // L1-L5 are saved reverb-send zones; DSP routing will follow separately.
+    private var stagePanel: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Orchestral Stage").font(.headline)
+                Text("Drag a marker left or right to pan, or forward and back to choose a reverb zone.")
+                    .font(.caption).foregroundStyle(.secondary)
+                GeometryReader { geometry in
+                    let width = geometry.size.width
+                    let usableWidth = max(1, width - 36)
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color(nsColor: .windowBackgroundColor))
+                        ForEach(1...5, id: \.self) { zone in
+                            let y = CGFloat(35 + (zone - 1) * 43)
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(zone.isMultiple(of: 2) ? Color.blue.opacity(0.08) : Color.teal.opacity(0.08))
+                                .frame(height: 40)
+                                .position(x: width / 2, y: y)
+                            HStack {
+                                Text("L\\(zone)").font(.caption2).bold()
+                                Spacer()
+                            }
+                            .padding(.leading, 7)
+                            .position(x: width / 2, y: y)
+                        }
+                        Path { path in
+                            path.move(to: CGPoint(x: width / 2, y: 14))
+                            path.addLine(to: CGPoint(x: width / 2, y: 238))
+                        }
+                        .stroke(Color.secondary.opacity(0.35), style: StrokeStyle(lineWidth: 1, dash: [3, 4]))
+                        ForEach(viewModel.project.tracks.filter { $0.type == .midi || $0.type == .instrument }) { track in
+                            let x = CGFloat(18) + CGFloat((track.pan + 1) / 2) * usableWidth
+                            let y = CGFloat(35 + ((track.stageReverbZone ?? 1) - 1) * 43)
+                            Circle()
+                                .fill(viewModel.selectedTrackID == track.id ? Color.accentColor : Color.orange)
+                                .frame(width: 20, height: 20)
+                                .overlay(Circle().stroke(Color.white, lineWidth: 2))
+                                .overlay(Text(String(track.name.prefix(1))).font(.system(size: 9, weight: .bold)).foregroundStyle(.white))
+                                .position(x: x, y: y)
+                                .help("\\(track.name) — L\\(track.stageReverbZone ?? 1)")
+                                .onTapGesture { viewModel.selectTrack(track.id) }
+                                .gesture(DragGesture(minimumDistance: 3)
+                                    .onChanged { value in
+                                        let pan = Float(min(1, max(-1, (value.location.x + x - 18) / usableWidth * 2 - 1)))
+                                        let zone = min(5, max(1, Int(((value.location.y + y - 35) / 43).rounded()) + 1))
+                                        viewModel.setTrackStagePosition(id: track.id, pan: pan, zone: zone)
+                                    })
+                        }
+                    }
+                }
+                .frame(height: 250)
+                HStack {
+                    Text("LEFT").frame(maxWidth: .infinity, alignment: .leading)
+                    Text("CONDUCTOR")
+                    Text("RIGHT").frame(maxWidth: .infinity, alignment: .trailing)
+                }
+                .font(.system(size: 9)).foregroundStyle(.secondary)
+                if let id = viewModel.selectedTrackID,
+                   let track = viewModel.project.track(withID: id) {
+                    Divider()
+                    Text(track.name).font(.subheadline).bold()
+                    HStack {
+                        Text("Pan")
+                        Slider(value: Binding(
+                            get: { Double(viewModel.project.track(withID: id)?.pan ?? 0) },
+                            set: { viewModel.setTrackPan(id: id, pan: Float($0)) }
+                        ), in: -1...1)
+                        Text("\\(Int(track.pan * 100))").monospacedDigit().frame(width: 36)
+                    }
+                    Picker("Reverb zone", selection: Binding<Int>(
+                        get: { viewModel.project.track(withID: id)?.stageReverbZone ?? 1 },
+                        set: { viewModel.setTrackStageZone(id: id, zone: $0) }
+                    )) {
+                        ForEach(1...5, id: \.self) { zone in
+                            Text("L\\(zone)").tag(zone)
+                        }
+                    }
+                    Text("L1 = least reverb · L5 = most reverb")
+                        .font(.caption2).foregroundStyle(.secondary)
+                } else {
+                    Text("Select an instrument track to edit its stage position.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Text("Reverb zones are saved now; shared hall processing is coming next.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            .padding(12)
         }
     }
 
