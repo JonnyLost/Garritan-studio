@@ -298,7 +298,7 @@ public struct VRackView: View {
                         Divider()
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {
-                                Text("Volume")
+                                Text("Track Volume")
                                 Spacer()
                                 Text(String(format: "%.0f%%", track.volume * 100))
                                     .monospacedDigit()
@@ -310,6 +310,35 @@ public struct VRackView: View {
                             ), in: 0...1)
                         }
                         ChannelStereoMeter(engine: viewModel.audioEngine, trackID: id)
+                        if track.instrumentSlot != nil {
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text("Instrument Level (CC7)")
+                                    Spacer()
+                                    Text(track.instrumentLevelCC7.map { "\($0) / 127" } ?? "Not set")
+                                        .monospacedDigit()
+                                        .foregroundStyle(.secondary)
+                                }
+                                Slider(value: Binding(
+                                    get: { Double(viewModel.project.track(withID: id)?.instrumentLevelCC7 ?? 100) },
+                                    set: { viewModel.setInstrumentLevel(id: id, value: UInt8(min(127, max(0, Int($0.rounded()))))) }
+                                ), in: 0...127, step: 1)
+                                HStack {
+                                    Text("ARIA MIDI Channel")
+                                    Spacer()
+                                    Picker("ARIA MIDI Channel", selection: Binding<Int>(
+                                        get: { Int(viewModel.project.track(withID: id)?.instrumentLevelChannel ?? 0) },
+                                        set: { viewModel.setInstrumentLevelChannel(id: id, channel: UInt8($0)) }
+                                    )) {
+                                        ForEach(0..<16, id: \.self) { channel in
+                                            Text("\(channel + 1)").tag(channel)
+                                        }
+                                    }
+                                    .labelsHidden()
+                                }
+                                .font(.caption)
+                            }
+                        }
                         VStack(alignment: .leading, spacing: 6) {
                             Text("MIDI Output")
                                 .font(.subheadline)
