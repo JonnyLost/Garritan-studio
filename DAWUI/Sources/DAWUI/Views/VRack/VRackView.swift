@@ -90,6 +90,7 @@ struct RackInstrumentRow: View {
     let isSelected: Bool
     let onSelect: () -> Void
     let onShowBrowser: () -> Void
+    @State private var showNativeWarning = false
     
     var body: some View {
         VStack(spacing: 4) {
@@ -122,7 +123,14 @@ struct RackInstrumentRow: View {
                 }
                 
                 Spacer()
-                
+
+                if instrument.pluginSlot.pluginID?.name.localizedCaseInsensitiveContains("aria") == true {
+                    Button("Open ARIA…") { showNativeWarning = true }
+                        .font(.system(size: 10))
+                        .buttonStyle(.bordered)
+                        .help("Open ARIA's original editor (may crash on this Mac)")
+                }
+
                 // Mute button
                 Button(action: {
                     viewModel.toggleRackInstrumentMute(instrument.id)
@@ -153,6 +161,14 @@ struct RackInstrumentRow: View {
         .contentShape(Rectangle())
         .onTapGesture {
             onSelect()
+        }
+        .alert("Open Original ARIA Player?", isPresented: $showNativeWarning) {
+            Button("Cancel", role: .cancel) { }
+            Button("Open Anyway") {
+                viewModel.openRackInstrumentUI(instrument.id, preferNativeARIA: true)
+            }
+        } message: {
+            Text("The native ARIA editor has previously crashed Studio on this Mac. Save your work first. The generic instrument controls remain available through the keyboard icon.")
         }
     }
 }
