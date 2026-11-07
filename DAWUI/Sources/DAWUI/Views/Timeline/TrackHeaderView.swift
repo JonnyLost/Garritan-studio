@@ -1239,14 +1239,14 @@ struct AudioInputSelector: View {
     }
 }
 
-private struct TrackGarritanProgram {
+struct TrackGarritanProgram {
     let library: String
     let programName: String
     var id: String { library + ":" + programName }
     var name: String { String(programName.split(separator: "/").last ?? Substring(programName)) }
 }
 
-private enum TrackGarritanLoader {
+enum TrackGarritanLoader {
     static func apply(_ program: TrackGarritanProgram, to unit: AVAudioUnit) throws {
         let instant = program.library == "Garritan Instant Orchestra"
         let sourceName = instant ? "Blending Textures/Evolving Orchestra" :
