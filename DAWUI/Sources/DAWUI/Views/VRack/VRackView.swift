@@ -310,6 +310,24 @@ public struct VRackView: View {
                             ), in: 0...1)
                         }
                         VStack(alignment: .leading, spacing: 6) {
+                            Text("MIDI Output")
+                                .font(.subheadline)
+                            Picker("MIDI Output", selection: Binding<Int>(
+                                get: { viewModel.project.track(withID: id)?.midiOutputChannel.map { Int($0) } ?? -1 },
+                                set: { viewModel.setTrackMIDIOutputChannel(id: id, channel: $0 < 0 ? nil : UInt8($0)) }
+                            )) {
+                                Text("All Channels").tag(-1)
+                                ForEach(0..<16, id: \.self) { channel in
+                                    Text("Channel \(channel + 1)").tag(channel)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(maxWidth: .infinity)
+                            Text("All preserves each event's MIDI channel.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        VStack(alignment: .leading, spacing: 6) {
                             HStack {
                                 Text("Pan")
                                 Spacer()
