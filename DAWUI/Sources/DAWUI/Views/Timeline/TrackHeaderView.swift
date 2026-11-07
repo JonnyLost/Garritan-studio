@@ -2,7 +2,7 @@ import SwiftUI
 import DAWCore
 import AVFoundation
 import Compression
-import FoundationXML
+import Foundation
 
 // MARK: - Track Header View
 
