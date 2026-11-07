@@ -1,6 +1,8 @@
 import SwiftUI
 import DAWCore
 import AVFoundation
+import Compression
+import FoundationXML
 
 // MARK: - Track Header View
 
@@ -381,6 +383,53 @@ struct InstrumentSlotButton: View {
     }
 }
 
+// Read-only ARIA AU state inspection. Does not write to the Audio Unit.
+private struct ARIARackSlot {
+    let number: Int
+    let patch: String
+    let midiChannel: String?
+}
+
+private final class ARIARackXMLReader: NSObject, XMLParserDelegate {
+    var slots: [ARIARackSlot] = []
+    func parser(_ parser: XMLParser, didStartElement elementName: String,
+                namespaceURI: String?, qualifiedName qName: String?,
+                attributes: [String: String]) {
+        guard elementName == "InstrumentSlot" else { return }
+        let slotNumber = Int(attributes["id"] ?? "") ?? -1
+        guard (0..<16).contains(slotNumber) else { return }
+        let patch = attributes["name"] ?? ""
+        guard !patch.isEmpty else { return }
+        let channel = attributes["midiChannel"] ?? attributes["channel"]
+        slots.append(ARIARackSlot(number: slotNumber, patch: patch, midiChannel: channel))
+    }
+}
+
+private enum ARIARackStateReader {
+    static func inspect(_ unit: AVAudioUnit) -> [ARIARackSlot]? {
+        guard let blob = unit.auAudioUnit.fullState?["AriaData"] as? Data else { return nil }
+        let bytes = [UInt8](blob)
+        guard bytes.count > 14, Array(bytes.prefix(4)) == Array("CEGP".utf8) else { return nil }
+        let expected = Int(UInt32(bytes[4]) | UInt32(bytes[5]) << 8 |
+                           UInt32(bytes[6]) << 16 | UInt32(bytes[7]) << 24)
+        guard expected > 0 && expected < 8_000_000 else { return nil }
+        let compressed = Array(bytes[10..<(bytes.count - 4)])
+        var plain = [UInt8](repeating: 0, count: expected)
+        let decoded = compressed.withUnsafeBufferPointer { src in
+            plain.withUnsafeMutableBufferPointer { dst in
+                compression_decode_buffer(dst.baseAddress!, dst.count, src.baseAddress!,
+                                          src.count, nil, COMPRESSION_ZLIB)
+            }
+        }
+        guard decoded == expected else { return nil }
+        let reader = ARIARackXMLReader()
+        let parser = XMLParser(data: Data(plain))
+        parser.delegate = reader
+        guard parser.parse() else { return nil }
+        return reader.slots
+    }
+}
+
 // MARK: - Instrument Browser Sheet
 
 struct InstrumentBrowserSheet: View {
@@ -400,6 +449,8 @@ struct InstrumentBrowserSheet: View {
     @State private var selectedProgramID: String?
     @State private var workspacePage = 0
     @State private var selectedRackSlot = 0
+    @State private var inspectedRackSlots: [ARIARackSlot] = []
+    @State private var rackInspectionSucceeded = false
     // Visual rack only: ARIA's individual slot state is not exposed here yet.
     // Do not infer a slot assignment from the track's AU instrument identity.
 
@@ -480,6 +531,7 @@ struct InstrumentBrowserSheet: View {
                 .tint(workspacePage == 0 ? Color.accentColor : Color.secondary)
                 Button {
                     workspacePage = 1
+                    refreshRackInspection()
                 } label: {
                     Label("ARIA Rack", systemImage: "slider.horizontal.3")
                 }
@@ -694,10 +746,14 @@ struct InstrumentBrowserSheet: View {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("ARIA Instrument Rack").font(.title3.weight(.semibold))
-                    Text("A visual foundation for ARIA's 16 instrument slots.")
+                    Text("Read-only view of ARIA's instrument-slot state.")
                         .font(.caption).foregroundColor(.secondary)
                 }
                 Spacer()
+                Button("Refresh Slots", systemImage: "arrow.clockwise") {
+                    refreshRackInspection()
+                }
+                .buttonStyle(.bordered)
                 Label(trackARIA == nil ? "ARIA not loaded" : "ARIA connected",
                       systemImage: trackARIA == nil ? "circle.dashed" : "checkmark.circle")
                     .font(.caption)
@@ -717,10 +773,12 @@ struct InstrumentBrowserSheet: View {
                                 Image(systemName: "pianokeys")
                                     .foregroundColor(.secondary)
                             }
-                            Text("Slot not inspected")
+                            Text(inspectedRackSlots.first(where: { $0.number == index })?.patch.components(separatedBy: "/").last
+                                 ?? (rackInspectionSucceeded ? "No patch reported" : "Not inspected"))
                                 .font(.subheadline.weight(.medium))
                                 .lineLimit(1)
-                            Text("MIDI Ch \(index + 1) · proposed")
+                            Text(inspectedRackSlots.first(where: { $0.number == index })?.midiChannel
+                                 .map { "MIDI channel \($0)" } ?? "Channel not verified")
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                         }
@@ -745,9 +803,16 @@ struct InstrumentBrowserSheet: View {
                 Image(systemName: "info.circle")
                     .foregroundColor(.accentColor)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Slot \(selectedRackSlot + 1) · inspection pending")
+                    Text("Slot \(selectedRackSlot + 1)")
                         .font(.headline)
-                    Text("This is a layout preview, not a readout of ARIA's current patches. Slot loading, MIDI routing, volume, pan and effects will be connected to verified ARIA state in later steps. Existing instrument loading remains in the Browser.")
+                    Text(inspectedRackSlots.first(where: { $0.number == selectedRackSlot })?.patch
+                         ?? (rackInspectionSucceeded
+                             ? "No instrument assignment reported for this slot."
+                             : "Could not decode ARIA slot state."))
+                        .font(.caption)
+                        .textSelection(.enabled)
+                    Text("Read-only inspection. Slot editing and routing are not enabled.")
+                        .font(.caption2).foregroundColor(.secondary)
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -759,6 +824,16 @@ struct InstrumentBrowserSheet: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func refreshRackInspection() {
+        if let unit = trackARIA, let slots = ARIARackStateReader.inspect(unit) {
+            inspectedRackSlots = slots
+            rackInspectionSucceeded = true
+        } else {
+            inspectedRackSlots = []
+            rackInspectionSucceeded = false
+        }
     }
 
     private func discoverPrograms() {
