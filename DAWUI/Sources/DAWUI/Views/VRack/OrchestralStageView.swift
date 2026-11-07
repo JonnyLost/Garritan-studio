@@ -44,56 +44,106 @@ struct OrchestralStageView: View {
         }
     }
 
-    // A five-arc stage, modeled after the original orchestral seating sketch.
-    // L5 is at the back; L1 is closest to the conductor.
+    // Semicircular seating around a conductor, based on the user's
+    // hand-drawn orchestral seating and five acoustic zones.
     private func curvedStageCanvas(width: CGFloat) -> some View {
         ZStack {
             RoundedRectangle(cornerRadius: 12)
                 .fill(Color(nsColor: .windowBackgroundColor))
-            ForEach(1...5, id: \.self) { zone in
-                curvedZone(zone, width: width)
+
+            ForEach((1...5).reversed(), id: \.self) { zone in
+                orchestralBand(zone, width: width)
             }
+
+            // Suggested section positions are visual references, not extra tracks.
+            sectionLabel("VIOLINS I", pan: -0.77, zone: 1, width: width)
+            sectionLabel("VIOLINS II", pan: -0.40, zone: 1, width: width)
+            sectionLabel("VIOLAS", pan: 0.02, zone: 1, width: width)
+            sectionLabel("CELLOS", pan: 0.45, zone: 1, width: width)
+            sectionLabel("BASSES", pan: 0.82, zone: 1, width: width)
+
+            sectionLabel("FLUTES", pan: -0.62, zone: 2, width: width)
+            sectionLabel("OBOES", pan: -0.22, zone: 2, width: width)
+            sectionLabel("CLARINETS", pan: 0.18, zone: 2, width: width)
+            sectionLabel("BASSOONS", pan: 0.57, zone: 2, width: width)
+
+            sectionLabel("HORNS", pan: -0.55, zone: 3, width: width)
+            sectionLabel("TRUMPETS", pan: -0.06, zone: 3, width: width)
+            sectionLabel("TROMBONES", pan: 0.38, zone: 3, width: width)
+            sectionLabel("TUBA", pan: 0.79, zone: 3, width: width)
+
+            sectionLabel("PERCUSSION", pan: -0.58, zone: 4, width: width)
+            sectionLabel("TIMPANI", pan: 0.46, zone: 4, width: width)
+            sectionLabel("CHOIR / ORGAN", pan: 0, zone: 5, width: width)
+
             ForEach(instrumentTracks) { track in
                 curvedMarker(track, width: width)
             }
+
             Text("CONDUCTOR")
-                .font(.caption2)
+                .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.secondary)
-                .position(x: width / 2, y: 410)
+                .position(x: width / 2, y: 408)
         }
+        .clipped()
     }
 
-    private func curveY(zone: Int, x: CGFloat, width: CGFloat) -> CGFloat {
-        let centerY = CGFloat(75 + (5 - zone) * 65)
-        let normalizedX = (x - width / 2) / max(1, width / 2)
-        return centerY + 34 * normalizedX * normalizedX
+    // Use a flattened half-circle so it remains legible at typical editor widths.
+    // Angles are relative to the vertical axis: -90° left, +90° right.
+    private func stagePoint(pan: CGFloat, zone: Int, width: CGFloat) -> CGPoint {
+        let angle = pan * (.pi / 2)
+        let radius = CGFloat(72 + (zone - 1) * 65)
+        let horizontalScale = min(CGFloat(1.35), max(CGFloat(0.65), width / 730))
+        return CGPoint(
+            x: width / 2 + sin(angle) * radius * horizontalScale,
+            y: 405 - cos(angle) * radius
+        )
     }
 
-    private func curvedZone(_ zone: Int, width: CGFloat) -> some View {
-        let centerY = curveY(zone: zone, x: width / 2, width: width)
-        return ZStack {
-            Path { path in
-                path.move(to: CGPoint(x: 24, y: centerY + 34))
-                path.addQuadCurve(
-                    to: CGPoint(x: width - 24, y: centerY + 34),
-                    control: CGPoint(x: width / 2, y: centerY - 34)
+    private func orchestralBand(_ zone: Int, width: CGFloat) -> some View {
+        let radius = CGFloat(72 + (zone - 1) * 65)
+        let scale = min(CGFloat(1.35), max(CGFloat(0.65), width / 730))
+        return Path { path in
+            for step in 0...90 {
+                let pan = CGFloat(step) / 45 - 1
+                let angle = pan * (.pi / 2)
+                let point = CGPoint(
+                    x: width / 2 + sin(angle) * radius * scale,
+                    y: 405 - cos(angle) * radius
                 )
+                if step == 0 { path.move(to: point) }
+                else { path.addLine(to: point) }
             }
-            .stroke(
-                zone.isMultiple(of: 2) ? Color.blue.opacity(0.17) : Color.teal.opacity(0.17),
-                style: StrokeStyle(lineWidth: 45, lineCap: .round)
-            )
-            Text("L\(zone)")
-                .font(.caption).bold()
-                .foregroundStyle(.secondary)
-                .position(x: 24, y: curveY(zone: zone, x: 24, width: width))
         }
+        .stroke(
+            zone.isMultiple(of: 2) ? Color.blue.opacity(0.17) : Color.teal.opacity(0.17),
+            style: StrokeStyle(lineWidth: 52, lineCap: .butt)
+        )
+        .overlay(
+            Text("L\(zone)")
+                .font(.caption2).bold()
+                .foregroundStyle(.secondary)
+                .position(x: width / 2, y: 405 - radius)
+        )
+    }
+
+    private func sectionLabel(_ title: String, pan: CGFloat, zone: Int, width: CGFloat) -> some View {
+        let point = stagePoint(pan: pan, zone: zone, width: width)
+        return Text(title)
+            .font(.system(size: 9, weight: .medium))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .position(x: point.x, y: point.y)
+            .allowsHitTesting(false)
     }
 
     private func curvedMarker(_ track: Track, width: CGFloat) -> some View {
-        let usableWidth = max(CGFloat(1), width - 70)
-        let x = CGFloat(35) + CGFloat((track.pan + 1) / 2) * usableWidth
-        let y = curveY(zone: track.stageReverbZone ?? 1, x: x, width: width)
+        let point = stagePoint(
+            pan: CGFloat(track.pan),
+            zone: track.stageReverbZone ?? 1,
+            width: width
+        )
         return Circle()
             .fill(viewModel.selectedTrackID == track.id ? Color.accentColor : Color.orange)
             .frame(width: 25, height: 25)
@@ -103,7 +153,7 @@ struct OrchestralStageView: View {
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(.white)
             )
-            .position(x: x, y: y)
+            .position(point)
             .help("\(track.name) — L\(track.stageReverbZone ?? 1)")
             .onTapGesture { viewModel.selectTrack(track.id) }
             .gesture(
@@ -111,7 +161,7 @@ struct OrchestralStageView: View {
                     .onChanged { value in
                         moveCurvedMarker(
                             trackID: track.id,
-                            current: CGPoint(x: x, y: y),
+                            current: point,
                             translation: value.translation,
                             width: width
                         )
@@ -128,14 +178,14 @@ struct OrchestralStageView: View {
     ) {
         if dragOrigins[trackID] == nil { dragOrigins[trackID] = current }
         guard let start = dragOrigins[trackID] else { return }
-        let x = min(width - 35, max(CGFloat(35), start.x + translation.width))
-        let pan = Float((x - 35) / max(1, width - 70) * 2 - 1)
-        let y = start.y + translation.height
-        let nearestZone = (1...5).min {
-            abs(curveY(zone: $0, x: x, width: width) - y) <
-            abs(curveY(zone: $1, x: x, width: width) - y)
-        } ?? 1
-        viewModel.setTrackStagePosition(id: trackID, pan: pan, zone: nearestZone)
+        let scale = min(CGFloat(1.35), max(CGFloat(0.65), width / 730))
+        let dx = (start.x + translation.width - width / 2) / scale
+        let dy = max(CGFloat(0.001), 405 - (start.y + translation.height))
+        let angle = atan2(dx, dy)
+        let pan = Float(min(CGFloat(1), max(CGFloat(-1), angle / (.pi / 2))))
+        let radius = hypot(dx, dy)
+        let zone = min(5, max(1, Int(((radius - 72) / 65).rounded()) + 1))
+        viewModel.setTrackStagePosition(id: trackID, pan: pan, zone: zone)
     }
 
     private func stageCanvas(width: CGFloat) -> some View {
