@@ -60,6 +60,9 @@ public struct Track: Identifiable, Codable, Sendable {
     // MIDI Output Routing (for MIDI tracks)
     // Determines where MIDI is sent: track instrument or V-Rack
     public var midiOutput: MIDIOutputDestination?
+    /// nil = All (preserve source MIDI channel); 0...15 = only that channel.
+    /// Optional for backward-compatible decoding of existing projects.
+    public var midiOutputChannel: UInt8?
     
     // Effect Plugins (insert effects)
     public var pluginSlots: [PluginSlot]
@@ -93,6 +96,7 @@ public struct Track: Identifiable, Codable, Sendable {
         self.instrumentSlot = nil
         self.garritanProgramID = nil
         self.midiOutput = nil  // Default: use track instrument
+        self.midiOutputChannel = nil  // All channels
         self.pluginSlots = []
         self.automationLanes = [
             AutomationLane(parameter: .volume),
