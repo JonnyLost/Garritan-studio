@@ -1164,13 +1164,16 @@ public final class PlaybackEngine: ObservableObject {
     /// Process a single MIDI event with sample-accurate timing
     /// Called from midiProcessingQueue - NOT the audio thread
     private func processEventSampleAccurate(_ scheduled: ScheduledEvent, sampleOffset: AUEventSampleTime) {
+        // All preserves each event's channel. A selected channel filters events.
+        if let selectedChannel = project?.track(withID: scheduled.trackID)?.midiOutputChannel,
+           scheduled.event.channel != selectedChannel { return }
         // Determine the instrument and channel based on midiOutput routing
         let (instrument, channel): (TrackInstrument?, UInt8) = {
             switch scheduled.midiOutput {
             case .rackInstrument(let rackID, let ch):
                 return (rackInstruments[rackID], ch - 1)
             case .trackInstrument, .none:
-                return (trackInstruments[scheduled.trackID], 0)
+                return (trackInstruments[scheduled.trackID], scheduled.event.channel)
             }
         }()
         
@@ -1473,6 +1476,9 @@ public final class PlaybackEngine: ObservableObject {
                     let clipEndBeat = clip.timeRange.end.beats(atTempo: tempo)
                     
                     for event in midiData.events {
+                        // Selected channel filters MIDI; All (nil) preserves channel 1–16.
+                        if let selectedChannel = track.midiOutputChannel,
+                           event.channel != selectedChannel { continue }
                         let absoluteBeat = clipStartBeat + event.beatPosition
                         guard absoluteBeat >= clipStartBeat && absoluteBeat < clipEndBeat else { continue }
                         
@@ -1497,7 +1503,7 @@ public final class PlaybackEngine: ObservableObject {
                                     samplePosition: samplePos,
                                     note: noteData.pitch,
                                     velocity: noteData.velocity,
-                                    channel: 0
+                                    channel: event.channel
                                 )
                                 coreAudioMIDIEvents.append(noteOn)
                                 
@@ -1506,7 +1512,7 @@ public final class PlaybackEngine: ObservableObject {
                                     trackID: track.id,
                                     samplePosition: samplePos + durationSamples,
                                     note: noteData.pitch,
-                                    channel: 0
+                                    channel: event.channel
                                 )
                                 coreAudioMIDIEvents.append(noteOff)
                                 
@@ -1516,7 +1522,7 @@ public final class PlaybackEngine: ObservableObject {
                                     samplePosition: samplePos,
                                     controller: cc,
                                     value: value,
-                                    channel: 0
+                                    channel: event.channel
                                 )
                                 coreAudioMIDIEvents.append(ccEvent)
                                 
