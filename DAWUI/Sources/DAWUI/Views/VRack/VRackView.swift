@@ -144,8 +144,14 @@ public struct VRackView: View {
                                 .onTapGesture { viewModel.selectTrack(track.id) }
                                 .gesture(DragGesture(minimumDistance: 3)
                                     .onChanged { value in
-                                        let pan = Float(min(1, max(-1, (value.location.x + x - 18) / usableWidth * 2 - 1)))
-                                        let zone = min(5, max(1, Int(((value.location.y + y - 35) / 43).rounded()) + 1))
+                                        let horizontalPosition: CGFloat = value.location.x + x - 18
+                                        let normalizedPosition: CGFloat = horizontalPosition / usableWidth
+                                        let rawPan: CGFloat = normalizedPosition * 2 - 1
+                                        let clampedPan: CGFloat = min(CGFloat(1), max(CGFloat(-1), rawPan))
+                                        let pan = Float(clampedPan)
+                                        let verticalPosition: CGFloat = value.location.y + y - 35
+                                        let zoneOffset: CGFloat = verticalPosition / 43
+                                        let zone = min(5, max(1, Int(zoneOffset.rounded()) + 1))
                                         viewModel.setTrackStagePosition(id: track.id, pan: pan, zone: zone)
                                     })
                         }
