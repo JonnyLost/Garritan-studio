@@ -64,7 +64,7 @@ struct OrchestralStageView: View {
                             .foregroundStyle(.secondary)
                     }
                     fittedCurvedStage(
-                        availableWidth: max(300, geometry.size.width - 294),
+                        availableWidth: max(200, geometry.size.width - 328),
                         availableHeight: max(220, geometry.size.height - 66)
                     )
                     HStack(spacing: 14) {
@@ -79,7 +79,8 @@ struct OrchestralStageView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                VStack(alignment: .leading, spacing: 14) {
+                ScrollView(.vertical) {
+                  VStack(alignment: .leading, spacing: 14) {
                     Label("Instrument position", systemImage: "slider.horizontal.3")
                         .font(.subheadline.weight(.semibold))
                     selectedTrackControls
@@ -102,13 +103,15 @@ struct OrchestralStageView: View {
                         }
                     }
                     Divider()
-                    Text("All instruments share one Concert Hall. Moving a marker changes its stereo position and room ambience.")
+                    Text("All instruments share one Concert Hall. Stage position controls stereo placement, distance and ambience.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
+                        .fixedSize(horizontal: false, vertical: true)
+                  }
+                  .padding(14)
+                  .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(14)
-                .frame(width: 246, alignment: .leading)
+                .frame(width: 280)
                 .background(Color(nsColor: .controlBackgroundColor).opacity(0.65))
                 .clipShape(RoundedRectangle(cornerRadius: 12))
             }
@@ -489,23 +492,27 @@ struct OrchestralStageView: View {
             Text("Moving the instrument changes its direct level and hall send.")
                 .font(.caption2).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Text("Dry / Wet")
+            VStack(alignment: .leading, spacing: 5) {
+                HStack {
+                    Text("Instrument Wet")
+                    Spacer()
+                    Text("\(Int(effectiveWetLevel(for: track) * 100))%")
+                        .monospacedDigit()
+                }
                 Slider(value: wetLevelBinding(for: id), in: 0...1)
                     .disabled(track.stageReverbZone == 0)
-                Text("\(Int(effectiveWetLevel(for: track) * 100))%")
-                    .monospacedDigit()
-                    .frame(width: 46)
             }
             Text("The wet level follows stage movement; adjust it to fine-tune the instrument.")
                 .font(.caption2).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Text("Overall Reverb")
+            VStack(alignment: .leading, spacing: 5) {
+                HStack {
+                    Text("Overall Reverb")
+                    Spacer()
+                    Text("\(Int(viewModel.audioEngine.concertHallOverallReverb * 100))%")
+                        .monospacedDigit()
+                }
                 Slider(value: overallReverbBinding, in: 0...2)
-                Text("\(Int(viewModel.audioEngine.concertHallOverallReverb * 100))%")
-                    .monospacedDigit()
-                    .frame(width: 46)
             }
             Text("Overall Reverb affects the entire Concert Hall.")
                 .font(.caption2).foregroundStyle(.secondary)
