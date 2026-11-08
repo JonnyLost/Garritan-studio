@@ -21,6 +21,8 @@ public final class ProjectViewModel: ObservableObject {
             NotificationCenter.default.post(name: .projectDidChange, object: project)
         }
     }
+    @Published public var activeKeyswitchArticulationID: String?
+    @Published public var activeKeyswitchTrackID: TrackID?
     @Published public private(set) var selectedTrackID: TrackID?
     @Published public private(set) var selectedClipIDs: Set<ClipID> = []
     @Published public private(set) var isModified: Bool = false
