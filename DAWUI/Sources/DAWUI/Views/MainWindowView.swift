@@ -85,46 +85,51 @@ public struct MainWindowView: View {
             Divider()
             
             HStack(spacing: 0) {
-                // Compact navigation replaces the old full-width composer drawer.
+                // Navigation spans both arrangement and lower editor.
                 if showVRack {
                     workspaceNavigation
                     Divider()
                 }
 
-                arrangeView
+                VStack(spacing: 0) {
+                    HStack(spacing: 0) {
+                        arrangeView
 
-                if viewModel.showInspector {
-                    Divider()
-                    InspectorView(viewModel: viewModel)
-                        .frame(width: 250)  // Fixed width
-                }
-                
-                if viewModel.showAIAssistant {
-                    Divider()
-                    AIAssistantView(viewModel: viewModel, isGenerativeFillMode: $isAIGenerationMode, voiceInput: voiceInput)
-                        .frame(width: 320)  // Fixed width for AI panel
-                }
-            }
-            
-                if showInstrumentWorkspace || showStageWorkspace || viewModel.showMixer || viewModel.showPianoRoll {
-                ResizeHandle(height: $pianoRollHeight)
-                    .onTapGesture(count: 2) {
-                        if lowerWorkspaceMaximized {
-                            pianoRollHeight = lowerWorkspaceRestoreHeight
-                        } else {
-                            lowerWorkspaceRestoreHeight = pianoRollHeight
-                            pianoRollHeight = max(500, (NSApp.keyWindow?.contentView?.bounds.height ?? 800) - 190)
+                        if viewModel.showInspector {
+                            Divider()
+                            InspectorView(viewModel: viewModel)
+                                .frame(width: 250)
                         }
-                        lowerWorkspaceMaximized.toggle()
+
+                        if viewModel.showAIAssistant {
+                            Divider()
+                            AIAssistantView(viewModel: viewModel, isGenerativeFillMode: $isAIGenerationMode, voiceInput: voiceInput)
+                                .frame(width: 320)
+                        }
                     }
+                    .frame(maxHeight: .infinity)
 
-                bottomPanel
-                    .frame(height: pianoRollHeight)
-                    .simultaneousGesture(
-                        TapGesture().onEnded { _ in
-                            NSApp.keyWindow?.makeFirstResponder(nil)
-                        }
-                    )
+                    if showInstrumentWorkspace || showStageWorkspace || viewModel.showMixer || viewModel.showPianoRoll {
+                        ResizeHandle(height: $pianoRollHeight)
+                            .onTapGesture(count: 2) {
+                                if lowerWorkspaceMaximized {
+                                    pianoRollHeight = lowerWorkspaceRestoreHeight
+                                } else {
+                                    lowerWorkspaceRestoreHeight = pianoRollHeight
+                                    pianoRollHeight = max(500, (NSApp.keyWindow?.contentView?.bounds.height ?? 800) - 190)
+                                }
+                                lowerWorkspaceMaximized.toggle()
+                            }
+
+                        bottomPanel
+                            .frame(height: pianoRollHeight)
+                            .simultaneousGesture(
+                                TapGesture().onEnded { _ in
+                                    NSApp.keyWindow?.makeFirstResponder(nil)
+                                }
+                            )
+                    }
+                }
             }
         }
         .frame(minWidth: 1200, minHeight: 700)
