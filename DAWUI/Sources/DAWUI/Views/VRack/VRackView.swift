@@ -73,8 +73,20 @@ private final class BrowserAudition: ObservableObject {
                         userInfo: [NSLocalizedDescriptionKey: "ARIA MIDI audition is unavailable."])
                 }
                 let previewEngine = AVAudioEngine()
+                let converterMixer = AVAudioMixerNode()
                 previewEngine.attach(instrument)
-                previewEngine.connect(instrument, to: previewEngine.mainMixerNode, format: format)
+                previewEngine.attach(converterMixer)
+                // ARIA can expose a native render format different from the
+                // requested host format. Match the working track routing:
+                // AU native output -> converter mixer -> engine main mixer.
+                let nativeFormat = instrument.outputFormat(forBus: 0)
+                print("[BrowserAudition] ARIA output format: \(nativeFormat)")
+                print("[BrowserAudition] Host format: \(format)")
+                previewEngine.connect(instrument, to: converterMixer, format: nativeFormat)
+                previewEngine.connect(converterMixer, to: previewEngine.mainMixerNode, format: format)
+                converterMixer.outputVolume = 1.0
+                print("[BrowserAudition] AU connections: \(previewEngine.outputConnectionPoints(for: instrument, outputBus: 0).count)")
+                print("[BrowserAudition] Mixer connections: \(previewEngine.outputConnectionPoints(for: converterMixer, outputBus: 0).count)")
                 try TrackGarritanLoader.apply(TrackGarritanProgram(library: library, programName: path), to: instrument)
                 print("[BrowserAudition] Program loaded: \(path)")
                 try previewEngine.start()
