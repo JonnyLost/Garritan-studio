@@ -538,6 +538,16 @@ public final class ProjectViewModel: ObservableObject {
         updateTrack(track, description: "Move Instrument on Stage")
     }
 
+    public func setTrackStageWetTrim(id: TrackID, trim: Float) {
+        guard var track = project.track(withID: id) else { return }
+        track.stageWetTrim = min(2, max(0, trim))
+        updateTrack(track, description: "Adjust Instrument Hall Send")
+    }
+
+    public func setConcertHallOverallReverb(_ level: Float) {
+        audioEngine.setConcertHallOverallReverb(level)
+    }
+
     public func setTrackStageZone(id: TrackID, zone: Int) {
         guard var track = project.track(withID: id) else { return }
         track.stageReverbZone = min(5, max(0, zone))
