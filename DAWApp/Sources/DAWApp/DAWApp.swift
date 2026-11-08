@@ -407,6 +407,7 @@ struct SettingsView: View {
 
 /// Appearance is a user preference, not a property of the musical project.
 private struct AppearanceSettingsView: View {
+    @State private var showingIconGallery = false
     @AppStorage("garritanStudio.appearance") private var selection = StudioAppearance.system.rawValue
     @AppStorage("garritanStudio.iconCollection") private var iconSelection = StudioIconCollection.matchAppearance.rawValue
     @Environment(\.studioPalette) private var palette
@@ -474,13 +475,25 @@ private struct AppearanceSettingsView: View {
             .padding(12)
             .background(palette.surface, in: RoundedRectangle(cornerRadius: 10))
 
-            Text((StudioIconCollection(rawValue: iconSelection) ?? .matchAppearance).detail +
-                 " · Active: " + resolvedIcons.title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            HStack {
+                Text((StudioIconCollection(rawValue: iconSelection) ?? .matchAppearance).detail +
+                     " · Active: " + resolvedIcons.title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    showingIconGallery = true
+                } label: {
+                    Label("View All Instrument Icons", systemImage: "square.grid.3x3")
+                }
+                .buttonStyle(.bordered)
+            }
             Spacer(minLength: 0)
         }
         .padding(22)
+        .sheet(isPresented: $showingIconGallery) {
+            StudioIconGalleryView()
+        }
     }
 
     private func themeCard(_ appearance: StudioAppearance) -> some View {
