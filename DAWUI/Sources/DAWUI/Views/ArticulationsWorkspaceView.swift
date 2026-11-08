@@ -83,13 +83,37 @@ struct ArticulationsWorkspaceView: View {
     }
 
 
+    // Reference overlay only: the manual's octave labels are not yet calibrated
+    // against ARIA's actual MIDI keyswitch note numbers.
+    private func referencePitch(_ label: String) -> Int? {
+        let text = label.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let names = ["C": 0, "C#": 1, "DB": 1, "D": 2, "D#": 3, "EB": 3,
+                     "E": 4, "F": 5, "F#": 6, "GB": 6, "G": 7,
+                     "G#": 8, "AB": 8, "A": 9, "A#": 10, "BB": 10, "B": 11]
+        let prefix = String(text.prefix { !$0.isNumber && $0 != "-" })
+        guard let semitone = names[prefix],
+              let octave = Int(text.dropFirst(prefix.count)) else { return nil }
+        let pitch = (octave + 1) * 12 + semitone
+        return (0...127).contains(pitch) ? pitch : nil
+    }
+
+    private func referenceKeyswitch(_ pitch: Int) -> GPOKeyswitchCatalog.Assignment? {
+        activePatch?.keyswitches.first { referencePitch($0.note) == pitch }
+    }
+
     // MIDI note numbers are authoritative; displayed octaves use C4 = MIDI 60.
     // Catalog keyswitches remain reference-only until ARIA's octave convention is verified.
     private func keyboardKey(_ pitch: Int, black: Bool, width: CGFloat, height: CGFloat = 90) -> some View {
         let active = pressedPitch == UInt8(pitch)
+        let reference = referenceKeyswitch(pitch)
         return RoundedRectangle(cornerRadius: 3)
             .fill(active ? Color.accentColor : (black ? Color.black : Color.white))
-            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color.gray, lineWidth: 0.5))
+            .overlay(RoundedRectangle(cornerRadius: 3).stroke(reference == nil ? Color.gray : Color.orange, lineWidth: reference == nil ? 0.5 : 2))
+            .overlay(alignment: .top) {
+                if reference != nil {
+                    Circle().fill(Color.orange).frame(width: 5, height: 5).padding(.top, 3)
+                }
+            }
             .overlay(alignment: .bottom) {
                 if pitch % 12 == 0 {
                     Text("C\(pitch / 12 - 1)")
@@ -176,6 +200,12 @@ struct ArticulationsWorkspaceView: View {
             HStack(spacing: 5) {
                 Text("88-Key Keyboard").font(.caption2.weight(.semibold))
                 Spacer()
+                if activePatch != nil {
+                    Circle().fill(Color.orange).frame(width: 6, height: 6)
+                    Text("Manual KS reference · octave unverified")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
                 Text("A0–C8")
                     .font(.caption2.monospacedDigit())
                     .foregroundColor(.secondary)
