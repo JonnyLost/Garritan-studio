@@ -119,7 +119,7 @@ struct ArticulationsWorkspaceView: View {
     private func keyboardKey(_ pitch: Int, black: Bool, width: CGFloat, height: CGFloat = 90) -> some View {
         let active = pressedPitch == UInt8(pitch)
         let reference = referenceKeyswitch(pitch)
-        let selected = canSendKeyswitch && reference?.id == selectedArticulationID
+        let selected = canSendKeyswitch && reference != nil && selectedArticulationID != nil && reference?.id == selectedArticulationID
         return RoundedRectangle(cornerRadius: 3)
             .fill(active || selected ? Color.accentColor : (black ? Color.black : Color.white))
             .overlay(RoundedRectangle(cornerRadius: 3).stroke(selected ? Color.accentColor : (reference == nil ? (black ? Color.black : Color.gray.opacity(0.4)) : Color.orange), lineWidth: selected ? 2 : (reference == nil ? 0.6 : 1.5)))
