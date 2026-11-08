@@ -325,7 +325,7 @@ struct OrchestralStageView: View {
         let isConductor = track.stageReverbZone == 0
         let point = isConductor
             ? CGPoint(x: width / 2, y: 477 * stageScale(width))
-            : stagePoint(pan: CGFloat(track.pan), zone: track.stageReverbZone ?? 1, width: width)
+            : stagePoint(pan: CGFloat(track.pan), zone: track.stageReverbZone ?? 2, width: width)
         return Circle()
             .fill(viewModel.selectedTrackID == track.id ? Color.accentColor : Color.orange)
             .frame(width: 25, height: 25)
@@ -336,7 +336,7 @@ struct OrchestralStageView: View {
                     .foregroundStyle(.white)
             )
             .position(point)
-            .help(track.stageReverbZone == 0 ? "\(track.name) — Conductor (center, dry)" : "\(track.name) — L\(track.stageReverbZone ?? 1)")
+            .help(track.stageReverbZone == 0 ? "\(track.name) — Conductor (center, dry)" : "\(track.name) — L\(track.stageReverbZone ?? 2)")
             .onTapGesture { viewModel.selectTrack(track.id) }
             .gesture(
                 DragGesture(minimumDistance: 3)
@@ -362,7 +362,7 @@ struct OrchestralStageView: View {
         guard let start = dragOrigins[trackID] else { return }
         let scale = stageScale(width)
         let dx = (start.x + translation.width - width / 2) / scale
-        let dy = max(CGFloat(0.001), 535 - (start.y + translation.height) / scale)
+        let dy = 535 - (start.y + translation.height) / scale
         let angle = atan2(dx, dy)
         let pan = Float(min(CGFloat(1), max(CGFloat(-1), angle / (.pi / 2))))
         let radius = hypot(dx, dy)
@@ -412,7 +412,7 @@ struct OrchestralStageView: View {
     private func marker(_ track: Track, width: CGFloat) -> some View {
         let usableWidth = max(CGFloat(1), width - 36)
         let x = CGFloat(18) + CGFloat((track.pan + 1) / 2) * usableWidth
-        let y = CGFloat(35 + (max(1, track.stageReverbZone ?? 1) - 1) * 43)
+        let y = CGFloat(35 + (max(1, track.stageReverbZone ?? 2) - 1) * 43)
         let selected = viewModel.selectedTrackID == track.id
 
         return Circle()
@@ -425,7 +425,7 @@ struct OrchestralStageView: View {
                     .foregroundStyle(.white)
             )
             .position(x: x, y: y)
-            .help("\(track.name) — L\(track.stageReverbZone ?? 1)")
+            .help("\(track.name) — L\(track.stageReverbZone ?? 2)")
             .onTapGesture { viewModel.selectTrack(track.id) }
             .gesture(
                 DragGesture(minimumDistance: 3)
@@ -503,7 +503,7 @@ struct OrchestralStageView: View {
 
     private func zoneBinding(for id: TrackID) -> Binding<Int> {
         Binding(
-            get: { viewModel.project.track(withID: id)?.stageReverbZone ?? 1 },
+            get: { viewModel.project.track(withID: id)?.stageReverbZone ?? 2 },
             set: { viewModel.setTrackStageZone(id: id, zone: $0) }
         )
     }
