@@ -111,7 +111,10 @@ struct OrchestralStageView: View {
                   .padding(14)
                   .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(width: 280)
+                // GeometryReader does not constrain the ScrollView's height
+                // automatically in every split-editor configuration. Give it
+                // the available viewport so the bottom rows remain scrollable.
+                .frame(width: 280, height: max(120, geometry.size.height - 24))
                 .background(Color(nsColor: .controlBackgroundColor).opacity(0.65))
                 .clipShape(RoundedRectangle(cornerRadius: 12))
             }
