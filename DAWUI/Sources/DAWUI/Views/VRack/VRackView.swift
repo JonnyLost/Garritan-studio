@@ -230,9 +230,9 @@ public struct VRackView: View {
         catalog = loaded
     }
 
-    private func chooseInstrument(_ instrument: DrawerInstrument) {
+    private func chooseInstrument(_ instrument: DrawerInstrument, targetTrackID: TrackID? = nil) {
         guard !isLoadingInstrument else { return }
-        guard let trackID = viewModel.selectedTrackID,
+        guard let trackID = targetTrackID ?? viewModel.selectedTrackID,
               let track = viewModel.project.track(withID: trackID),
               track.type == .midi || track.type == .instrument else {
             pickerError = "Select a MIDI or instrument track first."
@@ -306,6 +306,16 @@ public struct VRackView: View {
                 print("[Instrument Picker] Load failed: \\(error)")
             }
         }
+    }
+
+    private func addInstrumentTrack(_ instrument: DrawerInstrument) {
+        guard !isLoadingInstrument else { return }
+        viewModel.addTrack(type: .instrument, name: instrument.name)
+        guard let newTrackID = viewModel.selectedTrackID else {
+            pickerError = "Could not create the instrument track."
+            return
+        }
+        chooseInstrument(instrument, targetTrackID: newTrackID)
     }
 
     // Studio-level controls: intentionally independent of ARIA's own mixer.
@@ -600,11 +610,19 @@ public struct VRackView: View {
                         Button {
                             chooseInstrument(instrument)
                         } label: {
-                            Label("Load Instrument", systemImage: "arrow.down.to.line")
+                            Label("Load on Selected Track", systemImage: "arrow.down.to.line")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(isLoadingInstrument || viewModel.selectedTrackID == nil)
+                        Button {
+                            addInstrumentTrack(instrument)
+                        } label: {
+                            Label("Add as New Track", systemImage: "plus")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(isLoadingInstrument)
                     } else {
                         Text("Select an instrument from the list to preview it, then click Load Instrument.")
                             .foregroundStyle(.secondary)
