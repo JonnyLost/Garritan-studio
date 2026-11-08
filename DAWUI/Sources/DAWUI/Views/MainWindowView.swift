@@ -112,7 +112,7 @@ public struct MainWindowView: View {
                 if showInstrumentWorkspace {
                     VRackView(viewModel: viewModel, closeInstrumentWorkspace: {
                         showInstrumentWorkspace = false
-                    }).expandedInstrumentBrowser
+                    }, expandedOnly: true)
                 } else {
                     arrangeView
                 }
