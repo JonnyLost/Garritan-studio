@@ -29,6 +29,7 @@ public struct VRackView: View {
     var openStageWorkspace: (() -> Void)?
     var openInstrumentWorkspace: (() -> Void)?
     var closeInstrumentWorkspace: (() -> Void)?
+    var expandedOnly: Bool = false
     @State private var showPluginBrowser = false
     @State private var selectedRackInstrumentID: UUID?
     @State private var mode: ComposerDrawerMode = .instruments
@@ -44,14 +45,26 @@ public struct VRackView: View {
 
     public init(viewModel: ProjectViewModel, openStageWorkspace: (() -> Void)? = nil,
                 openInstrumentWorkspace: (() -> Void)? = nil,
-                closeInstrumentWorkspace: (() -> Void)? = nil) {
+                closeInstrumentWorkspace: (() -> Void)? = nil,
+                expandedOnly: Bool = false) {
         self.viewModel = viewModel
         self.openStageWorkspace = openStageWorkspace
         self.openInstrumentWorkspace = openInstrumentWorkspace
         self.closeInstrumentWorkspace = closeInstrumentWorkspace
+        self.expandedOnly = expandedOnly
     }
 
     public var body: some View {
+        Group {
+            if expandedOnly {
+                expandedInstrumentBrowser
+            } else {
+                compactDrawer
+            }
+        }
+    }
+
+    private var compactDrawer: some View {
         HStack(spacing: 0) {
             VStack(spacing: 4) {
                 ForEach(ComposerDrawerMode.allCases) { option in
