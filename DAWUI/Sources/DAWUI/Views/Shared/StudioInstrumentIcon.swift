@@ -628,11 +628,12 @@ private struct InstrumentIconDrawing {
             ], details: [O(45, 72, 10, 10)], engraving: [])
         case .tambourine:
             var jingles: [Path] = []
-            for index in 0..<7 {
-                let angle = CGFloat(index) * .pi / 3.5
-                let x = 50 + cos(angle) * 32
-                let y = 50 + sin(angle) * 32
-                jingles.append(O(x - 5, y - 5, 10, 10))
+            let jingleCenters: [(CGFloat, CGFloat)] = [
+                (50, 18), (75, 29), (82, 53), (66, 78),
+                (36, 78), (18, 55), (26, 28)
+            ]
+            for center in jingleCenters {
+                jingles.append(O(center.0 - 5, center.1 - 5, 10, 10))
             }
             return Self(primary: [O(14, 14, 72, 72), O(23, 23, 54, 54)],
                         details: jingles,
