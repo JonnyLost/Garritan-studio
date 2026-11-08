@@ -270,12 +270,14 @@ public final class AudioEngine: ObservableObject {
         if let effect = trackNode.stereoPositionNode { engine.disconnectNodeOutput(effect) }
         engine.disconnectNodeOutput(trackNode.pannerNode)
         engine.disconnectNodeOutput(trackNode.outputMixer)
+        engine.disconnectNodeOutput(trackNode.concertHallSend)
         
         engine.detach(trackNode.inputMixer)
         engine.detach(trackNode.gainNode)
         if let effect = trackNode.stereoPositionNode { engine.detach(effect) }
         engine.detach(trackNode.pannerNode)
         engine.detach(trackNode.outputMixer)
+        engine.detach(trackNode.concertHallSend)
         
         // Detach plugin nodes
         for auNode in trackNode.pluginNodes {
