@@ -318,9 +318,10 @@ public struct MainWindowView: View {
             VStack(spacing: 0) {
                 // Tracks label header
                 HStack {
-                    Text("Tracks")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    Text("TRACKS")
+                        .font(.system(size: 10, weight: .semibold))
+                        .tracking(0.9)
+                        .foregroundColor(palette.secondaryText)
                     Spacer()
                     Menu {
                         Button("Audio Track") { viewModel.addTrack(type: .audio) }
@@ -334,7 +335,7 @@ public struct MainWindowView: View {
                 }
                 .frame(height: rulerHeight)
                 .padding(.horizontal, 8)
-                .background(Color(nsColor: .windowBackgroundColor))
+                .background(palette.panel)
                 
                 Divider()
                 
@@ -346,13 +347,14 @@ public struct MainWindowView: View {
                                 // Drop indicator line above track
                                 if dropTargetIndex == index && draggedTrackID != nil && draggedTrackID != track.id {
                                     Rectangle()
-                                        .fill(Color.accentColor)
+                                        .fill(palette.accent)
                                         .frame(height: 3)
                                 }
                                 
                                 TrackHeaderView(track: track, viewModel: viewModel)
                                     .frame(width: trackHeaderWidth, height: trackHeight)
-                                    .background(viewModel.selectedTrackID == track.id ? Color.accentColor.opacity(0.1) : Color(nsColor: .controlBackgroundColor))
+                                    .background(viewModel.selectedTrackID == track.id ?
+                                                palette.selectedBackground.opacity(0.7) : palette.surface)
                                     .opacity(draggedTrackID == track.id ? 0.5 : 1.0)
                                     .onDrag {
                                         draggedTrackID = track.id
