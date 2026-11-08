@@ -220,7 +220,7 @@ public struct VRackView: View {
     private func displayInstrumentType(_ type: String) -> String {
         // Garritan bank folder names use ordering prefixes, e.g. "03 Clarinets".
         // Keep the underlying folder name intact for accurate catalog filtering.
-        type.replacingOccurrences(of: #"^\\d+\\s+"#, with: "", options: .regularExpression)
+        type.replacingOccurrences(of: #"^\d+\s+"#, with: "", options: .regularExpression)
     }
 
     private var availableInstrumentTypes: [String] {
