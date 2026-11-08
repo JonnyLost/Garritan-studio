@@ -129,6 +129,7 @@ private enum InstrumentIconIdentity: Equatable {
     case timpani, snare, bassDrum, cymbals, triangle, gong, mallets, chimes, bells
     case xylophone, vibraphone, marimba, glockenspiel, crotales, handbells
     case tambourine, maracas, castanets, woodblock, windMachine
+    case cowbell, sleighBells, markTree, ratchet, gourd, claves, cabasa, vibraslap
     case percussion, harp, piano, celesta, harpsichord, organ, glassArmonica
     case choir, synth, wind, world, orchestra, generic
 
@@ -178,6 +179,14 @@ private enum InstrumentIconIdentity: Equatable {
         case .castanets: return "Castanets"
         case .woodblock: return "Woodblock"
         case .windMachine: return "Wind machine"
+        case .cowbell: return "Cowbell"
+        case .sleighBells: return "Sleigh bells"
+        case .markTree: return "Mark tree"
+        case .ratchet: return "Ratchet"
+        case .gourd: return "Gourd percussion"
+        case .claves: return "Claves"
+        case .cabasa: return "Cabasa"
+        case .vibraslap: return "Vibraslap"
         case .mallets: return "Mallet percussion"
         case .chimes: return "Tubular bells"
         case .bells: return "Bells"
@@ -245,7 +254,10 @@ private enum InstrumentIconIdentity: Equatable {
         if has(["cymbal", "hi-hat"]) { return .cymbals }
         if has(["triangle"]) { return .triangle }
         if has(["gong", "tam tam", "tam-tam"]) { return .gong }
-        if has(["tubular bell", "chime", "mark tree"]) { return .chimes }
+        if has(["mark tree"]) { return .markTree }
+        if has(["tubular bell", "chime"]) { return .chimes }
+        if has(["sleigh bell"]) { return .sleighBells }
+        if has(["cowbell", "cow bell"]) { return .cowbell }
         if has(["glockenspiel"]) { return .glockenspiel }
         if has(["crotale"]) { return .crotales }
         if has(["handbell"]) { return .handbells }
@@ -256,7 +268,12 @@ private enum InstrumentIconIdentity: Equatable {
         if has(["tambourine"]) { return .tambourine }
         if has(["maracas", "shaker"]) { return .maracas }
         if has(["castanet"]) { return .castanets }
-        if has(["woodblock", "wood block", "temple block", "clave"]) { return .woodblock }
+        if has(["clave"]) { return .claves }
+        if has(["woodblock", "wood block", "temple block"]) { return .woodblock }
+        if has(["ratchet"]) { return .ratchet }
+        if has(["gourd"]) { return .gourd }
+        if has(["cabasa"]) { return .cabasa }
+        if has(["vibraslap"]) { return .vibraslap }
         if has(["wind machine"]) { return .windMachine }
         if has(["percussion", "drum"]) {
             return .percussion
@@ -378,8 +395,10 @@ private struct InstrumentIconDrawing {
             return Array(base.primary.prefix(1))
         case .tambourine, .castanets, .maracas:
             return Array(base.primary.prefix(2))
-        case .woodblock:
+        case .woodblock, .ratchet, .cowbell, .gourd, .cabasa:
             return Array(base.primary.prefix(1))
+        case .sleighBells, .markTree, .claves, .vibraslap:
+            return Array(base.primary.prefix(2))
         case .harp:
             return [line([(26, 89), (29, 18), (36, 16), (36, 89)], closed: true)]
         case .piano:
@@ -682,6 +701,80 @@ private struct InstrumentIconDrawing {
                 B(14, 31, 62, 42), L([(78, 31), (87, 17)]),
                 L([(74, 67), (88, 78)]), L([(60, 18), (86, 8)])
             ], details: [L([(23, 42), (67, 42)]), L([(29, 58), (61, 58)])],
+               engraving: [])
+        case .cowbell:
+            return Self(primary: [
+                L([(26, 27), (33, 17), (68, 17), (76, 27), (83, 77),
+                   (19, 77), (26, 27)]),
+                O(45, 75, 12, 12)
+            ], details: [L([(31, 34), (68, 34)])],
+               engraving: [L([(29, 39), (23, 71)])])
+        case .sleighBells:
+            return Self(primary: [
+                O(14, 19, 30, 30), O(54, 19, 30, 30),
+                O(14, 54, 30, 30), O(54, 54, 30, 30)
+            ], details: [
+                L([(24, 31), (35, 40)]), L([(63, 30), (73, 40)]),
+                L([(24, 66), (35, 76)]), L([(65, 66), (74, 74)])
+            ], engraving: [])
+        case .markTree:
+            var rods: [Path] = []
+            for index in 0..<8 {
+                let x: CGFloat = 13 + CGFloat(index) * 10
+                let y: CGFloat = 36 + CGFloat(index) * 6
+                rods.append(L([(x, 26), (x, y + 25)]))
+            }
+            return Self(primary: [L([(9, 17), (90, 17)]),
+                                  L([(10, 17), (10, 84)]),
+                                  L([(89, 17), (89, 84)])] + rods,
+                        details: [L([(16, 91), (82, 91)])], engraving: [])
+        case .ratchet:
+            return Self(primary: [
+                B(15, 39, 54, 29),
+                L([(41, 39), (41, 20), (63, 20)]),
+                L([(69, 54), (87, 54)])
+            ], details: [
+                L([(20, 47), (28, 54), (36, 47), (44, 54), (52, 47), (60, 54)])
+            ], engraving: [])
+        case .gourd:
+            var silhouette = Path()
+            silhouette.move(to: CGPoint(x: 44, y: 11))
+            silhouette.addCurve(to: CGPoint(x: 35, y: 49),
+                                control1: CGPoint(x: 22, y: 16), control2: CGPoint(x: 22, y: 35))
+            silhouette.addCurve(to: CGPoint(x: 22, y: 83),
+                                control1: CGPoint(x: 3, y: 59), control2: CGPoint(x: 13, y: 77))
+            silhouette.addCurve(to: CGPoint(x: 78, y: 83),
+                                control1: CGPoint(x: 35, y: 102), control2: CGPoint(x: 65, y: 102))
+            silhouette.addCurve(to: CGPoint(x: 65, y: 49),
+                                control1: CGPoint(x: 88, y: 77), control2: CGPoint(x: 97, y: 59))
+            silhouette.addCurve(to: CGPoint(x: 44, y: 11),
+                                control1: CGPoint(x: 78, y: 31), control2: CGPoint(x: 72, y: 13))
+            return Self(primary: [silhouette],
+                        details: [L([(40, 18), (60, 18)])],
+                        engraving: [L([(35, 64), (65, 78)])])
+        case .claves:
+            return Self(primary: [
+                L([(23, 12), (75, 87)]),
+                L([(12, 24), (64, 99)]),
+                L([(73, 12), (25, 86)]),
+                L([(85, 24), (37, 98)])
+            ], details: [L([(24, 12), (35, 7)]), L([(73, 12), (84, 7)])],
+               engraving: [])
+        case .cabasa:
+            return Self(primary: [
+                O(18, 20, 48, 50),
+                L([(66, 48), (90, 48)]),
+                L([(90, 41), (90, 56)])
+            ], details: [
+                L([(28, 22), (28, 68)]), L([(38, 20), (38, 70)]),
+                L([(48, 20), (48, 70)]), L([(58, 23), (58, 68)])
+            ], engraving: [])
+        case .vibraslap:
+            return Self(primary: [
+                O(12, 23, 27, 29),
+                L([(36, 37), (76, 37), (85, 49), (85, 69)]),
+                O(73, 66, 22, 22)
+            ], details: [L([(76, 75), (91, 75)])],
                engraving: [])
         case .windMachine:
             return Self(primary: [
