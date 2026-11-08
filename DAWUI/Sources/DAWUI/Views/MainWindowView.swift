@@ -18,6 +18,7 @@ public struct MainWindowView: View {
     @State private var pianoRollHeight: CGFloat = 500
     @State private var showStageWorkspace = false
     @State private var showChannelWorkspace = false
+    @State private var showArticulationsWorkspace = false
     @State private var showInstrumentWorkspace = false
     @State private var compactLowerWorkspace = false
     @State private var lowerWorkspaceMaximized = false
@@ -111,7 +112,7 @@ public struct MainWindowView: View {
                     }
                     .frame(maxHeight: .infinity)
 
-                    if showInstrumentWorkspace || showChannelWorkspace || showStageWorkspace || viewModel.showMixer || viewModel.showPianoRoll {
+                    if showInstrumentWorkspace || showChannelWorkspace || showStageWorkspace || showArticulationsWorkspace || viewModel.showMixer || viewModel.showPianoRoll {
                         ResizeHandle(height: $pianoRollHeight)
                             .onTapGesture(count: 2) {
                                 if lowerWorkspaceMaximized {
@@ -444,6 +445,7 @@ public struct MainWindowView: View {
         showInstrumentWorkspace = workspace == "Instruments"
         showChannelWorkspace = workspace == "Channel"
         showStageWorkspace = workspace == "Stage"
+        showArticulationsWorkspace = workspace == "Articulations"
         viewModel.showPianoRoll = workspace == "Piano Roll"
         viewModel.showMixer = workspace == "Mixer"
     }
@@ -460,14 +462,13 @@ public struct MainWindowView: View {
             workspaceButton("Stage", symbol: "circle.hexagongrid", active: showStageWorkspace) {
                 selectWorkspace("Stage")
             }
-            workspaceButton("Articulations", symbol: "music.note", active: false) {
-                // Articulation editing is not implemented yet. Keep the piano roll available.
+            workspaceButton("Articulations", symbol: "music.note", active: showArticulationsWorkspace) {
+                selectWorkspace("Articulations")
+            }
+            workspaceButton("Piano Roll", symbol: "pianokeys", active: viewModel.showPianoRoll && !showInstrumentWorkspace && !showChannelWorkspace && !showStageWorkspace && !showArticulationsWorkspace && !viewModel.showMixer) {
                 selectWorkspace("Piano Roll")
             }
-            workspaceButton("Piano Roll", symbol: "pianokeys", active: viewModel.showPianoRoll && !showInstrumentWorkspace && !showChannelWorkspace && !showStageWorkspace && !viewModel.showMixer) {
-                selectWorkspace("Piano Roll")
-            }
-            workspaceButton("Mixer", symbol: "slider.vertical.3", active: viewModel.showMixer && !showInstrumentWorkspace && !showChannelWorkspace && !showStageWorkspace) {
+            workspaceButton("Mixer", symbol: "slider.vertical.3", active: viewModel.showMixer && !showInstrumentWorkspace && !showChannelWorkspace && !showStageWorkspace && !showArticulationsWorkspace) {
                 selectWorkspace("Mixer")
             }
             Spacer(minLength: 0)
@@ -526,6 +527,8 @@ public struct MainWindowView: View {
             VRackView(viewModel: viewModel, expandedOnly: true)
         } else if showChannelWorkspace {
             ChannelWorkspaceView(viewModel: viewModel)
+        } else if showArticulationsWorkspace {
+            ArticulationsWorkspaceView(viewModel: viewModel)
         } else if showStageWorkspace {
             VStack(spacing: 0) {
                 HStack {
