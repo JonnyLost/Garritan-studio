@@ -44,9 +44,19 @@ struct ArticulationsWorkspaceView: View {
     @State private var catalog = GPOKeyswitchCatalog.load()
     @State private var search = ""
     @State private var selectedPatchName: String?
-    @State private var selectedArticulationID: String?
     @State private var keyboardOctave = 3
     @State private var pressedPitch: UInt8?
+
+    private var selectedArticulationID: String? {
+        get {
+            guard viewModel.activeKeyswitchTrackID == viewModel.selectedTrackID else { return nil }
+            return viewModel.activeKeyswitchArticulationID
+        }
+        nonmutating set {
+            viewModel.activeKeyswitchTrackID = viewModel.selectedTrackID
+            viewModel.activeKeyswitchArticulationID = newValue
+        }
+    }
 
     private var suggestedName: String {
         guard let track = viewModel.selectedTrack else { return "" }
