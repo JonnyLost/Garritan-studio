@@ -536,7 +536,6 @@ public final class ProjectViewModel: ObservableObject {
         track.pan = zone == 0 ? 0 : min(1, max(-1, pan))
         track.stageReverbZone = min(5, max(0, zone))
         updateTrack(track, description: "Move Instrument on Stage")
-        playbackEngine.updateTrackConcertHallDepth(id, zone: min(5, max(0, zone)))
     }
 
     public func setTrackStageZone(id: TrackID, zone: Int) {
@@ -544,7 +543,6 @@ public final class ProjectViewModel: ObservableObject {
         track.stageReverbZone = min(5, max(0, zone))
         if zone == 0 { track.pan = 0 }
         updateTrack(track, description: "Change Stage Reverb Zone")
-        playbackEngine.updateTrackConcertHallDepth(id, zone: min(5, max(0, zone)))
     }
 
     public func setTrackPan(id: TrackID, pan: Float) {
