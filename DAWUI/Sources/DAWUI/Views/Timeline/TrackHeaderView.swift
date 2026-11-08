@@ -1162,7 +1162,7 @@ struct AudioInputSelector: View {
             }) {
                 HStack {
                     Text("None")
-                    if track.inputSource == nil || track.inputSource == .none {
+                    if track.inputSource == nil || track.inputSource == InputSource.none {
                         Image(systemName: "checkmark")
                     }
                 }
