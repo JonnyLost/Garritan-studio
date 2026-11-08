@@ -44,6 +44,8 @@ public struct Track: Identifiable, Codable, Sendable {
     /// Stage reverb zone, 1 (front/dry) through 5 (back/wet).
     /// Optional so existing projects decode without migration.
     public var stageReverbZone: Int?
+    /// Optional multiplier for this instrument's hall send (1 = stage default).
+    public var stageWetTrim: Float?
     public var isMuted: Bool
     public var isSolo: Bool
     public var isArmed: Bool       // Record armed
@@ -95,6 +97,7 @@ public struct Track: Identifiable, Codable, Sendable {
         self.volume = 0.7937  // -2 dB default
         self.pan = 0.0
         self.stageReverbZone = nil
+        self.stageWetTrim = nil
         self.isMuted = false
         self.isSolo = false
         self.isArmed = false
