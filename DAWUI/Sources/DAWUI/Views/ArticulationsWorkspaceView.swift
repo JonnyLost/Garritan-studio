@@ -170,7 +170,7 @@ struct ArticulationsWorkspaceView: View {
 
 
     // Compact mode shares the same catalog and patch-matching logic as the full editor.
-    private var compactKeyboard: some View {
+    var dockedKeyboard: some View {
         VStack(spacing: 3) {
             HStack(spacing: 5) {
                 Text("Keyboard").font(.caption2.weight(.semibold))
@@ -195,7 +195,7 @@ struct ArticulationsWorkspaceView: View {
                         ForEach(0..<36, id: \.self) { offset in
                             let pitch = start + offset
                             if pitch <= 127 && ![1, 3, 6, 8, 10].contains(pitch % 12) {
-                                keyboardKey(pitch, black: false, width: keyWidth, height: 45)
+                                keyboardKey(pitch, black: false, width: keyWidth, height: 62)
                             }
                         }
                     }
@@ -212,9 +212,10 @@ struct ArticulationsWorkspaceView: View {
                     }
                 }
             }
-            .frame(height: 46)
+            .frame(height: 63)
         }
-        .frame(minWidth: 250)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
     }
 
     var compactControls: some View {
@@ -263,9 +264,6 @@ struct ArticulationsWorkspaceView: View {
                     .foregroundColor(.secondary)
                 Spacer()
             }
-            Divider()
-            compactKeyboard
-                .frame(maxWidth: .infinity)
         }
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
