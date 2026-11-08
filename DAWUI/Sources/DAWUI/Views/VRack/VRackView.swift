@@ -613,6 +613,11 @@ public struct VRackView: View {
                 previewInstrumentID = filteredCatalog.first?.id
             }
         }
+        .onChange(of: catalog.count) { _, _ in
+            if previewInstrumentID == nil {
+                previewInstrumentID = filteredCatalog.first?.id
+            }
+        }
     }
 
     private var instrumentsPanel: some View {
