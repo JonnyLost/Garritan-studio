@@ -337,11 +337,14 @@ public struct VRackView: View {
 
     private func addInstrumentTrack(_ instrument: DrawerInstrument) {
         guard !isLoadingInstrument else { return }
+        print("[Instrument Picker] Add as New Track: beginning track creation for \(instrument.name)")
         viewModel.addTrack(type: .instrument, name: instrument.name)
+        print("[Instrument Picker] Add as New Track: track creation returned")
         guard let newTrackID = viewModel.selectedTrackID else {
             pickerError = "Could not create the instrument track."
             return
         }
+        print("[Instrument Picker] Add as New Track: beginning ARIA load for \(newTrackID)")
         chooseInstrument(instrument, targetTrackID: newTrackID)
     }
 
