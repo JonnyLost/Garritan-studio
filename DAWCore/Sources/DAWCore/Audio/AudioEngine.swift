@@ -94,6 +94,12 @@ public final class AudioEngine: ObservableObject {
         concertHallReverb.wetDryMix = 100
         engine.attach(concertHallReverb)
         print("[ConcertHall] Reverb processor attached (unconnected; dry routing unchanged)")
+        // Diagnostics only: never change the graph while collecting this data.
+        print("[ConcertHall] Engine sample rate: \(sampleRate)")
+        print("[ConcertHall] Master output format: \(masterMixer.outputFormat(forBus: 0))")
+        print("[ConcertHall] Hall input format: \(concertHallReverb.inputFormat(forBus: 0))")
+        print("[ConcertHall] Hall output format: \(concertHallReverb.outputFormat(forBus: 0))")
+        print("[ConcertHall] Hall output connections: \(engine.outputConnectionPoints(for: concertHallReverb, outputBus: 0).count)")
         
         // Get sample rate from output
         sampleRate = engine.outputNode.outputFormat(forBus: 0).sampleRate
@@ -195,6 +201,10 @@ public final class AudioEngine: ObservableObject {
         engine.connect(stereoEffect, to: trackNode.pannerNode, format: format)
         engine.connect(trackNode.pannerNode, to: trackNode.outputMixer, format: format)
         engine.connect(trackNode.outputMixer, to: masterMixer, format: format)
+        let dryEdges = engine.outputConnectionPoints(for: trackNode.outputMixer, outputBus: 0)
+        print("[ConcertHall] Dry track \(track.id.rawValue) -> master: \(dryEdges.contains { $0.node === masterMixer })")
+        print("[ConcertHall] Track output format: \(trackNode.outputMixer.outputFormat(forBus: 0))")
+        print("[ConcertHall] Master input format: \(masterMixer.inputFormat(forBus: 0))")
         
         // Set initial values
         trackNode.setVolume(track.volume)
