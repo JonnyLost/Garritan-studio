@@ -17,6 +17,7 @@ public struct MainWindowView: View {
     @State private var mixerHeight: CGFloat = 280
     @State private var pianoRollHeight: CGFloat = 500
     @State private var showStageWorkspace = false
+    @State private var showChannelWorkspace = false
     @State private var showInstrumentWorkspace = false
     @State private var lowerWorkspaceMaximized = false
     @State private var lowerWorkspaceRestoreHeight: CGFloat = 500
@@ -109,7 +110,7 @@ public struct MainWindowView: View {
                     }
                     .frame(maxHeight: .infinity)
 
-                    if showInstrumentWorkspace || showStageWorkspace || viewModel.showMixer || viewModel.showPianoRoll {
+                    if showInstrumentWorkspace || showChannelWorkspace || showStageWorkspace || viewModel.showMixer || viewModel.showPianoRoll {
                         ResizeHandle(height: $pianoRollHeight)
                             .onTapGesture(count: 2) {
                                 if lowerWorkspaceMaximized {
@@ -420,32 +421,35 @@ public struct MainWindowView: View {
     
     // MARK: - Bottom Panel
     
+    private func selectWorkspace(_ workspace: String) {
+        showInstrumentWorkspace = workspace == "Instruments"
+        showChannelWorkspace = workspace == "Channel"
+        showStageWorkspace = workspace == "Stage"
+        viewModel.showPianoRoll = workspace == "Piano Roll"
+        viewModel.showMixer = workspace == "Mixer"
+    }
+
     @ViewBuilder
     private var workspaceNavigation: some View {
         VStack(spacing: 8) {
             workspaceButton("Instruments", symbol: "music.note.list", active: showInstrumentWorkspace) {
-                showInstrumentWorkspace = true
-                showStageWorkspace = false
+                selectWorkspace("Instruments")
             }
-            workspaceButton("Channel", symbol: "slider.horizontal.3", active: viewModel.showMixer && !showInstrumentWorkspace) {
-                showInstrumentWorkspace = false
-                showStageWorkspace = false
-                viewModel.showMixer = true
-                viewModel.showPianoRoll = false
+            workspaceButton("Channel", symbol: "slider.horizontal.3", active: showChannelWorkspace) {
+                selectWorkspace("Channel")
             }
             workspaceButton("Stage", symbol: "circle.hexagongrid", active: showStageWorkspace) {
-                showInstrumentWorkspace = false
-                showStageWorkspace = true
+                selectWorkspace("Stage")
             }
             workspaceButton("Articulations", symbol: "music.note", active: false) {
-                showInstrumentWorkspace = false
-                showStageWorkspace = false
-                viewModel.showPianoRoll = true
+                // Articulation editing is not implemented yet. Keep the piano roll available.
+                selectWorkspace("Piano Roll")
             }
-            workspaceButton("Piano Roll", symbol: "pianokeys", active: viewModel.showPianoRoll && !showStageWorkspace && !showInstrumentWorkspace) {
-                showInstrumentWorkspace = false
-                showStageWorkspace = false
-                viewModel.showPianoRoll = true
+            workspaceButton("Piano Roll", symbol: "pianokeys", active: viewModel.showPianoRoll && !showInstrumentWorkspace && !showChannelWorkspace && !showStageWorkspace && !viewModel.showMixer) {
+                selectWorkspace("Piano Roll")
+            }
+            workspaceButton("Mixer", symbol: "slider.vertical.3", active: viewModel.showMixer && !showInstrumentWorkspace && !showChannelWorkspace && !showStageWorkspace) {
+                selectWorkspace("Mixer")
             }
             Spacer(minLength: 0)
         }
@@ -474,18 +478,19 @@ public struct MainWindowView: View {
     private var bottomPanel: some View {
         if showInstrumentWorkspace {
             VRackView(viewModel: viewModel, expandedOnly: true)
+        } else if showChannelWorkspace {
+            ChannelWorkspaceView(viewModel: viewModel)
         } else if showStageWorkspace {
             VStack(spacing: 0) {
                 HStack {
                     Text("Orchestral Stage").font(.headline)
                     Spacer()
                     Button("Piano Roll") {
-                        showStageWorkspace = false
-                        viewModel.showPianoRoll = true
+                        selectWorkspace("Piano Roll")
                     }
                     .buttonStyle(.borderless)
                     Button {
-                        showStageWorkspace = false
+                        selectWorkspace("Piano Roll")
                     } label: {
                         Image(systemName: "xmark")
                     }
@@ -591,10 +596,10 @@ public struct MainWindowView: View {
             .help("Toggle Workspace Navigation")
 
             Toggle(isOn: Binding(
-                get: { viewModel.showPianoRoll && !showStageWorkspace },
+                get: { viewModel.showPianoRoll && !showStageWorkspace && !showChannelWorkspace && !showInstrumentWorkspace },
                 set: { enabled in
-                    showStageWorkspace = false
-                    viewModel.showPianoRoll = enabled
+                    if enabled { selectWorkspace("Piano Roll") }
+                    else { viewModel.showPianoRoll = false }
                 }
             )) {
                 Image(systemName: "rectangle.split.3x1")
@@ -602,10 +607,10 @@ public struct MainWindowView: View {
             .help("Toggle MIDI Editor Panel")
             
             Toggle(isOn: Binding(
-                get: { viewModel.showMixer && !showStageWorkspace },
+                get: { viewModel.showMixer && !showStageWorkspace && !showChannelWorkspace && !showInstrumentWorkspace },
                 set: { enabled in
-                    showStageWorkspace = false
-                    viewModel.showMixer = enabled
+                    if enabled { selectWorkspace("Mixer") }
+                    else { viewModel.showMixer = false }
                 }
             )) {
                 Image(systemName: "slider.horizontal.3")
@@ -1944,6 +1949,47 @@ struct InspectorView: View {
                     }
                 }
                 .padding()
+            }
+        }
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+}
+
+// MARK: - Channel Workspace
+
+/// Focused selected-track channel controls, distinct from the full multitrack mixer.
+private struct ChannelWorkspaceView: View {
+    @ObservedObject var viewModel: ProjectViewModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Channel").font(.headline)
+                    Text("Controls and routing for the selected track")
+                        .font(.caption).foregroundColor(.secondary)
+                }
+                Spacer()
+                if let track = viewModel.selectedTrack {
+                    Text(track.name).font(.subheadline).foregroundColor(.secondary)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            Divider()
+            ScrollView {
+                if let track = viewModel.selectedTrack {
+                    TrackInspectorSection(track: track, viewModel: viewModel,
+                                          audioRecorder: viewModel.audioRecorder)
+                        .frame(maxWidth: 540, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(20)
+                } else {
+                    ContentUnavailableView("No Track Selected",
+                                           systemImage: "slider.horizontal.3",
+                                           description: Text("Select a track in the arrangement to edit its channel."))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
         }
         .background(Color(nsColor: .controlBackgroundColor))
