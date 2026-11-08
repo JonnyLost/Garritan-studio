@@ -22,68 +22,100 @@ public struct StudioInstrumentIcon: View {
     }
 
     public var body: some View {
-        let kind = InstrumentIconIdentity.resolve(name: name, path: path, category: category)
-        let art = InstrumentIconDrawing.make(kind)
-        Canvas { graphicContext, bounds in
-            var context = graphicContext
+        let identity = InstrumentIconIdentity.resolve(name: name, path: path, category: category)
+        let art = InstrumentIconDrawing.make(identity)
+        let isCompact = dimension < 38
+
+        Canvas(rendersAsynchronously: false) { graphics, bounds in
+            var context = graphics
             context.scaleBy(x: bounds.width / 100, y: bounds.height / 100)
 
-            let style = collection
+            let stroke: StrokeStyle
+            let detailStroke: StrokeStyle
             let ink: Color
-            let detailInk: Color
-            let width: CGFloat
+            let secondaryInk: Color
+            let filledInk: Color
 
-            switch style {
+            switch collection {
             case .heritageEtching:
-                ink = palette.accent
-                detailInk = palette.secondaryText.opacity(0.85)
-                width = 3.7
+                // Sepia ink, hand-engraved detail, softly tinted instrument bodies.
+                ink = palette.appearance == .heritageLight
+                    ? Color(red: 0.37, green: 0.27, blue: 0.18)
+                    : Color(red: 0.89, green: 0.74, blue: 0.52)
+                secondaryInk = ink.opacity(0.72)
+                filledInk = ink.opacity(0.13)
+                stroke = StrokeStyle(lineWidth: 3.8, lineCap: .round, lineJoin: .round)
+                detailStroke = StrokeStyle(lineWidth: 1.7, lineCap: .round, lineJoin: .round)
             case .elegantMonoline, .matchAppearance:
+                // Minimal, even line weights with deliberate negative space.
                 ink = palette.primaryText
-                detailInk = palette.secondaryText
-                width = 4.8
+                secondaryInk = palette.primaryText.opacity(0.8)
+                filledInk = .clear
+                stroke = StrokeStyle(lineWidth: 4.1, lineCap: .round, lineJoin: .round)
+                detailStroke = StrokeStyle(lineWidth: 2.0, lineCap: .round, lineJoin: .round)
             case .gpo5Signature:
+                // Contemporary solid silhouettes with small contrasting highlights.
                 ink = palette.primaryText
-                detailInk = palette.accent
-                width = 6.4
+                secondaryInk = palette.accent
+                filledInk = ink.opacity(0.90)
+                stroke = StrokeStyle(lineWidth: 5.3, lineCap: .round, lineJoin: .round)
+                detailStroke = StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round)
             case .concertMedallion:
-                ink = Color(red: 0.93, green: 0.76, blue: 0.48)
-                detailInk = Color(red: 0.97, green: 0.87, blue: 0.66)
-                width = 5.4
-                let coin = Path(ellipseIn: CGRect(x: 3, y: 3, width: 94, height: 94))
-                context.fill(coin, with: .color(Color(red: 0.10, green: 0.15, blue: 0.18)))
-                context.stroke(coin, with: .color(ink), style: StrokeStyle(lineWidth: 3.4))
-                context.stroke(
-                    Path(ellipseIn: CGRect(x: 9, y: 9, width: 82, height: 82)),
-                    with: .color(ink.opacity(0.55)), style: StrokeStyle(lineWidth: 1.5)
-                )
-                context.translateBy(x: 16, y: 16)
-                context.scaleBy(x: 0.68, y: 0.68)
+                let gold = Color(red: 0.88, green: 0.70, blue: 0.41)
+                let lightGold = Color(red: 0.99, green: 0.89, blue: 0.70)
+                let darkField = Color(red: 0.10, green: 0.15, blue: 0.19)
+                let field = Path(ellipseIn: CGRect(x: 2, y: 2, width: 96, height: 96))
+                let inner = Path(ellipseIn: CGRect(x: 7, y: 7, width: 86, height: 86))
+                let incised = Path(ellipseIn: CGRect(x: 12, y: 12, width: 76, height: 76))
+                context.fill(field, with: .color(gold))
+                context.fill(inner, with: .color(darkField))
+                context.stroke(inner, with: .color(lightGold.opacity(0.8)),
+                               style: StrokeStyle(lineWidth: 2))
+                if !isCompact {
+                    context.stroke(incised, with: .color(gold.opacity(0.65)),
+                                   style: StrokeStyle(lineWidth: 1))
+                }
+                context.translateBy(x: 17, y: 17)
+                context.scaleBy(x: 0.66, y: 0.66)
+                ink = lightGold
+                secondaryInk = gold
+                filledInk = gold.opacity(0.5)
+                stroke = StrokeStyle(lineWidth: 5.2, lineCap: .round, lineJoin: .round)
+                detailStroke = StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round)
             }
 
-            let stroke = StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round)
-            let detail = StrokeStyle(
-                lineWidth: style == .heritageEtching ? 2.0 : 2.6,
-                lineCap: .round, lineJoin: .round
-            )
+            // Draw from back to front. Silhouette fills are deliberately
+            // separate from contour paths: open strokes must never be filled.
+            if collection != .elegantMonoline && collection != .matchAppearance {
+                for shape in art.silhouettes {
+                    context.fill(shape, with: .color(filledInk))
+                }
+            }
             for shape in art.primary {
                 context.stroke(shape, with: .color(ink), style: stroke)
             }
-            for shape in art.details {
-                context.stroke(shape, with: .color(detailInk), style: detail)
-            }
-            if style == .heritageEtching {
-                // Light engraved shading differentiates the heritage collection.
-                for shape in art.engraving {
-                    context.stroke(
-                        shape, with: .color(detailInk.opacity(0.60)),
-                        style: StrokeStyle(lineWidth: 1.5, lineCap: .round)
-                    )
+            // Tiny browser icons need high-contrast contours, not hairline
+            // engraving. The larger inspector displays the complete artwork.
+            if !isCompact {
+                for shape in art.details {
+                    context.stroke(shape, with: .color(secondaryInk), style: detailStroke)
+                }
+                if collection == .heritageEtching {
+                    for shape in art.engraving {
+                        context.stroke(shape, with: .color(secondaryInk.opacity(0.7)),
+                                       style: StrokeStyle(lineWidth: 1.0, lineCap: .round))
+                    }
+                }
+            } else {
+                // A restrained amount of detail survives in compact rows.
+                for shape in art.compactDetails {
+                    context.stroke(shape, with: .color(secondaryInk),
+                                   style: StrokeStyle(lineWidth: 3.0, lineCap: .round))
                 }
             }
         }
         .frame(width: dimension, height: dimension)
-        .accessibilityLabel(Text(kind.accessibilityLabel))
+        .accessibilityLabel(Text(identity.accessibilityLabel))
         .accessibilityHidden(false)
     }
 }
@@ -243,6 +275,17 @@ private struct InstrumentIconDrawing {
     let primary: [Path]
     let details: [Path]
     let engraving: [Path]
+    let silhouettes: [Path]
+    let compactDetails: [Path]
+
+    init(primary: [Path], details: [Path], engraving: [Path],
+         silhouettes: [Path] = [], compactDetails: [Path] = []) {
+        self.primary = primary
+        self.details = details
+        self.engraving = engraving
+        self.silhouettes = silhouettes
+        self.compactDetails = compactDetails
+    }
 
     static func line(_ points: [(CGFloat, CGFloat)], closed: Bool = false) -> Path {
         var path = Path()
