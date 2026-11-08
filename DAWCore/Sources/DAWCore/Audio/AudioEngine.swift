@@ -189,6 +189,24 @@ public final class AudioEngine: ObservableObject {
     /// Create audio nodes for a track
     public func createTrackNode(for track: Track) throws {
         guard trackNodes[track.id] == nil else { return }
+        // AVAudioEngine can stall when a new track is connected to a live
+        // master mixer. Reconfigure the graph while stopped, then resume.
+        let wasRunning = engine.isRunning
+        if wasRunning {
+            print("[Track Audio] Pausing engine for track graph reconfiguration")
+            engine.stop()
+        }
+        defer {
+            if wasRunning {
+                do {
+                    try engine.start()
+                    print("[Track Audio] Engine restarted after track creation")
+                } catch {
+                    print("[Track Audio] ERROR restarting engine after track creation: \(error)")
+                    isRunning = false
+                }
+            }
+        }
         
         print("[Track Audio] Constructing track node")
         let trackNode = TrackAudioNode(
