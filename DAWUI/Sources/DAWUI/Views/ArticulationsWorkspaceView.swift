@@ -45,6 +45,8 @@ struct ArticulationsWorkspaceView: View {
     @State private var search = ""
     @State private var selectedPatchName: String?
     @State private var selectedArticulationID: String?
+    @State private var keyboardOctave = 3
+    @State private var pressedPitch: UInt8?
 
     private var suggestedName: String {
         guard let track = viewModel.selectedTrack else { return "" }
@@ -78,6 +80,92 @@ struct ArticulationsWorkspaceView: View {
             return catalog.patches.first { $0.patch == selectedPatchName }
         }
         return suggestedPatch
+    }
+
+
+    // MIDI note numbers are authoritative; displayed octaves use C4 = MIDI 60.
+    // Catalog keyswitches remain reference-only until ARIA's octave convention is verified.
+    private func keyboardKey(_ pitch: Int, black: Bool, width: CGFloat) -> some View {
+        let active = pressedPitch == UInt8(pitch)
+        return RoundedRectangle(cornerRadius: 3)
+            .fill(active ? Color.accentColor : (black ? Color.black : Color.white))
+            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color.gray, lineWidth: 0.5))
+            .overlay(alignment: .bottom) {
+                if pitch % 12 == 0 {
+                    Text("C\(pitch / 12 - 1)")
+                        .font(.system(size: 9))
+                        .foregroundColor(active ? .white : .gray)
+                        .padding(.bottom, 4)
+                }
+            }
+            .frame(width: width, height: black ? 55 : 90)
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    let note = UInt8(pitch)
+                    guard pressedPitch != note else { return }
+                    if let previous = pressedPitch { viewModel.stopNotePreview(pitch: previous) }
+                    pressedPitch = note
+                    viewModel.playNotePreview(pitch: note)
+                }
+                .onEnded { _ in
+                    viewModel.stopNotePreview(pitch: UInt8(pitch))
+                    if pressedPitch == UInt8(pitch) { pressedPitch = nil }
+                })
+            .help("MIDI note \(pitch)")
+    }
+
+    private var auditionKeyboard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Playable Keyboard", systemImage: "pianokeys")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Button { keyboardOctave = max(0, keyboardOctave - 1) } label: {
+                    Image(systemName: "chevron.left")
+                }
+                .disabled(keyboardOctave == 0)
+                Text("C\(keyboardOctave)–B\(keyboardOctave + 2)")
+                    .font(.caption.monospacedDigit())
+                Button { keyboardOctave = min(7, keyboardOctave + 1) } label: {
+                    Image(systemName: "chevron.right")
+                }
+                .disabled(keyboardOctave == 7)
+            }
+            .buttonStyle(.borderless)
+            GeometryReader { geometry in
+                let keyWidth = geometry.size.width / 21
+                let start = (keyboardOctave + 1) * 12
+                ZStack(alignment: .topLeading) {
+                    HStack(spacing: 0) {
+                        ForEach(0..<36, id: \.self) { offset in
+                            let pitch = start + offset
+                            if pitch <= 127 && ![1, 3, 6, 8, 10].contains(pitch % 12) {
+                                keyboardKey(pitch, black: false, width: keyWidth)
+                            }
+                        }
+                    }
+                    ForEach(0..<36, id: \.self) { offset in
+                        let pitch = start + offset
+                        if pitch <= 127 && [1, 3, 6, 8, 10].contains(pitch % 12) {
+                            let precedingWhiteKeys = (0..<offset).filter {
+                                ![1, 3, 6, 8, 10].contains((start + $0) % 12)
+                            }.count
+                            keyboardKey(pitch, black: true, width: keyWidth * 0.62)
+                                .offset(x: CGFloat(precedingWhiteKeys) * keyWidth - keyWidth * 0.31)
+                                .zIndex(1)
+                        }
+                    }
+                }
+            }
+            .frame(height: 92)
+            Text("Hold a key to audition the selected instrument. Keyswitch assignments are not transmitted yet.")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+        .padding(12)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .cornerRadius(8)
     }
 
     var body: some View {
@@ -134,6 +222,8 @@ struct ArticulationsWorkspaceView: View {
                     Divider()
                     ScrollView {
                         VStack(alignment: .leading, spacing: 14) {
+                            auditionKeyboard
+                            Divider()
                             if let patch = activePatch {
                                 Text(patch.patch).font(.title3.weight(.semibold))
                                 Text("Reference assignments from the GPO5 owner's manual. These controls do not transmit MIDI yet.")
@@ -188,6 +278,8 @@ struct ArticulationsWorkspaceView: View {
             }
         }
         .onChange(of: viewModel.selectedTrackID) { _, _ in
+            if let pressedPitch { viewModel.stopNotePreview(pitch: pressedPitch) }
+            pressedPitch = nil
             selectedPatchName = nil
             selectedArticulationID = nil
         }
