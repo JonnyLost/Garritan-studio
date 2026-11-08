@@ -52,10 +52,10 @@ public struct StudioInstrumentIcon: View {
                 width = 5.4
                 let coin = Path(ellipseIn: CGRect(x: 3, y: 3, width: 94, height: 94))
                 context.fill(coin, with: .color(Color(red: 0.10, green: 0.15, blue: 0.18)))
-                context.stroke(coin, with: .color(ink), lineWidth: 3.4)
+                context.stroke(coin, with: .color(ink), style: StrokeStyle(lineWidth: 3.4))
                 context.stroke(
                     Path(ellipseIn: CGRect(x: 9, y: 9, width: 82, height: 82)),
-                    with: .color(ink.opacity(0.55)), lineWidth: 1.5
+                    with: .color(ink.opacity(0.55)), style: StrokeStyle(lineWidth: 1.5)
                 )
                 context.translateBy(x: 16, y: 16)
                 context.scaleBy(x: 0.68, y: 0.68)
@@ -83,7 +83,7 @@ public struct StudioInstrumentIcon: View {
             }
         }
         .frame(width: dimension, height: dimension)
-        .accessibilityLabel(kind.accessibilityLabel)
+        .accessibilityLabel(Text(kind.accessibilityLabel))
         .accessibilityHidden(false)
     }
 }
