@@ -777,9 +777,13 @@ public struct VRackView: View {
                                 previewInstrumentID = instrument.id
                             } label: {
                                 HStack(spacing: 12) {
-                                    Image(systemName: instrument.symbol)
-                                        .foregroundStyle(palette.accent)
-                                        .frame(width: 26)
+                                    StudioInstrumentIcon(
+                                        name: instrument.name,
+                                        path: instrument.path,
+                                        category: instrument.category,
+                                        size: 27
+                                    )
+                                    .frame(width: 31)
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(instrument.name)
                                             .font(.subheadline.weight(.medium))
@@ -826,9 +830,12 @@ public struct VRackView: View {
                                 ZStack {
                                     RoundedRectangle(cornerRadius: 12)
                                         .fill(palette.surface)
-                                    Image(systemName: instrument.symbol)
-                                        .font(.system(size: 38, weight: .light))
-                                        .foregroundStyle(palette.accent)
+                                    StudioInstrumentIcon(
+                                        name: instrument.name,
+                                        path: instrument.path,
+                                        category: instrument.category,
+                                        size: 58
+                                    )
                                 }
                                 .frame(height: 75)
 
@@ -1036,10 +1043,13 @@ public struct VRackView: View {
                             ForEach(instruments) { instrument in
                                 Button { chooseInstrument(instrument) } label: {
                                     HStack(spacing: 9) {
-                                        Image(systemName: instrument.symbol)
-                                            .font(.system(size: 18))
-                                            .frame(width: 30, height: 34)
-                                            .foregroundColor(.accentColor)
+                                        StudioInstrumentIcon(
+                                            name: instrument.name,
+                                            path: instrument.path,
+                                            category: instrument.category,
+                                            size: 30
+                                        )
+                                        .frame(width: 32, height: 34)
                                         VStack(alignment: .leading, spacing: 2) {
                                             Text(instrument.name)
                                                 .font(.system(size: 12, weight: .medium))
