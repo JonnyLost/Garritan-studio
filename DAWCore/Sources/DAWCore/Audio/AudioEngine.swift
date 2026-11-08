@@ -190,6 +190,7 @@ public final class AudioEngine: ObservableObject {
     public func createTrackNode(for track: Track) throws {
         guard trackNodes[track.id] == nil else { return }
         
+        print("[Track Audio] Constructing track node")
         let trackNode = TrackAudioNode(
             trackID: track.id,
             channelCount: 2,
@@ -198,10 +199,12 @@ public final class AudioEngine: ObservableObject {
         
         // Instantiate the in-process stereo positioning effect. If unavailable,
         // preserve the original mixer pan path instead of losing audio.
+        print("[Track Audio] Registering stereo effect")
         StereoPositionAudioUnit.registerIfNeeded()
         let stereoEffect = AVAudioUnitEffect(audioComponentDescription: StereoPositionAudioUnit.componentDescription)
         trackNode.stereoPositionNode = stereoEffect
 
+        print("[Track Audio] Stereo effect instantiated; attaching nodes")
         // Attach nodes to engine
         engine.attach(trackNode.inputMixer)
         engine.attach(trackNode.gainNode)
@@ -209,6 +212,7 @@ public final class AudioEngine: ObservableObject {
         engine.attach(trackNode.pannerNode)
         engine.attach(trackNode.outputMixer)
         engine.attach(trackNode.concertHallSend)
+        print("[Track Audio] Nodes attached; connecting hall send")
         engine.connect(
             trackNode.concertHallSend,
             to: concertHallSendMixer,
@@ -224,12 +228,14 @@ public final class AudioEngine: ObservableObject {
             channels: 2
         )!
         
+        print("[Track Audio] Hall send connected; connecting signal chain")
         engine.connect(trackNode.inputMixer, to: trackNode.gainNode, format: format)
         engine.connect(trackNode.gainNode, to: stereoEffect, format: format)
         engine.connect(stereoEffect, to: trackNode.pannerNode, format: format)
         // Split the post-panner signal into dry and Concert Hall send paths.
         // Both destinations receive the same audio; the send mixer
         // controls how much reaches the shared reverb.
+        print("[Track Audio] Connecting split panner output")
         engine.connect(
             trackNode.pannerNode,
             to: [
@@ -239,12 +245,14 @@ public final class AudioEngine: ObservableObject {
             fromBus: 0,
             format: format
         )
+        print("[Track Audio] Split connected; connecting master output")
         engine.connect(trackNode.outputMixer, to: masterMixer, format: format)
         let dryEdges = engine.outputConnectionPoints(for: trackNode.outputMixer, outputBus: 0)
         print("[ConcertHall] Dry track \(track.id.rawValue) -> master: \(dryEdges.contains { $0.node === masterMixer })")
         print("[ConcertHall] Track output format: \(trackNode.outputMixer.outputFormat(forBus: 0))")
         print("[ConcertHall] Master input format: \(masterMixer.inputFormat(forBus: 0))")
         
+        print("[Track Audio] Master output connected; applying parameters")
         // Set initial values
         trackNode.setVolume(track.volume)
         trackNode.setPan(track.pan)
@@ -258,7 +266,9 @@ public final class AudioEngine: ObservableObject {
         )
 
         trackNodes[track.id] = trackNode
+        print("[Track Audio] Installing meter")
         installTrackMeter(for: trackNode)
+        print("[Track Audio] Track node ready")
     }
 
     /// Meter after volume, mute and stereo positioning, without modifying audio.
