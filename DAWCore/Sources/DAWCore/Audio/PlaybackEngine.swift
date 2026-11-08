@@ -1963,6 +1963,11 @@ public final class PlaybackEngine: ObservableObject {
         }
     }
     
+    /// Apply orchestral stage depth to the shared Concert Hall send.
+    public func updateTrackConcertHallDepth(_ trackID: TrackID, zone: Int) {
+        audioEngine.setConcertHallDepth(zone, for: trackID)
+    }
+
     // MARK: - Real-time Volume Control
     
     /// Update volume for all audio clips on a track in real-time
