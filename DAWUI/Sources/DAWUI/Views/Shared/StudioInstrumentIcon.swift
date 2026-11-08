@@ -88,7 +88,7 @@ public struct StudioInstrumentIcon: View {
     }
 }
 
-private enum InstrumentIconIdentity {
+private enum InstrumentIconIdentity: Equatable {
     case piccolo, flute, altoFlute, bassFlute, oboe, englishHorn, clarinet, bassClarinet
     case contrabassClarinet, bassoon, contrabassoon
     case horn, trumpet, trombone, bassTrombone, tuba, brassEnsemble
@@ -250,7 +250,7 @@ private struct InstrumentIconDrawing {
     }
 
     static func make(_ kind: InstrumentIconIdentity) -> Self {
-        let L = line
+        let L: ([(CGFloat, CGFloat)]) -> Path = { points in line(points) }
         let O = oval
         let B = box
         switch kind {
@@ -438,7 +438,7 @@ private struct InstrumentIconDrawing {
             return Self(primary: frame, details: strings, engraving: [])
         case .piano:
             return Self(primary: [
-                L([(14, 37), (28, 14), (76, 14), (86, 33), (75, 59), (14, 59)], closed: true),
+                line([(14, 37), (28, 14), (76, 14), (86, 33), (75, 59), (14, 59)], closed: true),
                 L([(24, 60), (20, 90)]), L([(73, 60), (82, 90)]),
                 L([(14, 59), (75, 59)])
             ], details: [L([(19, 48), (66, 48)]), L([(24, 52), (24, 59)]),
