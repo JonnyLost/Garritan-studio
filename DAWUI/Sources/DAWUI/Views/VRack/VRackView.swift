@@ -41,6 +41,7 @@ public struct VRackView: View {
     @State private var isLoadingInstrument = false
     @State private var pickerError: String?
     @State private var previewInstrumentID: String?
+    @State private var instrumentTypeFilter = "All"
 
 
     public init(viewModel: ProjectViewModel, openStageWorkspace: (() -> Void)? = nil,
@@ -165,6 +166,14 @@ public struct VRackView: View {
             if f.contains("world") || f.contains("ethnic") { return "World" }
             return "Other"
         }
+        var instrumentType: String {
+            let components = path.split(separator: "/").map(String.init)
+            let familyIndex = components.first == "Standard" ? 1 : 0
+            if components.count > familyIndex + 2 {
+                return components[familyIndex + 1]
+            }
+            return family
+        }
         var symbol: String {
             switch category {
             case "Woodwinds": return "wind"
@@ -205,6 +214,18 @@ public struct VRackView: View {
             let ri = scoreFamilies.firstIndex(of: rhs.category) ?? 99
             if li != ri { return li < ri }
             return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+        }
+    }
+
+    private var availableInstrumentTypes: [String] {
+        Array(Set(filteredCatalog.map(\.instrumentType))).sorted {
+            $0.localizedStandardCompare($1) == .orderedAscending
+        }
+    }
+
+    private var expandedFilteredCatalog: [DrawerInstrument] {
+        filteredCatalog.filter {
+            instrumentTypeFilter == "All" || $0.instrumentType == instrumentTypeFilter
         }
     }
 
@@ -530,6 +551,7 @@ public struct VRackView: View {
                         ForEach(["All"] + scoreFamilies, id: \.self) { family in
                             Button {
                                 familyFilter = family
+                                instrumentTypeFilter = "All"
                                 previewInstrumentID = nil
                             } label: {
                                 HStack {
@@ -549,8 +571,33 @@ public struct VRackView: View {
                 .frame(width: 165)
                 Divider()
                 ScrollView {
+                    VStack(alignment: .leading, spacing: 3) {
+                        ForEach(["All"] + availableInstrumentTypes, id: \.self) { type in
+                            Button {
+                                instrumentTypeFilter = type
+                                previewInstrumentID = nil
+                            } label: {
+                                HStack {
+                                    Text(type == "All" ? "All Types" : type)
+                                        .lineLimit(2)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 9)
+                                .background(instrumentTypeFilter == type ?
+                                            Color.accentColor.opacity(0.2) : Color.clear)
+                                .clipShape(RoundedRectangle(cornerRadius: 7))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(8)
+                }
+                .frame(width: 155)
+                Divider()
+                ScrollView {
                     LazyVStack(alignment: .leading, spacing: 5) {
-                        ForEach(filteredCatalog) { instrument in
+                        ForEach(expandedFilteredCatalog) { instrument in
                             Button {
                                 previewInstrumentID = instrument.id
                             } label: {
@@ -580,7 +627,7 @@ public struct VRackView: View {
                             }
                             .buttonStyle(.plain)
                         }
-                        if filteredCatalog.isEmpty {
+                        if expandedFilteredCatalog.isEmpty {
                             Text("No instruments match these filters.")
                                 .foregroundStyle(.secondary)
                                 .padding()
