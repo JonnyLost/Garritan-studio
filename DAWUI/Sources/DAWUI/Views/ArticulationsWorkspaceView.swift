@@ -99,9 +99,9 @@ struct ArticulationsWorkspaceView: View {
                                 for: loaded, trackName: track.name, preferNativeARIA: true)
                         }
                     } label: {
-                        Label("Try Original ARIA Editor", systemImage: "pianokeys")
+                        Label("Open ARIA Player", systemImage: "pianokeys")
                     }
-                    .help("Experimental: requests ARIA's original native Audio Unit editor. This editor previously crashed on this Mac. Save your project first.")
+                    .help("Open the original ARIA Player interface for the selected instrument.")
                     .buttonStyle(.bordered)
                 }
                 Button("Reload Catalog") { catalog = GPOKeyswitchCatalog.load() }
