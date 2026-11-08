@@ -781,9 +781,9 @@ public struct VRackView: View {
                                         name: instrument.name,
                                         path: instrument.path,
                                         category: instrument.category,
-                                        size: 27
+                                        size: 31
                                     )
-                                    .frame(width: 31)
+                                    .frame(width: 35)
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(instrument.name)
                                             .font(.subheadline.weight(.medium))
@@ -834,10 +834,11 @@ public struct VRackView: View {
                                         name: instrument.name,
                                         path: instrument.path,
                                         category: instrument.category,
-                                        size: 58
+                                        size: 88
                                     )
+                                    .padding(.vertical, 10)
                                 }
-                                .frame(height: 75)
+                                .frame(height: 114)
 
                                 Text(instrument.name)
                                     .font(.system(size: 20, weight: .semibold,
