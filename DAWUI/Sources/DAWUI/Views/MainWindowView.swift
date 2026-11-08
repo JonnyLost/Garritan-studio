@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 // MARK: - Main Window View
 
 public struct MainWindowView: View {
+    @Environment(\.studioPalette) private var palette
     @StateObject private var viewModel: ProjectViewModel
     
     // Global key monitor for keyboard shortcuts
@@ -86,6 +87,7 @@ public struct MainWindowView: View {
     public var body: some View {
         VStack(spacing: 0) {
             TransportView(viewModel: viewModel)
+                .background(palette.panel)
             Divider()
             
             HStack(spacing: 0) {
@@ -178,6 +180,8 @@ public struct MainWindowView: View {
             }
         }
         .frame(minWidth: 1200, minHeight: 700)
+        .background(palette.canvas)
+        .tint(palette.accent)
         .toolbar { toolbarContent }
         .sheet(isPresented: $showAIPromptDialog) {
             AIPromptDialogView(
@@ -502,7 +506,7 @@ public struct MainWindowView: View {
         }
         .padding(.top, 10)
         .frame(width: 78)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(palette.sidebar)
     }
 
     private func workspaceButton(_ title: String, symbol: String, active: Bool,
@@ -512,10 +516,15 @@ public struct MainWindowView: View {
                 Image(systemName: symbol).font(.system(size: 17))
                 Text(title).font(.system(size: 9))
             }
-            .foregroundColor(active ? .white : .secondary)
+            .foregroundColor(active ? palette.selectedText : palette.secondaryText)
             .frame(width: 68, height: 56)
-            .background(active ? Color.accentColor : Color.clear)
+            .background(active ? palette.selectedBackground : Color.clear)
             .cornerRadius(9)
+            .overlay {
+                RoundedRectangle(cornerRadius: 9)
+                    .strokeBorder(active ? palette.accent.opacity(0.6) : .clear, lineWidth: 1)
+            }
+            .animation(.easeInOut(duration: 0.15), value: active)
         }
         .buttonStyle(.plain)
         .help(title)
@@ -545,7 +554,7 @@ public struct MainWindowView: View {
         }
         .padding(.horizontal, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(palette.surface)
     }
 
     @ViewBuilder
