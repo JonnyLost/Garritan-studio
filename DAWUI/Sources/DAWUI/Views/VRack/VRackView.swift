@@ -181,7 +181,7 @@ public struct VRackView: View {
     }
 
     private var filteredCatalog: [DrawerInstrument] {
-        catalog.filter { instrument in
+        (catalog.isEmpty ? (Self.cachedCatalog ?? []) : catalog).filter { instrument in
             (libraryFilter == "All Libraries" || instrument.library == libraryFilter) &&
             (familyFilter == "All" || instrument.category == familyFilter) &&
             (instrumentSet == "Complete" || !isIndividualPlayer(instrument)) &&
