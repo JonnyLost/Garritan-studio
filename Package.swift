@@ -62,7 +62,10 @@ let package = Package(
         .target(
             name: "DAWUI",
             dependencies: ["DAWCore"],
-            path: "DAWUI/Sources/DAWUI"
+            path: "DAWUI/Sources/DAWUI",
+            resources: [
+                .copy("Resources/GPO5_keyswitch_catalog.json")
+            ]
         ),
         
         // MARK: - Main Application
