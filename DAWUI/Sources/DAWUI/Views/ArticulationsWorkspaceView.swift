@@ -20,14 +20,14 @@ private struct GPOKeyswitchCatalog: Decodable {
         let fm = FileManager.default
         let name = "GPO5_keyswitch_catalog"
         var candidates: [URL] = []
-        if let bundled = Bundle.main.url(forResource: name, withExtension: "json") {
+        if let bundled = Bundle.module.url(forResource: name, withExtension: "json") {
             candidates.append(bundled)
         }
         let root = URL(fileURLWithPath: fm.currentDirectoryPath, isDirectory: true)
         candidates += [
+            root.appendingPathComponent("Resources/Articulations/\(name).json"),
             root.appendingPathComponent("Resources/\(name).json"),
             root.appendingPathComponent("\(name).json"),
-            fm.homeDirectoryForCurrentUser.appendingPathComponent("Downloads/\(name).json")
         ]
         for url in candidates where fm.fileExists(atPath: url.path) {
             if let data = try? Data(contentsOf: url),
