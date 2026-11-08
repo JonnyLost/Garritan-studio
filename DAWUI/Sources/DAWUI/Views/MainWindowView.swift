@@ -17,6 +17,7 @@ public struct MainWindowView: View {
     @State private var mixerHeight: CGFloat = 280
     @State private var pianoRollHeight: CGFloat = 500
     @State private var showStageWorkspace = false
+    @State private var showInstrumentWorkspace = false
     @State private var showCreateClipDialog: Bool = false
     @State private var createClipTrackID: TrackID?
     @State private var horizontalScrollOffset: CGFloat = 0
@@ -86,6 +87,10 @@ public struct MainWindowView: View {
                 if showVRack {
                     VRackView(viewModel: viewModel, openStageWorkspace: {
                         showStageWorkspace = true
+                    }, openInstrumentWorkspace: {
+                        showInstrumentWorkspace = true
+                    }, closeInstrumentWorkspace: {
+                        showInstrumentWorkspace = false
                     })
                         .frame(width: composerDrawerWidth)
                     Rectangle()
@@ -104,7 +109,13 @@ public struct MainWindowView: View {
                         )
                 }
                 
-                arrangeView
+                if showInstrumentWorkspace {
+                    VRackView(viewModel: viewModel, closeInstrumentWorkspace: {
+                        showInstrumentWorkspace = false
+                    }).expandedInstrumentBrowser
+                } else {
+                    arrangeView
+                }
 
                 if viewModel.showInspector {
                     Divider()
