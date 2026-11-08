@@ -630,7 +630,8 @@ public struct VRackView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Instrument Browser")
-                        .font(.title2.bold())
+                        .font(.system(size: 23, weight: .semibold,
+                                      design: palette.appearance == .gpo5Modern ? .default : .serif))
                     Text("Explore Garritan libraries and choose a patch for the selected track")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -642,7 +643,8 @@ public struct VRackView: View {
                 Button("Done") { closeInstrumentWorkspace?() }
                     .keyboardShortcut(.cancelAction)
             }
-            .padding(18)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
             .background(palette.panel)
             Divider()
             HStack(spacing: 10) {
@@ -762,77 +764,113 @@ public struct VRackView: View {
                 .frame(maxWidth: .infinity)
                 .background(palette.canvas)
                 Divider()
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("INSTRUMENT DETAILS")
-                        .font(.caption.bold())
-                        .foregroundStyle(.secondary)
-                    if let instrument = previewInstrument {
-                        Image(systemName: instrument.symbol)
-                            .font(.system(size: 36))
-                            .foregroundStyle(Color.accentColor)
-                        Text(instrument.name)
-                            .font(.title3.bold())
-                        LabeledContent("Family", value: instrument.category)
-                        LabeledContent("Library", value: instrument.library)
-                        Text(instrument.path)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                        Divider()
-                        Text("AUDITION").font(.caption.bold()).foregroundStyle(.secondary)
-                        HStack {
-                            Button {
-                                audition.play(library: instrument.library, path: instrument.path, viewModel: viewModel)
-                            } label: {
-                                Label("Play", systemImage: "play.fill")
+                // Keep loading actions visible at every editor height.
+                VStack(spacing: 0) {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("INSTRUMENT DETAILS")
+                                .font(.system(size: 10, weight: .semibold))
+                                .tracking(1.1)
+                                .foregroundStyle(palette.secondaryText)
+
+                            if let instrument = previewInstrument {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(palette.surface)
+                                    Image(systemName: instrument.symbol)
+                                        .font(.system(size: 38, weight: .light))
+                                        .foregroundStyle(palette.accent)
+                                }
+                                .frame(height: 75)
+
+                                Text(instrument.name)
+                                    .font(.system(size: 20, weight: .semibold,
+                                                  design: palette.appearance == .gpo5Modern ? .default : .serif))
+                                    .foregroundStyle(palette.primaryText)
+                                    .fixedSize(horizontal: false, vertical: true)
+
+                                HStack(spacing: 6) {
+                                    Circle().fill(palette.accent).frame(width: 7, height: 7)
+                                    Text(instrument.category.uppercased())
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .tracking(0.8)
+                                        .foregroundStyle(palette.secondaryText)
+                                }
+                                Divider()
+
+                                Text("LIBRARY")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .tracking(1.0)
+                                    .foregroundStyle(palette.secondaryText)
+                                Text(instrument.library)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(palette.primaryText)
+                                    .fixedSize(horizontal: false, vertical: true)
+
+                                Text("PATCH LOCATION")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .tracking(1.0)
+                                    .foregroundStyle(palette.secondaryText)
+                                Text(instrument.path)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(palette.secondaryText)
+                                    .lineLimit(4)
+                                    .textSelection(.enabled)
+                            } else {
+                                Text("Choose an instrument to see its details and load it.")
+                                    .font(.subheadline)
+                                    .foregroundStyle(palette.secondaryText)
                             }
-                            .disabled(audition.isLoading || audition.isPlaying || isLoadingInstrument)
+
+                            if isLoadingInstrument { ProgressView("Loading instrument…") }
+                            if let pickerError {
+                                Text(pickerError)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    Divider()
+
+                    VStack(spacing: 9) {
+                        if let instrument = previewInstrument {
                             Button {
                                 audition.stop()
+                                chooseInstrument(instrument)
                             } label: {
-                                Label("Stop", systemImage: "stop.fill")
+                                Label("Load on Selected Track", systemImage: "arrow.down.to.line")
+                                    .frame(maxWidth: .infinity)
                             }
-                            .disabled(!audition.isLoading && !audition.isPlaying)
+                            .buttonStyle(.borderedProminent)
+                            .disabled(isLoadingInstrument || viewModel.selectedTrackID == nil)
+
+                            Button {
+                                audition.stop()
+                                addInstrumentTrack(instrument)
+                            } label: {
+                                Label("Add as New Track", systemImage: "plus")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(isLoadingInstrument)
+                        } else {
+                            Text("Select a patch to begin")
+                                .font(.caption)
+                                .foregroundStyle(palette.secondaryText)
                         }
-                        .controlSize(.small)
-                        if audition.isLoading { ProgressView("Preparing preview…").controlSize(.small) }
-                        if let error = audition.errorMessage {
-                            Text(error).font(.caption).foregroundStyle(.red)
-                        }
-                        Text("Preview is separate from project tracks.")
-                            .font(.caption2).foregroundStyle(.secondary)
-                        Spacer()
-                        Button {
-                            audition.stop()
-                            chooseInstrument(instrument)
-                        } label: {
-                            Label("Load on Selected Track", systemImage: "arrow.down.to.line")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(isLoadingInstrument || viewModel.selectedTrackID == nil)
-                        Button {
-                            audition.stop()
-                            addInstrumentTrack(instrument)
-                        } label: {
-                            Label("Add as New Track", systemImage: "plus")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(isLoadingInstrument)
-                    } else {
-                        Text("Select an instrument from the list to preview it, then click Load Instrument.")
-                            .foregroundStyle(.secondary)
-                        Spacer()
                     }
-                    if isLoadingInstrument { ProgressView("Loading…") }
-                    if let pickerError {
-                        Text(pickerError).font(.caption).foregroundStyle(.red)
-                    }
+                    .controlSize(.regular)
+                    .padding(12)
+                    .frame(maxWidth: .infinity)
+                    .background(palette.surface)
                 }
-                .padding(18)
-                .frame(width: 245)
-                .frame(maxHeight: .infinity, alignment: .topLeading)
+                .frame(width: 273)
+                .frame(maxHeight: .infinity)
                 .background(palette.panel)
             }
         }
