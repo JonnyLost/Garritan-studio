@@ -291,7 +291,13 @@ private struct InstrumentIconDrawing {
             } else {
                 primary.append(L([(56, 86), (69, 92), (72, 88)]))
             }
-            let detail = (0..<5).map { i in O(CGFloat(48+i), CGFloat(31+i*9), 4, 4) }
+            var detail: [Path] = []
+            for index in 0..<5 {
+                let step = CGFloat(index)
+                let x: CGFloat = 48 + step
+                let y: CGFloat = 31 + step * 9
+                detail.append(O(x, y, 4, 4))
+            }
             return Self(primary: primary, details: detail, engraving: [L([(48, 25), (56, 76)])])
         case .clarinet, .bassClarinet, .contrabassClarinet:
             var primary = [
@@ -305,7 +311,13 @@ private struct InstrumentIconDrawing {
             if kind == .contrabassClarinet {
                 primary.append(L([(36, 24), (22, 30), (22, 67), (32, 72)]))
             }
-            let detail = (0..<5).map { i in O(CGFloat(43+i*2), CGFloat(24+i*10), 5, 5) }
+            var detail: [Path] = []
+            for index in 0..<5 {
+                let step = CGFloat(index)
+                let x: CGFloat = 43 + step * 2
+                let y: CGFloat = 24 + step * 10
+                detail.append(O(x, y, 5, 5))
+            }
             return Self(primary: primary, details: detail, engraving: [L([(40, 22), (57, 70)])])
         case .bassoon, .contrabassoon:
             let primary = [
@@ -425,8 +437,13 @@ private struct InstrumentIconDrawing {
                                   L([(17, 8), (17, 91)]), L([(83, 8), (83, 91)])],
                         details: [O(37, 32, 26, 26)], engraving: [])
         case .mallets, .xylophone, .vibraphone, .marimba, .bells, .glockenspiel:
-            let bars = (0..<6).map { i in
-                B(CGFloat(12+i*13), CGFloat(22+i*3), 10, CGFloat(50-i*4))
+            var bars: [Path] = []
+            for index in 0..<6 {
+                let step = CGFloat(index)
+                let x: CGFloat = 12 + step * 13
+                let y: CGFloat = 22 + step * 3
+                let height: CGFloat = 50 - step * 4
+                bars.append(B(x, y, 10, height))
             }
             var base = [L([(10, 78), (88, 78)]), L([(14, 20), (85, 20)])]
             var details: [Path] = [L([(22, 14), (76, 85)])]
@@ -445,8 +462,10 @@ private struct InstrumentIconDrawing {
             }
             return Self(primary: base + bars, details: details, engraving: [])
         case .crotales:
-            let disks = (0..<5).map { i in
-                O(CGFloat(10 + i*16), CGFloat(20 + i*8), 17, 17)
+            var disks: [Path] = []
+            for index in 0..<5 {
+                let step = CGFloat(index)
+                disks.append(O(10 + step * 16, 20 + step * 8, 17, 17))
             }
             return Self(primary: disks + [L([(12, 75), (91, 75)])],
                         details: [L([(27, 74), (26, 89)]), L([(69, 74), (70, 89)])],
@@ -457,8 +476,12 @@ private struct InstrumentIconDrawing {
                 O(29, 61, 42, 13), L([(49, 16), (49, 8)])
             ], details: [O(45, 72, 10, 10)], engraving: [])
         case .chimes:
-            let pipes = (0..<6).map { i in
-                L([(CGFloat(19+i*12), 28), (CGFloat(19+i*12), CGFloat(88-i*5))])
+            var pipes: [Path] = []
+            for index in 0..<6 {
+                let step = CGFloat(index)
+                let x: CGFloat = 19 + step * 12
+                let bottom: CGFloat = 88 - step * 5
+                pipes.append(L([(x, 28), (x, bottom)]))
             }
             return Self(primary: [L([(10, 18), (90, 18)]),
                                   L([(10, 18), (10, 92)]), L([(90, 18), (90, 92)])] + pipes,
@@ -469,9 +492,10 @@ private struct InstrumentIconDrawing {
                 L([(32, 29), (75, 31)]),
                 L([(29, 87), (74, 87)])
             ]
-            let strings = (0..<7).map { i in
-                let x = CGFloat(37+i*5)
-                return L([(x, 31), (x+3, 84)])
+            var strings: [Path] = []
+            for index in 0..<7 {
+                let x: CGFloat = 37 + CGFloat(index) * 5
+                strings.append(L([(x, 31), (x + 3, 84)]))
             }
             return Self(primary: frame, details: strings, engraving: [])
         case .piano:
@@ -485,15 +509,21 @@ private struct InstrumentIconDrawing {
         case .celesta, .harpsichord:
             let primary = [B(12, 30, 76, 45), L([(20, 75), (16, 91)]),
                            L([(80, 75), (84, 91)]), L([(18, 49), (82, 49)])]
-            let keys = (0..<9).map { i in
-                L([(CGFloat(20+i*7), 50), (CGFloat(20+i*7), 69)])
+            var keys: [Path] = []
+            for index in 0..<9 {
+                let x: CGFloat = 20 + CGFloat(index) * 7
+                keys.append(L([(x, 50), (x, 69)]))
             }
             return Self(primary: primary, details: keys,
                         engraving: [L([(15, 36), (82, 36)])])
         case .organ:
-            let pipes = (0..<5).map { i in
-                B(CGFloat(16+i*14), CGFloat(15+abs(2-i)*6), 10,
-                  CGFloat(51-abs(2-i)*6))
+            var pipes: [Path] = []
+            for index in 0..<5 {
+                let x: CGFloat = 16 + CGFloat(index) * 14
+                let rise = CGFloat(abs(2 - index))
+                let y: CGFloat = 15 + rise * 6
+                let height: CGFloat = 51 - rise * 6
+                pipes.append(B(x, y, 10, height))
             }
             return Self(primary: pipes + [B(12, 68, 76, 20)],
                         details: [L([(20, 76), (81, 76)]),
@@ -516,8 +546,10 @@ private struct InstrumentIconDrawing {
                 L([(91, 83), (91, 62), (78, 54)])
             ], details: [L([(27, 85), (73, 85)])], engraving: [])
         case .synth:
-            let keys = (0..<8).map { i in
-                L([(CGFloat(18+i*9), 49), (CGFloat(18+i*9), 77)])
+            var keys: [Path] = []
+            for index in 0..<8 {
+                let x: CGFloat = 18 + CGFloat(index) * 9
+                keys.append(L([(x, 49), (x, 77)]))
             }
             return Self(primary: [B(9, 22, 82, 60), L([(15, 48), (85, 48)])],
                         details: keys + [O(22, 30, 8, 8), O(37, 30, 8, 8),
