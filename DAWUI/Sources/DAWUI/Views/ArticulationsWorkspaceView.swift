@@ -85,7 +85,7 @@ struct ArticulationsWorkspaceView: View {
 
     // MIDI note numbers are authoritative; displayed octaves use C4 = MIDI 60.
     // Catalog keyswitches remain reference-only until ARIA's octave convention is verified.
-    private func keyboardKey(_ pitch: Int, black: Bool, width: CGFloat) -> some View {
+    private func keyboardKey(_ pitch: Int, black: Bool, width: CGFloat, height: CGFloat = 90) -> some View {
         let active = pressedPitch == UInt8(pitch)
         return RoundedRectangle(cornerRadius: 3)
             .fill(active ? Color.accentColor : (black ? Color.black : Color.white))
@@ -98,7 +98,7 @@ struct ArticulationsWorkspaceView: View {
                         .padding(.bottom, 4)
                 }
             }
-            .frame(width: width, height: black ? 55 : 90)
+            .frame(width: width, height: black ? height * 0.61 : height)
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 0)
                 .onChanged { _ in
@@ -170,8 +170,55 @@ struct ArticulationsWorkspaceView: View {
 
 
     // Compact mode shares the same catalog and patch-matching logic as the full editor.
+    private var compactKeyboard: some View {
+        VStack(spacing: 3) {
+            HStack(spacing: 5) {
+                Text("Keyboard").font(.caption2.weight(.semibold))
+                Spacer()
+                Button { keyboardOctave = max(0, keyboardOctave - 1) } label: {
+                    Image(systemName: "chevron.left")
+                }
+                .disabled(keyboardOctave == 0)
+                Text("C\\(keyboardOctave)–B\\(keyboardOctave + 2)")
+                    .font(.caption2.monospacedDigit())
+                Button { keyboardOctave = min(7, keyboardOctave + 1) } label: {
+                    Image(systemName: "chevron.right")
+                }
+                .disabled(keyboardOctave == 7)
+            }
+            .buttonStyle(.borderless)
+            GeometryReader { geometry in
+                let keyWidth = geometry.size.width / 21
+                let start = (keyboardOctave + 1) * 12
+                ZStack(alignment: .topLeading) {
+                    HStack(spacing: 0) {
+                        ForEach(0..<36, id: \\.self) { offset in
+                            let pitch = start + offset
+                            if pitch <= 127 && ![1, 3, 6, 8, 10].contains(pitch % 12) {
+                                keyboardKey(pitch, black: false, width: keyWidth, height: 45)
+                            }
+                        }
+                    }
+                    ForEach(0..<36, id: \\.self) { offset in
+                        let pitch = start + offset
+                        if pitch <= 127 && [1, 3, 6, 8, 10].contains(pitch % 12) {
+                            let precedingWhiteKeys = (0..<offset).filter {
+                                ![1, 3, 6, 8, 10].contains((start + $0) % 12)
+                            }.count
+                            keyboardKey(pitch, black: true, width: keyWidth * 0.62, height: 45)
+                                .offset(x: CGFloat(precedingWhiteKeys) * keyWidth - keyWidth * 0.31)
+                                .zIndex(1)
+                        }
+                    }
+                }
+            }
+            .frame(height: 46)
+        }
+        .frame(minWidth: 250)
+    }
+
     var compactControls: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(viewModel.selectedTrack?.name ?? "No track selected")
                     .font(.subheadline.weight(.semibold))
@@ -181,11 +228,11 @@ struct ArticulationsWorkspaceView: View {
                     .foregroundColor(.secondary)
                     .lineLimit(1)
             }
-            .frame(width: 175, alignment: .leading)
+            .frame(width: 150, alignment: .leading)
             Divider()
             if let patch = activePatch {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         ForEach(patch.keyswitches) { assignment in
                             Button {
                                 selectedArticulationID = assignment.id
@@ -209,14 +256,18 @@ struct ArticulationsWorkspaceView: View {
                         }
                     }
                 }
+                .frame(maxWidth: 280)
             } else {
                 Text("Load a matching GPO5 KS patch to see articulation shortcuts")
                     .font(.caption)
                     .foregroundColor(.secondary)
                 Spacer()
             }
+            Divider()
+            compactKeyboard
+                .frame(maxWidth: .infinity)
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onChange(of: viewModel.selectedTrackID) { _, _ in
             selectedPatchName = nil
