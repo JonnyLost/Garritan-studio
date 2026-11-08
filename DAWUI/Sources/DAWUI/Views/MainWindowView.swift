@@ -19,6 +19,7 @@ public struct MainWindowView: View {
     @State private var showStageWorkspace = false
     @State private var showChannelWorkspace = false
     @State private var showInstrumentWorkspace = false
+    @State private var compactLowerWorkspace = false
     @State private var lowerWorkspaceMaximized = false
     @State private var lowerWorkspaceRestoreHeight: CGFloat = 500
     @State private var showCreateClipDialog: Bool = false
@@ -122,8 +123,26 @@ public struct MainWindowView: View {
                                 lowerWorkspaceMaximized.toggle()
                             }
 
-                        bottomPanel
-                            .frame(height: pianoRollHeight)
+                        VStack(spacing: 0) {
+                            HStack {
+                                Text(compactLowerWorkspace ? "Compact Workspace" : "Full Workspace")
+                                    .font(.caption.weight(.medium))
+                                Spacer()
+                                Button(compactLowerWorkspace ? "Expand" : "Compact") {
+                                    compactLowerWorkspace.toggle()
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                            .padding(.horizontal, 12)
+                            .frame(height: 28)
+                            Divider()
+                            if compactLowerWorkspace {
+                                compactWorkspaceStrip
+                            } else {
+                                bottomPanel
+                            }
+                        }
+                            .frame(height: compactLowerWorkspace ? 108 : pianoRollHeight)
                             .simultaneousGesture(
                                 TapGesture().onEnded { _ in
                                     NSApp.keyWindow?.makeFirstResponder(nil)
@@ -472,6 +491,33 @@ public struct MainWindowView: View {
         }
         .buttonStyle(.plain)
         .help(title)
+    }
+
+    private var compactWorkspaceStrip: some View {
+        HStack(spacing: 16) {
+            if let track = viewModel.selectedTrack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(track.name).font(.subheadline.weight(.semibold))
+                    Text(track.instrumentSlot?.pluginID?.name ?? "No instrument loaded")
+                        .font(.caption).foregroundColor(.secondary)
+                }
+                Spacer()
+                Text(track.volume <= 0 ? "−∞ dB" :
+                     String(format: "%.1f dB", 20 * log10(Double(track.volume))))
+                    .font(.caption.monospacedDigit())
+                Text(abs(track.pan) < 0.01 ? "Center" :
+                     String(format: "%.0f%% %@", abs(track.pan) * 100,
+                            track.pan < 0 ? "Left" : "Right"))
+                    .font(.caption)
+            } else {
+                Text("Select a track to view its essential controls")
+                    .font(.caption).foregroundColor(.secondary)
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .controlBackgroundColor))
     }
 
     @ViewBuilder
@@ -1961,6 +2007,19 @@ struct InspectorView: View {
 private struct ChannelWorkspaceView: View {
     @ObservedObject var viewModel: ProjectViewModel
 
+    private func signalNode(_ title: String, _ detail: String, _ symbol: String) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: symbol).font(.title2).foregroundColor(.accentColor)
+            Text(title).font(.subheadline.weight(.semibold))
+            Text(detail).font(.caption).foregroundColor(.secondary)
+                .lineLimit(2).multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, minHeight: 100)
+        .padding(8)
+        .background(Color.accentColor.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack {
@@ -1987,63 +2046,46 @@ private struct ChannelWorkspaceView: View {
                                                   audioRecorder: viewModel.audioRecorder)
                         }
                         .padding(18)
-                        .frame(maxWidth: 560, alignment: .leading)
+                        .frame(width: 420, alignment: .leading)
                         .background(Color(nsColor: .windowBackgroundColor))
                         .clipShape(RoundedRectangle(cornerRadius: 12))
 
-                        VStack(alignment: .leading, spacing: 16) {
-                            Label("Channel Overview", systemImage: "waveform.path")
+                        VStack(alignment: .leading, spacing: 14) {
+                            Label("Signal Flow", systemImage: "arrow.right")
                                 .font(.headline)
-                            HStack(spacing: 10) {
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(Color(hex: track.color.hex) ?? .accentColor)
-                                    .frame(width: 5, height: 44)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(track.name).font(.headline)
-                                    Text(track.type.rawValue.capitalized)
-                                        .font(.caption).foregroundColor(.secondary)
-                                }
+                            HStack(spacing: 8) {
+                                signalNode("Instrument", track.instrumentSlot?.pluginID?.name ?? "No instrument", "pianokeys")
+                                Image(systemName: "arrow.right").foregroundColor(.secondary)
+                                signalNode("Inserts", "Effects", "waveform.path")
+                                Image(systemName: "arrow.right").foregroundColor(.secondary)
+                                signalNode("Sends", "Stage ambience", "arrow.triangle.branch")
+                                Image(systemName: "arrow.right").foregroundColor(.secondary)
+                                signalNode("Output", "Master", "speaker.wave.2")
                             }
                             Divider()
-                            Text("SIGNAL").font(.caption2.weight(.semibold))
-                                .foregroundColor(.secondary)
-                            Label(track.instrumentSlot?.pluginID?.name ?? "No instrument loaded",
-                                  systemImage: "pianokeys")
-                                .font(.subheadline)
-                            Label("Master Output", systemImage: "speaker.wave.2")
-                                .font(.subheadline)
-                            Divider()
-                            Text("LEVEL & PAN").font(.caption2.weight(.semibold))
-                                .foregroundColor(.secondary)
+                            Label("Channel Controls", systemImage: "slider.horizontal.3")
+                                .font(.headline)
                             HStack {
                                 Text("Level")
                                 Spacer()
                                 Text(track.volume <= 0 ? "−∞ dB" :
                                      String(format: "%.1f dB", 20 * log10(Double(track.volume))))
-                                    .monospacedDigit()
                             }
                             .font(.subheadline)
-                            ProgressView(value: min(Double(track.volume) / 1.4, 1))
-                                .tint(.accentColor)
+                            ProgressView(value: min(max(Double(track.volume) / 1.4, 0), 1))
                             HStack {
                                 Text("Pan")
                                 Spacer()
                                 Text(abs(track.pan) < 0.01 ? "Center" :
                                      String(format: "%.0f%% %@", abs(track.pan) * 100,
                                             track.pan < 0 ? "Left" : "Right"))
-                                    .monospacedDigit()
                             }
                             .font(.subheadline)
-                            Divider()
-                            Label("Effects & Sends", systemImage: "slider.horizontal.3")
-                                .font(.headline)
-                            Text("Stage ambience and effects routing will be organized here as the channel strip develops.")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
+                            Text("Signal-flow blocks are a visual overview; existing controls remain on the left.")
+                                .font(.caption).foregroundColor(.secondary)
                         }
                         .padding(18)
-                        .frame(maxWidth: 340, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color(nsColor: .windowBackgroundColor))
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                     }
