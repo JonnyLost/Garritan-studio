@@ -218,7 +218,18 @@ public final class AudioEngine: ObservableObject {
         engine.connect(trackNode.inputMixer, to: trackNode.gainNode, format: format)
         engine.connect(trackNode.gainNode, to: stereoEffect, format: format)
         engine.connect(stereoEffect, to: trackNode.pannerNode, format: format)
-        engine.connect(trackNode.pannerNode, to: trackNode.outputMixer, format: format)
+        // Split the post-panner signal into dry and Concert Hall send paths.
+        // Both destinations receive the same audio; the send mixer
+        // controls how much reaches the shared reverb.
+        engine.connect(
+            trackNode.pannerNode,
+            to: [
+                AVAudioConnectionPoint(node: trackNode.outputMixer, bus: 0),
+                AVAudioConnectionPoint(node: trackNode.concertHallSend, bus: 0)
+            ],
+            fromBus: 0,
+            format: format
+        )
         engine.connect(trackNode.outputMixer, to: masterMixer, format: format)
         
         // Set initial values
