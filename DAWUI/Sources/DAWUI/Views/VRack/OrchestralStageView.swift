@@ -7,7 +7,18 @@ struct OrchestralStageView: View {
     @ObservedObject var viewModel: ProjectViewModel
     var expanded: Bool = false
     @State private var dragOrigins: [TrackID: CGPoint] = [:]
-    @State private var selectedLayout: StageLayout = .symphony
+    private var selectedLayout: StageLayout {
+        StageLayout(rawValue: viewModel.project.dawState.stageLayoutID ?? "") ?? .symphony
+    }
+
+    private var layoutBinding: Binding<StageLayout> {
+        Binding(
+            get: { selectedLayout },
+            set: { layout in
+                viewModel.project.dawState.stageLayoutID = layout.rawValue
+            }
+        )
+    }
 
     private enum StageLayout: String, CaseIterable, Identifiable {
         case filmScore = "Film Score Orchestra"
@@ -74,7 +85,7 @@ struct OrchestralStageView: View {
                             .font(.system(size: 10, weight: .medium))
                             .tracking(1.5)
                             .foregroundStyle(.secondary)
-                        Picker("Stage Layout", selection: $selectedLayout) {
+                        Picker("Stage Layout", selection: layoutBinding) {
                             ForEach(StageLayout.allCases) { layout in
                                 Text(layout.rawValue).tag(layout)
                             }
@@ -82,6 +93,13 @@ struct OrchestralStageView: View {
                         .labelsHidden()
                         .frame(width: 190)
                     }
+                    HStack {
+                        Spacer()
+                        Button("Auto Arrange") { autoArrangeTracks() }
+                            .disabled(instrumentTracks.isEmpty)
+                            .help("Place recognized instruments in the selected seating template")
+                    }
+                    .font(.caption)
                     fittedCurvedStage(
                         availableWidth: max(200, geometry.size.width - 328),
                         availableHeight: max(220, geometry.size.height - 66)
@@ -138,6 +156,50 @@ struct OrchestralStageView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12))
             }
             .padding(12)
+        }
+    }
+
+    /// Conservative name-based matching. Unrecognized instruments retain their
+    /// current position; the command is explicit, never triggered by a picker change.
+    private func autoArrangeTracks() {
+        let sections = seating
+        for track in instrumentTracks {
+            let name = track.name.lowercased()
+            let matches = sections.filter { section in
+                let label = section.name.lowercased()
+                let aliases: [String]
+                if name.contains("violin") {
+                    aliases = name.contains("ii") || name.contains("2") ? ["violin ii"] : ["violin i"]
+                } else if name.contains("viola") { aliases = ["viola"]
+                } else if name.contains("cello") { aliases = ["cello"]
+                } else if name.contains("bassoon") { aliases = ["bassoon"]
+                } else if name.contains("clarinet") { aliases = ["clarinet"]
+                } else if name.contains("flute") || name.contains("piccolo") { aliases = ["flute", "picc"]
+                } else if name.contains("oboe") { aliases = ["oboe"]
+                } else if name.contains("horn") { aliases = ["horn"]
+                } else if name.contains("trumpet") { aliases = ["trumpet"]
+                } else if name.contains("trombone") { aliases = ["trombone"]
+                } else if name.contains("tuba") { aliases = ["tuba"]
+                } else if name.contains("timpani") { aliases = ["timp"]
+                } else if name.contains("harp") { aliases = ["harp"]
+                } else if name.contains("soprano") { aliases = ["soprano"]
+                } else if name.contains("alto") { aliases = ["alto"]
+                } else if name.contains("tenor") { aliases = ["tenor"]
+                } else if name.contains("choir") { aliases = ["choir"]
+                } else if name.contains("piano") { aliases = ["piano"]
+                } else if name.contains("guitar") { aliases = ["guitar"]
+                } else if name.contains("drum") { aliases = ["drum", "perc"]
+                } else if name.contains("sax") { aliases = ["sax"]
+                } else if name.contains("bass") { aliases = ["bass"]
+                } else { aliases = [] }
+                return aliases.contains { label.contains($0) }
+            }
+            guard let section = matches.first else { continue }
+            viewModel.setTrackStagePosition(
+                id: track.id,
+                pan: Float(section.pan),
+                zone: section.zone
+            )
         }
     }
 
