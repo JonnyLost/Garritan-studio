@@ -6,6 +6,7 @@ import DAWCore
 
 /// Mixing console view with channel strips
 public struct MixerView: View {
+    @Environment(\.studioPalette) private var palette
     @ObservedObject var viewModel: ProjectViewModel
     
     @State private var showPluginBrowser = false
@@ -36,7 +37,7 @@ public struct MixerView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Color(nsColor: .windowBackgroundColor))
+            .background(palette.panel)
             
             Divider()
             
@@ -71,7 +72,7 @@ public struct MixerView: View {
                 Spacer() // Push channels to the left
             }
         }
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(palette.canvas)
         .sheet(isPresented: $showPluginBrowser) {
             PluginBrowserView(
                 viewModel: viewModel,
@@ -123,6 +124,7 @@ public struct MixerView: View {
 // MARK: - Channel Strip View
 
 struct ChannelStripView: View {
+    @Environment(\.studioPalette) private var palette
     let track: Track
     @ObservedObject var viewModel: ProjectViewModel
     let isPlaying: Bool
@@ -215,7 +217,7 @@ struct ChannelStripView: View {
             .padding(.bottom, 6)
         }
         .frame(width: 70, height: 260)
-        .background(isSelected ? Color.accentColor.opacity(0.15) : Color(nsColor: .controlBackgroundColor))
+        .background(isSelected ? palette.selectedBackground : palette.surface)
         .cornerRadius(4)
         .contentShape(Rectangle())
         .onTapGesture {
@@ -249,6 +251,7 @@ struct ChannelStripView: View {
 // MARK: - Master Channel Strip View
 
 struct MasterChannelStripView: View {
+    @Environment(\.studioPalette) private var palette
     let track: Track
     @ObservedObject var viewModel: ProjectViewModel
     let isPlaying: Bool
@@ -294,7 +297,7 @@ struct MasterChannelStripView: View {
                 .padding(.bottom, 8)
         }
         .frame(width: 80, height: 260)
-        .background(Color(nsColor: .windowBackgroundColor).opacity(0.8))
+        .background(palette.panel)
         .cornerRadius(4)
     }
     
@@ -378,7 +381,7 @@ struct FaderView: View {
                 VStack {
                     Spacer()
                     RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.accentColor.opacity(0.5))
+                        .fill(palette.accent.opacity(0.5))
                         .frame(width: 6, height: fillHeight(in: geometry.size.height))
                 }
                 
@@ -433,7 +436,7 @@ struct KnobView: View {
                 Circle()
                     .trim(from: 0, to: 0.75)
                     .rotation(.degrees(135))
-                    .stroke(Color.accentColor, lineWidth: 3)
+                    .stroke(palette.accent, lineWidth: 3)
                     .frame(width: 26, height: 26)
                 
                 // Position indicator
