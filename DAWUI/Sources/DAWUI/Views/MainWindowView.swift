@@ -1979,11 +1979,76 @@ private struct ChannelWorkspaceView: View {
             Divider()
             ScrollView {
                 if let track = viewModel.selectedTrack {
-                    TrackInspectorSection(track: track, viewModel: viewModel,
-                                          audioRecorder: viewModel.audioRecorder)
-                        .frame(maxWidth: 540, alignment: .leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(20)
+                    HStack(alignment: .top, spacing: 18) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Label("Track & Routing", systemImage: "slider.horizontal.3")
+                                .font(.headline)
+                            TrackInspectorSection(track: track, viewModel: viewModel,
+                                                  audioRecorder: viewModel.audioRecorder)
+                        }
+                        .padding(18)
+                        .frame(maxWidth: 560, alignment: .leading)
+                        .background(Color(nsColor: .windowBackgroundColor))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                        VStack(alignment: .leading, spacing: 16) {
+                            Label("Channel Overview", systemImage: "waveform.path")
+                                .font(.headline)
+                            HStack(spacing: 10) {
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(Color(hex: track.color.hex) ?? .accentColor)
+                                    .frame(width: 5, height: 44)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(track.name).font(.headline)
+                                    Text(track.type.rawValue.capitalized)
+                                        .font(.caption).foregroundColor(.secondary)
+                                }
+                            }
+                            Divider()
+                            Text("SIGNAL").font(.caption2.weight(.semibold))
+                                .foregroundColor(.secondary)
+                            Label(track.instrumentSlot?.pluginID?.name ?? "No instrument loaded",
+                                  systemImage: "pianokeys")
+                                .font(.subheadline)
+                            Label("Master Output", systemImage: "speaker.wave.2")
+                                .font(.subheadline)
+                            Divider()
+                            Text("LEVEL & PAN").font(.caption2.weight(.semibold))
+                                .foregroundColor(.secondary)
+                            HStack {
+                                Text("Level")
+                                Spacer()
+                                Text(track.volume <= 0 ? "−∞ dB" :
+                                     String(format: "%.1f dB", 20 * log10(Double(track.volume))))
+                                    .monospacedDigit()
+                            }
+                            .font(.subheadline)
+                            ProgressView(value: min(Double(track.volume) / 1.4, 1))
+                                .tint(.accentColor)
+                            HStack {
+                                Text("Pan")
+                                Spacer()
+                                Text(abs(track.pan) < 0.01 ? "Center" :
+                                     String(format: "%.0f%% %@", abs(track.pan) * 100,
+                                            track.pan < 0 ? "Left" : "Right"))
+                                    .monospacedDigit()
+                            }
+                            .font(.subheadline)
+                            Divider()
+                            Label("Effects & Sends", systemImage: "slider.horizontal.3")
+                                .font(.headline)
+                            Text("Stage ambience and effects routing will be organized here as the channel strip develops.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(18)
+                        .frame(maxWidth: 340, alignment: .leading)
+                        .background(Color(nsColor: .windowBackgroundColor))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(20)
                 } else {
                     ContentUnavailableView("No Track Selected",
                                            systemImage: "slider.horizontal.3",
