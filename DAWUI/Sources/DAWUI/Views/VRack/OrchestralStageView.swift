@@ -2,7 +2,7 @@ import SwiftUI
 import DAWCore
 
 /// Stage placement is independent of the sample library. Horizontal placement
-/// controls existing track pan; L1-L5 are persisted room-send zones (audio later).
+/// controls existing track pan; L1-L5 drive the shared Concert Hall send.
 struct OrchestralStageView: View {
     @ObservedObject var viewModel: ProjectViewModel
     var expanded: Bool = false
@@ -41,7 +41,7 @@ struct OrchestralStageView: View {
 
                 selectedTrackControls
 
-                Text("Zones are saved with the project. Hall audio processing is temporarily disabled.")
+                Text("Stage positions and Concert Hall ambience are saved with the project.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
             .padding(12)
@@ -102,7 +102,7 @@ struct OrchestralStageView: View {
                         }
                     }
                     Divider()
-                    Text("All instruments share the same stage. Reverb zones are saved but audio processing is temporarily disabled while we investigate startup.")
+                    Text("All instruments share one Concert Hall. Moving a marker changes its stereo position and room ambience.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 0)
