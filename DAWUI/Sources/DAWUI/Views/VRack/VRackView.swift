@@ -40,6 +40,9 @@ public struct VRackView: View {
     @State private var isLoadingInstrument = false
     @State private var pickerError: String?
     @State private var previewInstrumentID: String?
+    // Shared across the compact and embedded instances of the browser.
+    @MainActor private static var sharedFamilyFilter = "All"
+    @MainActor private static var sharedPreviewInstrumentID: String?
 
 
     public init(viewModel: ProjectViewModel, openStageWorkspace: (() -> Void)? = nil,
@@ -460,7 +463,7 @@ public struct VRackView: View {
     // Full-width browser shares the same catalog, filters and ARIA loader
     // as the compact picker. Browsing never loads a patch until requested.
     private var previewInstrument: DrawerInstrument? {
-        catalog.first { $0.id == previewInstrumentID }
+        (catalog.isEmpty ? (Self.cachedCatalog ?? []) : catalog).first { $0.id == previewInstrumentID }
     }
 
     var expandedInstrumentBrowser: some View {
@@ -507,6 +510,7 @@ public struct VRackView: View {
                         ForEach(["All"] + scoreFamilies, id: \.self) { family in
                             Button {
                                 familyFilter = family
+                                previewInstrumentID = nil
                             } label: {
                                 HStack {
                                     Text(family == "All" ? "All Instruments" : family)
@@ -592,7 +596,7 @@ public struct VRackView: View {
                         .buttonStyle(.borderedProminent)
                         .disabled(isLoadingInstrument || viewModel.selectedTrackID == nil)
                     } else {
-                        Text("Select an instrument to see its details.")
+                        Text("Select an instrument from the list to preview it, then click Load Instrument.")
                             .foregroundStyle(.secondary)
                         Spacer()
                     }
@@ -610,6 +614,11 @@ public struct VRackView: View {
         .onAppear {
             if catalog.isEmpty { discoverCatalog() }
             if previewInstrumentID == nil {
+                previewInstrumentID = filteredCatalog.first?.id
+            }
+        }
+        .onChange(of: familyFilter) { _, _ in
+            if !filteredCatalog.contains(where: { $0.id == previewInstrumentID }) {
                 previewInstrumentID = filteredCatalog.first?.id
             }
         }
