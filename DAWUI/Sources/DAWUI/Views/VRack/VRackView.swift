@@ -132,6 +132,7 @@ private final class BrowserAudition: ObservableObject {
 
 /// Sidebar panel for managing V-Rack instruments
 public struct VRackView: View {
+    @Environment(\.studioPalette) private var palette
     @ObservedObject var viewModel: ProjectViewModel
     var openStageWorkspace: (() -> Void)?
     var openInstrumentWorkspace: (() -> Void)?
@@ -642,6 +643,7 @@ public struct VRackView: View {
                     .keyboardShortcut(.cancelAction)
             }
             .padding(18)
+            .background(palette.panel)
             Divider()
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
@@ -661,7 +663,7 @@ public struct VRackView: View {
                 .frame(width: 105)
             }
             .padding(12)
-            .background(Color(nsColor: .controlBackgroundColor))
+            .background(palette.surface)
             HStack(spacing: 0) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 3) {
@@ -678,7 +680,7 @@ public struct VRackView: View {
                                 }
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 9)
-                                .background(familyFilter == family ? Color.accentColor.opacity(0.2) : Color.clear)
+                                .background(familyFilter == family ? palette.selectedBackground : Color.clear)
                                 .clipShape(RoundedRectangle(cornerRadius: 7))
                             }
                             .buttonStyle(.plain)
@@ -687,6 +689,7 @@ public struct VRackView: View {
                     .padding(10)
                 }
                 .frame(width: 165)
+                .background(palette.sidebar)
                 Divider()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 3) {
@@ -704,7 +707,7 @@ public struct VRackView: View {
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 9)
                                 .background(instrumentTypeFilter == type ?
-                                            Color.accentColor.opacity(0.2) : Color.clear)
+                                            palette.selectedBackground : Color.clear)
                                 .clipShape(RoundedRectangle(cornerRadius: 7))
                             }
                             .buttonStyle(.plain)
@@ -713,6 +716,7 @@ public struct VRackView: View {
                     .padding(8)
                 }
                 .frame(width: 155)
+                .background(palette.panel)
                 Divider()
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 5) {
@@ -723,7 +727,7 @@ public struct VRackView: View {
                             } label: {
                                 HStack(spacing: 12) {
                                     Image(systemName: instrument.symbol)
-                                        .foregroundStyle(Color.accentColor)
+                                        .foregroundStyle(palette.accent)
                                         .frame(width: 26)
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(instrument.name)
@@ -736,13 +740,13 @@ public struct VRackView: View {
                                     Spacer()
                                     if previewInstrumentID == instrument.id {
                                         Image(systemName: "checkmark.circle.fill")
-                                            .foregroundStyle(Color.accentColor)
+                                            .foregroundStyle(palette.accent)
                                     }
                                 }
                                 .padding(10)
                                 .background(previewInstrumentID == instrument.id ?
-                                            Color.accentColor.opacity(0.15) :
-                                            Color(nsColor: .controlBackgroundColor).opacity(0.45))
+                                            palette.selectedBackground :
+                                            palette.surface)
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
                             }
                             .buttonStyle(.plain)
@@ -756,6 +760,7 @@ public struct VRackView: View {
                     .padding(12)
                 }
                 .frame(maxWidth: .infinity)
+                .background(palette.canvas)
                 Divider()
                 VStack(alignment: .leading, spacing: 14) {
                     Text("INSTRUMENT DETAILS")
@@ -828,9 +833,12 @@ public struct VRackView: View {
                 .padding(18)
                 .frame(width: 245)
                 .frame(maxHeight: .infinity, alignment: .topLeading)
+                .background(palette.panel)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(palette.canvas)
+        .tint(palette.accent)
         .onAppear {
             if catalog.isEmpty { discoverCatalog() }
             if previewInstrumentID == nil {
