@@ -163,6 +163,11 @@ struct DAWApp: App {
                 }
                 .keyboardShortcut("i", modifiers: .command)
                 
+                Button("Show/Hide On-Screen Keyboard") {
+                    NotificationCenter.default.post(name: Notification.Name("toggleStudioKeyboard"), object: nil)
+                }
+                .keyboardShortcut("k", modifiers: .command)
+
                 Divider()
                 
                 Button("Zoom In") {
