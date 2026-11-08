@@ -569,9 +569,11 @@ public struct MainWindowView: View {
             ArticulationsWorkspaceView(viewModel: viewModel)
         } else if showStageWorkspace {
             VStack(spacing: 0) {
-                HStack {
-                    Text("Orchestral Stage").font(.headline)
-                    Spacer()
+                StudioWorkspaceHeader(
+                    "Orchestral Stage",
+                    subtitle: "Orchestra seating, stereo placement and Concert Hall ambience",
+                    symbol: "circle.hexagongrid"
+                ) {
                     Button("Piano Roll") {
                         selectWorkspace("Piano Roll")
                     }
@@ -584,9 +586,6 @@ public struct MainWindowView: View {
                     .buttonStyle(.borderless)
                     .help("Close Stage workspace")
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                Divider()
                 OrchestralStageView(viewModel: viewModel, expanded: true)
             }
         } else if viewModel.showPianoRoll {
@@ -2046,101 +2045,128 @@ struct InspectorView: View {
 
 /// Focused selected-track channel controls, distinct from the full multitrack mixer.
 private struct ChannelWorkspaceView: View {
+    @Environment(\.studioPalette) private var palette
     @ObservedObject var viewModel: ProjectViewModel
 
     private func signalNode(_ title: String, _ detail: String, _ symbol: String) -> some View {
-        VStack(spacing: 8) {
-            Image(systemName: symbol).font(.title2).foregroundColor(.accentColor)
-            Text(title).font(.subheadline.weight(.semibold))
-            Text(detail).font(.caption).foregroundColor(.secondary)
-                .lineLimit(2).multilineTextAlignment(.center)
+        VStack(spacing: 9) {
+            Image(systemName: symbol)
+                .font(.system(size: 21, weight: .medium))
+                .foregroundStyle(palette.accent)
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(palette.primaryText)
+            Text(detail)
+                .font(.system(size: 10))
+                .foregroundStyle(palette.secondaryText)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
         }
-        .frame(maxWidth: .infinity, minHeight: 100)
-        .padding(8)
-        .background(Color.accentColor.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .frame(maxWidth: .infinity, minHeight: 96)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 12)
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: 9))
+        .overlay {
+            RoundedRectangle(cornerRadius: 9)
+                .strokeBorder(palette.separator.opacity(0.8), lineWidth: 1)
+                .allowsHitTesting(false)
+        }
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Channel").font(.headline)
-                    Text("Controls and routing for the selected track")
-                        .font(.caption).foregroundColor(.secondary)
-                }
-                Spacer()
+            StudioWorkspaceHeader(
+                "Channel",
+                subtitle: "Track controls and signal routing",
+                symbol: "slider.horizontal.3"
+            ) {
                 if let track = viewModel.selectedTrack {
-                    Text(track.name).font(.subheadline).foregroundColor(.secondary)
+                    Text(track.name)
+                        .foregroundStyle(palette.secondaryText)
+                        .lineLimit(1)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            Divider()
+
             ScrollView {
                 if let track = viewModel.selectedTrack {
-                    HStack(alignment: .top, spacing: 18) {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Label("Track & Routing", systemImage: "slider.horizontal.3")
-                                .font(.headline)
-                            TrackInspectorSection(track: track, viewModel: viewModel,
-                                                  audioRecorder: viewModel.audioRecorder)
+                    HStack(alignment: .top, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 16) {
+                            StudioSectionHeading("Track & Routing", symbol: "slider.horizontal.3")
+                            TrackInspectorSection(
+                                track: track,
+                                viewModel: viewModel,
+                                audioRecorder: viewModel.audioRecorder
+                            )
                         }
                         .padding(18)
-                        .frame(width: 420, alignment: .leading)
-                        .background(Color(nsColor: .windowBackgroundColor))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .frame(width: 350, alignment: .leading)
+                        .studioPanel()
 
-                        VStack(alignment: .leading, spacing: 14) {
-                            Label("Signal Flow", systemImage: "arrow.right")
-                                .font(.headline)
-                            HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 17) {
+                            StudioSectionHeading("Signal Flow", symbol: "arrow.right")
+                            HStack(spacing: 7) {
                                 signalNode("Instrument", track.instrumentSlot?.pluginID?.name ?? "No instrument", "pianokeys")
-                                Image(systemName: "arrow.right").foregroundColor(.secondary)
+                                Image(systemName: "arrow.right")
+                                    .foregroundStyle(palette.accent)
+                                    .font(.system(size: 11))
                                 signalNode("Inserts", "Effects", "waveform.path")
-                                Image(systemName: "arrow.right").foregroundColor(.secondary)
+                                Image(systemName: "arrow.right")
+                                    .foregroundStyle(palette.accent)
+                                    .font(.system(size: 11))
                                 signalNode("Sends", "Stage ambience", "arrow.triangle.branch")
-                                Image(systemName: "arrow.right").foregroundColor(.secondary)
+                                Image(systemName: "arrow.right")
+                                    .foregroundStyle(palette.accent)
+                                    .font(.system(size: 11))
                                 signalNode("Output", "Master", "speaker.wave.2")
                             }
-                            Divider()
-                            Label("Channel Controls", systemImage: "slider.horizontal.3")
-                                .font(.headline)
+
+                            Rectangle().fill(palette.separator).frame(height: 1)
+
+                            StudioSectionHeading("Channel Overview", symbol: "waveform")
                             HStack {
                                 Text("Level")
                                 Spacer()
                                 Text(track.volume <= 0 ? "−∞ dB" :
                                      String(format: "%.1f dB", 20 * log10(Double(track.volume))))
+                                    .monospacedDigit()
                             }
-                            .font(.subheadline)
+                            .font(.system(size: 12))
+                            .foregroundStyle(palette.primaryText)
                             ProgressView(value: min(max(Double(track.volume) / 1.4, 0), 1))
+                                .tint(palette.accent)
                             HStack {
                                 Text("Pan")
                                 Spacer()
                                 Text(abs(track.pan) < 0.01 ? "Center" :
                                      String(format: "%.0f%% %@", abs(track.pan) * 100,
                                             track.pan < 0 ? "Left" : "Right"))
+                                    .monospacedDigit()
                             }
-                            .font(.subheadline)
-                            Text("Signal-flow blocks are a visual overview; existing controls remain on the left.")
-                                .font(.caption).foregroundColor(.secondary)
+                            .font(.system(size: 12))
+                            .foregroundStyle(palette.primaryText)
+
+                            Text("Signal flow is a visual overview. Adjust the track controls on the left.")
+                                .font(.system(size: 11))
+                                .foregroundStyle(palette.secondaryText)
                         }
                         .padding(18)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(nsColor: .windowBackgroundColor))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .studioPanel()
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(20)
+                    .padding(18)
                 } else {
-                    ContentUnavailableView("No Track Selected",
-                                           systemImage: "slider.horizontal.3",
-                                           description: Text("Select a track in the arrangement to edit its channel."))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    ContentUnavailableView(
+                        "No Track Selected",
+                        systemImage: "slider.horizontal.3",
+                        description: Text("Select a track in the arrangement to edit its channel.")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         }
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(palette.canvas)
+        .tint(palette.accent)
     }
 }
 
