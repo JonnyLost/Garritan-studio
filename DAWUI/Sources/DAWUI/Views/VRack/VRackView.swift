@@ -600,7 +600,8 @@ public struct VRackView: View {
                     }
                 }
                 .padding(18)
-                .frame(width: 245, maxHeight: .infinity, alignment: .topLeading)
+                .frame(width: 245)
+                .frame(maxHeight: .infinity, alignment: .topLeading)
             }
         }
         .frame(minWidth: 860, minHeight: 570)
