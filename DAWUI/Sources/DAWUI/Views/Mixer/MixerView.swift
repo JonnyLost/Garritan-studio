@@ -366,6 +366,7 @@ struct PluginSlotView: View {
 // MARK: - Fader View
 
 struct FaderView: View {
+    @Environment(\.studioPalette) private var palette
     @Binding var value: Double
     let range: ClosedRange<Double>
     
@@ -420,6 +421,7 @@ struct FaderView: View {
 // MARK: - Knob View
 
 struct KnobView: View {
+    @Environment(\.studioPalette) private var palette
     @Binding var value: Double
     let range: ClosedRange<Double>
     let label: String
