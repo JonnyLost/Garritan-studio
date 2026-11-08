@@ -27,6 +27,8 @@ private enum ComposerDrawerMode: String, CaseIterable, Identifiable {
 public struct VRackView: View {
     @ObservedObject var viewModel: ProjectViewModel
     var openStageWorkspace: (() -> Void)?
+    var openInstrumentWorkspace: (() -> Void)?
+    var closeInstrumentWorkspace: (() -> Void)?
     @State private var showPluginBrowser = false
     @State private var selectedRackInstrumentID: UUID?
     @State private var mode: ComposerDrawerMode = .instruments
@@ -37,13 +39,16 @@ public struct VRackView: View {
     @State private var catalog: [DrawerInstrument] = []
     @State private var isLoadingInstrument = false
     @State private var pickerError: String?
-    @State private var showExpandedBrowser = false
     @State private var previewInstrumentID: String?
 
 
-    public init(viewModel: ProjectViewModel, openStageWorkspace: (() -> Void)? = nil) {
+    public init(viewModel: ProjectViewModel, openStageWorkspace: (() -> Void)? = nil,
+                openInstrumentWorkspace: (() -> Void)? = nil,
+                closeInstrumentWorkspace: (() -> Void)? = nil) {
         self.viewModel = viewModel
         self.openStageWorkspace = openStageWorkspace
+        self.openInstrumentWorkspace = openInstrumentWorkspace
+        self.closeInstrumentWorkspace = closeInstrumentWorkspace
     }
 
     public var body: some View {
@@ -92,9 +97,6 @@ public struct VRackView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Color(nsColor: .controlBackgroundColor))
-        .sheet(isPresented: $showExpandedBrowser) {
-            expandedInstrumentBrowser
-        }
         .sheet(isPresented: $showPluginBrowser) {
             if let rackID = selectedRackInstrumentID {
                 RackPluginBrowserSheet(
@@ -461,7 +463,7 @@ public struct VRackView: View {
         catalog.first { $0.id == previewInstrumentID }
     }
 
-    private var expandedInstrumentBrowser: some View {
+    var expandedInstrumentBrowser: some View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
@@ -475,7 +477,7 @@ public struct VRackView: View {
                 Text("\(filteredCatalog.count) patches")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Button("Done") { showExpandedBrowser = false }
+                Button("Done") { closeInstrumentWorkspace?() }
                     .keyboardShortcut(.cancelAction)
             }
             .padding(18)
@@ -604,7 +606,7 @@ public struct VRackView: View {
                 .frame(maxHeight: .infinity, alignment: .topLeading)
             }
         }
-        .frame(minWidth: 860, minHeight: 570)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             if catalog.isEmpty { discoverCatalog() }
             if previewInstrumentID == nil {
@@ -623,7 +625,7 @@ public struct VRackView: View {
                 }
                 Spacer()
                 Button {
-                    showExpandedBrowser = true
+                    openInstrumentWorkspace?()
                 } label: {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
                 }
