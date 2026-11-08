@@ -38,6 +38,10 @@ public enum AudioEngineError: Error, LocalizedError {
 /// Main audio engine wrapping AVAudioEngine with track management
 @MainActor
 public final class AudioEngine: ObservableObject {
+    // Shared Concert Hall send curve, indexed by persisted stage zone (0...5).
+    // Keeping one curve avoids discrepancies between live movement and project loading.
+    private static let concertHallSendLevels: [Float] = [0.0, 0.12, 0.20, 0.30, 0.43, 0.58]
+
     // MARK: - Properties
     
     /// The underlying AVAudioEngine - exposed for advanced node attachment
@@ -243,8 +247,7 @@ public final class AudioEngine: ObservableObject {
         
         // Restore saved orchestral stage depth.
         let depth = max(0, min(5, track.stageReverbZone ?? 2))
-        let sendLevels: [Float] = [0.0, 0.12, 0.20, 0.30, 0.43, 0.58]
-        trackNode.concertHallSend.outputVolume = sendLevels[depth]
+        trackNode.concertHallSend.outputVolume = Self.concertHallSendLevels[depth]
 
         trackNodes[track.id] = trackNode
         installTrackMeter(for: trackNode)
@@ -322,11 +325,9 @@ public final class AudioEngine: ObservableObject {
     /// Set Concert Hall ambience according to orchestral stage depth.
     /// Depth 0 = conductor; depth 5 = back row.
     public func setConcertHallDepth(_ depth: Int, for trackID: TrackID) {
-        let sendLevels: [Float] = [0.0, 0.12, 0.20, 0.30, 0.43, 0.58]
         let safeDepth = max(0, min(5, depth))
-
         trackNodes[trackID]?.concertHallSend.outputVolume =
-            sendLevels[safeDepth]
+            Self.concertHallSendLevels[safeDepth]
     }
 
     /// Get track node for external access
