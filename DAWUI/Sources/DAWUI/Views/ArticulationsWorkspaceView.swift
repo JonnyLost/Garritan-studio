@@ -179,7 +179,7 @@ struct ArticulationsWorkspaceView: View {
                     Image(systemName: "chevron.left")
                 }
                 .disabled(keyboardOctave == 0)
-                Text("C\\(keyboardOctave)–B\\(keyboardOctave + 2)")
+                Text("C\(keyboardOctave)–B\(keyboardOctave + 2)")
                     .font(.caption2.monospacedDigit())
                 Button { keyboardOctave = min(7, keyboardOctave + 1) } label: {
                     Image(systemName: "chevron.right")
@@ -192,14 +192,14 @@ struct ArticulationsWorkspaceView: View {
                 let start = (keyboardOctave + 1) * 12
                 ZStack(alignment: .topLeading) {
                     HStack(spacing: 0) {
-                        ForEach(0..<36, id: \\.self) { offset in
+                        ForEach(0..<36, id: \.self) { offset in
                             let pitch = start + offset
                             if pitch <= 127 && ![1, 3, 6, 8, 10].contains(pitch % 12) {
                                 keyboardKey(pitch, black: false, width: keyWidth, height: 45)
                             }
                         }
                     }
-                    ForEach(0..<36, id: \\.self) { offset in
+                    ForEach(0..<36, id: \.self) { offset in
                         let pitch = start + offset
                         if pitch <= 127 && [1, 3, 6, 8, 10].contains(pitch % 12) {
                             let precedingWhiteKeys = (0..<offset).filter {
