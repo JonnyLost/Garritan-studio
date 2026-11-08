@@ -40,6 +40,7 @@ private struct GPOKeyswitchCatalog: Decodable {
 }
 
 struct ArticulationsWorkspaceView: View {
+    @Environment(\.studioPalette) private var palette
     @ObservedObject var viewModel: ProjectViewModel
     @State private var catalog = GPOKeyswitchCatalog.load()
     @State private var search = ""
@@ -215,8 +216,7 @@ struct ArticulationsWorkspaceView: View {
                 .foregroundColor(.secondary)
         }
         .padding(12)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .cornerRadius(8)
+        .studioPanel()
     }
 
 
@@ -324,13 +324,11 @@ struct ArticulationsWorkspaceView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Articulations").font(.headline)
-                    Text("GPO5 keyswitch reference • \(viewModel.selectedTrack?.name ?? "No track selected")")
-                        .font(.caption).foregroundColor(.secondary)
-                }
-                Spacer()
+            StudioWorkspaceHeader(
+                "Articulations",
+                subtitle: "GPO5 keyswitches · \(viewModel.selectedTrack?.name ?? "No track selected")",
+                symbol: "music.note"
+            ) {
                 if let track = viewModel.selectedTrack,
                    let pluginID = track.instrumentSlot?.pluginID {
                     Button {
@@ -349,8 +347,6 @@ struct ArticulationsWorkspaceView: View {
                 Button("Reload Catalog") { catalog = GPOKeyswitchCatalog.load() }
                     .buttonStyle(.borderless)
             }
-            .padding(14)
-            Divider()
 
             if let catalog {
                 HStack(spacing: 0) {
@@ -371,8 +367,10 @@ struct ArticulationsWorkspaceView: View {
                             .tag(patch.patch)
                         }
                         .listStyle(.sidebar)
+                        .scrollContentBackground(.hidden)
                     }
                     .frame(minWidth: 230, idealWidth: 290, maxWidth: 340)
+                    .background(palette.sidebar)
                     Divider()
                     ScrollView {
                         VStack(alignment: .leading, spacing: 14) {
@@ -433,6 +431,8 @@ struct ArticulationsWorkspaceView: View {
                 .padding(20)
             }
         }
+        .background(palette.canvas)
+        .tint(palette.accent)
         .onChange(of: viewModel.selectedTrackID) { _, _ in
             if let pressedPitch { viewModel.stopNotePreview(pitch: pressedPitch) }
             pressedPitch = nil
