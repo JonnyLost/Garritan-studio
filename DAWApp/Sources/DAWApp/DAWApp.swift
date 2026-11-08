@@ -19,14 +19,16 @@ struct DAWApp: App {
     @StateObject private var appState = AppState()
 
     init() {
-        // 'swift run DAWApp' launches an unbundled executable. Ensure macOS
-        // treats it as a foreground app so its windows can receive keyboard focus.
+        // The development executable is named DAWApp for compatibility with
+        // 'swift run DAWApp', but the visible product is Garritan Studio.
+        ProcessInfo.processInfo.processName = "Garritan Studio"
+        // The SwiftPM executable isn't a bundled .app; make it foreground-capable.
         NSApplication.shared.setActivationPolicy(.regular)
     }
 
     var body: some Scene {
         // Main document window
-        WindowGroup {
+        WindowGroup("Garritan Studio") {
             StudioAppearanceHost {
                 MainWindowView(project: appState.currentProject)
                 .onAppear {
