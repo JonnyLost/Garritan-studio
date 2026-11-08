@@ -97,6 +97,19 @@ struct ArticulationsWorkspaceView: View {
         return (0...127).contains(pitch) ? pitch : nil
     }
 
+    private var canSendKeyswitch: Bool {
+        guard let activePatch, let suggestedPatch, viewModel.selectedTrack != nil else { return false }
+        return activePatch.patch == suggestedPatch.patch
+    }
+
+    private func selectArticulation(_ assignment: GPOKeyswitchCatalog.Assignment) {
+        guard canSendKeyswitch, let pitch = referencePitch(assignment.note) else { return }
+        selectedArticulationID = assignment.id
+        let note = UInt8(pitch)
+        viewModel.playNotePreview(pitch: note)
+        viewModel.stopNotePreview(pitch: note)
+    }
+
     private func referenceKeyswitch(_ pitch: Int) -> GPOKeyswitchCatalog.Assignment? {
         activePatch?.keyswitches.first { referencePitch($0.note) == pitch }
     }
@@ -106,12 +119,13 @@ struct ArticulationsWorkspaceView: View {
     private func keyboardKey(_ pitch: Int, black: Bool, width: CGFloat, height: CGFloat = 90) -> some View {
         let active = pressedPitch == UInt8(pitch)
         let reference = referenceKeyswitch(pitch)
+        let selected = canSendKeyswitch && reference?.id == selectedArticulationID
         return RoundedRectangle(cornerRadius: 3)
             .fill(active ? Color.accentColor : (black ? Color.black : Color.white))
-            .overlay(RoundedRectangle(cornerRadius: 3).stroke(reference == nil ? Color.gray : Color.orange, lineWidth: reference == nil ? 0.5 : 2))
+            .overlay(RoundedRectangle(cornerRadius: 3).stroke(selected ? Color.accentColor : (reference == nil ? Color.gray : Color.orange), lineWidth: selected ? 3 : (reference == nil ? 0.5 : 2)))
             .overlay(alignment: .top) {
                 if reference != nil {
-                    Circle().fill(Color.orange).frame(width: 5, height: 5).padding(.top, 3)
+                    Circle().fill(selected ? Color.accentColor : Color.orange).frame(width: 5, height: 5).padding(.top, 3)
                 }
             }
             .overlay(alignment: .bottom) {
@@ -131,6 +145,9 @@ struct ArticulationsWorkspaceView: View {
                     if let previous = pressedPitch { viewModel.stopNotePreview(pitch: previous) }
                     pressedPitch = note
                     viewModel.playNotePreview(pitch: note)
+                    if canSendKeyswitch, let assignment = referenceKeyswitch(pitch) {
+                        selectedArticulationID = assignment.id
+                    }
                 }
                 .onEnded { _ in
                     viewModel.stopNotePreview(pitch: UInt8(pitch))
@@ -183,7 +200,7 @@ struct ArticulationsWorkspaceView: View {
                 }
             }
             .frame(height: 92)
-            Text("Hold a key to audition the selected instrument. Keyswitch assignments are not transmitted yet.")
+            Text("Hold a key to audition the selected instrument. Matched keyswitch notes also select their articulation.")
                 .font(.caption2)
                 .foregroundColor(.secondary)
         }
@@ -202,7 +219,7 @@ struct ArticulationsWorkspaceView: View {
                 Spacer()
                 if activePatch != nil {
                     Circle().fill(Color.orange).frame(width: 6, height: 6)
-                    Text("Manual KS reference · octave unverified")
+                    Text("GPO5 keyswitches")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
@@ -256,7 +273,7 @@ struct ArticulationsWorkspaceView: View {
                     HStack(spacing: 6) {
                         ForEach(patch.keyswitches) { assignment in
                             Button {
-                                selectedArticulationID = assignment.id
+                                selectArticulation(assignment)
                             } label: {
                                 VStack(spacing: 3) {
                                     Text(assignment.articulation)
@@ -273,7 +290,8 @@ struct ArticulationsWorkspaceView: View {
                                 .cornerRadius(7)
                             }
                             .buttonStyle(.plain)
-                            .help("Reference keyswitch: \\(assignment.note). MIDI transmission not enabled.")
+                            .disabled(!canSendKeyswitch)
+                            .help(canSendKeyswitch ? "Send \\(assignment.note) keyswitch" : "Load this exact GPO5 KS program to enable switching.")
                         }
                     }
                 }
@@ -351,7 +369,7 @@ struct ArticulationsWorkspaceView: View {
                             Divider()
                             if let patch = activePatch {
                                 Text(patch.patch).font(.title3.weight(.semibold))
-                                Text("Reference assignments from the GPO5 owner's manual. These controls do not transmit MIDI yet.")
+                                Text("Reference assignments from the GPO5 manual. MIDI enabled only for the exact loaded KS program.")
                                     .font(.caption).foregroundColor(.secondary)
                                 if selectedPatchName == nil && suggestedPatch?.patch == patch.patch {
                                     Label("Matched to loaded Garritan program", systemImage: "checkmark.circle")
@@ -362,7 +380,7 @@ struct ArticulationsWorkspaceView: View {
                                 }
                                 ForEach(patch.keyswitches) { assignment in
                                     Button {
-                                        selectedArticulationID = assignment.id
+                                        selectArticulation(assignment)
                                     } label: {
                                         HStack(spacing: 16) {
                                             Image(systemName: selectedArticulationID == assignment.id ? "largecircle.fill.circle" : "circle")
@@ -378,6 +396,7 @@ struct ArticulationsWorkspaceView: View {
                                         .cornerRadius(7)
                                     }
                                     .buttonStyle(.plain)
+                                    .disabled(!canSendKeyswitch)
                                     .accessibilityLabel("\\(assignment.articulation), keyswitch \\(assignment.note)")
                                 }
                             } else {
@@ -409,6 +428,10 @@ struct ArticulationsWorkspaceView: View {
             selectedArticulationID = nil
         }
         .onChange(of: selectedPatchName) { _, _ in
+            selectedArticulationID = nil
+        }
+        .onChange(of: suggestedName) { _, _ in
+            selectedPatchName = nil
             selectedArticulationID = nil
         }
     }
