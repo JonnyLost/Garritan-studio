@@ -7,6 +7,7 @@ import Foundation
 // MARK: - Track Header View
 
 struct TrackHeaderView: View {
+    @Environment(\.studioPalette) private var palette
     let track: Track
     @ObservedObject var viewModel: ProjectViewModel
     var onCreateClip: (() -> Void)? = nil
@@ -32,12 +33,18 @@ struct TrackHeaderView: View {
                         .textFieldStyle(.plain)
                         .font(.system(size: 12, weight: .medium))
                     } else {
-                        Text(track.name)
-                            .font(.system(size: 12, weight: .medium))
-                            .lineLimit(1)
-                            .onTapGesture(count: 2) {
-                                startEditing()
+                        HStack(spacing: 5) {
+                            if track.type == .instrument {
+                                StudioInstrumentIcon(name: track.name, size: 17)
+                                    .frame(width: 19)
                             }
+                            Text(track.name)
+                                .font(.system(size: 12, weight: .medium))
+                                .lineLimit(1)
+                                .onTapGesture(count: 2) {
+                                    startEditing()
+                                }
+                        }
                     }
                     
                     // Instrument slot for MIDI/Instrument tracks
@@ -131,7 +138,7 @@ struct TrackHeaderView: View {
                 isPresented: $showInstrumentBrowser
             )
         }
-        .background(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
+        .background(isSelected ? palette.selectedBackground.opacity(0.7) : Color.clear)
         .contentShape(Rectangle())
         .onTapGesture {
             // Instant selection with piano roll follow (no animation delay)
