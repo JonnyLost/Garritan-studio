@@ -89,6 +89,21 @@ struct ArticulationsWorkspaceView: View {
                         .font(.caption).foregroundColor(.secondary)
                 }
                 Spacer()
+                if let track = viewModel.selectedTrack,
+                   let pluginID = track.instrumentSlot?.pluginID {
+                    Button {
+                        if let loaded = viewModel.pluginHost.loadedPlugins.values.first(where: {
+                            $0.identifier == pluginID
+                        }) {
+                            PluginWindowManager.shared.openPluginWindow(
+                                for: loaded, trackName: track.name)
+                        }
+                    } label: {
+                        Label("Open ARIA Player", systemImage: "slider.horizontal.3")
+                    }
+                    .help("Open the loaded instrument's native plugin window")
+                    .buttonStyle(.bordered)
+                }
                 Button("Reload Catalog") { catalog = GPOKeyswitchCatalog.load() }
                     .buttonStyle(.borderless)
             }
