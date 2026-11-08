@@ -94,6 +94,7 @@ private enum InstrumentIconIdentity: Equatable {
     case horn, trumpet, trombone, bassTrombone, tuba, brassEnsemble
     case violin, viola, cello, doubleBass, strings
     case timpani, snare, bassDrum, cymbals, triangle, gong, mallets, chimes, bells
+    case xylophone, vibraphone, marimba, glockenspiel, crotales, handbells
     case percussion, harp, piano, celesta, harpsichord, organ, glassArmonica
     case choir, synth, wind, world, orchestra, generic
 
@@ -127,6 +128,12 @@ private enum InstrumentIconIdentity: Equatable {
         case .cymbals: return "Cymbals"
         case .triangle: return "Triangle"
         case .gong: return "Gong"
+        case .xylophone: return "Xylophone"
+        case .vibraphone: return "Vibraphone"
+        case .marimba: return "Marimba"
+        case .glockenspiel: return "Glockenspiel"
+        case .crotales: return "Crotales"
+        case .handbells: return "Handbells"
         case .mallets: return "Mallet percussion"
         case .chimes: return "Tubular bells"
         case .bells: return "Bells"
@@ -190,8 +197,13 @@ private enum InstrumentIconIdentity: Equatable {
         if has(["triangle"]) { return .triangle }
         if has(["gong", "tam tam", "tam-tam"]) { return .gong }
         if has(["tubular bell", "chime", "mark tree"]) { return .chimes }
-        if has(["glockenspiel", "handbell", "crotale", "bell"]) { return .bells }
-        if has(["xylophone", "vibraphone", "marimba"]) { return .mallets }
+        if has(["glockenspiel"]) { return .glockenspiel }
+        if has(["crotale"]) { return .crotales }
+        if has(["handbell"]) { return .handbells }
+        if has(["xylophone"]) { return .xylophone }
+        if has(["vibraphone"]) { return .vibraphone }
+        if has(["marimba"]) { return .marimba }
+        if has(["bell"]) { return .bells }
         if has(["percussion", "tambourine", "drum", "shaker", "castanet", "clave"]) {
             return .percussion
         }
@@ -412,12 +424,38 @@ private struct InstrumentIconDrawing {
             return Self(primary: [O(20, 15, 60, 60), L([(18, 8), (82, 8)]),
                                   L([(17, 8), (17, 91)]), L([(83, 8), (83, 91)])],
                         details: [O(37, 32, 26, 26)], engraving: [])
-        case .mallets, .bells:
+        case .mallets, .xylophone, .vibraphone, .marimba, .bells, .glockenspiel:
             let bars = (0..<6).map { i in
                 B(CGFloat(12+i*13), CGFloat(22+i*3), 10, CGFloat(50-i*4))
             }
-            return Self(primary: [L([(10, 78), (88, 78)]), L([(14, 20), (85, 20)])] + bars,
-                        details: [L([(22, 14), (76, 85)])], engraving: [])
+            var base = [L([(10, 78), (88, 78)]), L([(14, 20), (85, 20)])]
+            var details: [Path] = [L([(22, 14), (76, 85)])]
+            if kind == .marimba {
+                base.append(L([(21, 84), (76, 84)]))
+                details.append(L([(20, 75), (20, 89)]))
+                details.append(L([(31, 75), (31, 93)]))
+                details.append(L([(42, 75), (42, 92)]))
+                details.append(L([(53, 75), (53, 88)]))
+            } else if kind == .vibraphone {
+                base.append(L([(10, 90), (91, 90)]))
+                details.append(L([(49, 78), (49, 90)]))
+                details.append(L([(34, 90), (63, 90)]))
+            } else if kind == .glockenspiel || kind == .bells {
+                base.append(L([(12, 42), (80, 42)]))
+            }
+            return Self(primary: base + bars, details: details, engraving: [])
+        case .crotales:
+            let disks = (0..<5).map { i in
+                O(CGFloat(10 + i*16), CGFloat(20 + i*8), 17, 17)
+            }
+            return Self(primary: disks + [L([(12, 75), (91, 75)])],
+                        details: [L([(27, 74), (26, 89)]), L([(69, 74), (70, 89)])],
+                        engraving: [])
+        case .handbells:
+            return Self(primary: [
+                L([(31, 67), (35, 29), (49, 16), (63, 29), (68, 67), (31, 67)]),
+                O(29, 61, 42, 13), L([(49, 16), (49, 8)])
+            ], details: [O(45, 72, 10, 10)], engraving: [])
         case .chimes:
             let pipes = (0..<6).map { i in
                 L([(CGFloat(19+i*12), 28), (CGFloat(19+i*12), CGFloat(88-i*5))])
