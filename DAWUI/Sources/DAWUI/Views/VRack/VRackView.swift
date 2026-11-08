@@ -627,26 +627,16 @@ public struct VRackView: View {
 
     var expandedInstrumentBrowser: some View {
         VStack(spacing: 0) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Instrument Browser")
-                        .font(.system(size: 23, weight: .semibold,
-                                      design: palette.appearance == .gpo5Modern ? .default : .serif))
-                    Text("Explore Garritan libraries and choose a patch for the selected track")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
+            StudioWorkspaceHeader(
+                "Instrument Browser",
+                subtitle: "Explore Garritan libraries and choose a patch",
+                symbol: "music.note.list"
+            ) {
                 Text("\(filteredCatalog.count) patches")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.secondaryText)
                 Button("Done") { closeInstrumentWorkspace?() }
                     .keyboardShortcut(.cancelAction)
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 14)
-            .background(palette.panel)
-            Divider()
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
