@@ -135,6 +135,60 @@ public struct StudioPalette {
     }
 }
 
+
+// MARK: - Instrument Artwork Collections
+
+/// These four renderers use the same instrument-specific vector geometry,
+/// with treatment selected by appearance or a user override.
+public enum StudioIconCollection: String, CaseIterable, Identifiable {
+    case matchAppearance
+    case heritageEtching
+    case elegantMonoline
+    case gpo5Signature
+    case concertMedallion
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .matchAppearance: return "Match Appearance"
+        case .heritageEtching: return "Heritage Etching"
+        case .elegantMonoline: return "Elegant Monoline"
+        case .gpo5Signature: return "GPO5 Signature"
+        case .concertMedallion: return "Concert Medallions"
+        }
+    }
+
+    public var detail: String {
+        switch self {
+        case .matchAppearance: return "Use the icons designed for the selected appearance"
+        case .heritageEtching: return "Fine engraved instrument drawings"
+        case .elegantMonoline: return "Clean, minimal orchestral outlines"
+        case .gpo5Signature: return "Bolder, contemporary silhouettes"
+        case .concertMedallion: return "Gold-toned instruments in circular cameos"
+        }
+    }
+
+    public static func recommended(for appearance: StudioAppearance) -> StudioIconCollection {
+        switch appearance {
+        case .system, .heritageLight: return .elegantMonoline
+        case .gpo5Modern: return .gpo5Signature
+        case .heritageDark: return .concertMedallion
+        }
+    }
+}
+
+private struct StudioIconCollectionKey: EnvironmentKey {
+    static let defaultValue = StudioIconCollection.elegantMonoline
+}
+
+public extension EnvironmentValues {
+    var studioIconCollection: StudioIconCollection {
+        get { self[StudioIconCollectionKey.self] }
+        set { self[StudioIconCollectionKey.self] = newValue }
+    }
+}
+
 private struct StudioPaletteKey: EnvironmentKey {
     static let defaultValue = StudioPalette(appearance: .heritageLight)
 }
@@ -150,6 +204,7 @@ public extension EnvironmentValues {
 /// workspace. System mode follows the Mac's current light/dark appearance.
 public struct StudioAppearanceHost<Content: View>: View {
     @AppStorage("garritanStudio.appearance") private var selection = StudioAppearance.system.rawValue
+    @AppStorage("garritanStudio.iconCollection") private var iconSelection = StudioIconCollection.matchAppearance.rawValue
     @Environment(\.colorScheme) private var systemScheme
 
     private let content: Content
@@ -163,8 +218,13 @@ public struct StudioAppearanceHost<Content: View>: View {
         let resolved: StudioAppearance = choice == .system
             ? (systemScheme == .dark ? .heritageDark : .heritageLight)
             : choice
+        let requestedIcons = StudioIconCollection(rawValue: iconSelection) ?? .matchAppearance
+        let resolvedIcons = requestedIcons == .matchAppearance
+            ? StudioIconCollection.recommended(for: resolved)
+            : requestedIcons
         content
             .environment(\.studioPalette, StudioPalette(appearance: resolved))
+            .environment(\.studioIconCollection, resolvedIcons)
             .preferredColorScheme(choice.preferredColorScheme)
     }
 }
