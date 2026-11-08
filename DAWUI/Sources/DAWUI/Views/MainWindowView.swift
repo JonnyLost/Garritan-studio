@@ -21,6 +21,7 @@ public struct MainWindowView: View {
     @State private var showArticulationsWorkspace = false
     @State private var showInstrumentWorkspace = false
     @State private var compactLowerWorkspace = false
+    @State private var showDockedKeyboard = false
     @State private var lowerWorkspaceMaximized = false
     @State private var lowerWorkspaceRestoreHeight: CGFloat = 500
     @State private var showCreateClipDialog: Bool = false
@@ -111,6 +112,25 @@ public struct MainWindowView: View {
                         }
                     }
                     .frame(maxHeight: .infinity)
+
+                    if showDockedKeyboard {
+                        Divider()
+                        HStack(spacing: 0) {
+                            ArticulationsWorkspaceView(viewModel: viewModel).dockedKeyboard
+                                .frame(maxWidth: .infinity)
+                            Button {
+                                showDockedKeyboard = false
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.secondary)
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Hide On-Screen Keyboard")
+                            .padding(.trailing, 12)
+                        }
+                        .frame(height: 94)
+                        .background(Color(nsColor: .controlBackgroundColor))
+                    }
 
                     if showInstrumentWorkspace || showChannelWorkspace || showStageWorkspace || showArticulationsWorkspace || viewModel.showMixer || viewModel.showPianoRoll {
                         ResizeHandle(height: $pianoRollHeight)
@@ -242,6 +262,9 @@ public struct MainWindowView: View {
         .onDisappear {
             // Stop keyboard monitor when view disappears (e.g., project reload)
             keyMonitor.stop()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("toggleStudioKeyboard"))) { _ in
+            showDockedKeyboard.toggle()
         }
         .onReceive(NotificationCenter.default.publisher(for: .performUndo)) { _ in
             viewModel.undo()
