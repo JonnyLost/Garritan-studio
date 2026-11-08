@@ -58,6 +58,9 @@ public final class AudioEngine: ObservableObject {
     // behavior independently testable before introducing audio routing.
     private let concertHallReverb = AVAudioUnitReverb()
     private let concertHallSendMixer = AVAudioMixerNode()
+    private let concertHallReturnMixer = AVAudioMixerNode()
+    /// Shared hall return level, independent of individual instrument sends.
+    @Published public private(set) var concertHallOverallReverb: Float = 1.0
 
     /// Post-fader stereo peak levels (linear 0...1), refreshed approximately 20 times/sec.
     @Published public private(set) var trackPeakLevels: [TrackID: [Float]] = [:]
@@ -104,8 +107,7 @@ public final class AudioEngine: ObservableObject {
         engine.attach(concertHallSendMixer)
 
         // Dedicated Concert Hall return; existing dry routes stay untouched.
-        let hallReturnMixer = AVAudioMixerNode()
-        engine.attach(hallReturnMixer)
+        engine.attach(concertHallReturnMixer)
 
         let hallFormat = AVAudioFormat(
             standardFormatWithSampleRate: engine.outputNode.outputFormat(forBus: 0).sampleRate,
@@ -113,8 +115,8 @@ public final class AudioEngine: ObservableObject {
         )!
 
         engine.connect(concertHallSendMixer, to: concertHallReverb, format: hallFormat)
-        engine.connect(concertHallReverb, to: hallReturnMixer, format: hallFormat)
-        engine.connect(hallReturnMixer, to: masterMixer, format: hallFormat)
+        engine.connect(concertHallReverb, to: concertHallReturnMixer, format: hallFormat)
+        engine.connect(concertHallReturnMixer, to: masterMixer, format: hallFormat)
 
         print("[ConcertHall] Dedicated reverb return connected")
         
@@ -252,7 +254,7 @@ public final class AudioEngine: ObservableObject {
         let depth = max(0, min(5, track.stageReverbZone ?? 2))
         trackNode.setStageAcoustics(
             directLevel: Self.stageDirectLevels[depth],
-            hallSendLevel: Self.concertHallSendLevels[depth]
+            hallSendLevel: Self.concertHallSendLevels[depth] * max(0, track.stageWetTrim ?? 1)
         )
 
         trackNodes[track.id] = trackNode
@@ -325,17 +327,23 @@ public final class AudioEngine: ObservableObject {
         trackNode.setPan(track.pan)
         trackNode.setMuted(track.isMuted)
         // Keep the acoustic send synchronized with all track edits, including undo/redo.
-        setConcertHallDepth(track.stageReverbZone ?? 2, for: track.id)
+        setConcertHallDepth(track.stageReverbZone ?? 2, wetTrim: track.stageWetTrim ?? 1, for: track.id)
     }
     
     /// Set Concert Hall ambience according to orchestral stage depth.
     /// Depth 0 = conductor; depth 5 = back row.
-    public func setConcertHallDepth(_ depth: Int, for trackID: TrackID) {
+    public func setConcertHallDepth(_ depth: Int, wetTrim: Float = 1, for trackID: TrackID) {
         let safeDepth = max(0, min(5, depth))
+        let trim = wetTrim.isFinite ? min(2, max(0, wetTrim)) : 1
         trackNodes[trackID]?.setStageAcoustics(
             directLevel: Self.stageDirectLevels[safeDepth],
-            hallSendLevel: Self.concertHallSendLevels[safeDepth]
+            hallSendLevel: Self.concertHallSendLevels[safeDepth] * trim
         )
+    }
+
+    public func setConcertHallOverallReverb(_ level: Float) {
+        concertHallOverallReverb = level.isFinite ? min(2, max(0, level)) : 1
+        concertHallReturnMixer.outputVolume = concertHallOverallReverb
     }
 
     /// Get track node for external access
