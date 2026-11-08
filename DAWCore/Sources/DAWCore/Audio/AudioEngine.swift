@@ -50,6 +50,7 @@ public final class AudioEngine: ObservableObject {
     // Keeping the established dry signal path untouched makes startup
     // behavior independently testable before introducing audio routing.
     private let concertHallReverb = AVAudioUnitReverb()
+    private let concertHallSendMixer = AVAudioMixerNode()
 
     /// Post-fader stereo peak levels (linear 0...1), refreshed approximately 20 times/sec.
     @Published public private(set) var trackPeakLevels: [TrackID: [Float]] = [:]
@@ -93,6 +94,7 @@ public final class AudioEngine: ObservableObject {
         concertHallReverb.loadFactoryPreset(.mediumHall)
         concertHallReverb.wetDryMix = 100
         engine.attach(concertHallReverb)
+        engine.attach(concertHallSendMixer)
 
         // Dedicated Concert Hall return; existing dry routes stay untouched.
         let hallReturnMixer = AVAudioMixerNode()
@@ -103,6 +105,7 @@ public final class AudioEngine: ObservableObject {
             channels: 2
         )!
 
+        engine.connect(concertHallSendMixer, to: concertHallReverb, format: hallFormat)
         engine.connect(concertHallReverb, to: hallReturnMixer, format: hallFormat)
         engine.connect(hallReturnMixer, to: masterMixer, format: hallFormat)
 
