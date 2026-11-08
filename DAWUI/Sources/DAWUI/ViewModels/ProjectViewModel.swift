@@ -328,15 +328,19 @@ public final class ProjectViewModel: ObservableObject {
         
         let action = AddTrackAction(track: track)
         undoManager.registerAction(action, project: &project)
+        print("[Track Creation] Undo action registered; creating audio node for \(track.name)")
         
         // Create audio node
         do {
             try audioEngine.createTrackNode(for: track)
+            print("[Track Creation] Audio node created for \(track.name)")
         } catch {
             print("Failed to create track node: \(error)")
         }
         
+        print("[Track Creation] Updating solo state")
         audioEngine.updateSoloState(tracks: project.tracks)
+        print("[Track Creation] Selecting track")
         selectedTrackID = track.id
     }
     
