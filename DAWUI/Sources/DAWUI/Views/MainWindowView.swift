@@ -18,6 +18,8 @@ public struct MainWindowView: View {
     @State private var pianoRollHeight: CGFloat = 500
     @State private var showStageWorkspace = false
     @State private var showInstrumentWorkspace = false
+    @State private var lowerWorkspaceMaximized = false
+    @State private var lowerWorkspaceRestoreHeight: CGFloat = 500
     @State private var showCreateClipDialog: Bool = false
     @State private var createClipTrackID: TrackID?
     @State private var horizontalScrollOffset: CGFloat = 0
@@ -83,39 +85,13 @@ public struct MainWindowView: View {
             Divider()
             
             HStack(spacing: 0) {
-                // V-Rack sidebar (left side)
+                // Compact navigation replaces the old full-width composer drawer.
                 if showVRack {
-                    VRackView(viewModel: viewModel, openStageWorkspace: {
-                        showStageWorkspace = true
-                    }, openInstrumentWorkspace: {
-                        showInstrumentWorkspace = true
-                    }, closeInstrumentWorkspace: {
-                        showInstrumentWorkspace = false
-                    })
-                        .frame(width: composerDrawerWidth)
-                    Rectangle()
-                        .fill(Color(nsColor: .separatorColor))
-                        .frame(width: 5)
-                        .contentShape(Rectangle())
-                        .help("Drag to resize the composer drawer")
-                        .gesture(
-                            DragGesture(minimumDistance: 2)
-                                .onChanged { value in
-                                    let startingWidth = drawerDragStartWidth ?? composerDrawerWidth
-                                    if drawerDragStartWidth == nil { drawerDragStartWidth = startingWidth }
-                                    composerDrawerWidth = min(600, max(270, startingWidth + value.translation.width))
-                                }
-                                .onEnded { _ in drawerDragStartWidth = nil }
-                        )
+                    workspaceNavigation
+                    Divider()
                 }
-                
-                if showInstrumentWorkspace {
-                    VRackView(viewModel: viewModel, closeInstrumentWorkspace: {
-                        showInstrumentWorkspace = false
-                    }, expandedOnly: true)
-                } else {
-                    arrangeView
-                }
+
+                arrangeView
 
                 if viewModel.showInspector {
                     Divider()
@@ -130,12 +106,20 @@ public struct MainWindowView: View {
                 }
             }
             
-                if showStageWorkspace || viewModel.showMixer || viewModel.showPianoRoll {
-                // Draggable resize handle
-                ResizeHandle(height: (showStageWorkspace || viewModel.showPianoRoll) ? $pianoRollHeight : $mixerHeight)
-                
+                if showInstrumentWorkspace || showStageWorkspace || viewModel.showMixer || viewModel.showPianoRoll {
+                ResizeHandle(height: $pianoRollHeight)
+                    .onTapGesture(count: 2) {
+                        if lowerWorkspaceMaximized {
+                            pianoRollHeight = lowerWorkspaceRestoreHeight
+                        } else {
+                            lowerWorkspaceRestoreHeight = pianoRollHeight
+                            pianoRollHeight = max(500, (NSApp.keyWindow?.contentView?.bounds.height ?? 800) - 190)
+                        }
+                        lowerWorkspaceMaximized.toggle()
+                    }
+
                 bottomPanel
-                    .frame(height: (showStageWorkspace || viewModel.showPianoRoll) ? pianoRollHeight : mixerHeight)
+                    .frame(height: pianoRollHeight)
                     .simultaneousGesture(
                         TapGesture().onEnded { _ in
                             NSApp.keyWindow?.makeFirstResponder(nil)
@@ -432,8 +416,59 @@ public struct MainWindowView: View {
     // MARK: - Bottom Panel
     
     @ViewBuilder
+    private var workspaceNavigation: some View {
+        VStack(spacing: 8) {
+            workspaceButton("Instruments", symbol: "music.note.list", active: showInstrumentWorkspace) {
+                showInstrumentWorkspace = true
+                showStageWorkspace = false
+            }
+            workspaceButton("Channel", symbol: "slider.horizontal.3", active: viewModel.showMixer && !showInstrumentWorkspace) {
+                showInstrumentWorkspace = false
+                showStageWorkspace = false
+                viewModel.showMixer = true
+                viewModel.showPianoRoll = false
+            }
+            workspaceButton("Stage", symbol: "circle.hexagongrid", active: showStageWorkspace) {
+                showInstrumentWorkspace = false
+                showStageWorkspace = true
+            }
+            workspaceButton("Articulations", symbol: "music.note", active: false) {
+                showInstrumentWorkspace = false
+                showStageWorkspace = false
+                viewModel.showPianoRoll = true
+            }
+            workspaceButton("Piano Roll", symbol: "pianokeys", active: viewModel.showPianoRoll && !showStageWorkspace && !showInstrumentWorkspace) {
+                showInstrumentWorkspace = false
+                showStageWorkspace = false
+                viewModel.showPianoRoll = true
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 10)
+        .frame(width: 78)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func workspaceButton(_ title: String, symbol: String, active: Bool,
+                                 action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 5) {
+                Image(systemName: symbol).font(.system(size: 17))
+                Text(title).font(.system(size: 9))
+            }
+            .foregroundColor(active ? .white : .secondary)
+            .frame(width: 68, height: 56)
+            .background(active ? Color.accentColor : Color.clear)
+            .cornerRadius(9)
+        }
+        .buttonStyle(.plain)
+        .help(title)
+    }
+
     private var bottomPanel: some View {
-        if showStageWorkspace {
+        if showInstrumentWorkspace {
+            VRackView(viewModel: viewModel, expandedOnly: true)
+        } else if showStageWorkspace {
             VStack(spacing: 0) {
                 HStack {
                     Text("Orchestral Stage").font(.headline)
@@ -547,7 +582,7 @@ public struct MainWindowView: View {
             Toggle(isOn: $showVRack) {
                 Image(systemName: "pianokeys")
             }
-            .help("Toggle Instruments Panel")
+            .help("Toggle Workspace Navigation")
 
             Toggle(isOn: Binding(
                 get: { viewModel.showPianoRoll && !showStageWorkspace },
