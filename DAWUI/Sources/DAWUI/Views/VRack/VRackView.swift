@@ -21,6 +21,85 @@ private enum ComposerDrawerMode: String, CaseIterable, Identifiable {
     }
 }
 
+
+@MainActor
+private final class BrowserAudition: ObservableObject {
+    @Published var isLoading = false
+    @Published var isPlaying = false
+    @Published var errorMessage: String?
+    private var engine: AVAudioEngine?
+    private var unit: AVAudioUnitMIDIInstrument?
+    private var task: Task<Void, Never>?
+    private var token = UUID()
+
+    func stop() {
+        token = UUID()
+        task?.cancel()
+        task = nil
+        for note: UInt8 in [60, 64, 67, 72] { unit?.stopNote(note, onChannel: 0) }
+        engine?.stop()
+        engine = nil
+        unit = nil
+        isLoading = false
+        isPlaying = false
+    }
+
+    func play(library: String, path: String, viewModel: ProjectViewModel) {
+        stop()
+        errorMessage = nil
+        isLoading = true
+        let request = token
+        task = Task { @MainActor in
+            do {
+                if !viewModel.pluginHost.availableInstruments.contains(where: {
+                    $0.identifier.name.localizedCaseInsensitiveContains("aria") &&
+                    $0.identifier.manufacturer.localizedCaseInsensitiveContains("garr")
+                }) {
+                    await viewModel.pluginHost.scanForPlugins()
+                }
+                guard request == token else { return }
+                guard let description = viewModel.pluginHost.availableInstruments.first(where: {
+                    $0.identifier.name.localizedCaseInsensitiveContains("aria") &&
+                    $0.identifier.manufacturer.localizedCaseInsensitiveContains("garr")
+                }) else {
+                    throw NSError(domain: "BrowserAudition", code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: "Garritan ARIA Player was not found."])
+                }
+                let format = AVAudioFormat(standardFormatWithSampleRate: viewModel.audioEngine.sampleRate, channels: 2)!
+                let loaded = try await viewModel.pluginHost.loadPlugin(identifier: description.identifier, format: format)
+                guard request == token else { return }
+                guard let instrument = loaded.audioUnit as? AVAudioUnitMIDIInstrument else {
+                    throw NSError(domain: "BrowserAudition", code: 2,
+                        userInfo: [NSLocalizedDescriptionKey: "ARIA MIDI audition is unavailable."])
+                }
+                let previewEngine = AVAudioEngine()
+                previewEngine.attach(instrument)
+                previewEngine.connect(instrument, to: previewEngine.mainMixerNode, format: format)
+                try TrackGarritanLoader.apply(TrackGarritanProgram(library: library, programName: path), to: instrument)
+                try previewEngine.start()
+                guard request == token else { previewEngine.stop(); return }
+                engine = previewEngine
+                unit = instrument
+                isLoading = false
+                isPlaying = true
+                for note: UInt8 in [60, 64, 67, 72] {
+                    guard request == token && !Task.isCancelled else { break }
+                    instrument.startNote(note, withVelocity: 88, onChannel: 0)
+                    try? await Task.sleep(for: .milliseconds(450))
+                    instrument.stopNote(note, onChannel: 0)
+                    try? await Task.sleep(for: .milliseconds(90))
+                }
+                if request == token { stop() }
+            } catch {
+                if request == token {
+                    stop()
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+}
+
 // MARK: - V-Rack Sidebar View
 
 /// Sidebar panel for managing V-Rack instruments
@@ -40,6 +119,7 @@ public struct VRackView: View {
     @State private var catalog: [DrawerInstrument] = []
     @State private var isLoadingInstrument = false
     @State private var pickerError: String?
+    @StateObject private var audition = BrowserAudition()
     @State private var previewInstrumentID: String?
     @State private var instrumentTypeFilter = "All"
 
@@ -561,6 +641,7 @@ public struct VRackView: View {
                             Button {
                                 familyFilter = family
                                 instrumentTypeFilter = "All"
+                                audition.stop()
                                 previewInstrumentID = nil
                             } label: {
                                 HStack {
@@ -584,6 +665,7 @@ public struct VRackView: View {
                         ForEach(["All"] + availableInstrumentTypes, id: \.self) { type in
                             Button {
                                 instrumentTypeFilter = type
+                                audition.stop()
                                 previewInstrumentID = nil
                             } label: {
                                 HStack {
@@ -608,6 +690,7 @@ public struct VRackView: View {
                     LazyVStack(alignment: .leading, spacing: 5) {
                         ForEach(expandedFilteredCatalog) { instrument in
                             Button {
+                                audition.stop()
                                 previewInstrumentID = instrument.id
                             } label: {
                                 HStack(spacing: 12) {
@@ -662,8 +745,32 @@ public struct VRackView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
+                        Divider()
+                        Text("AUDITION").font(.caption.bold()).foregroundStyle(.secondary)
+                        HStack {
+                            Button {
+                                audition.play(library: instrument.library, path: instrument.path, viewModel: viewModel)
+                            } label: {
+                                Label("Play", systemImage: "play.fill")
+                            }
+                            .disabled(audition.isLoading || audition.isPlaying || isLoadingInstrument)
+                            Button {
+                                audition.stop()
+                            } label: {
+                                Label("Stop", systemImage: "stop.fill")
+                            }
+                            .disabled(!audition.isLoading && !audition.isPlaying)
+                        }
+                        .controlSize(.small)
+                        if audition.isLoading { ProgressView("Preparing preview…").controlSize(.small) }
+                        if let error = audition.errorMessage {
+                            Text(error).font(.caption).foregroundStyle(.red)
+                        }
+                        Text("Preview is separate from project tracks.")
+                            .font(.caption2).foregroundStyle(.secondary)
                         Spacer()
                         Button {
+                            audition.stop()
                             chooseInstrument(instrument)
                         } label: {
                             Label("Load on Selected Track", systemImage: "arrow.down.to.line")
@@ -672,6 +779,7 @@ public struct VRackView: View {
                         .buttonStyle(.borderedProminent)
                         .disabled(isLoadingInstrument || viewModel.selectedTrackID == nil)
                         Button {
+                            audition.stop()
                             addInstrumentTrack(instrument)
                         } label: {
                             Label("Add as New Track", systemImage: "plus")
@@ -701,6 +809,7 @@ public struct VRackView: View {
                 previewInstrumentID = filteredCatalog.first?.id
             }
         }
+        .onDisappear { audition.stop() }
         .onChange(of: familyFilter) { _, _ in
             if !filteredCatalog.contains(where: { $0.id == previewInstrumentID }) {
                 previewInstrumentID = filteredCatalog.first?.id
