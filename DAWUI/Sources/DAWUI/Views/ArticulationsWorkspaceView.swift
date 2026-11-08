@@ -170,43 +170,33 @@ struct ArticulationsWorkspaceView: View {
 
 
     // Compact mode shares the same catalog and patch-matching logic as the full editor.
+    // Full concert piano range (A0–C8, MIDI 21–108) scaled to the dock width.
     var dockedKeyboard: some View {
         VStack(spacing: 3) {
             HStack(spacing: 5) {
-                Text("Keyboard").font(.caption2.weight(.semibold))
+                Text("88-Key Keyboard").font(.caption2.weight(.semibold))
                 Spacer()
-                Button { keyboardOctave = max(0, keyboardOctave - 1) } label: {
-                    Image(systemName: "chevron.left")
-                }
-                .disabled(keyboardOctave == 0)
-                Text("C\(keyboardOctave)–B\(keyboardOctave + 2)")
+                Text("A0–C8")
                     .font(.caption2.monospacedDigit())
-                Button { keyboardOctave = min(7, keyboardOctave + 1) } label: {
-                    Image(systemName: "chevron.right")
-                }
-                .disabled(keyboardOctave == 7)
+                    .foregroundColor(.secondary)
             }
-            .buttonStyle(.borderless)
             GeometryReader { geometry in
-                let keyWidth = geometry.size.width / 21
-                let start = (keyboardOctave + 1) * 12
+                let whiteKeyWidth = geometry.size.width / 52
                 ZStack(alignment: .topLeading) {
                     HStack(spacing: 0) {
-                        ForEach(0..<36, id: \.self) { offset in
-                            let pitch = start + offset
-                            if pitch <= 127 && ![1, 3, 6, 8, 10].contains(pitch % 12) {
-                                keyboardKey(pitch, black: false, width: keyWidth, height: 62)
+                        ForEach(21...108, id: \.self) { pitch in
+                            if ![1, 3, 6, 8, 10].contains(pitch % 12) {
+                                keyboardKey(pitch, black: false, width: whiteKeyWidth, height: 62)
                             }
                         }
                     }
-                    ForEach(0..<36, id: \.self) { offset in
-                        let pitch = start + offset
-                        if pitch <= 127 && [1, 3, 6, 8, 10].contains(pitch % 12) {
-                            let precedingWhiteKeys = (0..<offset).filter {
-                                ![1, 3, 6, 8, 10].contains((start + $0) % 12)
+                    ForEach(21...108, id: \.self) { pitch in
+                        if [1, 3, 6, 8, 10].contains(pitch % 12) {
+                            let precedingWhiteKeys = (21..<pitch).filter {
+                                ![1, 3, 6, 8, 10].contains($0 % 12)
                             }.count
-                            keyboardKey(pitch, black: true, width: keyWidth * 0.62, height: 45)
-                                .offset(x: CGFloat(precedingWhiteKeys) * keyWidth - keyWidth * 0.31)
+                            keyboardKey(pitch, black: true, width: whiteKeyWidth * 0.65, height: 62)
+                                .offset(x: CGFloat(precedingWhiteKeys) * whiteKeyWidth - whiteKeyWidth * 0.325)
                                 .zIndex(1)
                         }
                     }
