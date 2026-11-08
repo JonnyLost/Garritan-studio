@@ -1,0 +1,2142 @@
+{
+  "source": "GPO5_Searchable_Manual.pdf (HTML documentation text edition)",
+  "note": "Note labels retain the manual octave notation; MIDI note numbers must be calibrated against ARIA before playback. Extracted labels require review, especially long descriptions.",
+  "patches": [
+    {
+      "patch": "Flute Solo KS",
+      "keyswitches": [
+        {
+          "note": "C3",
+          "articulation": "Vibrato"
+        },
+        {
+          "note": "D3",
+          "articulation": "Non-vibrato"
+        },
+        {
+          "note": "E3",
+          "articulation": "Flutter"
+        }
+      ],
+      "manual_line": 2937
+    },
+    {
+      "patch": "Piccolo Solo KS",
+      "keyswitches": [
+        {
+          "note": "C4",
+          "articulation": "Vibrato"
+        },
+        {
+          "note": "D4",
+          "articulation": "Non-vibrato"
+        },
+        {
+          "note": "E4",
+          "articulation": "Flutter"
+        }
+      ],
+      "manual_line": 2993
+    },
+    {
+      "patch": "French Horn 1 Plr1 KS",
+      "keyswitches": [
+        {
+          "note": "C1",
+          "articulation": "Open"
+        },
+        {
+          "note": "D1",
+          "articulation": "Mutes"
+        }
+      ],
+      "manual_line": 3528
+    },
+    {
+      "patch": "French Horn 1 Plr2 KS",
+      "keyswitches": [
+        {
+          "note": "C1",
+          "articulation": "Open"
+        },
+        {
+          "note": "D1",
+          "articulation": "Mutes"
+        }
+      ],
+      "manual_line": 3559
+    },
+    {
+      "patch": "French Horn 1 Plr3 KS",
+      "keyswitches": [
+        {
+          "note": "C1",
+          "articulation": "Open"
+        },
+        {
+          "note": "D1",
+          "articulation": "Mutes"
+        }
+      ],
+      "manual_line": 3586
+    },
+    {
+      "patch": "French Horn 1 Solo KS",
+      "keyswitches": [
+        {
+          "note": "C1",
+          "articulation": "Open"
+        },
+        {
+          "note": "D1",
+          "articulation": "Mutes"
+        }
+      ],
+      "manual_line": 3630
+    },
+    {
+      "patch": "SAM French Horn Plr1 KS",
+      "keyswitches": [
+        {
+          "note": "C1",
+          "articulation": "Open"
+        },
+        {
+          "note": "D1",
+          "articulation": "Mutes"
+        }
+      ],
+      "manual_line": 3800
+    },
+    {
+      "patch": "SAM French Horn Plr2 KS",
+      "keyswitches": [
+        {
+          "note": "C1",
+          "articulation": "Open"
+        },
+        {
+          "note": "D1",
+          "articulation": "Mutes"
+        }
+      ],
+      "manual_line": 3817
+    },
+    {
+      "patch": "SAM French Horn Plr3 KS",
+      "keyswitches": [
+        {
+          "note": "C1",
+          "articulation": "Open"
+        },
+        {
+          "note": "D1",
+          "articulation": "Mutes"
+        }
+      ],
+      "manual_line": 3831
+    },
+    {
+      "patch": "SAM French Horn Section KS",
+      "keyswitches": [
+        {
+          "note": "C0",
+          "articulation": "Sustains"
+        },
+        {
+          "note": "D0",
+          "articulation": "Marcato"
+        },
+        {
+          "note": "E0",
+          "articulation": "Staccato"
+        }
+      ],
+      "manual_line": 3845
+    },
+    {
+      "patch": "SAM French Horn Solo KS",
+      "keyswitches": [
+        {
+          "note": "C0",
+          "articulation": "Sustains"
+        },
+        {
+          "note": "D0",
+          "articulation": "Marcato"
+        },
+        {
+          "note": "E0",
+          "articulation": "Staccato"
+        }
+      ],
+      "manual_line": 3902
+    },
+    {
+      "patch": "Piccolo Trumpet KS",
+      "keyswitches": [
+        {
+          "note": "C2",
+          "articulation": "Vibrato"
+        },
+        {
+          "note": "D2",
+          "articulation": "Non-Vibrato"
+        }
+      ],
+      "manual_line": 3959
+    },
+    {
+      "patch": "SAM Piccolo Trumpet Solo KS",
+      "keyswitches": [
+        {
+          "note": "C2",
+          "articulation": "Sustains"
+        },
+        {
+          "note": "D2",
+          "articulation": "Marcato"
+        },
+        {
+          "note": "E2",
+          "articulation": "Staccato"
+        }
+      ],
+      "manual_line": 4002
+    },
+    {
+      "patch": "SAM Trumpet Plr1 KS",
+      "keyswitches": [
+        {
+          "note": "C3",
+          "articulation": "Open"
+        },
+        {
+          "note": "D3",
+          "articulation": "Mutes"
+        }
+      ],
+      "manual_line": 4058
+    },
+    {
+      "patch": "SAM Trumpet Plr2 KS",
+      "keyswitches": [
+        {
+          "note": "C3",
+          "articulation": "Open"
+        },
+        {
+          "note": "D3",
+          "articulation": "Mutes"
+        }
+      ],
+      "manual_line": 4072
+    },
+    {
+      "patch": "SAM Trumpet Plr3 KS",
+      "keyswitches": [
+        {
+          "note": "C3",
+          "articulation": "Open"
+        },
+        {
+          "note": "D3",
+          "articulation": "Mutes"
+        }
+      ],
+      "manual_line": 4086
+    },
+    {
+      "patch": "SAM Trumpet Section KS",
+      "keyswitches": [
+        {
+          "note": "C2",
+          "articulation": "Sustains"
+        },
+        {
+          "note": "D2",
+          "articulation": "Marcato"
+        },
+        {
+          "note": "E2",
+          "articulation": "Staccato"
+        }
+      ],
+      "manual_line": 4100
+    },
+    {
+      "patch": "SAM Trumpet Solo KS",
+      "keyswitches": [
+        {
+          "note": "C2",
+          "articulation": "Sustains"
+        },
+        {
+          "note": "D2",
+          "articulation": "Marcato"
+        },
+        {
+          "note": "E2",
+          "articulation": "Staccato"
+        }
+      ],
+      "manual_line": 4155
+    },
+    {
+      "patch": "Trumpet 1 Plr1 KS",
+      "keyswitches": [
+        {
+          "note": "C3",
+          "articulation": "Open"
+        },
+        {
+          "note": "D3",
+          "articulation": "Mutes"
+        }
+      ],
+      "manual_line": 4226
+    },
+    {
+      "patch": "Trumpet 1 Plr2 KS",
+      "keyswitches": [
+        {
+          "note": "C3",
+          "articulation": "Open"
+        },
+        {
+          "note": "D3",
+          "articulation": "Mutes"
+        }
+      ],
+      "manual_line": 4257
+    },
+    {
+      "patch": "Trumpet 1 Plr3 KS",
+      "keyswitches": [
+        {
+          "note": "C3",
+          "articulation": "Open"
+        },
+        {
+          "note": "D3",
+          "articulation": "Mutes"
+        }
+      ],
+      "manual_line": 4284
+    },
+    {
+      "patch": "Trumpet 1 Solo KS",
+      "keyswitches": [
+        {
+          "note": "C3",
+          "articulation": "Open"
+        },
+        {
+          "note": "D3",
+          "articulation": "Mutes"
+        }
+      ],
+      "manual_line": 4329
+    },
+    {
+      "patch": "SAM Bass Trombone Solo KS",
+      "keyswitches": [
+        {
+          "note": "C0",
+          "articulation": "Sustains"
+        },
+        {
+          "note": "D0",
+          "articulation": "Marcato"
+        },
+        {
+          "note": "E0",
+          "articulation": "Staccato"
+        }
+      ],
+      "manual_line": 4525
+    },
+    {
+      "patch": "SAM Trombone Plr1 KS",
+      "keyswitches": [
+        {
+          "note": "C2",
+          "articulation": "Open"
+        },
+        {
+          "note": "D2",
+          "articulation": "Mutes"
+        }
+      ],
+      "manual_line": 4582
+    },
+    {
+      "patch": "SAM Trombone Plr2 KS",
+      "keyswitches": [
+        {
+          "note": "C2",
+          "articulation": "Open"
+        },
+        {
+          "note": "D2",
+          "articulation": "Mutes"
+        }
+      ],
+      "manual_line": 4596
+    },
+    {
+      "patch": "SAM Trombone Plr3 KS",
+      "keyswitches": [
+        {
+          "note": "C2",
+          "articulation": "Open"
+        },
+        {
+          "note": "D2",
+          "articulation": "Mutes"
+        }
+      ],
+      "manual_line": 4610
+    },
+    {
+      "patch": "SAM Trombone Section KS",
+      "keyswitches": [
+        {
+          "note": "C0",
+          "articulation": "Sustains"
+        },
+        {
+          "note": "D0",
+          "articulation": "Marcato"
+        },
+        {
+          "note": "E0",
+          "articulation": "Staccato"
+        }
+      ],
+      "manual_line": 4628
+    },
+    {
+      "patch": "SAM Trombone Solo KS",
+      "keyswitches": [
+        {
+          "note": "C0",
+          "articulation": "Sustains"
+        },
+        {
+          "note": "D0",
+          "articulation": "Marcato"
+        },
+        {
+          "note": "E0",
+          "articulation": "Staccato"
+        }
+      ],
+      "manual_line": 4680
+    },
+    {
+      "patch": "Trombone Plr1 KS",
+      "keyswitches": [
+        {
+          "note": "C2",
+          "articulation": "Open"
+        },
+        {
+          "note": "D2",
+          "articulation": "Mutes"
+        }
+      ],
+      "manual_line": 4780
+    },
+    {
+      "patch": "Trombone Plr2 KS",
+      "keyswitches": [
+        {
+          "note": "C2",
+          "articulation": "Open"
+        },
+        {
+          "note": "D2",
+          "articulation": "Mutes"
+        }
+      ],
+      "manual_line": 4825
+    },
+    {
+      "patch": "Trombone Plr3 KS",
+      "keyswitches": [
+        {
+          "note": "C2",
+          "articulation": "Open"
+        },
+        {
+          "note": "D2",
+          "articulation": "Mutes"
+        }
+      ],
+      "manual_line": 4866
+    },
+    {
+      "patch": "Trombone Solo KS",
+      "keyswitches": [
+        {
+          "note": "C2",
+          "articulation": "Open"
+        },
+        {
+          "note": "D2",
+          "articulation": "Mutes"
+        }
+      ],
+      "manual_line": 4925
+    },
+    {
+      "patch": "SAM Tuba Solo KS",
+      "keyswitches": [
+        {
+          "note": "C0",
+          "articulation": "Sustains"
+        },
+        {
+          "note": "D0",
+          "articulation": "Marcato"
+        },
+        {
+          "note": "E0",
+          "articulation": "Staccato"
+        }
+      ],
+      "manual_line": 4969
+    },
+    {
+      "patch": "Crotales KS",
+      "keyswitches": [
+        {
+          "note": "C3",
+          "articulation": "Standard single hits"
+        },
+        {
+          "note": "D3",
+          "articulation": "Playable release trigger rolls (use with VAR controls)"
+        }
+      ],
+      "manual_line": 5125
+    },
+    {
+      "patch": "Glockenspiel KS",
+      "keyswitches": [
+        {
+          "note": "C5",
+          "articulation": "Standard single hits"
+        },
+        {
+          "note": "D5",
+          "articulation": "Playable release trigger rolls (use with VAR controls)"
+        }
+      ],
+      "manual_line": 5158
+    },
+    {
+      "patch": "Handbells KS",
+      "keyswitches": [
+        {
+          "note": "C2",
+          "articulation": "Standard single hits"
+        },
+        {
+          "note": "D2",
+          "articulation": "Playable release trigger rolls (use with VAR controls)"
+        }
+      ],
+      "manual_line": 5170
+    },
+    {
+      "patch": "Marimba Grand Symph KS",
+      "keyswitches": [
+        {
+          "note": "C1",
+          "articulation": "Standard single hits"
+        },
+        {
+          "note": "D1",
+          "articulation": "Playable release trigger rolls (use with VAR controls)"
+        }
+      ],
+      "manual_line": 5182
+    },
+    {
+      "patch": "Marimba KS",
+      "keyswitches": [
+        {
+          "note": "C2",
+          "articulation": "Standard single hits"
+        },
+        {
+          "note": "D2",
+          "articulation": "Playable release trigger rolls (use with VAR controls)"
+        }
+      ],
+      "manual_line": 5198
+    },
+    {
+      "patch": "Percussion Accessories KS",
+      "keyswitches": [
+        {
+          "note": "C3",
+          "articulation": "Standard single hits"
+        },
+        {
+          "note": "D3",
+          "articulation": "Playable release trigger rolls (use with VAR controls)"
+        },
+        {
+          "note": "A#3",
+          "articulation": "cowbell 1"
+        },
+        {
+          "note": "B3",
+          "articulation": "cowbell 2"
+        },
+        {
+          "note": "C4",
+          "articulation": "cowbell 3"
+        },
+        {
+          "note": "C#4",
+          "articulation": "gourd 1"
+        },
+        {
+          "note": "D4",
+          "articulation": "gourd 2"
+        },
+        {
+          "note": "D#4",
+          "articulation": "shaker 1"
+        },
+        {
+          "note": "E4",
+          "articulation": "shaker 2"
+        },
+        {
+          "note": "C5",
+          "articulation": "tambourine pop"
+        },
+        {
+          "note": "C#5",
+          "articulation": "tambourine shake"
+        },
+        {
+          "note": "D5",
+          "articulation": "castanets"
+        },
+        {
+          "note": "D#5",
+          "articulation": "castanets roll"
+        },
+        {
+          "note": "E5",
+          "articulation": "clave 1"
+        },
+        {
+          "note": "F5",
+          "articulation": "clave 2"
+        },
+        {
+          "note": "F#5",
+          "articulation": "ratchet"
+        },
+        {
+          "note": "G5",
+          "articulation": "sleigh bells"
+        },
+        {
+          "note": "G#5",
+          "articulation": "mark tree"
+        },
+        {
+          "note": "A5",
+          "articulation": "triangle short - sustain pedal down for damped"
+        },
+        {
+          "note": "A#5",
+          "articulation": "triangle long - sustain pedal down for damped D#6–"
+        },
+        {
+          "note": "B6",
+          "articulation": "chime effects"
+        },
+        {
+          "note": "C7",
+          "articulation": "slapstick (clapper) C#7–"
+        },
+        {
+          "note": "D#7",
+          "articulation": "ratchets"
+        },
+        {
+          "note": "E7",
+          "articulation": "cabasa (long)"
+        },
+        {
+          "note": "F7",
+          "articulation": "cabasa"
+        },
+        {
+          "note": "F#7",
+          "articulation": "shaker"
+        },
+        {
+          "note": "G7",
+          "articulation": "vibraslap"
+        },
+        {
+          "note": "G#7",
+          "articulation": "triangle ring"
+        },
+        {
+          "note": "A7",
+          "articulation": "triangle (muted)"
+        },
+        {
+          "note": "A#7",
+          "articulation": "triangle"
+        }
+      ],
+      "manual_line": 5224
+    },
+    {
+      "patch": "Snares KS",
+      "keyswitches": [
+        {
+          "note": "C3",
+          "articulation": "Standard single hits"
+        },
+        {
+          "note": "D3",
+          "articulation": "Playable release trigger rolls (use with VAR controls)"
+        },
+        {
+          "note": "G#3",
+          "articulation": "snare drum hit, snares off (left hand)"
+        },
+        {
+          "note": "A3",
+          "articulation": "snare drum hit, snares off (right hand)"
+        },
+        {
+          "note": "A#3",
+          "articulation": "snare drum roll, snares off (mod wheel)"
+        },
+        {
+          "note": "B3",
+          "articulation": "snare drum hit, snares on (left hand)"
+        },
+        {
+          "note": "C4",
+          "articulation": "snare drum hit, snares on (right hand)"
+        },
+        {
+          "note": "C#4",
+          "articulation": "snare drum roll, snares on (mod wheel)"
+        }
+      ],
+      "manual_line": 5237
+    },
+    {
+      "patch": "Timpani 1 KS",
+      "keyswitches": [
+        {
+          "note": "C1",
+          "articulation": "Standard single hits"
+        },
+        {
+          "note": "D1",
+          "articulation": "Playable release trigger rolls (use with VAR controls) C2–"
+        },
+        {
+          "note": "A3",
+          "articulation": "left hand hits C4–"
+        },
+        {
+          "note": "A5",
+          "articulation": "right hand hits"
+        }
+      ],
+      "manual_line": 5251
+    },
+    {
+      "patch": "Timpani 2 KS",
+      "keyswitches": [
+        {
+          "note": "C1",
+          "articulation": "Standard single hits"
+        },
+        {
+          "note": "D1",
+          "articulation": "Playable release trigger rolls (use with VAR controls) C2–"
+        },
+        {
+          "note": "E3",
+          "articulation": "left hand hits C4–"
+        },
+        {
+          "note": "E5",
+          "articulation": "right hand hits"
+        }
+      ],
+      "manual_line": 5268
+    },
+    {
+      "patch": "Timpani 3 KS",
+      "keyswitches": [
+        {
+          "note": "C1",
+          "articulation": "Standard single hits"
+        },
+        {
+          "note": "D1",
+          "articulation": "Playable release trigger rolls (use with VAR controls)"
+        },
+        {
+          "note": "E1",
+          "articulation": "Pre-recorded timpani rolls (both hands, C4-B 5) C2–B 3: left hand hits C4–B 5: right hand hits"
+        }
+      ],
+      "manual_line": 5280
+    },
+    {
+      "patch": "Tubular Bells KS",
+      "keyswitches": [
+        {
+          "note": "C3",
+          "articulation": "Standard single hits"
+        },
+        {
+          "note": "D3",
+          "articulation": "Playable release trigger rolls (use with VAR controls)"
+        }
+      ],
+      "manual_line": 5293
+    },
+    {
+      "patch": "Vibraphone KS",
+      "keyswitches": [
+        {
+          "note": "C2",
+          "articulation": "Standard single hits"
+        },
+        {
+          "note": "D2",
+          "articulation": "Playable release trigger rolls (use with VAR controls)"
+        }
+      ],
+      "manual_line": 5306
+    },
+    {
+      "patch": "Xylophone KS",
+      "keyswitches": [
+        {
+          "note": "C4",
+          "articulation": "Standard single hits"
+        },
+        {
+          "note": "D4",
+          "articulation": "Playable release trigger rolls (use with VAR controls)"
+        }
+      ],
+      "manual_line": 5341
+    },
+    {
+      "patch": "Concert Grand Harp 1 KS",
+      "keyswitches": [
+        {
+          "note": "C0",
+          "articulation": "Chromatic Harp"
+        },
+        {
+          "note": "D0",
+          "articulation": "Pedal Mode"
+        },
+        {
+          "note": "E0",
+          "articulation": "Harmonics"
+        }
+      ],
+      "manual_line": 5399
+    },
+    {
+      "patch": "Harp 1 KS",
+      "keyswitches": [
+        {
+          "note": "C0",
+          "articulation": "Chromatic Harp"
+        },
+        {
+          "note": "D0",
+          "articulation": "Glissando Harp (MIDI maps are used to emulate the pedals)"
+        },
+        {
+          "note": "E0",
+          "articulation": "Harp Harmonics"
+        }
+      ],
+      "manual_line": 5424
+    },
+    {
+      "patch": "Harp 2 KS",
+      "keyswitches": [
+        {
+          "note": "C0",
+          "articulation": "Chromatic Harp"
+        },
+        {
+          "note": "D0",
+          "articulation": "Glissando Harp (MIDI maps are used to emulate the pedals)"
+        },
+        {
+          "note": "E0",
+          "articulation": "Harp Harmonics"
+        }
+      ],
+      "manual_line": 5435
+    },
+    {
+      "patch": "Harpsichord KS",
+      "keyswitches": [
+        {
+          "note": "C1",
+          "articulation": "8' stop, brighter sound"
+        },
+        {
+          "note": "D1",
+          "articulation": "8' and 4' stop, mellow sound"
+        },
+        {
+          "note": "E1",
+          "articulation": "buff stop, muted sound"
+        }
+      ],
+      "manual_line": 5574
+    },
+    {
+      "patch": "Violin 1 Solo KS",
+      "keyswitches": [
+        {
+          "note": "C2",
+          "articulation": "sustain"
+        },
+        {
+          "note": "C#2",
+          "articulation": "sustain mute"
+        },
+        {
+          "note": "D2",
+          "articulation": "automatically alternating up and downbows"
+        },
+        {
+          "note": "D#2",
+          "articulation": "upbows"
+        },
+        {
+          "note": "E2",
+          "articulation": "downbows"
+        },
+        {
+          "note": "F2",
+          "articulation": "pizzicato"
+        },
+        {
+          "note": "F#2",
+          "articulation": "playable tremolo mute"
+        },
+        {
+          "note": "G2",
+          "articulation": "playable tremolo"
+        },
+        {
+          "note": "G#2",
+          "articulation": "playable muted trills (extended intervals can be chosen with CC#15)"
+        },
+        {
+          "note": "A2",
+          "articulation": "playable trills (extended intervals can be chosen with CC#15)"
+        },
+        {
+          "note": "A#2",
+          "articulation": "playable whole step muted trills"
+        },
+        {
+          "note": "B2",
+          "articulation": "playable whole step trills"
+        }
+      ],
+      "manual_line": 5773
+    },
+    {
+      "patch": "Violin 2 Solo KS",
+      "keyswitches": [
+        {
+          "note": "C2",
+          "articulation": "sustain"
+        },
+        {
+          "note": "C#2",
+          "articulation": "sustain mute"
+        },
+        {
+          "note": "D2",
+          "articulation": "automatically alternating up and downbows"
+        },
+        {
+          "note": "D#2",
+          "articulation": "upbows"
+        },
+        {
+          "note": "E2",
+          "articulation": "downbows"
+        },
+        {
+          "note": "F2",
+          "articulation": "pizzicato"
+        },
+        {
+          "note": "F#2",
+          "articulation": "playable tremolo mute"
+        },
+        {
+          "note": "G2",
+          "articulation": "playable tremolo"
+        },
+        {
+          "note": "G#2",
+          "articulation": "playable muted trills (extended intervals can be chosen with CC#15)"
+        },
+        {
+          "note": "A2",
+          "articulation": "playable trills (extended intervals can be chosen with CC#15)"
+        },
+        {
+          "note": "A#2",
+          "articulation": "playable whole step muted trills"
+        },
+        {
+          "note": "B2",
+          "articulation": "playable whole step trills"
+        }
+      ],
+      "manual_line": 5858
+    },
+    {
+      "patch": "Violin 3 Solo KS",
+      "keyswitches": [
+        {
+          "note": "C2",
+          "articulation": "sustain"
+        },
+        {
+          "note": "C#2",
+          "articulation": "sustain mute"
+        },
+        {
+          "note": "D2",
+          "articulation": "automatically alternating up and downbows"
+        },
+        {
+          "note": "D#2",
+          "articulation": "upbows"
+        },
+        {
+          "note": "E2",
+          "articulation": "downbows"
+        },
+        {
+          "note": "F2",
+          "articulation": "pizzicato"
+        },
+        {
+          "note": "F#2",
+          "articulation": "playable tremolo mute"
+        },
+        {
+          "note": "G2",
+          "articulation": "playable tremolo"
+        },
+        {
+          "note": "G#2",
+          "articulation": "playable muted trills (extended intervals can be chosen with CC#15)"
+        },
+        {
+          "note": "A2",
+          "articulation": "playable trills (extended intervals can be chosen with CC#15)"
+        },
+        {
+          "note": "A#2",
+          "articulation": "playable whole step muted trills"
+        },
+        {
+          "note": "B2",
+          "articulation": "playable whole step trills"
+        }
+      ],
+      "manual_line": 5938
+    },
+    {
+      "patch": "Viola 1 Solo KS",
+      "keyswitches": [
+        {
+          "note": "C2",
+          "articulation": "sustain"
+        },
+        {
+          "note": "C#2",
+          "articulation": "sustain mute"
+        },
+        {
+          "note": "D2",
+          "articulation": "automatically alternating up and downbows"
+        },
+        {
+          "note": "D#2",
+          "articulation": "upbows"
+        },
+        {
+          "note": "E2",
+          "articulation": "downbows"
+        },
+        {
+          "note": "F2",
+          "articulation": "pizzicato"
+        },
+        {
+          "note": "F#2",
+          "articulation": "playable tremolo mute"
+        },
+        {
+          "note": "G2",
+          "articulation": "playable tremolo"
+        },
+        {
+          "note": "G#2",
+          "articulation": "playable muted trills (extended intervals can be chosen with CC#15)"
+        },
+        {
+          "note": "A2",
+          "articulation": "playable trills (extended intervals can be chosen with CC#15)"
+        },
+        {
+          "note": "A#2",
+          "articulation": "playable whole step muted trills"
+        },
+        {
+          "note": "B2",
+          "articulation": "playable whole step trills"
+        }
+      ],
+      "manual_line": 6019
+    },
+    {
+      "patch": "Cello 1 Solo KS",
+      "keyswitches": [
+        {
+          "note": "C1",
+          "articulation": "sustain"
+        },
+        {
+          "note": "C#1",
+          "articulation": "sustain mute"
+        },
+        {
+          "note": "D1",
+          "articulation": "automatically alternating up and downbows"
+        },
+        {
+          "note": "D#1",
+          "articulation": "upbows"
+        },
+        {
+          "note": "E1",
+          "articulation": "downbows"
+        },
+        {
+          "note": "F1",
+          "articulation": "pizzicato"
+        },
+        {
+          "note": "F#1",
+          "articulation": "playable tremolo mute"
+        },
+        {
+          "note": "G1",
+          "articulation": "playable tremolo"
+        },
+        {
+          "note": "G#1",
+          "articulation": "playable muted trills (extended intervals can be chosen with CC#15)"
+        },
+        {
+          "note": "A1",
+          "articulation": "playable trills (extended intervals can be chosen with CC#15)"
+        },
+        {
+          "note": "A#1",
+          "articulation": "playable whole step muted trills"
+        },
+        {
+          "note": "B1",
+          "articulation": "playable whole step trills"
+        }
+      ],
+      "manual_line": 6099
+    },
+    {
+      "patch": "Cello 2 Solo KS",
+      "keyswitches": [
+        {
+          "note": "C1",
+          "articulation": "sustain"
+        },
+        {
+          "note": "C#1",
+          "articulation": "sustain mute"
+        },
+        {
+          "note": "D1",
+          "articulation": "automatically alternating up and downbows"
+        },
+        {
+          "note": "D#1",
+          "articulation": "upbows"
+        },
+        {
+          "note": "E1",
+          "articulation": "downbows"
+        },
+        {
+          "note": "F1",
+          "articulation": "pizzicato"
+        },
+        {
+          "note": "F#1",
+          "articulation": "playable tremolo mute"
+        },
+        {
+          "note": "G1",
+          "articulation": "playable tremolo"
+        },
+        {
+          "note": "G#1",
+          "articulation": "playable muted trills (extended intervals can be chosen with CC#15)"
+        },
+        {
+          "note": "A1",
+          "articulation": "playable trills (extended intervals can be chosen with CC#15)"
+        },
+        {
+          "note": "A#1",
+          "articulation": "playable whole step muted trills"
+        },
+        {
+          "note": "B1",
+          "articulation": "playable whole step trills"
+        }
+      ],
+      "manual_line": 6177
+    },
+    {
+      "patch": "Cello 3 Solo KS",
+      "keyswitches": [
+        {
+          "note": "C1",
+          "articulation": "sustain"
+        },
+        {
+          "note": "C#1",
+          "articulation": "sustain mute"
+        },
+        {
+          "note": "D1",
+          "articulation": "automatically alternating up and downbows"
+        },
+        {
+          "note": "D#1",
+          "articulation": "upbows"
+        },
+        {
+          "note": "E1",
+          "articulation": "downbows"
+        },
+        {
+          "note": "F1",
+          "articulation": "pizzicato"
+        },
+        {
+          "note": "F#1",
+          "articulation": "playable tremolo mute"
+        },
+        {
+          "note": "G1",
+          "articulation": "playable tremolo"
+        },
+        {
+          "note": "G#1",
+          "articulation": "playable muted trills (extended intervals can be chosen with CC#15)"
+        },
+        {
+          "note": "A1",
+          "articulation": "playable trills (extended intervals can be chosen with CC#15)"
+        },
+        {
+          "note": "A#1",
+          "articulation": "playable whole step muted trills"
+        },
+        {
+          "note": "B1",
+          "articulation": "playable whole step trills"
+        }
+      ],
+      "manual_line": 6248
+    },
+    {
+      "patch": "Double Bass 1 Solo KS",
+      "keyswitches": [
+        {
+          "note": "C0",
+          "articulation": "sustain"
+        },
+        {
+          "note": "C#0",
+          "articulation": "sustain mute"
+        },
+        {
+          "note": "D0",
+          "articulation": "automatically alternating up and downbows"
+        },
+        {
+          "note": "D#0",
+          "articulation": "upbows"
+        },
+        {
+          "note": "E0",
+          "articulation": "downbows"
+        },
+        {
+          "note": "F0",
+          "articulation": "pizzicato"
+        },
+        {
+          "note": "F#0",
+          "articulation": "playable tremolo mute"
+        },
+        {
+          "note": "G0",
+          "articulation": "playable tremolo"
+        },
+        {
+          "note": "G#0",
+          "articulation": "playable muted trills (extended intervals can be chosen with CC#15)"
+        },
+        {
+          "note": "A0",
+          "articulation": "playable trills (extended intervals can be chosen with CC#15)"
+        },
+        {
+          "note": "A#0",
+          "articulation": "playable whole step muted trills"
+        },
+        {
+          "note": "B0",
+          "articulation": "playable whole step trills"
+        }
+      ],
+      "manual_line": 6315
+    },
+    {
+      "patch": "Violins 1 KS",
+      "keyswitches": [
+        {
+          "note": "C2",
+          "articulation": "sus+short (legato with sustain pedal)"
+        },
+        {
+          "note": "C#2",
+          "articulation": "sus+short mutes (legato with sustain pedal)"
+        },
+        {
+          "note": "D2",
+          "articulation": "automatically alternating up and downbows"
+        },
+        {
+          "note": "D#2",
+          "articulation": "upbows"
+        },
+        {
+          "note": "E2",
+          "articulation": "downbows"
+        },
+        {
+          "note": "F2",
+          "articulation": "pizzicato"
+        },
+        {
+          "note": "F#2",
+          "articulation": "tremolo mutes (legato with sustain pedal)"
+        },
+        {
+          "note": "G2",
+          "articulation": "tremolo (legato with sustain pedal)"
+        },
+        {
+          "note": "G#2",
+          "articulation": "half-step trills mutes (legato with sustain pedal)"
+        },
+        {
+          "note": "A2",
+          "articulation": "half-step trills (legato with sustain pedal)"
+        },
+        {
+          "note": "A#2",
+          "articulation": "whole-step trills mutes (legato with sustain pedal)"
+        },
+        {
+          "note": "B2",
+          "articulation": "whole-step trills (legato with sustain pedal)"
+        }
+      ],
+      "manual_line": 6333
+    },
+    {
+      "patch": "Violins 1 Short Bows KS",
+      "keyswitches": [
+        {
+          "note": "D2",
+          "articulation": "automatically alternating bow strokes"
+        },
+        {
+          "note": "D#2",
+          "articulation": "bow stroke 1"
+        },
+        {
+          "note": "E2",
+          "articulation": "bow stroke 2"
+        }
+      ],
+      "manual_line": 6386
+    },
+    {
+      "patch": "Violins 2 KS",
+      "keyswitches": [
+        {
+          "note": "C2",
+          "articulation": "sus+short (legato with sustain pedal)"
+        },
+        {
+          "note": "C#2",
+          "articulation": "sus+short mutes (legato with sustain pedal)"
+        },
+        {
+          "note": "D2",
+          "articulation": "automatically alternating up and downbows"
+        },
+        {
+          "note": "D#2",
+          "articulation": "upbows"
+        },
+        {
+          "note": "E2",
+          "articulation": "downbows"
+        },
+        {
+          "note": "F2",
+          "articulation": "pizzicato"
+        },
+        {
+          "note": "F#2",
+          "articulation": "tremolo mutes (legato with sustain pedal)"
+        },
+        {
+          "note": "G2",
+          "articulation": "tremolo (legato with sustain pedal)"
+        },
+        {
+          "note": "G#2",
+          "articulation": "half-step trills mutes (legato with sustain pedal)"
+        },
+        {
+          "note": "A2",
+          "articulation": "half-step trills (legato with sustain pedal)"
+        },
+        {
+          "note": "A#2",
+          "articulation": "whole-step trills mutes (legato with sustain pedal)"
+        },
+        {
+          "note": "B2",
+          "articulation": "whole-step trills (legato with sustain pedal)"
+        }
+      ],
+      "manual_line": 6481
+    },
+    {
+      "patch": "Violins 2 Short Bows KS",
+      "keyswitches": [
+        {
+          "note": "D2",
+          "articulation": "automatically alternating bow strokes"
+        },
+        {
+          "note": "D#2",
+          "articulation": "bow stroke 1"
+        },
+        {
+          "note": "E2",
+          "articulation": "bow stroke 2"
+        }
+      ],
+      "manual_line": 6534
+    },
+    {
+      "patch": "Violas KS",
+      "keyswitches": [
+        {
+          "note": "C2",
+          "articulation": "sus+short (legato with sustain pedal)"
+        },
+        {
+          "note": "C#2",
+          "articulation": "sus+short mutes (legato with sustain pedal)"
+        },
+        {
+          "note": "D2",
+          "articulation": "automatically alternating up and downbows"
+        },
+        {
+          "note": "D#2",
+          "articulation": "upbows"
+        },
+        {
+          "note": "E2",
+          "articulation": "downbows"
+        },
+        {
+          "note": "F2",
+          "articulation": "pizzicato"
+        },
+        {
+          "note": "F#2",
+          "articulation": "tremolo mutes (legato with sustain pedal)"
+        },
+        {
+          "note": "G2",
+          "articulation": "tremolo (legato with sustain pedal)"
+        },
+        {
+          "note": "G#2",
+          "articulation": "half-step trills mutes (legato with sustain pedal)"
+        },
+        {
+          "note": "A2",
+          "articulation": "half-step trills (legato with sustain pedal)"
+        },
+        {
+          "note": "A#2",
+          "articulation": "whole-step trills mutes (legato with sustain pedal)"
+        },
+        {
+          "note": "B2",
+          "articulation": "whole-step trills (legato with sustain pedal)"
+        }
+      ],
+      "manual_line": 6634
+    },
+    {
+      "patch": "Violas Short Bows KS",
+      "keyswitches": [
+        {
+          "note": "D2",
+          "articulation": "automatically alternating bow strokes"
+        },
+        {
+          "note": "D#2",
+          "articulation": "bow stroke 1"
+        },
+        {
+          "note": "E2",
+          "articulation": "bow stroke 2"
+        }
+      ],
+      "manual_line": 6688
+    },
+    {
+      "patch": "Cellos KS",
+      "keyswitches": [
+        {
+          "note": "C1",
+          "articulation": "sus+short (legato with sustain pedal)"
+        },
+        {
+          "note": "C#1",
+          "articulation": "sus+short mutes (legato with sustain pedal)"
+        },
+        {
+          "note": "D1",
+          "articulation": "automatically alternating up and downbows"
+        },
+        {
+          "note": "D#1",
+          "articulation": "upbows"
+        },
+        {
+          "note": "E1",
+          "articulation": "downbows"
+        },
+        {
+          "note": "F1",
+          "articulation": "pizzicato"
+        },
+        {
+          "note": "F#1",
+          "articulation": "tremolo mutes (legato with sustain pedal)"
+        },
+        {
+          "note": "G1",
+          "articulation": "tremolo (legato with sustain pedal)"
+        },
+        {
+          "note": "G#1",
+          "articulation": "half-step trills mutes (legato with sustain pedal)"
+        },
+        {
+          "note": "A1",
+          "articulation": "half-step trills (legato with sustain pedal)"
+        },
+        {
+          "note": "A#1",
+          "articulation": "whole-step trills mutes (legato with sustain pedal)"
+        },
+        {
+          "note": "B1",
+          "articulation": "whole-step trills (legato with sustain pedal)"
+        }
+      ],
+      "manual_line": 6784
+    },
+    {
+      "patch": "Cellos Short Bows KS",
+      "keyswitches": [
+        {
+          "note": "D1",
+          "articulation": "automatically alternating bow strokes"
+        },
+        {
+          "note": "D#1",
+          "articulation": "bow stroke 1"
+        },
+        {
+          "note": "E1",
+          "articulation": "bow stroke 2"
+        }
+      ],
+      "manual_line": 6838
+    },
+    {
+      "patch": "Basses KS",
+      "keyswitches": [
+        {
+          "note": "C0",
+          "articulation": "sus+short (legato with sustain pedal)"
+        },
+        {
+          "note": "C#0",
+          "articulation": "sus+short mutes (legato with sustain pedal)"
+        },
+        {
+          "note": "D0",
+          "articulation": "automatically alternating up and downbows"
+        },
+        {
+          "note": "D#0",
+          "articulation": "upbows"
+        },
+        {
+          "note": "E0",
+          "articulation": "downbows"
+        },
+        {
+          "note": "F0",
+          "articulation": "pizzicato"
+        },
+        {
+          "note": "F#0",
+          "articulation": "tremolo mutes (legato with sustain pedal)"
+        },
+        {
+          "note": "G0",
+          "articulation": "tremolo (legato with sustain pedal)"
+        },
+        {
+          "note": "G#0",
+          "articulation": "half-step trills mutes (legato with sustain pedal)"
+        },
+        {
+          "note": "A0",
+          "articulation": "half-step trills (legato with sustain pedal)"
+        },
+        {
+          "note": "A#0",
+          "articulation": "whole-step trills mutes (legato with sustain pedal)"
+        },
+        {
+          "note": "B0",
+          "articulation": "whole-step trills (legato with sustain pedal)"
+        }
+      ],
+      "manual_line": 6933
+    },
+    {
+      "patch": "Basses Short Bows KS",
+      "keyswitches": [
+        {
+          "note": "D0",
+          "articulation": "automatically alternating bow strokes"
+        },
+        {
+          "note": "D#0",
+          "articulation": "bow stroke 1"
+        },
+        {
+          "note": "E0",
+          "articulation": "bow stroke 2"
+        }
+      ],
+      "manual_line": 6986
+    },
+    {
+      "patch": "Full Strings KS",
+      "keyswitches": [
+        {
+          "note": "C0",
+          "articulation": "sus+short (legato with sustain pedal)"
+        },
+        {
+          "note": "C#0",
+          "articulation": "sus+short mutes (legato with sustain pedal)"
+        },
+        {
+          "note": "D0",
+          "articulation": "automatically alternating up and downbows"
+        },
+        {
+          "note": "D#0",
+          "articulation": "upbows"
+        },
+        {
+          "note": "E0",
+          "articulation": "downbows"
+        },
+        {
+          "note": "F0",
+          "articulation": "pizzicato"
+        },
+        {
+          "note": "F#0",
+          "articulation": "tremolo mutes (legato with sustain pedal)"
+        },
+        {
+          "note": "G0",
+          "articulation": "tremolo (legato with sustain pedal)"
+        },
+        {
+          "note": "G#0",
+          "articulation": "half-step trills mutes (legato with sustain pedal)"
+        },
+        {
+          "note": "A0",
+          "articulation": "half-step trills (legato with sustain pedal)"
+        },
+        {
+          "note": "A#0",
+          "articulation": "whole-step trills mutes (legato with sustain pedal)"
+        },
+        {
+          "note": "B0",
+          "articulation": "whole-step trills (legato with sustain pedal)"
+        }
+      ],
+      "manual_line": 7058
+    },
+    {
+      "patch": "Full Strings Short Bows KS",
+      "keyswitches": [
+        {
+          "note": "D0",
+          "articulation": "automatically alternating bow strokes"
+        },
+        {
+          "note": "D#0",
+          "articulation": "bow stroke 1"
+        },
+        {
+          "note": "E0",
+          "articulation": "bow stroke 2"
+        }
+      ],
+      "manual_line": 7088
+    },
+    {
+      "patch": "Sopranos KS",
+      "keyswitches": [
+        {
+          "note": "C1",
+          "articulation": "Aahs"
+        },
+        {
+          "note": "D1",
+          "articulation": "Oohs"
+        }
+      ],
+      "manual_line": 7175
+    },
+    {
+      "patch": "Altos KS",
+      "keyswitches": [
+        {
+          "note": "C1",
+          "articulation": "Aahs"
+        },
+        {
+          "note": "D1",
+          "articulation": "Oohs"
+        }
+      ],
+      "manual_line": 7250
+    },
+    {
+      "patch": "Tenors KS",
+      "keyswitches": [
+        {
+          "note": "C1",
+          "articulation": "Aahs"
+        },
+        {
+          "note": "D1",
+          "articulation": "Ohs"
+        }
+      ],
+      "manual_line": 7297
+    },
+    {
+      "patch": "Boys Choir KS",
+      "keyswitches": [
+        {
+          "note": "C1",
+          "articulation": "Aahs"
+        },
+        {
+          "note": "D1",
+          "articulation": "Oohs"
+        },
+        {
+          "note": "E1",
+          "articulation": "Eehs"
+        }
+      ],
+      "manual_line": 7385
+    },
+    {
+      "patch": "Children KS",
+      "keyswitches": [
+        {
+          "note": "C1",
+          "articulation": "Aahs"
+        },
+        {
+          "note": "D1",
+          "articulation": "Oohs"
+        },
+        {
+          "note": "E1",
+          "articulation": "Eehs"
+        }
+      ],
+      "manual_line": 7444
+    },
+    {
+      "patch": "Full Choir KS",
+      "keyswitches": [
+        {
+          "note": "C1",
+          "articulation": "Aahs"
+        },
+        {
+          "note": "D1",
+          "articulation": "Oohs"
+        }
+      ],
+      "manual_line": 7505
+    },
+    {
+      "patch": "3 Violins Grp 1 KS",
+      "keyswitches": [
+        {
+          "note": "C2",
+          "articulation": "Sustain"
+        },
+        {
+          "note": "D#2",
+          "articulation": "Detache"
+        },
+        {
+          "note": "F2",
+          "articulation": "Pizzicato"
+        },
+        {
+          "note": "F#2",
+          "articulation": "Col Legno"
+        },
+        {
+          "note": "G2",
+          "articulation": "Spiccato"
+        },
+        {
+          "note": "G#2",
+          "articulation": "Staccato"
+        }
+      ],
+      "manual_line": 8872
+    },
+    {
+      "patch": "3 Violins Grp 2 KS",
+      "keyswitches": [
+        {
+          "note": "C2",
+          "articulation": "Sustain"
+        },
+        {
+          "note": "D#2",
+          "articulation": "Detache"
+        },
+        {
+          "note": "F2",
+          "articulation": "Pizzicato"
+        },
+        {
+          "note": "F#2",
+          "articulation": "Col Legno"
+        },
+        {
+          "note": "G2",
+          "articulation": "Spiccato"
+        },
+        {
+          "note": "G#2",
+          "articulation": "Staccato"
+        }
+      ],
+      "manual_line": 8887
+    },
+    {
+      "patch": "6 Violins Grp 1 KS",
+      "keyswitches": [
+        {
+          "note": "C2",
+          "articulation": "Sustain"
+        },
+        {
+          "note": "D#2",
+          "articulation": "Detache"
+        },
+        {
+          "note": "F2",
+          "articulation": "Pizzicato"
+        },
+        {
+          "note": "F#2",
+          "articulation": "Col Legno"
+        },
+        {
+          "note": "G2",
+          "articulation": "Spiccato"
+        },
+        {
+          "note": "G#2",
+          "articulation": "Staccato"
+        }
+      ],
+      "manual_line": 8906
+    },
+    {
+      "patch": "4 Violas KS",
+      "keyswitches": [
+        {
+          "note": "C2",
+          "articulation": "SustainVib"
+        },
+        {
+          "note": "F2",
+          "articulation": "Pizzicato"
+        },
+        {
+          "note": "G2",
+          "articulation": "Spiccato"
+        }
+      ],
+      "manual_line": 8921
+    },
+    {
+      "patch": "3 Cellos KS",
+      "keyswitches": [
+        {
+          "note": "C1",
+          "articulation": "SustainVib"
+        },
+        {
+          "note": "F1",
+          "articulation": "Pizzicato"
+        },
+        {
+          "note": "G1",
+          "articulation": "Spiccato"
+        }
+      ],
+      "manual_line": 8935
+    },
+    {
+      "patch": "2 Basses KS",
+      "keyswitches": [
+        {
+          "note": "C0",
+          "articulation": "SustainVib"
+        },
+        {
+          "note": "D0",
+          "articulation": "Pizzicato"
+        },
+        {
+          "note": "F0",
+          "articulation": "Spiccato"
+        }
+      ],
+      "manual_line": 8949
+    },
+    {
+      "patch": "Violin 1 KS",
+      "keyswitches": [
+        {
+          "note": "C2",
+          "articulation": "SustainVib"
+        },
+        {
+          "note": "C#2",
+          "articulation": "LushForte"
+        },
+        {
+          "note": "D2",
+          "articulation": "Sfz"
+        },
+        {
+          "note": "D#2",
+          "articulation": "Detache"
+        },
+        {
+          "note": "E2",
+          "articulation": "Martele"
+        },
+        {
+          "note": "F2",
+          "articulation": "Pizzicato"
+        },
+        {
+          "note": "F#2",
+          "articulation": "Col Legno"
+        },
+        {
+          "note": "G2",
+          "articulation": "Spiccato"
+        },
+        {
+          "note": "G#2",
+          "articulation": "Staccato"
+        }
+      ],
+      "manual_line": 9242
+    },
+    {
+      "patch": "Viola 1 KS",
+      "keyswitches": [
+        {
+          "note": "C2",
+          "articulation": "SustainVib"
+        },
+        {
+          "note": "D2",
+          "articulation": "Tremolo"
+        },
+        {
+          "note": "E2",
+          "articulation": "Snap"
+        },
+        {
+          "note": "F2",
+          "articulation": "Pizzicato"
+        },
+        {
+          "note": "G2",
+          "articulation": "Spiccato"
+        }
+      ],
+      "manual_line": 9257
+    },
+    {
+      "patch": "Cello 1 KS",
+      "keyswitches": [
+        {
+          "note": "C1",
+          "articulation": "SustainVib"
+        },
+        {
+          "note": "D1",
+          "articulation": "Tremolo"
+        },
+        {
+          "note": "E1",
+          "articulation": "Detache"
+        },
+        {
+          "note": "F1",
+          "articulation": "Pizzicato"
+        },
+        {
+          "note": "G1",
+          "articulation": "Spiccato Short"
+        },
+        {
+          "note": "A1",
+          "articulation": "Snap"
+        }
+      ],
+      "manual_line": 9271
+    },
+    {
+      "patch": "Bass 1 KS",
+      "keyswitches": [
+        {
+          "note": "C0",
+          "articulation": "SustainVib"
+        },
+        {
+          "note": "D0",
+          "articulation": "Spiccato"
+        },
+        {
+          "note": "E0",
+          "articulation": "Snap"
+        },
+        {
+          "note": "F0",
+          "articulation": "Pizzicato"
+        }
+      ],
+      "manual_line": 9291
+    }
+  ]
+}
