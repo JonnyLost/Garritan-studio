@@ -37,6 +37,8 @@ public struct VRackView: View {
     @State private var catalog: [DrawerInstrument] = []
     @State private var isLoadingInstrument = false
     @State private var pickerError: String?
+    @State private var showExpandedBrowser = false
+    @State private var previewInstrumentID: String?
 
 
     public init(viewModel: ProjectViewModel, openStageWorkspace: (() -> Void)? = nil) {
@@ -90,6 +92,9 @@ public struct VRackView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Color(nsColor: .controlBackgroundColor))
+        .sheet(isPresented: $showExpandedBrowser) {
+            expandedInstrumentBrowser
+        }
         .sheet(isPresented: $showPluginBrowser) {
             if let rackID = selectedRackInstrumentID {
                 RackPluginBrowserSheet(
@@ -450,6 +455,163 @@ public struct VRackView: View {
         return id
     }
 
+    // Full-width browser shares the same catalog, filters and ARIA loader
+    // as the compact picker. Browsing never loads a patch until requested.
+    private var previewInstrument: DrawerInstrument? {
+        catalog.first { $0.id == previewInstrumentID }
+    }
+
+    private var expandedInstrumentBrowser: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Instrument Browser")
+                        .font(.title2.bold())
+                    Text("Explore Garritan libraries and choose a patch for the selected track")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("\(filteredCatalog.count) patches")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Done") { showExpandedBrowser = false }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(18)
+            Divider()
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Search instruments or articulations", text: $searchText)
+                    .textFieldStyle(.plain)
+                Picker("Library", selection: $libraryFilter) {
+                    Text("All Libraries").tag("All Libraries")
+                    Text("GPO5").tag("Garritan Personal Orchestra 5")
+                    Text("Instant Orchestra").tag("Garritan Instant Orchestra")
+                }
+                .frame(width: 150)
+                Picker("Set", selection: $instrumentSet) {
+                    Text("Core").tag("Core Orchestra")
+                    Text("Complete").tag("Complete")
+                }
+                .frame(width: 105)
+            }
+            .padding(12)
+            .background(Color(nsColor: .controlBackgroundColor))
+            HStack(spacing: 0) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 3) {
+                        ForEach(["All"] + scoreFamilies, id: \.self) { family in
+                            Button {
+                                familyFilter = family
+                            } label: {
+                                HStack {
+                                    Text(family == "All" ? "All Instruments" : family)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 9)
+                                .background(familyFilter == family ? Color.accentColor.opacity(0.2) : Color.clear)
+                                .clipShape(RoundedRectangle(cornerRadius: 7))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(10)
+                }
+                .frame(width: 165)
+                Divider()
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 5) {
+                        ForEach(filteredCatalog) { instrument in
+                            Button {
+                                previewInstrumentID = instrument.id
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: instrument.symbol)
+                                        .foregroundStyle(Color.accentColor)
+                                        .frame(width: 26)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(instrument.name)
+                                            .font(.subheadline.weight(.medium))
+                                        Text(instrument.category + " · " +
+                                             (instrument.library == "Garritan Personal Orchestra 5" ? "GPO5" : "Instant Orchestra"))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    if previewInstrumentID == instrument.id {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundStyle(Color.accentColor)
+                                    }
+                                }
+                                .padding(10)
+                                .background(previewInstrumentID == instrument.id ?
+                                            Color.accentColor.opacity(0.15) :
+                                            Color(nsColor: .controlBackgroundColor).opacity(0.45))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        if filteredCatalog.isEmpty {
+                            Text("No instruments match these filters.")
+                                .foregroundStyle(.secondary)
+                                .padding()
+                        }
+                    }
+                    .padding(12)
+                }
+                .frame(maxWidth: .infinity)
+                Divider()
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("INSTRUMENT DETAILS")
+                        .font(.caption.bold())
+                        .foregroundStyle(.secondary)
+                    if let instrument = previewInstrument {
+                        Image(systemName: instrument.symbol)
+                            .font(.system(size: 36))
+                            .foregroundStyle(Color.accentColor)
+                        Text(instrument.name)
+                            .font(.title3.bold())
+                        LabeledContent("Family", value: instrument.category)
+                        LabeledContent("Library", value: instrument.library)
+                        Text(instrument.path)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                        Spacer()
+                        Button {
+                            chooseInstrument(instrument)
+                        } label: {
+                            Label("Load Instrument", systemImage: "arrow.down.to.line")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isLoadingInstrument || viewModel.selectedTrackID == nil)
+                    } else {
+                        Text("Select an instrument to see its details.")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    if isLoadingInstrument { ProgressView("Loading…") }
+                    if let pickerError {
+                        Text(pickerError).font(.caption).foregroundStyle(.red)
+                    }
+                }
+                .padding(18)
+                .frame(width: 245, maxHeight: .infinity, alignment: .topLeading)
+            }
+        }
+        .frame(minWidth: 860, minHeight: 570)
+        .onAppear {
+            if catalog.isEmpty { discoverCatalog() }
+            if previewInstrumentID == nil {
+                previewInstrumentID = filteredCatalog.first?.id
+            }
+        }
+    }
+
     private var instrumentsPanel: some View {
         VStack(spacing: 0) {
             HStack {
@@ -459,6 +621,13 @@ public struct VRackView: View {
                         .font(.system(size: 10)).foregroundColor(.secondary)
                 }
                 Spacer()
+                Button {
+                    showExpandedBrowser = true
+                } label: {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                }
+                .buttonStyle(.plain)
+                .help("Open the full instrument browser")
                 if let trackID = selectedARIAID {
                     Menu {
                         Button("Open Plugin Controls") {
