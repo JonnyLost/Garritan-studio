@@ -247,7 +247,7 @@ public final class AudioEngine: ObservableObject {
         
         // Restore saved orchestral stage depth.
         let depth = max(0, min(5, track.stageReverbZone ?? 2))
-        trackNode.concertHallSend.outputVolume = Self.concertHallSendLevels[depth]
+        trackNode.setConcertHallSendLevel(Self.concertHallSendLevels[depth])
 
         trackNodes[track.id] = trackNode
         installTrackMeter(for: trackNode)
@@ -326,8 +326,9 @@ public final class AudioEngine: ObservableObject {
     /// Depth 0 = conductor; depth 5 = back row.
     public func setConcertHallDepth(_ depth: Int, for trackID: TrackID) {
         let safeDepth = max(0, min(5, depth))
-        trackNodes[trackID]?.concertHallSend.outputVolume =
+        trackNodes[trackID]?.setConcertHallSendLevel(
             Self.concertHallSendLevels[safeDepth]
+        )
     }
 
     /// Get track node for external access
@@ -819,7 +820,8 @@ public final class TrackAudioNode {
     
     private var isMuted: Bool = false
     private var volume: Float = 1.0
-    
+    private var concertHallSendLevel: Float = 0.20
+
     public init(trackID: TrackID, channelCount: Int, sampleRate: Double) {
         self.trackID = trackID
         self.inputMixer = AVAudioMixerNode()
@@ -832,6 +834,12 @@ public final class TrackAudioNode {
     
     public func setVolume(_ volume: Float) {
         self.volume = volume
+        updateOutputVolume()
+    }
+
+    /// Preserve the stage's relative hall send when volume or mute changes.
+    public func setConcertHallSendLevel(_ level: Float) {
+        concertHallSendLevel = max(0, level)
         updateOutputVolume()
     }
     
@@ -852,7 +860,11 @@ public final class TrackAudioNode {
     }
     
     private func updateOutputVolume() {
-        outputMixer.outputVolume = isMuted ? 0.0 : volume
+        let dryGain: Float = isMuted ? 0.0 : volume
+        outputMixer.outputVolume = dryGain
+        // The hall send branches before outputMixer, so it must explicitly
+        // follow volume and mute (including solo) to prevent wet-only audio.
+        concertHallSend.outputVolume = dryGain * concertHallSendLevel
     }
 }
 
