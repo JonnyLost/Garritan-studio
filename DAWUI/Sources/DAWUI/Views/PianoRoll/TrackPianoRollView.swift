@@ -24,6 +24,7 @@ private struct HorizontalScrollOffsetKey: PreferenceKey {
 /// A piano roll that shows ALL MIDI on a track, not tied to individual clips.
 /// Auto-creates a master clip when the user draws notes on an empty track.
 public struct TrackPianoRollView: View {
+    @Environment(\.studioPalette) private var palette
     @ObservedObject var viewModel: ProjectViewModel
     let trackID: TrackID
     
@@ -188,9 +189,20 @@ public struct TrackPianoRollView: View {
     
     public var body: some View {
         VStack(spacing: 0) {
+            StudioWorkspaceHeader(
+                "Piano Roll",
+                subtitle: "MIDI note editor, velocity and expression lanes",
+                symbol: "pianokeys"
+            ) {
+                if let track = currentTrack {
+                    Text(track.name)
+                        .foregroundStyle(palette.secondaryText)
+                        .lineLimit(1)
+                }
+            }
             editorToolbar
             
-            Rectangle().fill(Color.gray.opacity(0.3)).frame(height: 1)
+            Rectangle().fill(palette.separator).frame(height: 1)
             
             GeometryReader { geometry in
                 let availableHeight = geometry.size.height - (showVelocityLane ? velocityLaneHeight : 0) - (showCCLane ? ccLaneHeight : 0) - 24
@@ -199,7 +211,7 @@ public struct TrackPianoRollView: View {
                 VStack(spacing: 0) {
                     // TOP ROW: Corner + Bar ruler (synced with note grid horizontal scroll)
                     HStack(spacing: 0) {
-                        Color(nsColor: .windowBackgroundColor)
+                        palette.panel
                             .frame(width: pianoKeyWidth, height: 24)
                         
                         // Bar ruler - offset to match note grid horizontal scroll
@@ -249,7 +261,7 @@ public struct TrackPianoRollView: View {
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                                 .frame(width: pianoKeyWidth, height: velocityLaneHeight)
-                                .background(Color(nsColor: .windowBackgroundColor))
+                                .background(palette.panel)
                             
                             // Velocity - offset to match note grid horizontal scroll
                             velocityCanvas
@@ -267,7 +279,7 @@ public struct TrackPianoRollView: View {
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                                 .frame(width: pianoKeyWidth, height: ccLaneHeight)
-                                .background(Color(nsColor: .windowBackgroundColor))
+                                .background(palette.panel)
                             
                             // CC - offset to match note grid horizontal scroll
                             ccCanvas
@@ -281,7 +293,8 @@ public struct TrackPianoRollView: View {
                 }
             }
         }
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(palette.canvas)
+        .tint(palette.accent)
         .focusable()
         .focused($isViewFocused)
         .focusEffectDisabled()
@@ -371,7 +384,10 @@ public struct TrackPianoRollView: View {
             ForEach(MIDIEditorTool.allCases, id: \.self) { tool in
                 Button(action: { currentTool = tool }) {
                     Image(systemName: tool.icon)
-                        .foregroundColor(currentTool == tool ? .accentColor : .primary)
+                        .foregroundColor(currentTool == tool ? palette.accent : palette.primaryText)
+                        .frame(width: 26, height: 26)
+                        .background(currentTool == tool ? palette.selectedBackground : Color.clear,
+                                    in: RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
                 .help("\(tool.rawValue) (\(tool.shortcutKey))")
@@ -469,7 +485,7 @@ public struct TrackPianoRollView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(palette.surface)
     }
     
     // MARK: - Bar Ruler Canvas
@@ -508,7 +524,7 @@ public struct TrackPianoRollView: View {
             }
             context.stroke(playheadPath, with: .color(Color.accentColor), lineWidth: 1)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(palette.panel)
         .contentShape(Rectangle())
         .gesture(
             DragGesture(minimumDistance: 0)
@@ -551,14 +567,15 @@ public struct TrackPianoRollView: View {
                 
                 if isBlackKey {
                     let rect = CGRect(x: 0, y: y, width: size.width, height: Double(noteHeight))
-                    context.fill(Path(rect), with: .color(Color.black.opacity(0.1)))
+                    context.fill(Path(rect), with: .color(palette.appearance == .heritageLight ?
+                        Color.black.opacity(0.05) : Color.white.opacity(0.04)))
                 }
                 
                 let linePath = Path { path in
                     path.move(to: CGPoint(x: 0, y: y))
                     path.addLine(to: CGPoint(x: size.width, y: y))
                 }
-                context.stroke(linePath, with: .color(Color.gray.opacity(pitch % 12 == 0 ? 0.3 : 0.1)), lineWidth: pitch % 12 == 0 ? 1 : 0.5)
+                context.stroke(linePath, with: .color(palette.separator.opacity(pitch % 12 == 0 ? 0.65 : 0.25)), lineWidth: pitch % 12 == 0 ? 1 : 0.5)
             }
             
             // Vertical lines (beat/bar)
@@ -570,7 +587,7 @@ public struct TrackPianoRollView: View {
                     path.move(to: CGPoint(x: x, y: 0))
                     path.addLine(to: CGPoint(x: x, y: size.height))
                 }
-                context.stroke(linePath, with: .color(Color.gray.opacity(isBarLine ? 0.5 : 0.2)), lineWidth: isBarLine ? 1 : 0.5)
+                context.stroke(linePath, with: .color(palette.separator.opacity(isBarLine ? 0.9 : 0.35)), lineWidth: isBarLine ? 1 : 0.5)
             }
             
             // Draw existing notes (with drag offset for selected notes being dragged)
