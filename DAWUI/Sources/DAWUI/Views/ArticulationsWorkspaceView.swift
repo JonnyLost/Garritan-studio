@@ -44,9 +44,25 @@ struct ArticulationsWorkspaceView: View {
     @State private var catalog = GPOKeyswitchCatalog.load()
     @State private var search = ""
     @State private var selectedPatchName: String?
+    @State private var selectedArticulationID: String?
 
     private var suggestedName: String {
-        viewModel.selectedTrack?.name ?? ""
+        guard let track = viewModel.selectedTrack else { return "" }
+        // The catalog ID is the selected ARIA program path, not the user-editable track title.
+        let program = track.garritanProgramID?.components(separatedBy: ":").dropFirst().joined(separator: ":") ?? ""
+        return program.components(separatedBy: "/").last ?? ""
+    }
+
+    private func normalized(_ value: String) -> String {
+        value.lowercased().filter { $0.isLetter || $0.isNumber }
+    }
+
+    private var suggestedPatch: GPOKeyswitchCatalog.Patch? {
+        guard let catalog, !suggestedName.isEmpty else { return nil }
+        let needle = normalized(suggestedName.replacingOccurrences(of: ".sfz", with: "", options: .caseInsensitive))
+        // Match only unambiguous, exact patch names; never guess an articulation map.
+        let matches = catalog.patches.filter { normalized($0.patch) == needle }
+        return matches.count == 1 ? matches.first : nil
     }
 
     private var matchingPatches: [GPOKeyswitchCatalog.Patch] {
@@ -61,7 +77,7 @@ struct ArticulationsWorkspaceView: View {
         if let selectedPatchName {
             return catalog.patches.first { $0.patch == selectedPatchName }
         }
-        return catalog.patches.first { $0.patch.compare(suggestedName, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }
+        return suggestedPatch
     }
 
     var body: some View {
@@ -107,22 +123,37 @@ struct ArticulationsWorkspaceView: View {
                                 Text(patch.patch).font(.title3.weight(.semibold))
                                 Text("Reference assignments from the GPO5 owner's manual. These controls do not transmit MIDI yet.")
                                     .font(.caption).foregroundColor(.secondary)
+                                if selectedPatchName == nil && suggestedPatch?.patch == patch.patch {
+                                    Label("Matched to loaded Garritan program", systemImage: "checkmark.circle")
+                                        .font(.caption).foregroundColor(.green)
+                                } else {
+                                    Text("Manual reference selection")
+                                        .font(.caption).foregroundColor(.secondary)
+                                }
                                 ForEach(patch.keyswitches) { assignment in
-                                    HStack(spacing: 16) {
-                                        Text(assignment.note)
-                                            .font(.system(.body, design: .monospaced).weight(.semibold))
-                                            .frame(width: 52, alignment: .leading)
-                                        Text(assignment.articulation)
-                                        Spacer()
+                                    Button {
+                                        selectedArticulationID = assignment.id
+                                    } label: {
+                                        HStack(spacing: 16) {
+                                            Image(systemName: selectedArticulationID == assignment.id ? "largecircle.fill.circle" : "circle")
+                                                .foregroundColor(.accentColor)
+                                            Text(assignment.note)
+                                                .font(.system(.body, design: .monospaced).weight(.semibold))
+                                                .frame(width: 52, alignment: .leading)
+                                            Text(assignment.articulation)
+                                            Spacer()
+                                        }
+                                        .padding(10)
+                                        .background(Color(nsColor: .controlBackgroundColor))
+                                        .cornerRadius(7)
                                     }
-                                    .padding(10)
-                                    .background(Color(nsColor: .controlBackgroundColor))
-                                    .cornerRadius(7)
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("\\(assignment.articulation), keyswitch \\(assignment.note)")
                                 }
                             } else {
-                                Text("Select a keyswitch patch from the list.")
+                                Text("Select a keyswitch patch from the list, or load a matching Garritan KS program.")
                                     .foregroundColor(.secondary)
-                                Text("The track name is used only as an initial suggestion; patch identity must be confirmed before MIDI triggering.")
+                                Text("Only exact matches to the loaded Garritan program are suggested. Manual selection remains available.")
                                     .font(.caption).foregroundColor(.secondary)
                             }
                         }
@@ -140,6 +171,13 @@ struct ArticulationsWorkspaceView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .padding(20)
             }
+        }
+        .onChange(of: viewModel.selectedTrackID) { _, _ in
+            selectedPatchName = nil
+            selectedArticulationID = nil
+        }
+        .onChange(of: selectedPatchName) { _, _ in
+            selectedArticulationID = nil
         }
     }
 }
