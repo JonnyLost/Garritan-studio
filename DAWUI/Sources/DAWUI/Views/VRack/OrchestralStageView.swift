@@ -4,6 +4,7 @@ import DAWCore
 /// Stage placement is independent of the sample library. Horizontal placement
 /// controls existing track pan; L1-L5 drive the shared Concert Hall send.
 struct OrchestralStageView: View {
+    @Environment(\.studioPalette) private var palette
     @ObservedObject var viewModel: ProjectViewModel
     var expanded: Bool = false
     @State private var dragOrigins: [TrackID: CGPoint] = [:]
@@ -152,7 +153,7 @@ struct OrchestralStageView: View {
                 // automatically in every split-editor configuration. Give it
                 // the available viewport so the bottom rows remain scrollable.
                 .frame(width: 280, height: max(120, geometry.size.height - 24))
-                .background(Color(nsColor: .controlBackgroundColor).opacity(0.65))
+                .background(palette.panel.opacity(0.9))
                 .clipShape(RoundedRectangle(cornerRadius: 12))
             }
             .padding(12)
@@ -380,7 +381,7 @@ struct OrchestralStageView: View {
     private func curvedStageCanvas(width: CGFloat) -> some View {
         ZStack {
             RoundedRectangle(cornerRadius: 12)
-                .fill(Color(nsColor: .windowBackgroundColor))
+                .fill(palette.surface)
 
             ForEach((1...5).reversed(), id: \.self) { zone in
                 orchestralBand(zone, width: width)
@@ -587,7 +588,7 @@ struct OrchestralStageView: View {
         let selected = viewModel.selectedTrackID == track.id
 
         return Circle()
-            .fill(selected ? Color.accentColor : Color.orange)
+            .fill(selected ? palette.accent : Color.orange)
             .frame(width: 22, height: 22)
             .overlay(Circle().stroke(Color.white, lineWidth: 2))
             .overlay(
