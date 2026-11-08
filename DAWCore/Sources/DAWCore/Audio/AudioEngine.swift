@@ -231,6 +231,10 @@ public final class AudioEngine: ObservableObject {
             format: format
         )
         engine.connect(trackNode.outputMixer, to: masterMixer, format: format)
+        let dryEdges = engine.outputConnectionPoints(for: trackNode.outputMixer, outputBus: 0)
+        print("[ConcertHall] Dry track \(track.id.rawValue) -> master: \(dryEdges.contains { $0.node === masterMixer })")
+        print("[ConcertHall] Track output format: \(trackNode.outputMixer.outputFormat(forBus: 0))")
+        print("[ConcertHall] Master input format: \(masterMixer.inputFormat(forBus: 0))")
         
         // Set initial values
         trackNode.setVolume(track.volume)
