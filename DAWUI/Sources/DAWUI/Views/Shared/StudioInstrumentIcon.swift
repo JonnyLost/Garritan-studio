@@ -544,19 +544,46 @@ private struct InstrumentIconDrawing {
             body.addCurve(to: CGPoint(x: 50, y: 33),
                           control1: CGPoint(x: 85, y: 48), control2: CGPoint(x: 86, y: 20))
             body.closeSubpath()
-            let primary = [
-                body, L([(46, 43), (46, 8), (54, 8), (54, 43)]),
-                L([(42, 60), (58, 60)]), L([(38, 8), (62, 8)]),
+            // Player and section names resolve to their instrument body, but
+            // size, scroll and endpin differ between violin, viola, cello and bass.
+            let scale: CGFloat
+            switch kind {
+            case .violin: scale = 0.80
+            case .viola: scale = 0.89
+            case .cello: scale = 1.0
+            case .doubleBass: scale = 1.08
+            default: scale = 0.95
+            }
+            let bodyTransform = CGAffineTransform(
+                a: scale, b: 0, c: 0, d: scale,
+                tx: 50 * (1 - scale), ty: 63 * (1 - scale)
+            )
+            var primary = [
+                body.applying(bodyTransform),
+                L([(46, 43), (46, 8), (54, 8), (54, 43)]),
+                L([(42, 60), (58, 60)]),
+                L([(38, 8), (62, 8)]),
                 L([(50, 8), (50, 3)])
             ]
+            if kind == .violin {
+                // A slender bow makes the small solo violin immediately distinct.
+                primary.append(L([(82, 18), (91, 85)]))
+            }
+            if kind == .doubleBass {
+                primary.append(L([(38, 33), (29, 25), (27, 19)]))
+                primary.append(L([(62, 33), (71, 25), (73, 19)]))
+            }
             var detail = [L([(44, 46), (44, 85)]), L([(48, 46), (48, 85)]),
                           L([(52, 46), (52, 85)]), L([(56, 46), (56, 85)]),
                           L([(35, 53), (38, 59), (34, 65)]),
                           L([(65, 53), (62, 59), (66, 65)])]
             if kind == .doubleBass {
+                primary.append(L([(50, 88), (50, 100)]))
                 detail.append(L([(29, 92), (38, 96), (62, 96), (71, 92)]))
             } else if kind == .cello {
-                detail.append(L([(50, 86), (50, 98)]))
+                primary.append(L([(50, 86), (50, 99)]))
+            } else if kind == .viola {
+                detail.append(L([(32, 47), (36, 42)]))
             } else if kind == .strings {
                 detail.append(L([(15, 24), (8, 30), (8, 70), (15, 76)]))
             }
