@@ -465,6 +465,7 @@ public struct MainWindowView: View {
         .help(title)
     }
 
+    @ViewBuilder
     private var bottomPanel: some View {
         if showInstrumentWorkspace {
             VRackView(viewModel: viewModel, expandedOnly: true)
