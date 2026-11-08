@@ -269,6 +269,8 @@ public struct DAWState: Codable, Sendable {
     public var showVRack: Bool
     public var showMixer: Bool
     public var showInspector: Bool
+    /// Optional for compatibility with projects saved before stage layouts.
+    public var stageLayoutID: String?
     
     // Zoom and scroll
     public var zoomLevel: Double
@@ -296,6 +298,7 @@ public struct DAWState: Codable, Sendable {
         self.showVRack = showVRack
         self.showMixer = showMixer
         self.showInspector = showInspector
+        self.stageLayoutID = nil
         self.zoomLevel = zoomLevel
         self.horizontalScrollOffset = horizontalScrollOffset
         self.verticalScrollOffset = verticalScrollOffset
