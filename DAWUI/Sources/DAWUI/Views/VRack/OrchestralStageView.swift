@@ -491,12 +491,13 @@ struct OrchestralStageView: View {
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Text("Dry / Wet")
-                Slider(value: wetTrimBinding(for: id), in: 0...2)
-                Text("\(Int(min(200, max(0, (track.stageWetTrim ?? 1) * 100))))%")
+                Slider(value: wetLevelBinding(for: id), in: 0...1)
+                    .disabled(track.stageReverbZone == 0)
+                Text("\(Int(effectiveWetLevel(for: track) * 100))%")
                     .monospacedDigit()
                     .frame(width: 46)
             }
-            Text("Instrument hall send: 100% follows the selected stage zone.")
+            Text("The wet level follows stage movement; adjust it to fine-tune the instrument.")
                 .font(.caption2).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
@@ -515,10 +516,26 @@ struct OrchestralStageView: View {
         }
     }
 
-    private func wetTrimBinding(for id: TrackID) -> Binding<Double> {
+    private let stageSendLevels: [Double] = [0, 0.12, 0.20, 0.30, 0.43, 0.58]
+
+    private func effectiveWetLevel(for track: Track) -> Double {
+        let zone = min(5, max(0, track.stageReverbZone ?? 2))
+        return min(1, stageSendLevels[zone] * Double(track.stageWetTrim ?? 1))
+    }
+
+    private func wetLevelBinding(for id: TrackID) -> Binding<Double> {
         Binding(
-            get: { Double(viewModel.project.track(withID: id)?.stageWetTrim ?? 1) },
-            set: { viewModel.setTrackStageWetTrim(id: id, trim: Float($0)) }
+            get: {
+                guard let track = viewModel.project.track(withID: id) else { return 0 }
+                return effectiveWetLevel(for: track)
+            },
+            set: { level in
+                guard let track = viewModel.project.track(withID: id) else { return }
+                let zone = min(5, max(0, track.stageReverbZone ?? 2))
+                let base = stageSendLevels[zone]
+                guard base > 0 else { return }
+                viewModel.setTrackStageWetTrim(id: id, trim: Float(min(2, max(0, level / base))))
+            }
         )
     }
 
