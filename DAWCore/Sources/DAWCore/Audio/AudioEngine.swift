@@ -199,6 +199,15 @@ public final class AudioEngine: ObservableObject {
         engine.attach(stereoEffect)
         engine.attach(trackNode.pannerNode)
         engine.attach(trackNode.outputMixer)
+        engine.attach(trackNode.concertHallSend)
+        engine.connect(
+            trackNode.concertHallSend,
+            to: concertHallSendMixer,
+            format: AVAudioFormat(
+                standardFormatWithSampleRate: sampleRate,
+                channels: 2
+            )!
+        )
         
         // Connect: input -> plugins -> gain -> panner -> output
         let format = AVAudioFormat(
@@ -762,6 +771,7 @@ public final class TrackAudioNode {
     public let pannerNode: AVAudioMixerNode
     public var stereoPositionNode: AVAudioUnitEffect?
     public let outputMixer: AVAudioMixerNode
+    public let concertHallSend: AVAudioMixerNode
     
     // Plugin chain (Audio Units)
     public var pluginNodes: [AVAudioUnit] = []
@@ -781,6 +791,8 @@ public final class TrackAudioNode {
         self.gainNode = AVAudioMixerNode()
         self.pannerNode = AVAudioMixerNode()
         self.outputMixer = AVAudioMixerNode()
+        self.concertHallSend = AVAudioMixerNode()
+        self.concertHallSend.outputVolume = 0.20
     }
     
     public func setVolume(_ volume: Float) {
