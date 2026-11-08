@@ -305,6 +305,76 @@ private struct InstrumentIconDrawing {
     }
 
     static func make(_ kind: InstrumentIconIdentity) -> Self {
+        let base = makeBase(kind)
+        return Self(
+            primary: base.primary,
+            details: base.details,
+            engraving: base.engraving,
+            silhouettes: fillShapes(for: kind, base: base),
+            compactDetails: Array(base.details.prefix(4))
+        )
+    }
+
+    /// Extra closed polygons that can be filled by Signature, Heritage and
+    /// Medallion styles without filling open instrument strokes.
+    private static func fillShapes(for kind: InstrumentIconIdentity,
+                                   base: InstrumentIconDrawing) -> [Path] {
+        switch kind {
+        case .piccolo, .flute, .altoFlute, .bassFlute:
+            return [line([(8, 75), (91, 25), (96, 31), (12, 81)], closed: true)]
+        case .oboe, .englishHorn:
+            return [line([(45, 22), (53, 20), (62, 82), (52, 83)], closed: true)]
+        case .clarinet, .bassClarinet, .contrabassClarinet:
+            return [line([(37, 13), (45, 10), (65, 78), (54, 82)], closed: true)]
+        case .bassoon, .contrabassoon:
+            return [box(30, 24, 10, 59), box(61, 19, 12, 63)]
+        case .horn:
+            return [line([(72, 25), (89, 17), (93, 14), (93, 77), (75, 70)],
+                         closed: true)]
+        case .trumpet:
+            return [line([(69, 48), (93, 32), (93, 73), (69, 57)], closed: true)]
+        case .trombone, .bassTrombone:
+            return [line([(72, 40), (93, 24), (93, 58), (73, 47)], closed: true)]
+        case .tuba:
+            return [line([(70, 16), (88, 6), (88, 30), (73, 28)], closed: true)]
+        case .violin, .viola, .cello, .doubleBass, .strings:
+            return Array(base.primary.prefix(1))
+        case .timpani:
+            return [line([(16, 39), (30, 72), (39, 80), (61, 80),
+                          (72, 72), (84, 39)], closed: true)]
+        case .snare, .bassDrum, .percussion:
+            return [box(20, 35, 60, 37)]
+        case .cymbals:
+            return [oval(12, 20, 76, 22)]
+        case .gong:
+            return [oval(20, 15, 60, 60)]
+        case .mallets, .xylophone, .vibraphone, .marimba, .bells, .glockenspiel:
+            // Bars are thin enough that filling makes them readable at 24 px.
+            return Array(base.primary.suffix(6))
+        case .crotales:
+            return Array(base.primary.prefix(5))
+        case .handbells:
+            return Array(base.primary.prefix(1))
+        case .harp:
+            return [line([(26, 89), (29, 18), (36, 16), (36, 89)], closed: true)]
+        case .piano:
+            return Array(base.primary.prefix(1))
+        case .celesta, .harpsichord:
+            return [box(12, 30, 76, 20)]
+        case .organ:
+            return Array(base.primary.prefix(5))
+        case .glassArmonica:
+            return [oval(25, 30, 49, 42)]
+        case .choir:
+            return Array(base.primary.prefix(3))
+        case .synth:
+            return [box(9, 22, 82, 60)]
+        default:
+            return []
+        }
+    }
+
+    private static func makeBase(_ kind: InstrumentIconIdentity) -> Self {
         let L: ([(CGFloat, CGFloat)]) -> Path = { points in line(points) }
         let O = oval
         let B = box
