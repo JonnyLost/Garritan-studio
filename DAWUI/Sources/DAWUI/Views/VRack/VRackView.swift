@@ -100,13 +100,18 @@ private final class BrowserAudition: ObservableObject {
                 instrument.sendController(11, withValue: 127, onChannel: 0)
                 instrument.sendController(1, withValue: 100, onChannel: 0)
                 print("[BrowserAudition] Initialized MIDI CC7=110 CC11=127 CC1=100")
+                // Give ARIA time to finish loading sample data before sounding notes.
+                print("[BrowserAudition] Waiting 2 seconds for sample readiness")
+                try await Task.sleep(for: .seconds(2))
+                guard request == token && !Task.isCancelled else { return }
+                print("[BrowserAudition] Sample readiness wait completed")
                 isLoading = false
                 isPlaying = true
                 for note: UInt8 in [60, 64, 67, 72] {
                     guard request == token && !Task.isCancelled else { break }
                     print("[BrowserAudition] Note on: \(note)")
                     instrument.startNote(note, withVelocity: 88, onChannel: 0)
-                    try? await Task.sleep(for: .milliseconds(450))
+                    try? await Task.sleep(for: .milliseconds(900))
                     instrument.stopNote(note, onChannel: 0)
                     print("[BrowserAudition] Note off: \(note)")
                     try? await Task.sleep(for: .milliseconds(90))
