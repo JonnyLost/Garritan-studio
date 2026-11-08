@@ -401,13 +401,16 @@ struct SettingsView: View {
             AppearanceSettingsView()
                 .tabItem { Label("Appearance", systemImage: "paintpalette") }
         }
-        .frame(width: 620, height: 365)
+        .frame(width: 680, height: 540)
     }
 }
 
 /// Appearance is a user preference, not a property of the musical project.
 private struct AppearanceSettingsView: View {
     @AppStorage("garritanStudio.appearance") private var selection = StudioAppearance.system.rawValue
+    @AppStorage("garritanStudio.iconCollection") private var iconSelection = StudioIconCollection.matchAppearance.rawValue
+    @Environment(\.studioPalette) private var palette
+    @Environment(\.studioIconCollection) private var resolvedIcons
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -433,6 +436,46 @@ private struct AppearanceSettingsView: View {
                 set: { selection = $0 ? StudioAppearance.system.rawValue : StudioAppearance.gpo5Modern.rawValue }
             ))
             Text("When automatic, light uses Personal Orchestra and dark uses Orchestral Strings. The chosen theme is saved for future launches.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Divider()
+
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Instrument Icons").font(.headline)
+                    Text("Choose a full icon collection, or match your selected appearance.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Picker("Icon Collection", selection: $iconSelection) {
+                    ForEach(StudioIconCollection.allCases) { icons in
+                        Text(icons.title).tag(icons.rawValue)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 202)
+            }
+
+            HStack(spacing: 11) {
+                ForEach(["Piccolo", "Oboe Solo", "French Horn 1 Solo",
+                         "Trumpet 1 Solo", "Violin 1 KS", "Cello 1 KS",
+                         "Timpani", "Concert Grand Harp"], id: \.self) { name in
+                    VStack(spacing: 7) {
+                        StudioInstrumentIcon(name: name, size: 43)
+                        Text(name.components(separatedBy: " ").first ?? name)
+                            .font(.system(size: 9))
+                            .foregroundStyle(palette.secondaryText)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .padding(12)
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: 10))
+
+            Text((StudioIconCollection(rawValue: iconSelection) ?? .matchAppearance).detail +
+                 " · Active: " + resolvedIcons.title)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
