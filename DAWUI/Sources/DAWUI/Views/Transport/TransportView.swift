@@ -5,6 +5,7 @@ import DAWCore
 
 /// Transport control bar with play/stop, tempo, time display
 public struct TransportView: View {
+    @Environment(\.studioPalette) private var palette
     @ObservedObject var viewModel: ProjectViewModel
     @ObservedObject var transportState: TransportState
     
@@ -87,13 +88,13 @@ public struct TransportView: View {
                         .foregroundColor(.secondary)
                     Text(barsDisplay)
                         .font(.system(size: 18, weight: .bold, design: .monospaced))
-                        .foregroundColor(.white)
+                        .foregroundColor(palette.primaryText)
                         .fixedSize(horizontal: true, vertical: false)
                 }
                 .frame(minWidth: 80)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(Color.black.opacity(0.4))
+                .background(palette.raisedSurface)
                 .cornerRadius(4)
                 
                 // Time display (MM:SS:FF)
@@ -103,13 +104,13 @@ public struct TransportView: View {
                         .foregroundColor(.secondary)
                     Text(timeDisplay)
                         .font(.system(size: 18, weight: .bold, design: .monospaced))
-                        .foregroundColor(.green)
+                        .foregroundColor(palette.accent)
                         .fixedSize(horizontal: true, vertical: false)
                 }
                 .frame(minWidth: 90)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(Color.black.opacity(0.4))
+                .background(palette.raisedSurface)
                 .cornerRadius(4)
             }
             
@@ -140,7 +141,7 @@ public struct TransportView: View {
                     } else {
                         Text(String(format: "%.1f", transportState.tempo.bpm))
                             .font(.system(size: 16, weight: .bold, design: .monospaced))
-                            .foregroundColor(.orange)
+                            .foregroundColor(palette.accent)
                             .onTapGesture(count: 2) {
                                 tempoText = String(format: "%.1f", transportState.tempo.bpm)
                                 isEditingTempo = true
@@ -149,7 +150,7 @@ public struct TransportView: View {
                 }
                 .frame(width: 55)
                 .padding(.horizontal, 4)
-                .background(Color.black.opacity(0.3))
+                .background(palette.raisedSurface)
                 .cornerRadius(4)
                 
                 Button(action: { transportState.nudgeTempo(by: 1) }) {
@@ -171,7 +172,7 @@ public struct TransportView: View {
             }
             .frame(width: 35)
             .padding(.horizontal, 4)
-            .background(Color.black.opacity(0.3))
+            .background(palette.raisedSurface)
             .cornerRadius(4)
             
             Divider()
@@ -181,7 +182,7 @@ public struct TransportView: View {
             Button(action: { transportState.toggleLoop() }) {
                 Image(systemName: "repeat")
                     .font(.system(size: 14))
-                    .foregroundColor(transportState.isLoopEnabled ? .accentColor : .secondary)
+                    .foregroundColor(transportState.isLoopEnabled ? palette.accent : .secondary)
             }
             .buttonStyle(.plain)
             .help("Toggle Loop")
@@ -190,7 +191,7 @@ public struct TransportView: View {
             Button(action: { transportState.isMetronomeEnabled.toggle() }) {
                 Image(systemName: "metronome")
                     .font(.system(size: 14))
-                    .foregroundColor(transportState.isMetronomeEnabled ? .accentColor : .secondary)
+                    .foregroundColor(transportState.isMetronomeEnabled ? palette.accent : .secondary)
             }
             .buttonStyle(.plain)
             .help("Toggle Metronome")
@@ -236,7 +237,7 @@ public struct TransportView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(palette.panel)
         // Real-time playhead updates (using smooth interpolated position)
         .onReceive(transportState.$smoothPlayheadBeats) { beats in
             currentBeats = beats
