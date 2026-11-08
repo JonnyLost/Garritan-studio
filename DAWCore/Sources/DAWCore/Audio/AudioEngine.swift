@@ -41,6 +41,9 @@ public final class AudioEngine: ObservableObject {
     // Shared Concert Hall send curve, indexed by persisted stage zone (0...5).
     // Keeping one curve avoids discrepancies between live movement and project loading.
     private static let concertHallSendLevels: [Float] = [0.0, 0.12, 0.20, 0.30, 0.43, 0.58]
+    // Gentle direct-sound falloff across the five seating rows. Conductor
+    // remains at unity and dry. Reverb remains independently controllable.
+    private static let stageDirectLevels: [Float] = [1.0, 1.0, 0.94, 0.88, 0.82, 0.76]
 
     // MARK: - Properties
     
@@ -247,7 +250,10 @@ public final class AudioEngine: ObservableObject {
         
         // Restore saved orchestral stage depth.
         let depth = max(0, min(5, track.stageReverbZone ?? 2))
-        trackNode.setConcertHallSendLevel(Self.concertHallSendLevels[depth])
+        trackNode.setStageAcoustics(
+            directLevel: Self.stageDirectLevels[depth],
+            hallSendLevel: Self.concertHallSendLevels[depth]
+        )
 
         trackNodes[track.id] = trackNode
         installTrackMeter(for: trackNode)
@@ -326,8 +332,9 @@ public final class AudioEngine: ObservableObject {
     /// Depth 0 = conductor; depth 5 = back row.
     public func setConcertHallDepth(_ depth: Int, for trackID: TrackID) {
         let safeDepth = max(0, min(5, depth))
-        trackNodes[trackID]?.setConcertHallSendLevel(
-            Self.concertHallSendLevels[safeDepth]
+        trackNodes[trackID]?.setStageAcoustics(
+            directLevel: Self.stageDirectLevels[safeDepth],
+            hallSendLevel: Self.concertHallSendLevels[safeDepth]
         )
     }
 
@@ -821,6 +828,7 @@ public final class TrackAudioNode {
     private var isMuted: Bool = false
     private var volume: Float = 1.0
     private var concertHallSendLevel: Float = 0.20
+    private var stageDirectLevel: Float = 1.0
 
     public init(trackID: TrackID, channelCount: Int, sampleRate: Double) {
         self.trackID = trackID
@@ -837,9 +845,11 @@ public final class TrackAudioNode {
         updateOutputVolume()
     }
 
-    /// Preserve the stage's relative hall send when volume or mute changes.
-    public func setConcertHallSendLevel(_ level: Float) {
-        concertHallSendLevel = max(0, level)
+    /// Apply distance-dependent direct level and room send together.
+    /// This does not change the user's saved track volume.
+    public func setStageAcoustics(directLevel: Float, hallSendLevel: Float) {
+        stageDirectLevel = directLevel.isFinite ? min(1, max(0, directLevel)) : 1
+        concertHallSendLevel = hallSendLevel.isFinite ? max(0, hallSendLevel) : 0
         updateOutputVolume()
     }
     
@@ -861,9 +871,10 @@ public final class TrackAudioNode {
     
     private func updateOutputVolume() {
         let dryGain: Float = isMuted ? 0.0 : volume
-        outputMixer.outputVolume = dryGain
+        outputMixer.outputVolume = dryGain * stageDirectLevel
         // The hall send branches before outputMixer, so it must explicitly
         // follow volume and mute (including solo) to prevent wet-only audio.
+        // Keep the room send separate from direct-sound distance attenuation.
         concertHallSend.outputVolume = dryGain * concertHallSendLevel
     }
 }
