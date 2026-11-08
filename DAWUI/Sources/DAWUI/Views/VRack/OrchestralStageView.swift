@@ -79,8 +79,7 @@ struct OrchestralStageView: View {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Label("Orchestra seating", systemImage: "music.note.list")
-                            .font(.subheadline.weight(.semibold))
+                        StudioSectionHeading("Orchestra Seating", symbol: "music.note.list")
                         Spacer()
                         Text("CONCERT HALL")
                             .font(.system(size: 10, weight: .medium))
@@ -119,8 +118,7 @@ struct OrchestralStageView: View {
 
                 ScrollView(.vertical) {
                   VStack(alignment: .leading, spacing: 14) {
-                    Label("Instrument position", systemImage: "slider.horizontal.3")
-                        .font(.subheadline.weight(.semibold))
+                    StudioSectionHeading("Instrument Position", symbol: "slider.horizontal.3")
                     selectedTrackControls
                     Divider()
                     Text("REVERB ZONES")
@@ -153,11 +151,12 @@ struct OrchestralStageView: View {
                 // automatically in every split-editor configuration. Give it
                 // the available viewport so the bottom rows remain scrollable.
                 .frame(width: 280, height: max(120, geometry.size.height - 24))
-                .background(palette.panel.opacity(0.9))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .studioPanel()
             }
-            .padding(12)
+            .padding(14)
         }
+        .background(palette.canvas)
+        .tint(palette.accent)
     }
 
     /// Conservative name-based matching. Unrecognized instruments retain their
