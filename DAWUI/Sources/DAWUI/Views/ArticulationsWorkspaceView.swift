@@ -168,6 +168,62 @@ struct ArticulationsWorkspaceView: View {
         .cornerRadius(8)
     }
 
+
+    // Compact mode shares the same catalog and patch-matching logic as the full editor.
+    var compactControls: some View {
+        HStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(viewModel.selectedTrack?.name ?? "No track selected")
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Text(activePatch?.patch ?? "No matching keyswitch map")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(width: 175, alignment: .leading)
+            Divider()
+            if let patch = activePatch {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(patch.keyswitches) { assignment in
+                            Button {
+                                selectedArticulationID = assignment.id
+                            } label: {
+                                VStack(spacing: 3) {
+                                    Text(assignment.articulation)
+                                        .font(.caption.weight(.medium))
+                                        .lineLimit(1)
+                                    Text(assignment.note)
+                                        .font(.caption2.monospaced())
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(selectedArticulationID == assignment.id
+                                    ? Color.accentColor.opacity(0.2)
+                                    : Color(nsColor: .controlBackgroundColor))
+                                .cornerRadius(7)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Reference keyswitch: \\(assignment.note). MIDI transmission not enabled.")
+                        }
+                    }
+                }
+            } else {
+                Text("Load a matching GPO5 KS patch to see articulation shortcuts")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onChange(of: viewModel.selectedTrackID) { _, _ in
+            selectedPatchName = nil
+            selectedArticulationID = nil
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack {
