@@ -76,22 +76,33 @@ private final class BrowserAudition: ObservableObject {
                 previewEngine.attach(instrument)
                 previewEngine.connect(instrument, to: previewEngine.mainMixerNode, format: format)
                 try TrackGarritanLoader.apply(TrackGarritanProgram(library: library, programName: path), to: instrument)
+                print("[BrowserAudition] Program loaded: \(path)")
                 try previewEngine.start()
+                print("[BrowserAudition] Engine started: \(previewEngine.isRunning)")
                 guard request == token else { previewEngine.stop(); return }
                 engine = previewEngine
                 unit = instrument
+                // GPO instruments often use CC1 for dynamic volume; a fresh
+                // ARIA instance may be silent until modulation/expression is set.
+                instrument.sendController(7, withValue: 110, onChannel: 0)
+                instrument.sendController(11, withValue: 127, onChannel: 0)
+                instrument.sendController(1, withValue: 100, onChannel: 0)
+                print("[BrowserAudition] Initialized MIDI CC7=110 CC11=127 CC1=100")
                 isLoading = false
                 isPlaying = true
                 for note: UInt8 in [60, 64, 67, 72] {
                     guard request == token && !Task.isCancelled else { break }
+                    print("[BrowserAudition] Note on: \(note)")
                     instrument.startNote(note, withVelocity: 88, onChannel: 0)
                     try? await Task.sleep(for: .milliseconds(450))
                     instrument.stopNote(note, onChannel: 0)
+                    print("[BrowserAudition] Note off: \(note)")
                     try? await Task.sleep(for: .milliseconds(90))
                 }
                 if request == token { stop() }
             } catch {
                 if request == token {
+                    print("[BrowserAudition] ERROR: \(error)")
                     stop()
                     errorMessage = error.localizedDescription
                 }
