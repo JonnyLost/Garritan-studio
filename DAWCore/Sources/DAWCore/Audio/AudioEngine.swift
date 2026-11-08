@@ -315,6 +315,8 @@ public final class AudioEngine: ObservableObject {
         trackNode.setVolume(track.volume)
         trackNode.setPan(track.pan)
         trackNode.setMuted(track.isMuted)
+        // Keep the acoustic send synchronized with all track edits, including undo/redo.
+        setConcertHallDepth(track.stageReverbZone ?? 2, for: track.id)
     }
     
     /// Set Concert Hall ambience according to orchestral stage depth.
