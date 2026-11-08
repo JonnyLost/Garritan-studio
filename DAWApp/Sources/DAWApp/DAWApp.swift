@@ -27,7 +27,8 @@ struct DAWApp: App {
     var body: some Scene {
         // Main document window
         WindowGroup {
-            MainWindowView(project: appState.currentProject)
+            StudioAppearanceHost {
+                MainWindowView(project: appState.currentProject)
                 .onAppear {
                     DispatchQueue.main.async {
                         NSApplication.shared.activate(ignoringOtherApps: true)
@@ -42,6 +43,7 @@ struct DAWApp: App {
                     }
                     appState.markUnsavedChanges()
                 }
+            }
         }
         .commands {
             // File commands
@@ -184,7 +186,9 @@ struct DAWApp: App {
         
         // Settings window
         Settings {
-            SettingsView()
+            StudioAppearanceHost {
+                SettingsView()
+            }
         }
     }
 }
@@ -389,8 +393,96 @@ extension Notification.Name {
 
 struct SettingsView: View {
     var body: some View {
-        GeneralSettingsView()
-            .frame(width: 400, height: 250)
+        TabView {
+            GeneralSettingsView()
+                .tabItem { Label("General", systemImage: "gearshape") }
+            AppearanceSettingsView()
+                .tabItem { Label("Appearance", systemImage: "paintpalette") }
+        }
+        .frame(width: 620, height: 365)
+    }
+}
+
+/// Appearance is a user preference, not a property of the musical project.
+private struct AppearanceSettingsView: View {
+    @AppStorage("garritanStudio.appearance") private var selection = StudioAppearance.system.rawValue
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Garritan Studio Appearance").font(.title3.bold())
+                Text("Three visual styles inspired by Garritan's orchestral heritage.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            HStack(spacing: 14) {
+                ForEach(StudioAppearance.visualThemes) { appearance in
+                    Button {
+                        selection = appearance.rawValue
+                    } label: {
+                        themeCard(appearance)
+                    }
+                    .buttonStyle(.plain)
+                    .help(appearance.subtitle)
+                }
+            }
+            Toggle("Automatically follow macOS light and dark appearance", isOn: Binding(
+                get: { selection == StudioAppearance.system.rawValue },
+                set: { selection = $0 ? StudioAppearance.system.rawValue : StudioAppearance.gpo5Modern.rawValue }
+            ))
+            Text("When automatic, light uses Personal Orchestra and dark uses Orchestral Strings. The chosen theme is saved for future launches.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .padding(22)
+    }
+
+    private func themeCard(_ appearance: StudioAppearance) -> some View {
+        let colors = StudioPalette(appearance: appearance)
+        let selected = selection == appearance.rawValue
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                Spacer()
+                Image(systemName: "music.note")
+            }
+            .font(.caption)
+            HStack(spacing: 5) {
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(colors.sidebar)
+                    .frame(width: 22, height: 66)
+                VStack(spacing: 5) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(colors.surface)
+                        .frame(height: 27)
+                    HStack(spacing: 4) {
+                        ForEach(0..<4, id: \.self) { _ in
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(colors.accentMuted)
+                                .frame(height: 29)
+                        }
+                    }
+                }
+            }
+            Text(appearance.title)
+                .font(.caption.bold())
+                .lineLimit(1)
+            Text(appearance == .heritageLight ? "Heritage Light" :
+                 appearance == .gpo5Modern ? "Modern" : "Heritage Dark")
+                .font(.caption2)
+                .opacity(0.8)
+        }
+        .foregroundStyle(colors.primaryText)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(colors.canvas))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(selected ? colors.accent : colors.separator,
+                              lineWidth: selected ? 3 : 1)
+        }
     }
 }
 
