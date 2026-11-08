@@ -121,18 +121,18 @@ struct ArticulationsWorkspaceView: View {
         let reference = referenceKeyswitch(pitch)
         let selected = canSendKeyswitch && reference?.id == selectedArticulationID
         return RoundedRectangle(cornerRadius: 3)
-            .fill(active ? Color.accentColor : (black ? Color.black : Color.white))
-            .overlay(RoundedRectangle(cornerRadius: 3).stroke(selected ? Color.accentColor : (reference == nil ? Color.clear : Color.orange), lineWidth: selected ? 2.5 : (reference == nil ? 0 : 1.5)))
+            .fill(active || selected ? Color.accentColor : (black ? Color.black : Color.white))
+            .overlay(RoundedRectangle(cornerRadius: 3).stroke(selected ? Color.accentColor : (reference == nil ? (black ? Color.black : Color.gray.opacity(0.4)) : Color.orange), lineWidth: selected ? 2 : (reference == nil ? 0.6 : 1.5)))
             .overlay(alignment: .top) {
                 if reference != nil {
-                    Circle().fill(selected ? Color.accentColor : Color.orange).frame(width: 5, height: 5).padding(.top, 3)
+                    Circle().fill(selected ? Color.white : Color.orange).frame(width: 5, height: 5).padding(.top, 3)
                 }
             }
             .overlay(alignment: .bottom) {
                 if pitch % 12 == 0 {
                     Text("C\(pitch / 12 - 1)")
                         .font(.system(size: 9))
-                        .foregroundColor(active ? .white : .gray)
+                        .foregroundColor(active || selected ? .white : .gray)
                         .padding(.bottom, 4)
                 }
             }
@@ -153,7 +153,7 @@ struct ArticulationsWorkspaceView: View {
                     viewModel.stopNotePreview(pitch: UInt8(pitch))
                     if pressedPitch == UInt8(pitch) { pressedPitch = nil }
                 })
-            .help("MIDI note \(pitch)")
+            .help(reference.map { "\($0.articulation) — \($0.note)" } ?? "MIDI note \(pitch)")
     }
 
     private var auditionKeyboard: some View {
