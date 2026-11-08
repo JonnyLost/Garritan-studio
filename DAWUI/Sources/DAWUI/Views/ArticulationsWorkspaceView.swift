@@ -96,12 +96,12 @@ struct ArticulationsWorkspaceView: View {
                             $0.identifier == pluginID
                         }) {
                             PluginWindowManager.shared.openPluginWindow(
-                                for: loaded, trackName: track.name)
+                                for: loaded, trackName: track.name, preferNativeARIA: true)
                         }
                     } label: {
-                        Label("Open ARIA Player", systemImage: "slider.horizontal.3")
+                        Label("Try Original ARIA Editor", systemImage: "pianokeys")
                     }
-                    .help("Open the loaded instrument's native plugin window")
+                    .help("Experimental: requests ARIA's original native Audio Unit editor. This editor previously crashed on this Mac. Save your project first.")
                     .buttonStyle(.bordered)
                 }
                 Button("Reload Catalog") { catalog = GPOKeyswitchCatalog.load() }
