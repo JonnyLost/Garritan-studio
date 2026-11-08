@@ -138,7 +138,11 @@ public struct MainWindowView: View {
                             .frame(height: 28)
                             Divider()
                             if compactLowerWorkspace {
-                                compactWorkspaceStrip
+                                if showArticulationsWorkspace {
+                                    ArticulationsWorkspaceView(viewModel: viewModel).compactControls
+                                } else {
+                                    compactWorkspaceStrip
+                                }
                             } else {
                                 bottomPanel
                             }
