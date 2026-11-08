@@ -7,6 +7,17 @@ struct OrchestralStageView: View {
     @ObservedObject var viewModel: ProjectViewModel
     var expanded: Bool = false
     @State private var dragOrigins: [TrackID: CGPoint] = [:]
+    @State private var selectedLayout: StageLayout = .symphony
+
+    private enum StageLayout: String, CaseIterable, Identifiable {
+        case symphony = "Full Symphony Orchestra"
+        case chamber = "Chamber Orchestra"
+        case strings = "String Orchestra"
+        case concertBand = "Concert Band"
+        case jazz = "Jazz Band"
+        case choir = "Choir"
+        var id: String { rawValue }
+    }
 
     private var instrumentTracks: [Track] {
         viewModel.project.tracks.filter { $0.type == .midi || $0.type == .instrument }
@@ -62,6 +73,13 @@ struct OrchestralStageView: View {
                             .font(.system(size: 10, weight: .medium))
                             .tracking(1.5)
                             .foregroundStyle(.secondary)
+                        Picker("Stage Layout", selection: $selectedLayout) {
+                            ForEach(StageLayout.allCases) { layout in
+                                Text(layout.rawValue).tag(layout)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 190)
                     }
                     fittedCurvedStage(
                         availableWidth: max(200, geometry.size.width - 328),
@@ -165,7 +183,7 @@ struct OrchestralStageView: View {
         var id: String { "\(zone)-\(name)" }
     }
 
-    private let seating: [SeatSection] = [
+    private let symphonySeating: [SeatSection] = [
         .init(name: "Violin I", zone: 1, pan: -0.77, span: 0.40),
         .init(name: "Violin II", zone: 1, pan: -0.37, span: 0.35),
         .init(name: "Viola", zone: 1, pan: 0.00, span: 0.34),
@@ -195,6 +213,64 @@ struct OrchestralStageView: View {
         .init(name: "Tenors", zone: 5, pan: 0.43, span: 0.30),
         .init(name: "Basses", zone: 5, pan: 0.82, span: 0.29)
     ]
+
+    // Visual seating templates; changing them does not move project tracks.
+    private var seating: [SeatSection] {
+        switch selectedLayout {
+        case .symphony: return symphonySeating
+        case .chamber: return [
+            .init(name: "Violin I", zone: 1, pan: -0.65, span: 0.55),
+            .init(name: "Violin II", zone: 1, pan: -0.1, span: 0.42),
+            .init(name: "Viola", zone: 1, pan: 0.35, span: 0.4),
+            .init(name: "Cello", zone: 1, pan: 0.76, span: 0.38),
+            .init(name: "Basses", zone: 2, pan: 0.79, span: 0.3),
+            .init(name: "Flutes", zone: 2, pan: -0.57, span: 0.32),
+            .init(name: "Oboes", zone: 2, pan: -0.18, span: 0.32),
+            .init(name: "Clarinets", zone: 2, pan: 0.19, span: 0.32),
+            .init(name: "Bassoons", zone: 2, pan: 0.52, span: 0.3),
+            .init(name: "Horns", zone: 3, pan: -0.4, span: 0.42),
+            .init(name: "Trumpets", zone: 3, pan: 0.13, span: 0.34),
+            .init(name: "Timpani", zone: 4, pan: 0.43, span: 0.34)
+        ]
+        case .strings: return [
+            .init(name: "Violin I", zone: 1, pan: -0.72, span: 0.53),
+            .init(name: "Violin II", zone: 1, pan: -0.19, span: 0.47),
+            .init(name: "Viola", zone: 1, pan: 0.3, span: 0.43),
+            .init(name: "Cello", zone: 1, pan: 0.74, span: 0.42),
+            .init(name: "Double Basses", zone: 2, pan: 0.6, span: 0.53)
+        ]
+        case .concertBand: return [
+            .init(name: "Flutes / Picc.", zone: 1, pan: -0.7, span: 0.48),
+            .init(name: "Clarinets", zone: 1, pan: -0.1, span: 0.62),
+            .init(name: "Saxophones", zone: 1, pan: 0.62, span: 0.52),
+            .init(name: "Oboes", zone: 2, pan: -0.73, span: 0.38),
+            .init(name: "Bassoons", zone: 2, pan: -0.28, span: 0.37),
+            .init(name: "Horns", zone: 2, pan: 0.22, span: 0.44),
+            .init(name: "Euphoniums", zone: 2, pan: 0.74, span: 0.4),
+            .init(name: "Trumpets", zone: 3, pan: -0.52, span: 0.56),
+            .init(name: "Trombones", zone: 3, pan: 0.15, span: 0.56),
+            .init(name: "Tubas", zone: 3, pan: 0.78, span: 0.35),
+            .init(name: "Percussion", zone: 4, pan: -0.3, span: 0.7),
+            .init(name: "Timpani", zone: 4, pan: 0.57, span: 0.42)
+        ]
+        case .jazz: return [
+            .init(name: "Saxophones", zone: 1, pan: -0.46, span: 0.86),
+            .init(name: "Trombones", zone: 2, pan: -0.38, span: 0.77),
+            .init(name: "Trumpets", zone: 3, pan: -0.38, span: 0.77),
+            .init(name: "Piano", zone: 1, pan: 0.72, span: 0.33),
+            .init(name: "Bass", zone: 2, pan: 0.67, span: 0.34),
+            .init(name: "Drums", zone: 3, pan: 0.67, span: 0.36),
+            .init(name: "Guitar", zone: 4, pan: 0.67, span: 0.36)
+        ]
+        case .choir: return [
+            .init(name: "Sopranos", zone: 2, pan: -0.7, span: 0.48),
+            .init(name: "Altos", zone: 2, pan: -0.21, span: 0.45),
+            .init(name: "Tenors", zone: 2, pan: 0.26, span: 0.43),
+            .init(name: "Basses", zone: 2, pan: 0.73, span: 0.43),
+            .init(name: "Organ / Piano", zone: 4, pan: 0, span: 0.42)
+        ]
+        }
+    }
 
     // All geometry is in a 1000 x 560 reference canvas. The complete stage
     // scales with its width instead of being clipped by a fixed-height editor.
