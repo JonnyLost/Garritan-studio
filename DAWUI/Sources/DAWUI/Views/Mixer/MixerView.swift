@@ -18,14 +18,12 @@ public struct MixerView: View {
     
     public var body: some View {
         VStack(spacing: 0) {
-            // Mixer header
-            HStack {
-                Text("Mixer")
-                    .font(.headline)
-                
-                Spacer()
-                
-                // View options
+            StudioWorkspaceHeader(
+                "Mixer",
+                subtitle: "Instrument channels, levels and master output",
+                symbol: "slider.vertical.3"
+            ) {
+                // Keep the existing display menu; no audio routing is changed.
                 Menu {
                     Button("Show Sends") {}
                     Button("Show Inserts") {}
@@ -35,16 +33,11 @@ public struct MixerView: View {
                 }
                 .menuStyle(.borderlessButton)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(palette.panel)
-            
-            Divider()
             
             // Channel strips - left aligned
             HStack(spacing: 0) {
                 ScrollView(.horizontal, showsIndicators: true) {
-                    HStack(spacing: 0) {
+                    HStack(alignment: .top, spacing: 12) {
                         // Track channels
                         ForEach(viewModel.project.tracks) { track in
                             ChannelStripView(
@@ -56,8 +49,7 @@ public struct MixerView: View {
                                     showPluginBrowser = true
                                 }
                             )
-                            
-                            Divider()
+
                         }
                         
                         // Master channel
@@ -67,12 +59,14 @@ public struct MixerView: View {
                             isPlaying: viewModel.transportState.isPlaying
                         )
                     }
+                    .padding(16)
                 }
                 
                 Spacer() // Push channels to the left
             }
         }
         .background(palette.canvas)
+        .tint(palette.accent)
         .sheet(isPresented: $showPluginBrowser) {
             PluginBrowserView(
                 viewModel: viewModel,
@@ -143,11 +137,11 @@ struct ChannelStripView: View {
                     .frame(height: 4)
                 
                 Text(track.name)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.system(size: 11, weight: .semibold))
                     .lineLimit(1)
             }
-            .padding(.horizontal, 4)
-            .padding(.top, 4)
+            .padding(.horizontal, 7)
+            .padding(.top, 7)
             
             // Plugin slot
             let slot = track.pluginSlots.first
@@ -176,7 +170,7 @@ struct ChannelStripView: View {
             // Meter and fader side by side
             HStack(spacing: 2) {
                 StereoMeterView(leftLevel: meterLevels.left, rightLevel: meterLevels.right)
-                    .frame(width: 12, height: 80)
+                    .frame(width: 15, height: 145)
                 
                 FaderView(
                     value: Binding(
@@ -185,7 +179,7 @@ struct ChannelStripView: View {
                     ),
                     range: 0...1.4
                 )
-                .frame(width: 18, height: 80)
+                .frame(width: 26, height: 145)
             }
             
             Text(volumeText)
@@ -216,9 +210,14 @@ struct ChannelStripView: View {
             }
             .padding(.bottom, 6)
         }
-        .frame(width: 70, height: 260)
-        .background(isSelected ? palette.selectedBackground : palette.surface)
-        .cornerRadius(4)
+        .frame(width: 94, height: 335)
+        .background(isSelected ? palette.selectedBackground.opacity(0.6) : palette.panel)
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(isSelected ? palette.accent : palette.separator, lineWidth: 1)
+                .allowsHitTesting(false)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 10))
         .contentShape(Rectangle())
         .onTapGesture {
             // Instant selection with piano roll follow (no animation delay)
@@ -265,7 +264,7 @@ struct MasterChannelStripView: View {
             // Master label
             VStack(spacing: 2) {
                 RoundedRectangle(cornerRadius: 2)
-                    .fill(Color.white)
+                    .fill(palette.accent)
                     .frame(height: 4)
                 
                 Text("MASTER")
@@ -279,7 +278,7 @@ struct MasterChannelStripView: View {
             // Meter and fader
             HStack(spacing: 4) {
                 StereoMeterView(leftLevel: meterLevels.left, rightLevel: meterLevels.right)
-                    .frame(width: 16, height: 140)
+                    .frame(width: 17, height: 170)
                 
                 FaderView(
                     value: Binding(
@@ -288,7 +287,7 @@ struct MasterChannelStripView: View {
                     ),
                     range: 0...1.4
                 )
-                .frame(width: 24, height: 140)
+                .frame(width: 26, height: 170)
             }
             
             Text(masterVolumeText)
@@ -296,9 +295,14 @@ struct MasterChannelStripView: View {
                 .foregroundColor(.secondary)
                 .padding(.bottom, 8)
         }
-        .frame(width: 80, height: 260)
-        .background(palette.panel)
-        .cornerRadius(4)
+        .frame(width: 104, height: 335)
+        .background(palette.raisedSurface)
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(palette.accent.opacity(0.65), lineWidth: 1)
+                .allowsHitTesting(false)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
     
     private var masterVolumeText: String {
@@ -348,7 +352,7 @@ struct PluginSlotView: View {
             }
             .padding(.horizontal, 4)
             .padding(.vertical, 2)
-            .frame(width: 70, height: 16)
+            .frame(width: 80, height: 22)
             .background(Color.gray.opacity(0.2))
             .cornerRadius(2)
         }
