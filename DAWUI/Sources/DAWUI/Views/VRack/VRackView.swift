@@ -40,9 +40,6 @@ public struct VRackView: View {
     @State private var isLoadingInstrument = false
     @State private var pickerError: String?
     @State private var previewInstrumentID: String?
-    // Shared across the compact and embedded instances of the browser.
-    @MainActor private static var sharedFamilyFilter = "All"
-    @MainActor private static var sharedPreviewInstrumentID: String?
 
 
     public init(viewModel: ProjectViewModel, openStageWorkspace: (() -> Void)? = nil,
