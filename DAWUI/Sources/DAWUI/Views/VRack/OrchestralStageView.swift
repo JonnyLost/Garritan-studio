@@ -486,7 +486,7 @@ struct OrchestralStageView: View {
                     Text("L\(zone)").tag(zone)
                 }
             }
-            Text("Conductor = center / dry · L1–L5 = increasing reverb")
+            Text("Conductor = center / dry · L1–L5 = increasing reverb and gently reduced direct sound")
                 .font(.caption2).foregroundStyle(.secondary)
         } else {
             Text("Select a MIDI or instrument track to edit its stage position.")
