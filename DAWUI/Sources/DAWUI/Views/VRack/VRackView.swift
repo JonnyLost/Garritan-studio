@@ -652,17 +652,66 @@ public struct VRackView: View {
                     .foregroundStyle(.secondary)
                 TextField("Search instruments or articulations", text: $searchText)
                     .textFieldStyle(.plain)
-                Picker("Library", selection: $libraryFilter) {
-                    Text("All Libraries").tag("All Libraries")
-                    Text("GPO5").tag("Garritan Personal Orchestra 5")
-                    Text("Instant Orchestra").tag("Garritan Instant Orchestra")
+                Text("LIBRARY")
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(0.6)
+                    .foregroundStyle(palette.secondaryText)
+                Menu {
+                    Button("All Libraries") { libraryFilter = "All Libraries" }
+                    Button("Garritan Personal Orchestra 5") {
+                        libraryFilter = "Garritan Personal Orchestra 5"
+                    }
+                    Button("Garritan Instant Orchestra") {
+                        libraryFilter = "Garritan Instant Orchestra"
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(libraryFilter == "All Libraries" ? "All Libraries" :
+                             libraryFilter == "Garritan Personal Orchestra 5" ? "GPO5" : "Instant Orchestra")
+                            .lineLimit(1)
+                        Spacer(minLength: 2)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(palette.primaryText)
+                    .padding(.horizontal, 9)
+                    .frame(width: 126, height: 27)
+                    .background(palette.raisedSurface, in: RoundedRectangle(cornerRadius: 6))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(palette.separator, lineWidth: 1)
+                    }
                 }
-                .frame(width: 150)
-                Picker("Set", selection: $instrumentSet) {
-                    Text("Core").tag("Core Orchestra")
-                    Text("Complete").tag("Complete")
+                .menuStyle(.borderlessButton)
+                .accessibilityLabel("Library filter")
+                Text("SET")
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(0.6)
+                    .foregroundStyle(palette.secondaryText)
+                Menu {
+                    Button("Core Orchestra") { instrumentSet = "Core Orchestra" }
+                    Button("Complete") { instrumentSet = "Complete" }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(instrumentSet == "Core Orchestra" ? "Core" : "Complete")
+                            .lineLimit(1)
+                        Spacer(minLength: 2)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(palette.primaryText)
+                    .padding(.horizontal, 9)
+                    .frame(width: 85, height: 27)
+                    .background(palette.raisedSurface, in: RoundedRectangle(cornerRadius: 6))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(palette.separator, lineWidth: 1)
+                    }
                 }
-                .frame(width: 105)
+                .menuStyle(.borderlessButton)
+                .accessibilityLabel("Instrument set filter")
             }
             .padding(12)
             .background(palette.surface)
