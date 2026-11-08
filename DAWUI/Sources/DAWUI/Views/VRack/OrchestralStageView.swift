@@ -10,6 +10,7 @@ struct OrchestralStageView: View {
     @State private var selectedLayout: StageLayout = .symphony
 
     private enum StageLayout: String, CaseIterable, Identifiable {
+        case filmScore = "Film Score Orchestra"
         case symphony = "Full Symphony Orchestra"
         case chamber = "Chamber Orchestra"
         case strings = "String Orchestra"
@@ -218,6 +219,32 @@ struct OrchestralStageView: View {
     private var seating: [SeatSection] {
         switch selectedLayout {
         case .symphony: return symphonySeating
+        case .filmScore: return [
+            .init(name: "Violin I", zone: 1, pan: -0.78, span: 0.40),
+            .init(name: "Violin II", zone: 1, pan: -0.36, span: 0.35),
+            .init(name: "Violas", zone: 1, pan: 0.03, span: 0.34),
+            .init(name: "Cellos", zone: 1, pan: 0.43, span: 0.37),
+            .init(name: "Basses", zone: 1, pan: 0.80, span: 0.35),
+            .init(name: "Harp / Piano", zone: 2, pan: -0.83, span: 0.30),
+            .init(name: "Flutes", zone: 2, pan: -0.50, span: 0.26),
+            .init(name: "Oboes", zone: 2, pan: -0.21, span: 0.26),
+            .init(name: "Clarinets", zone: 2, pan: 0.12, span: 0.28),
+            .init(name: "Bassoons", zone: 2, pan: 0.46, span: 0.30),
+            .init(name: "Timpani", zone: 2, pan: 0.83, span: 0.25),
+            .init(name: "Trumpets", zone: 3, pan: -0.63, span: 0.34),
+            .init(name: "Horns", zone: 3, pan: -0.21, span: 0.40),
+            .init(name: "Trombones", zone: 3, pan: 0.29, span: 0.39),
+            .init(name: "Tuba", zone: 3, pan: 0.75, span: 0.30),
+            .init(name: "Orch. Perc.", zone: 4, pan: -0.70, span: 0.43),
+            .init(name: "Taiko / Drums", zone: 4, pan: -0.20, span: 0.40),
+            .init(name: "Hybrid Perc.", zone: 4, pan: 0.34, span: 0.44),
+            .init(name: "Synth / FX", zone: 4, pan: 0.81, span: 0.29),
+            .init(name: "Sopranos", zone: 5, pan: -0.77, span: 0.34),
+            .init(name: "Altos", zone: 5, pan: -0.36, span: 0.34),
+            .init(name: "Choir", zone: 5, pan: 0.05, span: 0.32),
+            .init(name: "Tenors", zone: 5, pan: 0.44, span: 0.32),
+            .init(name: "Basses", zone: 5, pan: 0.81, span: 0.30)
+        ]
         case .chamber: return [
             .init(name: "Violin I", zone: 1, pan: -0.65, span: 0.55),
             .init(name: "Violin II", zone: 1, pan: -0.1, span: 0.42),
