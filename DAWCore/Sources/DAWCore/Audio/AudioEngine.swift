@@ -237,6 +237,11 @@ public final class AudioEngine: ObservableObject {
         trackNode.setPan(track.pan)
         trackNode.setMuted(track.isMuted)
         
+        // Restore saved orchestral stage depth.
+        let depth = max(0, min(5, track.stageReverbZone ?? 2))
+        let sendLevels: [Float] = [0.0, 0.12, 0.20, 0.30, 0.43, 0.58]
+        trackNode.concertHallSend.outputVolume = sendLevels[depth]
+
         trackNodes[track.id] = trackNode
         installTrackMeter(for: trackNode)
     }
@@ -308,6 +313,16 @@ public final class AudioEngine: ObservableObject {
         trackNode.setMuted(track.isMuted)
     }
     
+    /// Set Concert Hall ambience according to orchestral stage depth.
+    /// Depth 0 = conductor; depth 5 = back row.
+    public func setConcertHallDepth(_ depth: Int, for trackID: TrackID) {
+        let sendLevels: [Float] = [0.0, 0.12, 0.20, 0.30, 0.43, 0.58]
+        let safeDepth = max(0, min(5, depth))
+
+        trackNodes[trackID]?.concertHallSend.outputVolume =
+            sendLevels[safeDepth]
+    }
+
     /// Get track node for external access
     public func trackNode(for trackID: TrackID) -> TrackAudioNode? {
         trackNodes[trackID]
