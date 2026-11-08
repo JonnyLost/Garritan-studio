@@ -122,7 +122,7 @@ struct ArticulationsWorkspaceView: View {
         let selected = canSendKeyswitch && reference?.id == selectedArticulationID
         return RoundedRectangle(cornerRadius: 3)
             .fill(active ? Color.accentColor : (black ? Color.black : Color.white))
-            .overlay(RoundedRectangle(cornerRadius: 3).stroke(selected ? Color.accentColor : (reference == nil ? Color.gray : Color.orange), lineWidth: selected ? 3 : (reference == nil ? 0.5 : 2)))
+            .overlay(RoundedRectangle(cornerRadius: 3).stroke(selected ? Color.accentColor : (reference == nil ? Color.clear : Color.orange), lineWidth: selected ? 2.5 : (reference == nil ? 0 : 1.5)))
             .overlay(alignment: .top) {
                 if reference != nil {
                     Circle().fill(selected ? Color.accentColor : Color.orange).frame(width: 5, height: 5).padding(.top, 3)
@@ -284,8 +284,9 @@ struct ArticulationsWorkspaceView: View {
                                 }
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 6)
+                                .foregroundColor(selectedArticulationID == assignment.id ? .white : .primary)
                                 .background(selectedArticulationID == assignment.id
-                                    ? Color.accentColor.opacity(0.2)
+                                    ? Color.accentColor
                                     : Color(nsColor: .controlBackgroundColor))
                                 .cornerRadius(7)
                             }
@@ -383,8 +384,8 @@ struct ArticulationsWorkspaceView: View {
                                         selectArticulation(assignment)
                                     } label: {
                                         HStack(spacing: 16) {
-                                            Image(systemName: selectedArticulationID == assignment.id ? "largecircle.fill.circle" : "circle")
-                                                .foregroundColor(.accentColor)
+                                            Image(systemName: selectedArticulationID == assignment.id ? "checkmark.circle.fill" : "circle")
+                                                .foregroundColor(selectedArticulationID == assignment.id ? .white : .accentColor)
                                             Text(assignment.note)
                                                 .font(.system(.body, design: .monospaced).weight(.semibold))
                                                 .frame(width: 52, alignment: .leading)
@@ -392,7 +393,8 @@ struct ArticulationsWorkspaceView: View {
                                             Spacer()
                                         }
                                         .padding(10)
-                                        .background(Color(nsColor: .controlBackgroundColor))
+                                        .foregroundColor(selectedArticulationID == assignment.id ? .white : .primary)
+                                        .background(selectedArticulationID == assignment.id ? Color.accentColor : Color(nsColor: .controlBackgroundColor))
                                         .cornerRadius(7)
                                     }
                                     .buttonStyle(.plain)
