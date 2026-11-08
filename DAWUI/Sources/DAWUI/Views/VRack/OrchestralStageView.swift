@@ -486,12 +486,47 @@ struct OrchestralStageView: View {
                     Text("L\(zone)").tag(zone)
                 }
             }
-            Text("Conductor = center / dry · L1–L5 = increasing reverb and gently reduced direct sound")
+            Text("Moving the instrument changes its direct level and hall send.")
                 .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Text("Dry / Wet")
+                Slider(value: wetTrimBinding(for: id), in: 0...2)
+                Text("\(Int(min(200, max(0, (track.stageWetTrim ?? 1) * 100))))%")
+                    .monospacedDigit()
+                    .frame(width: 46)
+            }
+            Text("Instrument hall send: 100% follows the selected stage zone.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Text("Overall Reverb")
+                Slider(value: overallReverbBinding, in: 0...2)
+                Text("\(Int(viewModel.audioEngine.concertHallOverallReverb * 100))%")
+                    .monospacedDigit()
+                    .frame(width: 46)
+            }
+            Text("Overall Reverb affects the entire Concert Hall.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         } else {
             Text("Select a MIDI or instrument track to edit its stage position.")
                 .font(.caption).foregroundStyle(.secondary)
         }
+    }
+
+    private func wetTrimBinding(for id: TrackID) -> Binding<Double> {
+        Binding(
+            get: { Double(viewModel.project.track(withID: id)?.stageWetTrim ?? 1) },
+            set: { viewModel.setTrackStageWetTrim(id: id, trim: Float($0)) }
+        )
+    }
+
+    private var overallReverbBinding: Binding<Double> {
+        Binding(
+            get: { Double(viewModel.audioEngine.concertHallOverallReverb) },
+            set: { viewModel.setConcertHallOverallReverb(Float($0)) }
+        )
     }
 
     private func panBinding(for id: TrackID) -> Binding<Double> {
