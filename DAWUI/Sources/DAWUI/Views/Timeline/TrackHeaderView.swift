@@ -375,9 +375,11 @@ struct InstrumentSlotButton: View {
     }
     
     private func openInstrumentUI() {
-        guard let slot = track.instrumentSlot,
-              let pluginID = slot.pluginID,
-              let loadedPlugin = viewModel.pluginHost.loadedPlugins.values.first(where: { $0.identifier == pluginID }) else { return }
+        // Multiple tracks can host identical ARIA AU descriptions. Match the
+        // instance bound to this track, never the first registry entry.
+        guard let instrument = viewModel.playbackEngine.instrument(for: track.id),
+              case .auInstrument(_, let instanceID) = instrument,
+              let loadedPlugin = viewModel.pluginHost.loadedPlugins[instanceID] else { return }
         
         PluginWindowManager.shared.openPluginWindow(for: loadedPlugin, trackName: track.name)
     }
@@ -386,7 +388,7 @@ struct InstrumentSlotButton: View {
         var updatedTrack = track
         updatedTrack.instrumentSlot = nil
         viewModel.updateTrack(updatedTrack, description: "Remove Instrument")
-        viewModel.playbackEngine.removeInstrument(for: track.id)
+        viewModel.unloadTrackInstrument(for: track.id)
     }
 }
 
