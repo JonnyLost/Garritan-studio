@@ -301,7 +301,6 @@ public final class RenderGraph {
     
     private var midiSendCount = 0
     private var renderErrorCount = 0
-    private var renderDebugCount = 0
     
     func sendMIDI(to trackID: TrackID, status: UInt8, data1: UInt8, data2: UInt8, sampleOffset: UInt32) {
         guard let track = tracks[trackID] else {
@@ -446,38 +445,12 @@ public final class RenderGraph {
                 }
             }
             
-            // Debug: check render status and if we got any audio
+            // Never perform string interpolation or console I/O on the
+            // real-time render callback. Failed renders are skipped, and audio
+            // diagnostics can be collected asynchronously outside this path.
             if renderStatus != noErr {
-                if renderErrorCount < 10 {
-                    print("[RenderGraph] ⚠️ Render failed: \(renderStatus) for track \(track.id.rawValue)")
-                    renderErrorCount += 1
-                }
+                renderErrorCount += 1
                 continue
-            }
-            
-            // Debug: check if there's any audio output (throttled)
-            if renderDebugCount < 100 {
-                var hasAudio = false
-                var maxSample: Float = 0
-                for i in 0..<min(Int(frameCount), 64) {
-                    let sample = max(abs(bufferL[i]), abs(bufferR[i]))
-                    if sample > maxSample {
-                        maxSample = sample
-                    }
-                    if sample > 0.0001 {
-                        hasAudio = true
-                    }
-                }
-                
-                // Always log for first few renders to see what's happening
-                let shortID = String(track.id.rawValue.uuidString.prefix(8))
-                if renderDebugCount < 10 {
-                    let useRenderBlock = track.renderBlock != nil
-                    print("[RenderGraph] Render #\(renderDebugCount): track=\(shortID), maxSample=\(maxSample), hasAudio=\(hasAudio), AUv3=\(useRenderBlock)")
-                } else if hasAudio {
-                    print("[RenderGraph] ✓ Track \(shortID) produced audio! maxSample=\(maxSample)")
-                }
-                renderDebugCount += 1
             }
             
             // Process through effects
