@@ -1315,9 +1315,20 @@ public final class ProjectViewModel: ObservableObject {
             }
         }
         
-        // Remove from audio engine
+        // Remove from the graph and from the plug-in host registry. Keeping
+        // the host's AU reference after deleting a V-Rack slot leaks instances.
+        let hostedPluginID: UUID?
+        if let loadedInstrument = playbackEngine.rackInstrument(for: id),
+           case .auInstrument(_, let instanceID) = loadedInstrument {
+            hostedPluginID = instanceID
+        } else {
+            hostedPluginID = nil
+        }
         playbackEngine.removeRackInstrument(rackID: id)
-        
+        if let hostedPluginID {
+            pluginHost.unloadPlugin(id: hostedPluginID)
+        }
+
         // Remove from project
         project.vRack.removeInstrument(withID: id)
     }
