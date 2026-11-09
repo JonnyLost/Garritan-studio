@@ -42,6 +42,7 @@ The Git tree was enumerated (84 Swift files and supporting resources at the time
 15. Capture track-level Audio Unit state during save, in addition to V-Rack state: `6c57bb6` — `ProjectViewModel.swift`.
 16. Restore saved track-level AU slots even when not identified as a Garritan catalog program: `47d08b3` — `ProjectViewModel.swift`.
 17. Eliminate console logging and diagnostic sample scans inside the experimental Core Audio render callback: `1a8d7f7` — `CoreAudio/RenderGraph.swift`.
+18. Remove console logging from Core Audio MIDI send path that may run during render: `24a61a3` — `CoreAudio/RenderGraph.swift`. This leaves other real-time-safety issues, including small-array allocation and synchronization, for a separately tested architectural correction.
 
 None of these code changes has passed macOS compilation or a device test here; the regression tests were added but not executed.
 
