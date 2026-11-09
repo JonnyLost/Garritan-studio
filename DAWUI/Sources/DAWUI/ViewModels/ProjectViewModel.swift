@@ -194,16 +194,21 @@ public final class ProjectViewModel: ObservableObject {
     
     private func routeMIDIToInstrument(_ event: IncomingMIDIEvent, trackID: TrackID) {
         guard let track = project.track(withID: trackID) else { return }
-        
+        // All channels (nil) preserves the incoming channel. A selected
+        // channel filters incoming MIDI, as it does for clip playback.
+        if let selectedChannel = track.midiOutputChannel, event.channel != selectedChannel {
+            return
+        }
+
         // Determine the MIDI destination and channel
         let (instrument, channel): (TrackInstrument?, UInt8) = {
             switch track.midiOutput {
             case .rackInstrument(let rackID, let ch):
                 // Route to V-Rack instrument on specified channel
-                return (playbackEngine.rackInstrument(for: rackID), ch - 1)  // Convert 1-16 to 0-15
+                return (playbackEngine.rackInstrument(for: rackID), min(16, max(1, ch)) - 1)
             case .trackInstrument, .none:
-                // Route to track's own instrument on channel 0
-                return (playbackEngine.instrument(for: trackID), 0)
+                // Route to the track instrument on the incoming MIDI channel.
+                return (playbackEngine.instrument(for: trackID), event.channel)
             }
         }()
         
@@ -220,8 +225,9 @@ public final class ProjectViewModel: ObservableObject {
         
         switch event.type {
         case .note(let noteData):
-            // Note: Some keyboards send velocity=1 for note-off instead of 0
-            let isNoteOff = noteData.velocity == 0 || noteData.velocity == 1
+            // MIDIManager normalizes both Note Off and zero-velocity Note On
+            // to velocity 0; velocity 1 is a valid, quiet Note On.
+            let isNoteOff = noteData.velocity == 0
             
             if !isNoteOff {
                 instrument.startNote(noteData.pitch, velocity: noteData.velocity, channel: channel)
