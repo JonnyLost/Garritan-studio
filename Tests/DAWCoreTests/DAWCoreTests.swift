@@ -216,6 +216,23 @@ final class ProjectPersistenceSafetyTests: XCTestCase {
         XCTAssertTrue(recovered.audioFiles.isEmpty)
     }
 
+    func testUnimplementedMIDIExportNeverWritesMalformedFile() async throws {
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("GarritanExport-\(UUID().uuidString).mid")
+        defer { try? FileManager.default.removeItem(at: destination) }
+
+        let manager = ProjectFileManager()
+        do {
+            try await manager.export(project: Project(name: "Test"), to: destination, format: .midi)
+            XCTFail("MIDI export must not report success before track chunks are supported")
+        } catch {
+            XCTAssertFalse(
+                FileManager.default.fileExists(atPath: destination.path),
+                "An unsupported export must not produce a corrupt MIDI file"
+            )
+        }
+    }
+
     func testFullSavePreservesAudioAlreadyInsideProjectPackage() async throws {
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("GarritanPackagedAudio-\(UUID().uuidString)", isDirectory: true)
