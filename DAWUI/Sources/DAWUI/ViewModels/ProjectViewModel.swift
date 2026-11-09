@@ -1447,8 +1447,9 @@ public final class ProjectViewModel: ObservableObject {
         // First scan for plugins so we have them available
         await pluginHost.scanForPlugins()
         
-        // Restore track-level Garritan instruments as well as V-Rack instruments.
-        for track in project.tracks where track.garritanProgramID != nil {
+        // Restore every saved track instrument (Garritan and other Audio
+        // Units), not only tracks with a Garritan catalog program ID.
+        for track in project.tracks {
             guard let slot = track.instrumentSlot, let pluginID = slot.pluginID else { continue }
             do {
                 let format = AVAudioFormat(standardFormatWithSampleRate: audioEngine.sampleRate, channels: 2)!
