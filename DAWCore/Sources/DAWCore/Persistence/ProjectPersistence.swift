@@ -54,17 +54,29 @@ public actor ProjectFileManager {
             packageURL = url.deletingPathExtension().appendingPathExtension(Self.projectExtension)
         }
         
-        // Remove existing package if present
-        if fm.fileExists(atPath: packageURL.path) {
-            try fm.removeItem(at: packageURL)
+        // Assemble a complete replacement beside the original package. Never
+        // delete the user's last successful save before all files are ready.
+        let parentURL = packageURL.deletingLastPathComponent()
+        let stagingURL = parentURL.appendingPathComponent(
+            ".\(packageURL.lastPathComponent).staging-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        let backupURL = parentURL.appendingPathComponent(
+            ".\(packageURL.lastPathComponent).backup-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer {
+            // On an error, only the incomplete staging package is discarded.
+            if fm.fileExists(atPath: stagingURL.path) {
+                try? fm.removeItem(at: stagingURL)
+            }
         }
-        
-        // Create package directory
-        try fm.createDirectory(at: packageURL, withIntermediateDirectories: true)
-        
-        // Create subdirectories
-        let audioDir = packageURL.appendingPathComponent(Self.audioFolderName)
-        let pluginsDir = packageURL.appendingPathComponent(Self.pluginStatesFolderName)
+
+        try fm.createDirectory(at: stagingURL, withIntermediateDirectories: true)
+
+        // Create subdirectories in the staging package.
+        let audioDir = stagingURL.appendingPathComponent(Self.audioFolderName)
+        let pluginsDir = stagingURL.appendingPathComponent(Self.pluginStatesFolderName)
         
         try fm.createDirectory(at: audioDir, withIntermediateDirectories: true)
         try fm.createDirectory(at: pluginsDir, withIntermediateDirectories: true)
@@ -102,16 +114,18 @@ public actor ProjectFileManager {
             let destURL = audioDir.appendingPathComponent(destFileName)
             let relativePath = "\(Self.audioFolderName)/\(destFileName)"
             
-            // Try to find the source file
+            // A previously saved recording may live inside the original package.
+            // Copy it before replacing that package, even if the external source
+            // file was moved or deleted.
+            let existingPackagedFile = packageURL.appendingPathComponent(audioRef.relativePath)
             let sourceURL = findAudioFile(for: audioRef)
-            
-            if let sourceURL = sourceURL, fm.fileExists(atPath: sourceURL.path) {
-                // Copy the file
-                try fm.copyItem(at: sourceURL, to: destURL)
-                print("[ProjectFileManager] Copied audio: \(sourceURL.lastPathComponent) -> \(destFileName)")
-            } else {
-                print("[ProjectFileManager] Warning: Audio file not found: \(audioRef.originalPath)")
+                ?? (fm.fileExists(atPath: existingPackagedFile.path) ? existingPackagedFile : nil)
+            guard let sourceURL, fm.fileExists(atPath: sourceURL.path) else {
+                // Never successfully save a project with silently missing audio.
+                throw PersistenceError.fileNotFound(URL(fileURLWithPath: audioRef.originalPath))
             }
+            try fm.copyItem(at: sourceURL, to: destURL)
+            print("[ProjectFileManager] Copied audio: \(sourceURL.lastPathComponent) -> \(destFileName)")
             
             // Update the reference in project
             var updatedRef = audioRef
@@ -152,9 +166,28 @@ public actor ProjectFileManager {
         encoder.dateEncodingStrategy = .iso8601
         
         let data = try encoder.encode(projectFile)
-        let projectFileURL = packageURL.appendingPathComponent(Self.projectFileName)
-        try data.write(to: projectFileURL)
-        
+        let projectFileURL = stagingURL.appendingPathComponent(Self.projectFileName)
+        try data.write(to: projectFileURL, options: .atomic)
+
+        // Promote the complete staging package. If promotion fails, restore the
+        // previous package instead of leaving a corrupt or partial project.
+        let hadPreviousPackage = fm.fileExists(atPath: packageURL.path)
+        if hadPreviousPackage {
+            try fm.moveItem(at: packageURL, to: backupURL)
+        }
+        do {
+            try fm.moveItem(at: stagingURL, to: packageURL)
+        } catch {
+            if hadPreviousPackage {
+                try? fm.moveItem(at: backupURL, to: packageURL)
+            }
+            throw error
+        }
+        if hadPreviousPackage {
+            // A cleanup failure must not turn a completed save into an error.
+            try? fm.removeItem(at: backupURL)
+        }
+
         print("[ProjectFileManager] Saved project to: \(packageURL.path)")
     }
     
@@ -368,7 +401,7 @@ public actor ProjectFileManager {
                         }
                     }
                 } else {
-                    print("[ProjectFileManager] Quick save - WARNING: New audio file not found: \(audioRef.originalPath)")
+                    throw PersistenceError.fileNotFound(URL(fileURLWithPath: audioRef.originalPath))
                 }
             }
         }
@@ -386,8 +419,8 @@ public actor ProjectFileManager {
         encoder.dateEncodingStrategy = .iso8601
         
         let data = try encoder.encode(projectFile)
-        try data.write(to: projectFileURL)
-        
+        try data.write(to: projectFileURL, options: .atomic)
+
         print("[ProjectFileManager] Quick save complete")
     }
     
