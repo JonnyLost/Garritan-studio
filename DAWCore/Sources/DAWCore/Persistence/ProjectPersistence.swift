@@ -588,20 +588,12 @@ public actor ProjectFileManager {
     }
     
     private func exportAsMIDI(project: Project, to url: URL) async throws {
-        // Build a standard MIDI file from MIDI tracks
-        var midiData = Data()
-        
-        // MIDI file header
-        let headerChunk: [UInt8] = [
-            0x4D, 0x54, 0x68, 0x64,  // "MThd"
-            0x00, 0x00, 0x00, 0x06,  // Chunk length
-            0x00, 0x01,              // Format type 1
-            0x00, UInt8(project.tracks.count + 1),  // Number of tracks
-            0x01, 0xE0               // 480 ticks per quarter note
-        ]
-        midiData.append(contentsOf: headerChunk)
-        
-        try midiData.write(to: url)
+        // A header by itself is not a valid Standard MIDI File. Until the
+        // MIDI track/chunk writer is implemented, fail explicitly rather than
+        // exporting an unreadable file that appears to have succeeded.
+        throw PersistenceError.invalidFormat(
+            "Standard MIDI export is not implemented yet; no file was created."
+        )
     }
 }
 
