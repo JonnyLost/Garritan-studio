@@ -265,57 +265,163 @@ struct ArticulationsWorkspaceView: View {
         .padding(.vertical, 6)
     }
 
-    var compactControls: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(viewModel.selectedTrack?.name ?? "No track selected")
-                    .font(.subheadline.weight(.semibold))
+    // MARK: - Cohesive articulation surfaces
+
+    private var instrumentIdentity: some View {
+        HStack(spacing: 11) {
+            if let track = viewModel.selectedTrack {
+                StudioInstrumentIcon(
+                    name: track.name,
+                    path: suggestedName,
+                    category: "Woodwinds",
+                    size: 42
+                )
+                .frame(width: 50, height: 50)
+                .background(palette.raisedSurface, in: RoundedRectangle(cornerRadius: 9))
+            } else {
+                Image(systemName: "pianokeys")
+                    .font(.system(size: 24))
+                    .foregroundStyle(palette.accent)
+                    .frame(width: 50, height: 50)
+                    .background(palette.surface, in: RoundedRectangle(cornerRadius: 9))
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(activePatch?.patch ?? (suggestedName.isEmpty ? "No instrument selected" : suggestedName))
+                    .font(.system(size: 21, weight: .semibold,
+                                  design: palette.appearance == .gpo5Modern ? .default : .serif))
+                    .foregroundStyle(palette.primaryText)
                     .lineLimit(1)
-                Text(activePatch?.patch ?? "No matching keyswitch map")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+
+                Text(viewModel.selectedTrack?.name ?? "Select an instrument track")
+                    .font(.system(size: 11))
+                    .foregroundStyle(palette.secondaryText)
                     .lineLimit(1)
             }
-            .frame(width: 150, alignment: .leading)
-            Divider()
+
+            Spacer(minLength: 4)
+
+            VStack(alignment: .trailing, spacing: 6) {
+                if canSendKeyswitch {
+                    Label("READY TO PLAY", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(Color.green)
+                } else if activePatch != nil {
+                    Label("REFERENCE ONLY", systemImage: "book.closed")
+                        .foregroundStyle(palette.secondaryText)
+                } else {
+                    Label("NO KS MAP", systemImage: "info.circle")
+                        .foregroundStyle(palette.secondaryText)
+                }
+                Text("\(activePatch?.keyswitches.count ?? 0) articulations")
+                    .foregroundStyle(palette.secondaryText)
+            }
+            .font(.system(size: 10, weight: .semibold))
+        }
+        .padding(15)
+        .studioPanel()
+    }
+
+    private func articulationButton(_ assignment: GPOKeyswitchCatalog.Assignment,
+                                    compact: Bool = false) -> some View {
+        let selected = canSendKeyswitch && selectedArticulationID == assignment.id
+        return Button {
+            selectArticulation(assignment)
+        } label: {
+            HStack(spacing: 11) {
+                Text(assignment.note)
+                    .font(.system(size: compact ? 12 : 15,
+                                  weight: .semibold, design: .monospaced))
+                    .foregroundStyle(selected ? palette.selectedText : palette.accent)
+                    .frame(width: compact ? 40 : 49, height: compact ? 37 : 46)
+                    .background(selected ? palette.accent : palette.accentMuted.opacity(0.55),
+                                in: RoundedRectangle(cornerRadius: 7))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(assignment.articulation)
+                        .font(.system(size: compact ? 12 : 14, weight: .semibold))
+                        .foregroundStyle(selected ? palette.selectedText : palette.primaryText)
+                        .lineLimit(1)
+                    Text(selected ? "ACTIVE" : (canSendKeyswitch ? "Tap to select" : "Reference only"))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(selected ? palette.selectedText.opacity(0.8)
+                            : palette.secondaryText)
+                }
+                Spacer(minLength: 2)
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(selected ? palette.selectedText : palette.secondaryText)
+                    .font(.system(size: 13))
+            }
+            .padding(compact ? 7 : 10)
+            .background(selected ? palette.selectedBackground : palette.surface,
+                        in: RoundedRectangle(cornerRadius: 10))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(selected ? palette.accent : palette.separator.opacity(0.8),
+                                  lineWidth: selected ? 1.6 : 1)
+                    .allowsHitTesting(false)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .disabled(!canSendKeyswitch)
+        .accessibilityLabel("\(assignment.articulation), keyswitch \(assignment.note)")
+        .help(canSendKeyswitch
+              ? "Send \(assignment.note) keyswitch for \(assignment.articulation)"
+              : "Load this exact Garritan KS program to activate this articulation")
+    }
+
+    var compactControls: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 9) {
+                Image(systemName: "music.note")
+                    .foregroundStyle(palette.accent)
+                Text(viewModel.selectedTrack?.name ?? "No track selected")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(palette.primaryText)
+                    .lineLimit(1)
+                Text("ARTICULATIONS")
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(1)
+                    .foregroundStyle(palette.secondaryText)
+                Spacer()
+                if canSendKeyswitch {
+                    Label("KS READY", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(Color.green)
+                } else {
+                    Text("REFERENCE")
+                        .foregroundStyle(palette.secondaryText)
+                }
+            }
+            .font(.system(size: 10, weight: .semibold))
+
             if let patch = activePatch {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 10) {
                         ForEach(patch.keyswitches) { assignment in
-                            Button {
-                                selectArticulation(assignment)
-                            } label: {
-                                VStack(spacing: 3) {
-                                    Text(assignment.articulation)
-                                        .font(.caption.weight(.medium))
-                                        .lineLimit(1)
-                                    Text(assignment.note)
-                                        .font(.caption2.monospaced())
-                                }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .foregroundColor(selectedArticulationID == assignment.id ? .white : .primary)
-                                .background(selectedArticulationID == assignment.id
-                                    ? Color.accentColor
-                                    : Color(nsColor: .controlBackgroundColor))
-                                .cornerRadius(7)
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(!canSendKeyswitch)
-                            .help(canSendKeyswitch ? "Send \\(assignment.note) keyswitch" : "Load this exact GPO5 KS program to enable switching.")
+                            articulationButton(assignment, compact: true)
+                                .frame(width: 205)
                         }
                     }
+                    .padding(.vertical, 1)
                 }
-                .frame(maxWidth: 280)
             } else {
-                Text("Load a matching GPO5 KS patch to see articulation shortcuts")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                Spacer()
+                HStack(spacing: 8) {
+                    Image(systemName: "info.circle")
+                        .foregroundStyle(palette.accent)
+                    Text("Load a GPO5 keyswitch instrument to show its available articulations.")
+                        .foregroundStyle(palette.secondaryText)
+                    Spacer()
+                }
+                .font(.system(size: 12))
+                .padding(12)
+                .studioPanel()
             }
         }
-        .padding(.horizontal, 12)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(palette.panel)
+        .tint(palette.accent)
         .onChange(of: viewModel.selectedTrackID) { _, _ in
             selectedPatchName = nil
             selectedArticulationID = nil
