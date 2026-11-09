@@ -263,9 +263,6 @@ public final class PlaybackEngine: ObservableObject {
         }
         
         // Legacy AVAudioEngine path
-        // Remove existing instrument if any
-        removeInstrument(for: trackID)
-        
         print("[PlaybackEngine] ========================================")
         print("[PlaybackEngine] Loading AU instrument: \(audioUnit.name)")
         print("[PlaybackEngine] Track ID: \(trackID.rawValue)")
@@ -277,7 +274,21 @@ public final class PlaybackEngine: ObservableObject {
             audioEngine.engine.stop()
             print("[PlaybackEngine] Stopped engine for reconfiguration")
         }
-        
+        defer {
+            // A failed track lookup or AU setup must not strand the whole
+            // engine stopped. The normal success path restarts it below.
+            if wasRunning && !audioEngine.engine.isRunning {
+                do {
+                    try audioEngine.engine.start()
+                } catch {
+                    print("[PlaybackEngine] Failed to restore engine after AU load: \(error)")
+                }
+            }
+        }
+
+        // Remove the old instrument only after stopping the graph.
+        removeInstrument(for: trackID)
+
         // Get the output format from the AU
         let auFormat = audioUnit.outputFormat(forBus: 0)
         print("[PlaybackEngine] AU native format: \(auFormat)")
@@ -325,14 +336,11 @@ public final class PlaybackEngine: ObservableObject {
             throw PlaybackError.trackNotFound(trackID)
         }
         
-        // Restart the engine
+        // Restart the engine; don't report a successful AU load if playback
+        // cannot resume. The defer above also attempts recovery on failure.
         if wasRunning {
-            do {
-                try audioEngine.engine.start()
-                print("[PlaybackEngine] ✓ Engine restarted")
-            } catch {
-                print("[PlaybackEngine] ⚠️ Failed to restart engine: \(error)")
-            }
+            try audioEngine.engine.start()
+            print("[PlaybackEngine] ✓ Engine restarted")
         }
         
         // Check the connections
