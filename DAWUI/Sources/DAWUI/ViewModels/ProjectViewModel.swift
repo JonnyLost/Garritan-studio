@@ -118,8 +118,9 @@ public final class ProjectViewModel: ObservableObject {
         // CRITICAL: Bind transport to audio engine for sample-accurate timing
         transportState.bind(to: audioEngine)
         
-        // Bind other subsystems to transport
-        midiSequencer.bind(to: transportState)
+        // PlaybackEngine owns clip MIDI scheduling and the audio-engine clock.
+        // The legacy MIDISequencer has no scheduled tracks here; binding it
+        // would start a second timer that repeatedly rewrites the playhead.
         playbackEngine.bind(to: transportState)
         midiRecorder.bind(to: transportState)
         // Note: Metronome is handled by PlaybackEngine - no separate binding needed
