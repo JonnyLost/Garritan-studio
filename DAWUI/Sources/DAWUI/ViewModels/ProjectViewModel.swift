@@ -441,13 +441,33 @@ public final class ProjectViewModel: ObservableObject {
         let action = RemoveTrackAction(from: project, trackID: id)
         undoManager.registerAction(action, project: &project)
         
+        // Release the hosted AU and its converter before removing the track
+        // mixer. Otherwise deleted tracks leave orphaned audio nodes behind.
+        unloadTrackInstrument(for: id)
         audioEngine.removeTrackNode(for: id)
-        
+
         if selectedTrackID == id {
             selectedTrackID = project.tracks.first?.id
         }
     }
     
+    /// Remove the track's audio unit and its corresponding host registry entry.
+    /// Use this for both track deletion and "Remove Instrument" in the header.
+    public func unloadTrackInstrument(for trackID: TrackID) {
+        let loadedPluginID: UUID?
+        if let instrument = playbackEngine.instrument(for: trackID),
+           case .auInstrument(_, let pluginID) = instrument {
+            loadedPluginID = pluginID
+        } else {
+            loadedPluginID = nil
+        }
+
+        playbackEngine.removeInstrument(for: trackID)
+        if let loadedPluginID {
+            pluginHost.unloadPlugin(id: loadedPluginID)
+        }
+    }
+
     public func updateTrack(_ track: Track, description: String = "Modify Track") {
         guard let oldTrack = project.track(withID: track.id) else { return }
         
