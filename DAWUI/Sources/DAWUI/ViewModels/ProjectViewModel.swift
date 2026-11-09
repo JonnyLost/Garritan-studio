@@ -1390,6 +1390,25 @@ public final class ProjectViewModel: ObservableObject {
         print("[PluginState] Loaded plugins count: \(pluginHost.loadedPlugins.count)")
         print("[PluginState] Loaded plugin IDs: \(pluginHost.loadedPlugins.keys.map { $0.uuidString.prefix(8) })")
         
+        // Capture track-level instrument state as well as V-Rack state.
+        // Otherwise edits made inside ARIA after choosing a program are lost
+        // when the saved project is reopened.
+        for index in project.tracks.indices {
+            let track = project.tracks[index]
+            guard track.instrumentSlot?.pluginID != nil,
+                  let instrument = playbackEngine.instrument(for: track.id),
+                  case .auInstrument(_, let loadedID) = instrument else {
+                continue
+            }
+            do {
+                let stateData = try pluginHost.savePreset(pluginID: loadedID)
+                project.tracks[index].instrumentSlot?.stateData = stateData
+                print("[PluginState] Saved track \(track.name): \(stateData.count) bytes")
+            } catch {
+                print("[PluginState] Could not save track \(track.name): \(error)")
+            }
+        }
+
         // Save rack instrument plugin states
         for (index, instrument) in project.vRack.instruments.enumerated() {
             print("[PluginState] Processing: \(instrument.name) (slot: \(instrument.pluginSlot.id.uuidString.prefix(8)))")
