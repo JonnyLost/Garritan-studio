@@ -398,9 +398,6 @@ public final class PlaybackEngine: ObservableObject {
     
     /// Load an AU instrument plugin for the V-Rack
     public func loadRackInstrument(_ audioUnit: AVAudioUnit, rackID: UUID, pluginID: UUID) async throws {
-        // Remove existing instrument if any
-        removeRackInstrument(rackID: rackID)
-        
         print("[PlaybackEngine] ========================================")
         print("[PlaybackEngine] Loading V-Rack AU instrument: \(audioUnit.name)")
         print("[PlaybackEngine] Rack ID: \(rackID)")
@@ -410,7 +407,19 @@ public final class PlaybackEngine: ObservableObject {
         if wasRunning {
             audioEngine.engine.stop()
         }
-        
+        defer {
+            if wasRunning && !audioEngine.engine.isRunning {
+                do {
+                    try audioEngine.engine.start()
+                } catch {
+                    print("[PlaybackEngine] Failed to restore engine after V-Rack load: \(error)")
+                }
+            }
+        }
+
+        // Remove the previous V-Rack instrument while the graph is stopped.
+        removeRackInstrument(rackID: rackID)
+
         // Attach the audio unit to the engine
         audioEngine.engine.attach(audioUnit)
         
