@@ -976,25 +976,38 @@ struct InstrumentBrowserSheet: View {
                 )
                 log("Step 2 DONE: Plugin loaded: \(loadedPlugin.name)")
                 
-                // Update track's instrument slot
+                // Only persist a new slot once its Audio Unit is actually
+                // connected to this track's playback graph.
                 if var track = viewModel.project.track(withID: trackID) {
-                    log("Step 3: Updating track slot...")
+                    let previousPluginID: UUID?
+                    if let instrument = viewModel.playbackEngine.instrument(for: trackID),
+                       case .auInstrument(_, let instanceID) = instrument {
+                        previousPluginID = instanceID
+                    } else {
+                        previousPluginID = nil
+                    }
+
+                    log("Step 3: Connecting the new Audio Unit...")
+                    do {
+                        try await viewModel.playbackEngine.loadInstrument(
+                            loadedPlugin.audioUnit,
+                            for: trackID,
+                            pluginID: loadedPlugin.id
+                        )
+                    } catch {
+                        viewModel.pluginHost.unloadPlugin(id: loadedPlugin.id)
+                        throw error
+                    }
+                    if let previousPluginID, previousPluginID != loadedPlugin.id {
+                        viewModel.pluginHost.unloadPlugin(id: previousPluginID)
+                    }
+
                     track.instrumentSlot = PluginSlot(pluginID: description.identifier, isEnabled: true)
-                    
                     await MainActor.run {
                         viewModel.updateTrack(track, description: "Load Instrument")
                     }
-                    log("Step 3 DONE: Track updated")
-                    
-                    // Load instrument into playback engine
-                    log("Step 4: Loading into playback engine...")
-                    try await viewModel.playbackEngine.loadInstrument(
-                        loadedPlugin.audioUnit,
-                        for: trackID,
-                        pluginID: loadedPlugin.id
-                    )
-                    log("Step 4 DONE: Playback engine loaded")
-                    
+                    log("Step 3 DONE: Instrument connected and slot saved")
+
                     await MainActor.run {
                         // Do not automatically create the Audio Unit editor.
                         // ARIA Player can crash inside its custom editor on macOS
@@ -1006,6 +1019,7 @@ struct InstrumentBrowserSheet: View {
                         log("Step 5 DONE: Instrument loaded; browser closed without opening editor")
                     }
                 } else {
+                    viewModel.pluginHost.unloadPlugin(id: loadedPlugin.id)
                     log("ERROR: Track not found for ID: \(trackID)")
                 }
             } catch {
