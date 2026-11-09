@@ -44,6 +44,14 @@ The Git tree was enumerated (84 Swift files and supporting resources at the time
 17. Eliminate console logging and diagnostic sample scans inside the experimental Core Audio render callback: `1a8d7f7` — `CoreAudio/RenderGraph.swift`.
 18. Remove console logging from Core Audio MIDI send path that may run during render: `24a61a3` — `CoreAudio/RenderGraph.swift`. This leaves other real-time-safety issues, including small-array allocation and synchronization, for a separately tested architectural correction.
 
+19. Stop AVAudioEngine during live track and V-Rack AU detachment: `ede8eeb` — `PlaybackEngine.swift`.
+20. Remove a deleted track's hosted instrument and plugin registry entry: `2d2507c` — `ProjectViewModel.swift`.
+21. Open the precise AU instance assigned to the selected track (rather than the first ARIA plugin of that type) and centralize track unload: `a234fe2` — `TrackHeaderView.swift`.
+22. Update the saved instrument slot only after AU graph loading succeeds; release stale host entries: `72d02a3` — `TrackHeaderView.swift`.
+23. Decode a new project before clearing the current session, preserving existing instruments on invalid-file failures: `1dec8e6` — `DAWApp.swift`.
+24. Release the V-Rack AU host instance on slot deletion: `5fbf806` — `ProjectViewModel.swift`.
+25. Reapply live mixer and stage-acoustics parameters after project undo/redo: `51d7c33` — `ProjectViewModel.swift`.
+
 None of these code changes has passed macOS compilation or a device test here; the regression tests were added but not executed.
 
 ## Highest-priority unresolved risks
@@ -57,7 +65,8 @@ None of these code changes has passed macOS compilation or a device test here; t
 7. **High — source tempo changes are not fully reflected in transport/sample scheduling**. Data model holds `tempoChanges`, but multiple conversions and clip scheduling calculations rely on a single `tempo.bpm`. A full tempo-map integration and seek/loop tests are prerequisites for accurate scoring.
 8. **Medium/high — Audio Unit state reconstruction is runtime-sensitive**. State is stored as property-list data in instrument slots and restoring ARIA relies on asynchronous plugin loading and applying `fullState`; confirm stability, exact patch reloading and editor failure isolation on actual macOS hardware.
 9. **Medium — MIDI export remains unimplemented**. It now fails explicitly rather than manufacturing corrupt files. Implement real MThd and MTrk chunks, variable-length deltas, tempo/time-signature meta events, correctly ordered channel events and end-of-track markers, then test against external DAWs.
-10. **Medium — oversized controller/view classes and limited tests**. `PlaybackEngine`, `ProjectViewModel` and `MainWindowView` are large cross-domain modules. Only three Swift test files are present and no `.github/workflows` CI workflow was found. Do not extrapolate scalability to 80–100 tracks without profiling CPU, memory, audio underruns and AU plugin instance costs.
+10. **High — undo/redo track lifecycle is not rebuilt.** Audio parameters are now resynchronized after undo/redo, but history actions that insert/remove tracks do not recreate/destroy audio nodes or hosted instruments. Test and redesign lifecycle reconciliation before relying on undo for track deletion.
+11. **Medium — oversized controller/view classes and limited tests**. `PlaybackEngine`, `ProjectViewModel` and `MainWindowView` are large cross-domain modules. Only three Swift test files are present and no `.github/workflows` CI workflow was found. Do not extrapolate scalability to 80–100 tracks without profiling CPU, memory, audio underruns and AU plugin instance costs.
 
 Additional findings: `ClaudeService.swift` stores its direct-service API key in `UserDefaults`; prefer macOS Keychain for secrets. Device MIDI timing uses callback host time rather than original UMP packet timestamps in parts of the ingress path. The implementation includes incomplete/future-marked alternate audio backend paths and unverified UI/editing behaviors.
 
