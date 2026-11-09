@@ -319,7 +319,22 @@ public final class AudioEngine: ObservableObject {
     /// Remove audio nodes for a track
     public func removeTrackNode(for trackID: TrackID) {
         guard let trackNode = trackNodes[trackID] else { return }
-        
+
+        // Match createTrackNode: graph changes are made while the engine is
+        // stopped to avoid stalls when disconnecting a live master mixer.
+        let wasRunning = engine.isRunning
+        if wasRunning { engine.stop() }
+        defer {
+            if wasRunning {
+                do {
+                    try engine.start()
+                } catch {
+                    print("[Track Audio] ERROR restarting engine after track removal: \(error)")
+                    isRunning = false
+                }
+            }
+        }
+
         // Remove metering tap before detaching the output node.
         trackNode.outputMixer.removeTap(onBus: 0)
         trackPeakLevels.removeValue(forKey: trackID)
