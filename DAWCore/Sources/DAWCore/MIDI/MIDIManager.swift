@@ -399,7 +399,10 @@ public final class MIDIManager: ObservableObject {
             eventType = .programChange(program: data1)
             
         case 0xE0:  // Pitch Bend
-            let value = Int16(data1) | (Int16(data2) << 7) - 8192
+            // MIDI pitch bend is a 14-bit unsigned value (LSB first),
+            // centered at 8192. Parenthesize decoding before subtraction.
+            let unsignedValue = (Int(data2) << 7) | Int(data1)
+            let value = Int16(unsignedValue - 8192)
             eventType = .pitchBend(value: value)
             
         case 0xA0:  // Poly Aftertouch
