@@ -365,7 +365,18 @@ public final class PlaybackEngine: ObservableObject {
     /// Remove the instrument from a track
     public func removeInstrument(for trackID: TrackID) {
         guard let instrument = trackInstruments[trackID] else { return }
-        
+
+        // AU and mixer detachment is a graph mutation. The instrument picker
+        // and track header can call this while playback is active.
+        let wasRunning = audioEngine.engine.isRunning
+        if wasRunning { audioEngine.engine.stop() }
+        defer {
+            if wasRunning {
+                do { try audioEngine.start() }
+                catch { print("[PlaybackEngine] Failed to restart after instrument removal: \(error)") }
+            }
+        }
+
         // Disconnect and detach the audio node
         audioEngine.engine.disconnectNodeOutput(instrument.audioNode)
         audioEngine.engine.detach(instrument.audioNode)
@@ -481,7 +492,17 @@ public final class PlaybackEngine: ObservableObject {
     /// Remove a rack instrument
     public func removeRackInstrument(rackID: UUID) {
         guard let instrument = rackInstruments[rackID] else { return }
-        
+
+        // Match track-instrument removal: don't detach an actively rendered AU.
+        let wasRunning = audioEngine.engine.isRunning
+        if wasRunning { audioEngine.engine.stop() }
+        defer {
+            if wasRunning {
+                do { try audioEngine.start() }
+                catch { print("[PlaybackEngine] Failed to restart after V-Rack removal: \(error)") }
+            }
+        }
+
         // Disconnect and detach the audio node
         audioEngine.engine.disconnectNodeOutput(instrument.audioNode)
         audioEngine.engine.detach(instrument.audioNode)
