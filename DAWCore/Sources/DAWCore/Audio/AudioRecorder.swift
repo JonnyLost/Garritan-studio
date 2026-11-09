@@ -751,7 +751,13 @@ public final class MIDIRecorderManager: ObservableObject {
     private var recordedEvents: [MIDIEvent] = []
     private var recordingStartBeat: Double = 0
     private var recordingStartSamplePosition: Int64 = 0  // Sample position when recording started
-    private var pendingNotes: [UInt8: (startBeat: Double, velocity: UInt8, channel: UInt8)] = [:]
+    private struct PendingNoteKey: Hashable {
+        let pitch: UInt8
+        let channel: UInt8
+    }
+
+    // A pitch may sound simultaneously on different MIDI channels.
+    private var pendingNotes: [PendingNoteKey: (startBeat: Double, velocity: UInt8)] = [:]
     
     // Minimum time between Note Ons to be considered a retrigger (not a duplicate)
     private let minRetriggerBeats: Double = 0.02  // ~10ms at 120bpm
@@ -806,17 +812,17 @@ public final class MIDIRecorderManager: ObservableObject {
         let currentSamplePosition = transport.getCurrentSamplePosition()
         let currentBeat = transport.samplePositionToBeats(currentSamplePosition)
         
-        for (pitch, noteInfo) in pendingNotes {
+        for (key, noteInfo) in pendingNotes {
             let duration = max(0.01, currentBeat - noteInfo.startBeat)
             let event = MIDIEvent.note(
                 at: noteInfo.startBeat - recordingStartBeat,
-                pitch: pitch,
+                pitch: key.pitch,
                 velocity: noteInfo.velocity,
                 duration: duration,
-                channel: noteInfo.channel
+                channel: key.channel
             )
             recordedEvents.append(event)
-            print("[MIDIRecorder] Closing pending note \(pitch) with duration \(String(format: "%.3f", duration))")
+            print("[MIDIRecorder] Closing pending note \(key.pitch) with duration \(String(format: "%.3f", duration))")
         }
         
         isRecording = false
@@ -863,16 +869,13 @@ public final class MIDIRecorderManager: ObservableObject {
         case .note(let noteData):
             midiLog("RAW NOTE: pitch=\(noteData.pitch), velocity=\(noteData.velocity), beat=\(String(format: "%.3f", relativeBeat))")
             
-            // Check if this is a note-off:
-            // - velocity = 0 (standard note-off)
-            // - velocity = 1 (some keyboards use this for note-off)
-            // - OR there's already a pending note for this pitch (re-trigger = complete old note first)
-            let isNoteOff = noteData.velocity == 0 || noteData.velocity == 1
-            let hasPendingNote = pendingNotes[noteData.pitch] != nil
-            
-            if isNoteOff || (hasPendingNote && noteData.velocity < 10) {
+            // MIDI Note Off and Note On with velocity zero are normalized to
+            // velocity zero by MIDIManager. Velocity one is a valid quiet Note On.
+            let noteKey = PendingNoteKey(pitch: noteData.pitch, channel: event.channel)
+
+            if noteData.velocity == 0 {
                 // Note off - complete the pending note
-                if let pending = pendingNotes.removeValue(forKey: noteData.pitch) {
+                if let pending = pendingNotes.removeValue(forKey: noteKey) {
                     let duration = max(0.01, eventBeat - pending.startBeat)
                     let relativeStart = pending.startBeat - recordingStartBeat
                     let noteEvent = MIDIEvent.note(
@@ -893,7 +896,7 @@ public final class MIDIRecorderManager: ObservableObject {
             } else if noteData.velocity > 0 {
                 // Note on - store as pending with precise beat position
                 // Check if there's already a pending note for this pitch
-                if let pending = pendingNotes[noteData.pitch] {
+                if let pending = pendingNotes[noteKey] {
                     let timeSincePending = eventBeat - pending.startBeat
                     
                     // If very close in time, this is likely a duplicate from multiple MIDI ports - ignore it
@@ -903,7 +906,7 @@ public final class MIDIRecorderManager: ObservableObject {
                     }
                     
                     // Otherwise it's a real retrigger - complete the previous note
-                    pendingNotes.removeValue(forKey: noteData.pitch)
+                    pendingNotes.removeValue(forKey: noteKey)
                     let duration = max(0.01, timeSincePending)
                     let relativeStart = pending.startBeat - recordingStartBeat
                     let noteEvent = MIDIEvent.note(
@@ -914,15 +917,15 @@ public final class MIDIRecorderManager: ObservableObject {
                         channel: pending.channel
                     )
                     recordedEvents.append(noteEvent)
+                    recordedEventCount = recordedEvents.count
                     // Update live events for real-time display
                     liveRecordedEvents = recordedEvents
                     midiLog("  -> AUTO NOTE OFF (retrigger): start=\(String(format: "%.3f", relativeStart)), dur=\(String(format: "%.3f", duration))")
                 }
                 
-                pendingNotes[noteData.pitch] = (
+                pendingNotes[noteKey] = (
                     startBeat: eventBeat,
-                    velocity: noteData.velocity,
-                    channel: event.channel
+                    velocity: noteData.velocity
                 )
                 midiLog("  -> NOTE ON stored")
             }
