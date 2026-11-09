@@ -148,7 +148,7 @@ public struct MainWindowView: View {
 
                         VStack(spacing: 0) {
                             HStack {
-                                Text(compactLowerWorkspace ? "Compact Workspace" : "Full Workspace")
+                                Text(compactLowerWorkspace ? (showArticulationsWorkspace ? "Quick Articulations" : "Compact Workspace") : "Full Workspace")
                                     .font(.caption.weight(.medium))
                                 Spacer()
                                 Button(compactLowerWorkspace ? "Expand" : "Compact") {
@@ -169,7 +169,7 @@ public struct MainWindowView: View {
                                 bottomPanel
                             }
                         }
-                            .frame(height: compactLowerWorkspace ? 108 : pianoRollHeight)
+                            .frame(height: compactLowerWorkspace ? (showArticulationsWorkspace ? 155 : 108) : pianoRollHeight)
                             .simultaneousGesture(
                                 TapGesture().onEnded { _ in
                                     NSApp.keyWindow?.makeFirstResponder(nil)
