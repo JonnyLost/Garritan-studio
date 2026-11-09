@@ -1573,10 +1573,22 @@ public final class ProjectViewModel: ObservableObject {
     
     public func undo() {
         undoManager.undo(project: &project)
+        synchronizeTrackAudioAfterHistoryChange()
     }
-    
+
     public func redo() {
         undoManager.redo(project: &project)
+        synchronizeTrackAudioAfterHistoryChange()
+    }
+
+    /// Undo/redo edits the project model directly and bypasses updateTrack(_:).
+    /// Reapply gain, pan, mute, stage send and solo state to the live track
+    /// nodes so the saved model and sounding audio do not diverge.
+    private func synchronizeTrackAudioAfterHistoryChange() {
+        for track in project.tracks {
+            audioEngine.updateTrackParameters(for: track)
+        }
+        audioEngine.updateSoloState(tracks: project.tracks)
     }
     
     // MARK: - Recording
