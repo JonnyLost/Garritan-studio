@@ -273,7 +273,6 @@ struct ArticulationsWorkspaceView: View {
                 StudioInstrumentIcon(
                     name: track.name,
                     path: suggestedName,
-                    category: "Woodwinds",
                     size: 42
                 )
                 .frame(width: 50, height: 50)
@@ -456,85 +455,131 @@ struct ArticulationsWorkspaceView: View {
 
             if let catalog {
                 HStack(spacing: 0) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        TextField("Find a GPO5 keyswitch patch", text: $search)
-                            .textFieldStyle(.roundedBorder)
-                            .padding(.horizontal, 12)
-                            .padding(.top, 12)
-                        Text("\(catalog.patches.count) documented KS patches")
-                            .font(.caption).foregroundColor(.secondary)
-                            .padding(.horizontal, 12)
-                        List(matchingPatches, id: \.patch, selection: $selectedPatchName) { patch in
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(patch.patch).font(.subheadline)
-                                Text("\(patch.keyswitches.count) articulations")
-                                    .font(.caption2).foregroundColor(.secondary)
+                    VStack(alignment: .leading, spacing: 10) {
+                        StudioSectionHeading("Keyswitch Programs", symbol: "list.bullet")
+                            .padding(.horizontal, 14)
+                            .padding(.top, 14)
+                        HStack(spacing: 7) {
+                            Image(systemName: "magnifyingglass")
+                                .foregroundStyle(palette.secondaryText)
+                            TextField("Search keyswitch patches", text: $search)
+                                .textFieldStyle(.plain)
+                        }
+                        .font(.system(size: 12))
+                        .padding(9)
+                        .background(palette.surface, in: RoundedRectangle(cornerRadius: 8))
+                        .padding(.horizontal, 12)
+
+                        HStack {
+                            Text("\(catalog.patches.count) GPO5 patches")
+                                .font(.system(size: 11))
+                                .foregroundStyle(palette.secondaryText)
+                            Spacer(minLength: 2)
+                            if suggestedPatch != nil {
+                                Button("Follow Track") {
+                                    selectedPatchName = nil
+                                }
+                                .font(.system(size: 10, weight: .medium))
+                                .buttonStyle(.borderless)
+                                .help("Show keyswitches for the loaded instrument")
                             }
+                        }
+                        .padding(.horizontal, 14)
+
+                        List(matchingPatches, id: \.patch, selection: $selectedPatchName) { patch in
+                            HStack(spacing: 9) {
+                                if suggestedPatch?.patch == patch.patch {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(palette.accent)
+                                        .font(.system(size: 12))
+                                } else {
+                                    Image(systemName: "music.note")
+                                        .foregroundStyle(palette.secondaryText)
+                                        .font(.system(size: 11))
+                                }
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(patch.patch)
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundStyle(palette.primaryText)
+                                    Text("\(patch.keyswitches.count) articulations")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(palette.secondaryText)
+                                }
+                            }
+                            .padding(.vertical, 3)
                             .tag(patch.patch)
                         }
                         .listStyle(.sidebar)
                         .scrollContentBackground(.hidden)
                     }
-                    .frame(minWidth: 230, idealWidth: 290, maxWidth: 340)
+                    .frame(width: 250)
                     .background(palette.sidebar)
-                    Divider()
+                    Rectangle()
+                        .fill(palette.separator)
+                        .frame(width: 1)
+
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 14) {
-                            auditionKeyboard
-                            Divider()
+                        VStack(alignment: .leading, spacing: 16) {
+                            instrumentIdentity
+
                             if let patch = activePatch {
-                                Text(patch.patch).font(.title3.weight(.semibold))
-                                Text("Reference assignments from the GPO5 manual. MIDI enabled only for the exact loaded KS program.")
-                                    .font(.caption).foregroundColor(.secondary)
-                                if selectedPatchName == nil && suggestedPatch?.patch == patch.patch {
-                                    Label("Matched to loaded Garritan program", systemImage: "checkmark.circle")
-                                        .font(.caption).foregroundColor(.green)
-                                } else {
-                                    Text("Manual reference selection")
-                                        .font(.caption).foregroundColor(.secondary)
-                                }
-                                ForEach(patch.keyswitches) { assignment in
-                                    Button {
-                                        selectArticulation(assignment)
-                                    } label: {
-                                        HStack(spacing: 16) {
-                                            Image(systemName: selectedArticulationID == assignment.id ? "checkmark.circle.fill" : "circle")
-                                                .foregroundColor(selectedArticulationID == assignment.id ? .white : .accentColor)
-                                            Text(assignment.note)
-                                                .font(.system(.body, design: .monospaced).weight(.semibold))
-                                                .frame(width: 52, alignment: .leading)
-                                            Text(assignment.articulation)
-                                            Spacer()
-                                        }
-                                        .padding(10)
-                                        .foregroundColor(selectedArticulationID == assignment.id ? .white : .primary)
-                                        .background(selectedArticulationID == assignment.id ? Color.accentColor : Color(nsColor: .controlBackgroundColor))
-                                        .cornerRadius(7)
+                                StudioSectionHeading("Available Articulations",
+                                                     symbol: "square.grid.2x2")
+                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 205), spacing: 10)],
+                                          alignment: .leading, spacing: 10) {
+                                    ForEach(patch.keyswitches) { assignment in
+                                        articulationButton(assignment)
                                     }
-                                    .buttonStyle(.plain)
-                                    .disabled(!canSendKeyswitch)
-                                    .accessibilityLabel("\\(assignment.articulation), keyswitch \\(assignment.note)")
                                 }
+
+                                HStack(spacing: 7) {
+                                    Image(systemName: canSendKeyswitch ?
+                                          "checkmark.shield.fill" : "book.closed")
+                                        .foregroundStyle(canSendKeyswitch ?
+                                                         Color.green : palette.accent)
+                                    Text(canSendKeyswitch
+                                         ? "Keyswitches control the loaded Garritan instrument."
+                                         : "Manual reference only. Load the matching KS instrument to enable MIDI.")
+                                        .foregroundStyle(palette.secondaryText)
+                                }
+                                .font(.system(size: 11))
+
+                                StudioSectionHeading("Play & Audition", symbol: "pianokeys")
+                                auditionKeyboard
                             } else {
-                                Text("Select a keyswitch patch from the list, or load a matching Garritan KS program.")
-                                    .foregroundColor(.secondary)
-                                Text("Only exact matches to the loaded Garritan program are suggested. Manual selection remains available.")
-                                    .font(.caption).foregroundColor(.secondary)
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Label("No matching keyswitch map",
+                                          systemImage: "info.circle")
+                                        .font(.headline)
+                                        .foregroundStyle(palette.primaryText)
+                                    Text("Select a reference patch on the left, or load a GPO5 keyswitch instrument to see its articulations.")
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(palette.secondaryText)
+                                }
+                                .padding(18)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .studioPanel()
+
+                                StudioSectionHeading("Play & Audition", symbol: "pianokeys")
+                                auditionKeyboard
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(18)
+                        .padding(17)
                     }
+                    .background(palette.canvas)
                 }
             } else {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("GPO5 keyswitch catalog not found").font(.headline)
-                    Text("Place GPO5_keyswitch_catalog.json in the project's Resources folder, beside the project root, or in your Downloads folder. Then select Reload Catalog.")
-                    Text("The catalog contains manual-derived reference data. MIDI playback and automatic patch matching will be added after verification.")
-                        .font(.caption).foregroundColor(.secondary)
+                    Label("GPO5 keyswitch catalog not found", systemImage: "exclamationmark.triangle")
+                        .font(.headline)
+                    Text("Place GPO5_keyswitch_catalog.json in the project's Resources folder or project root. Then select Reload Catalog.")
+                    Text("Articulation reference information requires the catalog file.")
+                        .font(.caption)
+                        .foregroundStyle(palette.secondaryText)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .padding(20)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
         }
         .background(palette.canvas)
