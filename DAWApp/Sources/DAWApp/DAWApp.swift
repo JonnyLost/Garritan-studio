@@ -255,16 +255,18 @@ class AppState: ObservableObject {
     
     func openProject(at url: URL) async {
         do {
+            // Decode and validate the next project BEFORE tearing down the
+            // current session. A missing/corrupt file must not silence the
+            // existing instruments or stop its autosave.
+            let loadedProject = try await fileManager.load(from: url)
+
             autosaveManager.stopAutosave()
-            
-            // Clear all existing plugins first
             NotificationCenter.default.post(name: .clearAllPlugins, object: nil)
-            
-            // Small delay to ensure cleanup completes
+
+            // Allow the old graph to release its hosted instruments.
             try? await Task.sleep(nanoseconds: 100_000_000)
-            
-            // Load the project
-            currentProject = try await fileManager.load(from: url)
+
+            currentProject = loadedProject
             currentProjectURL = url
             hasUnsavedChanges = false
             projectID = UUID()  // Force view refresh with new project
