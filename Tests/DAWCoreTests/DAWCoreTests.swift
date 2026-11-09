@@ -85,6 +85,13 @@ final class DAWCoreTests: XCTestCase {
         }
     }
     
+    func testMIDIReleaseVelocityAndSoftNoteOnRemainDistinct() {
+        // Note Off is represented by zero velocity in the incoming MIDI model.
+        XCTAssertEqual(NoteData(pitch: 60, velocity: 0).velocity, 0)
+        // Velocity one is still a valid Note On, not a Note Off.
+        XCTAssertEqual(NoteData(pitch: 60, velocity: 1).velocity, 1)
+    }
+
     func testMIDINoteNameParsing() {
         XCTAssertEqual(NoteData.pitch(from: "C4"), 60)
         XCTAssertEqual(NoteData.pitch(from: "A4"), 69)
@@ -171,5 +178,75 @@ final class DAWCoreTests: XCTestCase {
         
         let quantizedCeil = TimeUtilities.quantize(beats: beat, gridDivision: 0.5, mode: .ceil)
         XCTAssertEqual(quantizedCeil, 2.0, accuracy: 0.001)
+    }
+}
+
+@available(macOS 14.0, *)
+final class ProjectPersistenceSafetyTests: XCTestCase {
+    func testFailedFullSavePreservesPreviouslySavedProject() async throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("GarritanPersistence-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+
+        let package = folder.appendingPathComponent("Orchestra.dawproj")
+        let manager = ProjectFileManager()
+        var project = Project(name: "Original")
+        try await manager.save(project: project, to: package)
+
+        project.name = "Edited"
+        project.audioFiles.append(AudioFileReference(
+            originalPath: folder.appendingPathComponent("missing.wav").path,
+            relativePath: "",
+            sampleRate: 44100,
+            channelCount: 2,
+            lengthInSamples: 100,
+            bitDepth: 24
+        ))
+
+        var saveFailed = false
+        do {
+            try await manager.save(project: project, to: package)
+        } catch {
+            saveFailed = true
+        }
+        XCTAssertTrue(saveFailed, "Saving with missing audio must fail")
+        let recovered = try await manager.load(from: package)
+        XCTAssertEqual(recovered.name, "Original")
+        XCTAssertTrue(recovered.audioFiles.isEmpty)
+    }
+
+    func testFullSavePreservesAudioAlreadyInsideProjectPackage() async throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("GarritanPackagedAudio-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+
+        let source = folder.appendingPathComponent("sample.wav")
+        let sampleBytes = Data([0x52, 0x49, 0x46, 0x46])
+        try sampleBytes.write(to: source)
+
+        let package = folder.appendingPathComponent("Orchestra.dawproj")
+        let manager = ProjectFileManager()
+        var project = Project(name: "First Save")
+        project.audioFiles.append(AudioFileReference(
+            originalPath: source.path,
+            relativePath: "",
+            sampleRate: 44100,
+            channelCount: 2,
+            lengthInSamples: 2,
+            bitDepth: 24
+        ))
+        try await manager.save(project: project, to: package)
+        try FileManager.default.removeItem(at: source)
+
+        var loaded = try await manager.load(from: package)
+        loaded.name = "Second Save"
+        try await manager.save(project: loaded, to: package)
+
+        let recovered = try await manager.load(from: package)
+        XCTAssertEqual(recovered.name, "Second Save")
+        let packagedAudio = URL(fileURLWithPath: try XCTUnwrap(recovered.audioFiles.first).originalPath)
+        XCTAssertEqual(try Data(contentsOf: packagedAudio), sampleBytes)
     }
 }
