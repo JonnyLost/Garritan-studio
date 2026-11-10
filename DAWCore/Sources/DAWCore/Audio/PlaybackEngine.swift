@@ -48,6 +48,8 @@ public final class PlaybackEngine: ObservableObject {
     
     // V-Rack input monitoring (for armed tracks)
     private var isMonitoringVRackInput: Bool = false
+    private var vRackInputMeter: RealtimeStereoPeakMeter?
+    private var vRackInputMeterTimer: Timer?
     @Published public private(set) var vRackInputLevel: (left: Float, right: Float) = (0, 0)
     
     // V-Rack recording waveform visualization
@@ -762,82 +764,42 @@ public final class PlaybackEngine: ObservableObject {
     /// Start monitoring V-Rack input levels (for armed audio tracks with V-Rack input)
     /// This is lighter weight than recording - just measures levels without writing to disk
     public func startVRackInputMonitoring() {
-        guard let sumMixer = vRackSumMixer else {
-            print("[PlaybackEngine] Cannot start V-Rack monitoring: sum mixer not available")
-            return
-        }
-        
-        // Don't start monitoring if already recording (recording tap provides levels)
-        guard !isRecordingVRack && !isMonitoringVRackInput else {
-            return
-        }
-        
+        guard let sumMixer = vRackSumMixer, !isRecordingVRack,
+              !isMonitoringVRackInput else { return }
         let format = sumMixer.outputFormat(forBus: 0)
-        
-        // Install a lightweight tap just for metering
-        sumMixer.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            guard let self = self else { return }
-            
-            // Calculate stereo levels
-            let frameLength = Int(buffer.frameLength)
-            guard frameLength > 0 else { return }
-            
-            var leftSum: Float = 0
-            var rightSum: Float = 0
-            
-            if let channelData = buffer.floatChannelData {
-                // Left channel
-                for i in 0..<frameLength {
-                    let sample = channelData[0][i]
-                    leftSum += sample * sample
-                }
-                
-                // Right channel (if stereo)
-                if buffer.format.channelCount > 1 {
-                    for i in 0..<frameLength {
-                        let sample = channelData[1][i]
-                        rightSum += sample * sample
-                    }
-                } else {
-                    rightSum = leftSum  // Mono - use same value
-                }
-            }
-            
-            let leftRms = sqrt(leftSum / Float(frameLength))
-            let rightRms = sqrt(rightSum / Float(frameLength))
-            
-            // Convert to normalized 0-1 range (with -60dB floor)
-            let leftDb = 20 * log10(max(leftRms, 0.000001))
-            let rightDb = 20 * log10(max(rightRms, 0.000001))
-            
-            let leftNormalized = max(0, min(1, (leftDb + 60) / 60))
-            let rightNormalized = max(0, min(1, (rightDb + 60) / 60))
-            
-            DispatchQueue.main.async {
-                self.vRackInputLevel = (leftNormalized, rightNormalized)
-            }
+        guard format.commonFormat == .pcmFormatFloat32,
+              let meter = RealtimeStereoPeakMeter() else { return }
+
+        sumMixer.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+            meter.measure(buffer)
         }
-        
+        vRackInputMeter = meter
         isMonitoringVRackInput = true
-        print("[PlaybackEngine] V-Rack input monitoring started")
+        vRackInputMeterTimer?.invalidate()
+        vRackInputMeterTimer = Timer.scheduledTimer(
+            withTimeInterval: 0.05, repeats: true
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, let meter = self.vRackInputMeter else { return }
+                let peak = meter.takePeaks()
+                self.vRackInputLevel = (
+                    min(1, peak.left), min(1, peak.right)
+                )
+            }
+        }
+        print("[PlaybackEngine] V-Rack monitoring started")
     }
-    
-    /// Stop monitoring V-Rack input levels
+
     public func stopVRackInputMonitoring() {
-        guard isMonitoringVRackInput, let sumMixer = vRackSumMixer else {
-            return
-        }
-        
-        // Don't remove tap if we're recording (recording needs it)
-        guard !isRecordingVRack else {
-            return
-        }
-        
+        guard isMonitoringVRackInput, let sumMixer = vRackSumMixer,
+              !isRecordingVRack else { return }
         sumMixer.removeTap(onBus: 0)
+        vRackInputMeterTimer?.invalidate()
+        vRackInputMeterTimer = nil
+        vRackInputMeter = nil
         isMonitoringVRackInput = false
         vRackInputLevel = (0, 0)
-        
-        print("[PlaybackEngine] V-Rack input monitoring stopped")
+        print("[PlaybackEngine] V-Rack monitoring stopped")
     }
 
     // Diagnostic taps are installed only when live MIDI is first routed.
