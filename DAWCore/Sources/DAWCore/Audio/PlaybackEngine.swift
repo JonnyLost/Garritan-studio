@@ -1231,9 +1231,9 @@ public final class PlaybackEngine: ObservableObject {
                 let instrument: TrackInstrument? = {
                     switch note.midiOutput {
                     case .rackInstrument(let rackID, _):
-                        return rackInstruments[rackID]
+                        return midiQueueRackInstruments[rackID]
                     case .trackInstrument, .none:
-                        return trackInstruments[note.trackID]
+                        return midiQueueTrackInstruments[note.trackID]
                     }
                 }()
                 instrument?.stopNote(note.pitch, channel: note.channel)
@@ -1255,9 +1255,9 @@ public final class PlaybackEngine: ObservableObject {
             case .rackInstrument(let rackID, let ch):
                 // Saved V-Rack destinations are 1-based. Clamp malformed or
                 // old project values before subtraction to avoid UInt8 traps.
-                return (rackInstruments[rackID], min(16, max(1, ch)) - 1)
+                return (midiQueueRackInstruments[rackID], min(16, max(1, ch)) - 1)
             case .trackInstrument, .none:
-                return (trackInstruments[scheduled.trackID], scheduled.event.channel)
+                return (midiQueueTrackInstruments[scheduled.trackID], scheduled.event.channel)
             }
         }()
         
@@ -1309,9 +1309,9 @@ public final class PlaybackEngine: ObservableObject {
             let instrument: TrackInstrument? = {
                 switch note.midiOutput {
                 case .rackInstrument(let rackID, _):
-                    return rackInstruments[rackID]
+                    return midiQueueRackInstruments[rackID]
                 case .trackInstrument, .none:
-                    return trackInstruments[note.trackID]
+                    return midiQueueTrackInstruments[note.trackID]
                 }
             }()
             
@@ -2046,9 +2046,9 @@ public final class PlaybackEngine: ObservableObject {
                 let instrument: TrackInstrument?
                 switch note.midiOutput {
                 case .rackInstrument(let rackID, _):
-                    instrument = rackInstruments[rackID]
+                    instrument = midiQueueRackInstruments[rackID]
                 case .trackInstrument, .none:
-                    instrument = trackInstruments[note.trackID]
+                    instrument = midiQueueTrackInstruments[note.trackID]
                 }
                 instrument?.stopNote(note.pitch, channel: note.channel)
             }
