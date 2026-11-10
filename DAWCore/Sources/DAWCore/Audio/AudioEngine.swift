@@ -93,6 +93,8 @@ public final class AudioEngine: ObservableObject {
     
     // Timing tap installed flag
     private var timingTapInstalled = false
+    private let realtimeSamplePosition = RealtimeSamplePosition()
+    private var timingPositionUITimer: Timer?
     
     // Metronome
     private var metronomeNode: MetronomeNode?
@@ -553,6 +555,7 @@ public final class AudioEngine: ObservableObject {
     public func startPlayback(from samplePosition: Int64) {
         playbackStartSamplePosition = samplePosition
         currentSamplePosition = samplePosition
+        realtimeSamplePosition.publish(samplePosition)
         playbackStartHostTime = mach_absolute_time()
         isPlaying = true
         
@@ -587,6 +590,7 @@ public final class AudioEngine: ObservableObject {
     /// Set the current sample position (for seeking)
     public func setSamplePosition(_ position: Int64) {
         currentSamplePosition = position
+        realtimeSamplePosition.publish(position)
         playbackStartSamplePosition = position
         playbackStartHostTime = mach_absolute_time()
         samplePositionSubject.send(position)
@@ -607,9 +611,10 @@ public final class AudioEngine: ObservableObject {
         // Update our sample rate
         sampleRate = format.sampleRate
         
-        // Install tap on main mixer - this fires every buffer
-        // This is the MASTER CLOCK for all timing-critical operations
-        masterMixer.installTap(onBus: 0, bufferSize: bufferSize, format: format) { [weak self] buffer, time in
+        // Keep the MIDI clock calculation unchanged. UI receives only a
+        // lock-free position snapshot, not a new Task for every buffer.
+        let publishedPosition = realtimeSamplePosition
+        masterMixer.installTap(onBus: 0, bufferSize: bufferSize, format: format) { [weak self] buffer, _ in
             guard let self = self, self.isPlaying else { return }
             
             // Calculate current sample position based on elapsed time
@@ -621,14 +626,21 @@ public final class AudioEngine: ObservableObject {
             // This processes MIDI events that fall within this buffer window
             self.midiEventCallback?(bufferStartSample, buffer.frameLength, self.currentTempo)
             
-            // Update position on main thread (for UI only, not for timing)
-            let newPosition = bufferStartSample + Int64(buffer.frameLength)
-            Task { @MainActor in
-                self.currentSamplePosition = newPosition
-                self.samplePositionSubject.send(newPosition)
-            }
+            // Constant-time render callback publication, no actor hop.
+            publishedPosition.publish(bufferStartSample + Int64(buffer.frameLength))
         }
         
+        timingPositionUITimer?.invalidate()
+        timingPositionUITimer = Timer.scheduledTimer(
+            withTimeInterval: 1.0 / 30.0, repeats: true
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.isPlaying else { return }
+                let position = self.realtimeSamplePosition.load()
+                self.currentSamplePosition = position
+                self.samplePositionSubject.send(position)
+            }
+        }
         timingTapInstalled = true
         print("[AudioEngine] Timing tap installed, sample rate: \(sampleRate), buffer size: \(bufferSize)")
     }
@@ -679,6 +691,8 @@ public final class AudioEngine: ObservableObject {
     public func removeTimingTap() {
         guard timingTapInstalled else { return }
         masterMixer.removeTap(onBus: 0)
+        timingPositionUITimer?.invalidate()
+        timingPositionUITimer = nil
         timingTapInstalled = false
     }
     
