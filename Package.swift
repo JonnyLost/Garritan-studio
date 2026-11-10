@@ -87,7 +87,7 @@ let package = Package(
         // MARK: - Tests
         .testTarget(
             name: "DAWCoreTests",
-            dependencies: ["DAWCore"],
+            dependencies: ["DAWCore", "DAWRealtime"],
             path: "Tests/DAWCoreTests"
         )
     ]
