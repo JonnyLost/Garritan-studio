@@ -435,14 +435,9 @@ struct ArticulationsWorkspaceView: View {
                 symbol: "music.note"
             ) {
                 if let track = viewModel.selectedTrack,
-                   let pluginID = track.instrumentSlot?.pluginID {
+                   track.instrumentSlot?.pluginID != nil {
                     Button {
-                        if let loaded = viewModel.pluginHost.loadedPlugins.values.first(where: {
-                            $0.identifier == pluginID
-                        }) {
-                            PluginWindowManager.shared.openPluginWindow(
-                                for: loaded, trackName: track.name, preferNativeARIA: true)
-                        }
+                        viewModel.openTrackInstrumentUI(track.id, preferNativeARIA: true)
                     } label: {
                         Label("Open ARIA Player", systemImage: "pianokeys")
                     }
