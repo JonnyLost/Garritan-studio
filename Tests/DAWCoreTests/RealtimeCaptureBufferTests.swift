@@ -59,6 +59,36 @@ final class RealtimeCaptureBufferTests: XCTestCase {
         XCTAssertEqual(daw_audio_ring_take_peak(ring), 0, accuracy: 0.001)
     }
 
+    func testStereoMeterSeparatesChannelsAndAtomicPositionHandoff() throws {
+        let meter = try XCTUnwrap(daw_audio_stereo_meter_create())
+        defer { daw_audio_stereo_meter_destroy(meter) }
+        let left: [Float] = [0.1, 0.6, -0.2]
+        let right: [Float] = [-0.9, 0.3, 0.2]
+        left.withUnsafeBufferPointer { l in
+            right.withUnsafeBufferPointer { r in
+                daw_audio_stereo_meter_measure(
+                    meter, l.baseAddress, r.baseAddress, 2, 3, false
+                )
+            }
+        }
+        var leftPeak: Float = 0
+        var rightPeak: Float = 0
+        daw_audio_stereo_meter_take(meter, &leftPeak, &rightPeak)
+        XCTAssertEqual(leftPeak, 0.6, accuracy: 0.00001)
+        XCTAssertEqual(rightPeak, 0.9, accuracy: 0.00001)
+        daw_audio_stereo_meter_take(meter, &leftPeak, &rightPeak)
+        XCTAssertEqual(leftPeak, 0, accuracy: 0.00001)
+        XCTAssertEqual(rightPeak, 0, accuracy: 0.00001)
+
+        let position = try XCTUnwrap(daw_sample_position_create())
+        defer { daw_sample_position_destroy(position) }
+        XCTAssertEqual(daw_sample_position_load(position), 0)
+        daw_sample_position_publish(position, 12_345)
+        XCTAssertEqual(daw_sample_position_load(position), 12_345)
+        daw_sample_position_publish(position, 678)
+        XCTAssertEqual(daw_sample_position_load(position), 678)
+    }
+
     func testInterleavedStereoInputAndAtomicMeterReset() throws {
         let ring = try XCTUnwrap(daw_audio_ring_create(4))
         defer { daw_audio_ring_destroy(ring) }
