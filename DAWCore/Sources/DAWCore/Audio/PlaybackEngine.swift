@@ -82,6 +82,12 @@ public final class PlaybackEngine: ObservableObject {
     
     // High-priority queue for MIDI processing (avoids blocking audio thread)
     private let midiProcessingQueue = DispatchQueue(label: "com.musio.midi-processing", qos: .userInteractive)
+    // These fields are owned exclusively by midiProcessingQueue. The audio
+    // tap submits buffer positions but never reads mutable transport state.
+    private var midiQueuePlaybackActive = false
+    private var midiQueueStartBeat: Double = 0
+    private var midiQueueStartSample: Int64 = 0
+    private var midiQueueSampleRate: Double = 44100
     
     // Timer for processing V-Rack MIDI events in hybrid mode
     // (When Core Audio backend is active, AVAudioEngine's timing tap may not fire)
@@ -963,6 +969,19 @@ public final class PlaybackEngine: ObservableObject {
         let sampleRate = coreAudioBackend?.sampleRate ?? audioEngine.sampleRate
         playbackStartSample = beatsToSamples(playbackStartBeat, tempo: transport.tempo.bpm, sampleRate: sampleRate)
         lastProcessedSample = playbackStartSample
+
+        // Start a new MIDI session only after any previous queued buffer work
+        // has drained. Events earlier than the seek position must not play.
+        midiProcessingQueue.sync {
+            midiQueueStartBeat = playbackStartBeat
+            midiQueueStartSample = playbackStartSample
+            midiQueueSampleRate = sampleRate
+            for index in scheduledMIDIEvents.indices
+            where scheduledMIDIEvents[index].absoluteBeat < playbackStartBeat {
+                scheduledMIDIEvents[index].processed = true
+            }
+            midiQueuePlaybackActive = true
+        }
         
         // Core Audio backend path (HYBRID MODE)
         if let backend = coreAudioBackend {
@@ -1039,42 +1058,34 @@ public final class PlaybackEngine: ObservableObject {
     /// Process MIDI events for the current audio buffer (called from audio thread)
     /// This is the heart of sample-accurate timing
     private func processAudioBuffer(startSample: Int64, frameCount: AVAudioFrameCount, tempo: Double) {
-        guard isPlaying else { return }
-        
+        // Do not inspect MainActor playback state on the render callback.
+        // Only submit scalar timing values; the serial MIDI worker owns the
+        // session snapshot, event cursor and active-note list.
         let bufferEndSample = startSample + Int64(frameCount)
-        
-        // Convert sample range to beat range
-        let bufferStartBeat = samplesToBeats(startSample - playbackStartSample, tempo: tempo) + playbackStartBeat
-        let bufferEndBeat = samplesToBeats(bufferEndSample - playbackStartSample, tempo: tempo) + playbackStartBeat
-        
-        // Dispatch MIDI processing to high-priority queue (NOT the audio thread)
-        // This avoids blocking the audio render and prevents deadlocks
         midiProcessingQueue.async { [weak self] in
-            guard let self = self, self.isPlaying else { return }
-            
-            // Process MIDI events that fall within this buffer's time window
-            for i in 0..<self.scheduledMIDIEvents.count {
-                guard !self.scheduledMIDIEvents[i].processed else { continue }
-                
-                let eventBeat = self.scheduledMIDIEvents[i].absoluteBeat
-                
-                // Skip events before our window
-                guard eventBeat >= bufferStartBeat else { continue }
-                
-                // Stop if we're past the buffer window
+            guard let self = self, self.midiQueuePlaybackActive else { return }
+            let beatsPerSample = tempo / (60.0 * self.midiQueueSampleRate)
+            let bufferStartBeat = Double(startSample - self.midiQueueStartSample)
+                * beatsPerSample + self.midiQueueStartBeat
+            let bufferEndBeat = Double(bufferEndSample - self.midiQueueStartSample)
+                * beatsPerSample + self.midiQueueStartBeat
+
+            for index in self.scheduledMIDIEvents.indices {
+                guard !self.scheduledMIDIEvents[index].processed else { continue }
+                let eventBeat = self.scheduledMIDIEvents[index].absoluteBeat
+                // Events at or before this buffer's end must be processed
+                // even when the worker is late. Do not discard overdue notes.
                 guard eventBeat < bufferEndBeat else { break }
-                
-                // Process the event immediately (AUEventSampleTimeImmediate since we're slightly behind)
-                self.processEventSampleAccurate(self.scheduledMIDIEvents[i], sampleOffset: AUEventSampleTimeImmediate)
-                self.scheduledMIDIEvents[i].processed = true
+                self.processEventSampleAccurate(
+                    self.scheduledMIDIEvents[index],
+                    sampleOffset: AUEventSampleTimeImmediate
+                )
+                self.scheduledMIDIEvents[index].processed = true
             }
-            
-            // Process note-offs
+
             self.processNoteOffsInBuffer(bufferEndBeat: bufferEndBeat)
+            self.lastProcessedSample = bufferEndSample
         }
-        
-        // Update last processed position
-        lastProcessedSample = bufferEndSample
     }
     
     // MARK: - Hybrid Mode Timer
@@ -1123,7 +1134,8 @@ public final class PlaybackEngine: ObservableObject {
     
     /// Process V-Rack MIDI events based on elapsed time
     private func processHybridMIDIEvents(tempo: Double, sampleRate: Double) {
-        guard isPlaying else { return }
+        // This timer runs on midiProcessingQueue, like legacy buffer work.
+        guard midiQueuePlaybackActive else { return }
         
         // Calculate elapsed time in nanoseconds
         var timebaseInfo = mach_timebase_info_data_t()
@@ -1375,6 +1387,11 @@ public final class PlaybackEngine: ObservableObject {
     
     public func stopPlayback() {
         isPlaying = false
+        // Barrier: drain any queued buffer processing and prevent callbacks
+        // enqueued after stop from releasing or retriggering notes.
+        midiProcessingQueue.sync {
+            midiQueuePlaybackActive = false
+        }
 
         // Stop metering
         stopMetering()
@@ -1420,6 +1437,9 @@ public final class PlaybackEngine: ObservableObject {
     
     public func pausePlayback() {
         isPlaying = false
+        midiProcessingQueue.sync {
+            midiQueuePlaybackActive = false
+        }
         
         // Note: We don't stop notes on pause - they'll continue until their natural end
         // This matches DAW behavior where pausing doesn't cut notes off
