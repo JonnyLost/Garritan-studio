@@ -1070,17 +1070,30 @@ public final class PlaybackEngine: ObservableObject {
             let bufferEndBeat = Double(bufferEndSample - self.midiQueueStartSample)
                 * beatsPerSample + self.midiQueueStartBeat
 
+            let window = MIDIPlaybackWindow(
+                sessionStartBeat: self.midiQueueStartBeat,
+                bufferEndBeat: bufferEndBeat
+            )
             for index in self.scheduledMIDIEvents.indices {
                 guard !self.scheduledMIDIEvents[index].processed else { continue }
-                let eventBeat = self.scheduledMIDIEvents[index].absoluteBeat
-                // Events at or before this buffer's end must be processed
-                // even when the worker is late. Do not discard overdue notes.
-                guard eventBeat < bufferEndBeat else { break }
-                self.processEventSampleAccurate(
-                    self.scheduledMIDIEvents[index],
-                    sampleOffset: AUEventSampleTimeImmediate
-                )
-                self.scheduledMIDIEvents[index].processed = true
+                switch window.disposition(for: self.scheduledMIDIEvents[index].absoluteBeat) {
+                case .beforeSession:
+                    // Seeking past a note must not cause it to sound later.
+                    self.scheduledMIDIEvents[index].processed = true
+                case .due:
+                    // Process late-arriving work rather than losing the event.
+                    self.processEventSampleAccurate(
+                        self.scheduledMIDIEvents[index],
+                        sampleOffset: AUEventSampleTimeImmediate
+                    )
+                    self.scheduledMIDIEvents[index].processed = true
+                case .future:
+                    // Events are sorted: nothing else can be due yet.
+                    break
+                }
+                if window.disposition(for: self.scheduledMIDIEvents[index].absoluteBeat) == .future {
+                    break
+                }
             }
 
             self.processNoteOffsInBuffer(bufferEndBeat: bufferEndBeat)
