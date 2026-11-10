@@ -878,7 +878,7 @@ public final class MIDIRecorderManager: ObservableObject {
                         pitch: noteData.pitch,
                         velocity: pending.velocity,
                         duration: duration,
-                        channel: pending.channel
+                        channel: noteKey.channel
                     )
                     recordedEvents.append(noteEvent)
                     recordedEventCount = recordedEvents.count
@@ -909,7 +909,7 @@ public final class MIDIRecorderManager: ObservableObject {
                         pitch: noteData.pitch,
                         velocity: pending.velocity,
                         duration: duration,
-                        channel: pending.channel
+                        channel: noteKey.channel
                     )
                     recordedEvents.append(noteEvent)
                     recordedEventCount = recordedEvents.count
