@@ -68,6 +68,28 @@ final class DAWCoreTests: XCTestCase {
         XCTAssertEqual(track.volumeDB, -6.0, accuracy: 0.1)
     }
     
+    func testTrackMIDIChannelFilter() {
+        var track = Track(name: "MIDI Filter", type: .instrument)
+
+        // All channels is the default and accepts the full MIDI 1.0 range.
+        XCTAssertNil(track.midiOutputChannel)
+        XCTAssertTrue(track.acceptsMIDIChannel(0))
+        XCTAssertTrue(track.acceptsMIDIChannel(15))
+
+        // Selection is zero-based: 0 = displayed channel 1.
+        track.midiOutputChannel = 0
+        XCTAssertTrue(track.acceptsMIDIChannel(0))
+        XCTAssertFalse(track.acceptsMIDIChannel(1))
+        XCTAssertFalse(track.acceptsMIDIChannel(15))
+
+        track.midiOutputChannel = 15
+        XCTAssertTrue(track.acceptsMIDIChannel(15))
+        XCTAssertFalse(track.acceptsMIDIChannel(0))
+
+        track.midiOutputChannel = nil
+        XCTAssertTrue(track.acceptsMIDIChannel(8))
+    }
+
     // MARK: - MIDI Event Tests
     
     func testMIDINoteCreation() {
@@ -117,7 +139,9 @@ final class DAWCoreTests: XCTestCase {
         XCTAssertEqual(project.name, "Test Project")
         XCTAssertEqual(project.tempo.bpm, 120)
         XCTAssertEqual(project.timeSignature, .common)
-        XCTAssertEqual(project.tracks.count, 5)  // Default: 1 audio + 4 MIDI tracks
+        // New projects start with one ready-to-load instrument track.
+        XCTAssertEqual(project.tracks.count, 1)
+        XCTAssertEqual(project.tracks.first?.type, .instrument)
     }
     
     func testProjectTrackManagement() {
