@@ -32,14 +32,15 @@ public struct TransportView: View {
             .focusable(false)
             .help("Return to Zero")
             
-            // Rewind
-            Button(action: {}) {
+            // Move to the previous bar boundary using the existing safe seek path.
+            Button(action: { jumpByBars(-1) }) {
                 Image(systemName: "backward.fill")
                     .font(.system(size: 14))
             }
             .buttonStyle(.plain)
             .focusable(false)
-            .help("Rewind")
+            .help("Previous Bar")
+            .disabled(viewModel.isRecording)
             
             // Play/Pause (no separate Stop button - modern DAW style)
             Button(action: { viewModel.togglePlayPause() }) {
@@ -67,14 +68,15 @@ public struct TransportView: View {
             .focusable(false)
             .help(viewModel.isRecording ? "Stop Recording" : "Record")
             
-            // Fast forward
-            Button(action: {}) {
+            // Move to the next bar boundary.
+            Button(action: { jumpByBars(1) }) {
                 Image(systemName: "forward.fill")
                     .font(.system(size: 14))
             }
             .buttonStyle(.plain)
             .focusable(false)
-            .help("Fast Forward")
+            .help("Next Bar")
+            .disabled(viewModel.isRecording)
             
             Divider()
                 .frame(height: 24)
@@ -252,6 +254,16 @@ public struct TransportView: View {
     }
     
     // Bars display - uses local state for real-time updates
+    /// One-bar navigation is safe while stopped or playing. Seek through
+    /// ProjectViewModel so live MIDI playback restarts from the new position.
+    /// Recording disables the buttons above to avoid moving the capture clock.
+    private func jumpByBars(_ direction: Int) {
+        guard !viewModel.isRecording else { return }
+        let barLength = Double(max(1, transportState.timeSignature.beatsPerBar))
+        let currentBarStart = (max(0, transportState.playheadBeats) / barLength).rounded(.down) * barLength
+        viewModel.seekTo(beat: max(0, currentBarStart + Double(direction) * barLength))
+    }
+
     private var barsDisplay: String {
         let beats = currentBeats
         let timeSig = transportState.timeSignature
