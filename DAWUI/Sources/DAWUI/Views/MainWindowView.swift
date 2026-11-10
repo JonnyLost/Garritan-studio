@@ -600,7 +600,9 @@ public struct MainWindowView: View {
                 PianoRollPlaceholderView()
             }
         } else if viewModel.showMixer {
-            MixerView(viewModel: viewModel)
+            MixerView(viewModel: viewModel, openStageWorkspace: {
+                selectWorkspace("Stage")
+            })
         }
     }
     
