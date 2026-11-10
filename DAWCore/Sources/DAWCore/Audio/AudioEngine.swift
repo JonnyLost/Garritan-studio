@@ -459,6 +459,14 @@ public final class AudioEngine: ObservableObject {
         try rebuildPluginChain(for: trackNode)
     }
     
+    /// Return the actual effect Audio Unit connected at a track's insert slot.
+    /// Read-only: does not rebuild or otherwise modify the audio graph.
+    public func pluginNode(on trackID: TrackID, at slotIndex: Int) -> AVAudioUnit? {
+        guard let trackNode = trackNodes[trackID],
+              trackNode.pluginNodes.indices.contains(slotIndex) else { return nil }
+        return trackNode.pluginNodes[slotIndex]
+    }
+
     private func rebuildPluginChain(
         for trackNode: TrackAudioNode,
         inserting newPlugin: AVAudioUnit? = nil,
