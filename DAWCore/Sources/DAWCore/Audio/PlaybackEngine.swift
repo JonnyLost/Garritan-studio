@@ -1513,9 +1513,8 @@ public final class PlaybackEngine: ObservableObject {
                     let clipEndBeat = clip.timeRange.end.beats(atTempo: tempo)
                     
                     for event in midiData.events {
-                        // Selected channel filters MIDI; All (nil) preserves channel 1–16.
-                        if let selectedChannel = track.midiOutputChannel,
-                           event.channel != selectedChannel { continue }
+                        // Use the same channel filter as live MIDI playthrough.
+                        guard track.acceptsMIDIChannel(event.channel) else { continue }
                         let absoluteBeat = clipStartBeat + event.beatPosition
                         guard absoluteBeat >= clipStartBeat && absoluteBeat < clipEndBeat else { continue }
                         
@@ -1793,11 +1792,8 @@ public final class PlaybackEngine: ObservableObject {
         let clipEndBeat = clip.timeRange.end.beats(atTempo: project.tempo.bpm)
 
         for event in midiData.events {
-            // Keep legacy playback consistent with the hybrid backend and
-            // live MIDI routing: nil means All, otherwise match the recorded
-            // zero-based MIDI channel.
-            if let selectedChannel = track.midiOutputChannel,
-               event.channel != selectedChannel { continue }
+            // Match the same filter used by the hybrid backend and live input.
+            guard track.acceptsMIDIChannel(event.channel) else { continue }
 
             let absoluteBeat = clipStartBeat + event.beatPosition
 
