@@ -387,6 +387,21 @@ public final class PlaybackEngine: ObservableObject {
     public func removeInstrument(for trackID: TrackID) {
         guard let instrument = trackInstruments[trackID] else { return }
 
+        // Drain the MIDI worker and release this track's active notes before
+        // detaching its AU. Other tracks routed to V-Rack remain untouched.
+        midiProcessingQueue.sync {
+            for note in activeNotes where note.trackID == trackID {
+                if case .rackInstrument = note.midiOutput { continue }
+                midiQueueTrackInstruments[trackID]?.stopNote(note.pitch, channel: note.channel)
+            }
+            activeNotes.removeAll { note in
+                guard note.trackID == trackID else { return false }
+                if case .rackInstrument = note.midiOutput { return false }
+                return true
+            }
+            midiQueueTrackInstruments.removeValue(forKey: trackID)
+        }
+
         // AU and mixer detachment is a graph mutation. The instrument picker
         // and track header can call this while playback is active.
         let wasRunning = audioEngine.engine.isRunning
@@ -517,6 +532,24 @@ public final class PlaybackEngine: ObservableObject {
     /// Remove a rack instrument
     public func removeRackInstrument(rackID: UUID) {
         guard let instrument = rackInstruments[rackID] else { return }
+
+        // Multiple MIDI tracks may share this AU. Release every active note
+        // targeting the rack before the underlying graph nodes are detached.
+        midiProcessingQueue.sync {
+            for note in activeNotes {
+                if case .rackInstrument(let destinationID, _) = note.midiOutput,
+                   destinationID == rackID {
+                    midiQueueRackInstruments[rackID]?.stopNote(note.pitch, channel: note.channel)
+                }
+            }
+            activeNotes.removeAll { note in
+                if case .rackInstrument(let destinationID, _) = note.midiOutput {
+                    return destinationID == rackID
+                }
+                return false
+            }
+            midiQueueRackInstruments.removeValue(forKey: rackID)
+        }
 
         // Match track-instrument removal: don't detach an actively rendered AU.
         let wasRunning = audioEngine.engine.isRunning
