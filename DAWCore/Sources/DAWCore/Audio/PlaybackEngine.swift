@@ -1665,6 +1665,9 @@ public final class PlaybackEngine: ObservableObject {
         }
         
         hasLoggedPlaybackDebug = false
+        // Build the playback schedule off-queue, then publish it with one
+        // queue barrier. The worker must never observe a partially built list.
+        var localScheduledMIDIEvents: [ScheduledEvent] = []
 
         // Clean up old audio player nodes first
         cleanupAudioPlayers()
@@ -1700,7 +1703,10 @@ public final class PlaybackEngine: ObservableObject {
                 switch clip.content {
                 case .midi(let midiData):
                     print("[PlaybackEngine] MIDI clip with \(midiData.events.count) events")
-                    scheduleMIDIClip(midiData, clip: clip, track: track, project: project)
+                    scheduleMIDIClip(
+                        midiData, clip: clip, track: track, project: project,
+                        into: &localScheduledMIDIEvents
+                    )
 
                 case .audio(let audioData):
                     // Use simple AVAudioPlayer for reliable playback
@@ -1713,9 +1719,10 @@ public final class PlaybackEngine: ObservableObject {
             }
         }
         
-        // Sort by beat position for efficient processing (thread-safe)
+        // Publish the complete sorted schedule atomically to the worker.
+        localScheduledMIDIEvents.sort { $0.absoluteBeat < $1.absoluteBeat }
         midiProcessingQueue.sync {
-            scheduledMIDIEvents.sort { $0.absoluteBeat < $1.absoluteBeat }
+            scheduledMIDIEvents = localScheduledMIDIEvents
         }
     }
     
@@ -1822,7 +1829,8 @@ public final class PlaybackEngine: ObservableObject {
         _ midiData: MIDIClipData,
         clip: Clip,
         track: Track,
-        project: Project
+        project: Project,
+        into events: inout [ScheduledEvent]
     ) {
         let clipStartBeat = clip.timeRange.start.beats(atTempo: project.tempo.bpm)
         let clipEndBeat = clip.timeRange.end.beats(atTempo: project.tempo.bpm)
@@ -1844,7 +1852,7 @@ public final class PlaybackEngine: ObservableObject {
                 midiOutput: track.midiOutput  // Capture the track's routing
             )
 
-            scheduledMIDIEvents.append(scheduled)
+            events.append(scheduled)
         }
     }
     
