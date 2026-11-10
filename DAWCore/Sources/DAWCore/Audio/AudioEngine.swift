@@ -64,6 +64,8 @@ public final class AudioEngine: ObservableObject {
 
     /// Post-fader stereo peak levels (linear 0...1), refreshed approximately 20 times/sec.
     @Published public private(set) var trackPeakLevels: [TrackID: [Float]] = [:]
+    private var trackMeterStates: [TrackID: RealtimeStereoPeakMeter] = [:]
+    private var trackMeterTimer: Timer?
     
     @Published public private(set) var isRunning: Bool = false
     @Published public private(set) var sampleRate: Double = 44100
@@ -293,25 +295,26 @@ public final class AudioEngine: ObservableObject {
     private func installTrackMeter(for trackNode: TrackAudioNode) {
         let id = trackNode.trackID
         let format = trackNode.outputMixer.outputFormat(forBus: 0)
-        guard format.channelCount >= 2, format.commonFormat == .pcmFormatFloat32 else { return }
-        var framesSinceUpdate: AVAudioFrameCount = 0
-        let refreshFrames = AVAudioFrameCount(max(1, format.sampleRate / 20))
-        trackNode.outputMixer.installTap(onBus: 0, bufferSize: 512, format: format) { [weak self] buffer, _ in
-            framesSinceUpdate += buffer.frameLength
-            guard framesSinceUpdate >= refreshFrames else { return }
-            framesSinceUpdate = 0
-            guard let channels = buffer.floatChannelData else { return }
-            let count = Int(buffer.frameLength)
-            guard count > 0 else { return }
-            var peaks: [Float] = [0, 0]
-            for channel in 0..<2 {
-                let samples = channels[channel]
-                var peak: Float = 0
-                for frame in 0..<count { peak = max(peak, abs(samples[frame])) }
-                peaks[channel] = min(1, peak)
-            }
-            DispatchQueue.main.async { [weak self] in
-                self?.trackPeakLevels[id] = peaks
+        guard format.channelCount > 0, format.commonFormat == .pcmFormatFloat32,
+              let meter = RealtimeStereoPeakMeter() else { return }
+        trackMeterStates[id] = meter
+        trackNode.outputMixer.installTap(onBus: 0, bufferSize: 512, format: format) { buffer, _ in
+            meter.measure(buffer)
+        }
+
+        // Poll all track meters on the UI run loop. This eliminates per-buffer
+        // heap allocations and main-queue dispatch from each track's tap.
+        if trackMeterTimer == nil {
+            trackMeterTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    for (trackID, meter) in self.trackMeterStates {
+                        let peak = meter.takePeaks()
+                        self.trackPeakLevels[trackID] = [
+                            min(1, peak.left), min(1, peak.right)
+                        ]
+                    }
+                }
             }
         }
     }
@@ -337,7 +340,12 @@ public final class AudioEngine: ObservableObject {
 
         // Remove metering tap before detaching the output node.
         trackNode.outputMixer.removeTap(onBus: 0)
+        trackMeterStates.removeValue(forKey: trackID)
         trackPeakLevels.removeValue(forKey: trackID)
+        if trackMeterStates.isEmpty {
+            trackMeterTimer?.invalidate()
+            trackMeterTimer = nil
+        }
         // Disconnect and detach all nodes
         engine.disconnectNodeOutput(trackNode.inputMixer)
         engine.disconnectNodeOutput(trackNode.gainNode)
