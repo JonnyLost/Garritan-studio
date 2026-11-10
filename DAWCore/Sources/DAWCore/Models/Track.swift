@@ -121,6 +121,12 @@ public struct Track: Identifiable, Codable, Sendable {
     }
     
     // MARK: - Convenience
+
+    /// Match incoming and recorded MIDI consistently across playback engines.
+    /// MIDI channels are zero-based (0...15); nil means all channels.
+    public func acceptsMIDIChannel(_ channel: UInt8) -> Bool {
+        midiOutputChannel == nil || midiOutputChannel == channel
+    }
     
     /// Volume in decibels (-inf to +6 dB)
     public var volumeDB: Float {
