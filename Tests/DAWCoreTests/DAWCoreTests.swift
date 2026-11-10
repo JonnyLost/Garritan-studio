@@ -90,6 +90,26 @@ final class DAWCoreTests: XCTestCase {
         XCTAssertTrue(track.acceptsMIDIChannel(8))
     }
 
+    func testMIDIPlaybackWindowSeparatesSeekPastDueAndFuture() {
+        let window = MIDIPlaybackWindow(sessionStartBeat: 12, bufferEndBeat: 12.5)
+
+        // A seek should not retrigger notes that began in earlier measures.
+        XCTAssertEqual(window.disposition(for: 11.999), .beforeSession)
+        // Events exactly at the seek boundary are eligible.
+        XCTAssertEqual(window.disposition(for: 12), .due)
+        XCTAssertEqual(window.disposition(for: 12.25), .due)
+        // Buffer end is exclusive, so the following callback owns the event.
+        XCTAssertEqual(window.disposition(for: 12.5), .future)
+    }
+
+    func testMIDIPlaybackWindowProcessesOverdueEvents() {
+        let window = MIDIPlaybackWindow(sessionStartBeat: 4, bufferEndBeat: 8)
+        // A delayed worker still delivers unprocessed events before the end.
+        XCTAssertEqual(window.disposition(for: 4.01), .due)
+        XCTAssertEqual(window.disposition(for: 6), .due)
+        XCTAssertEqual(window.disposition(for: 8), .future)
+    }
+
     // MARK: - MIDI Event Tests
     
     func testMIDINoteCreation() {
