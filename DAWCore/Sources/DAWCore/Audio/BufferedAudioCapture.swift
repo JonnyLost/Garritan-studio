@@ -225,3 +225,27 @@ final class RealtimeStereoPeakMeter: @unchecked Sendable {
         daw_audio_stereo_meter_destroy(meter)
     }
 }
+
+/// Atomic handoff from the render clock to the 30 Hz transport UI.
+final class RealtimeSamplePosition: @unchecked Sendable {
+    private let position: OpaquePointer
+
+    init() {
+        guard let pointer = daw_sample_position_create() else {
+            preconditionFailure("Cannot allocate realtime sample position")
+        }
+        position = pointer
+    }
+
+    func publish(_ frames: Int64) {
+        daw_sample_position_publish(position, frames)
+    }
+
+    func load() -> Int64 {
+        daw_sample_position_load(position)
+    }
+
+    deinit {
+        daw_sample_position_destroy(position)
+    }
+}
