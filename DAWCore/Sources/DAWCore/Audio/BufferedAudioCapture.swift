@@ -192,3 +192,36 @@ final class RealtimePeakMeter: @unchecked Sendable {
         daw_audio_peak_meter_destroy(meter)
     }
 }
+
+/// Stereo meter state can be shared with an audio tap, and polled on the
+/// main actor at a controlled rate instead of dispatching once per buffer.
+final class RealtimeStereoPeakMeter: @unchecked Sendable {
+    private let meter: OpaquePointer
+
+    init?() {
+        guard let pointer = daw_audio_stereo_meter_create() else { return nil }
+        meter = pointer
+    }
+
+    func measure(_ buffer: AVAudioPCMBuffer) {
+        guard buffer.format.commonFormat == .pcmFormatFloat32,
+              let data = buffer.floatChannelData else { return }
+        let channels = UInt32(buffer.format.channelCount)
+        let second = (!buffer.format.isInterleaved && channels > 1) ? data[1] : data[0]
+        daw_audio_stereo_meter_measure(
+            meter, data[0], second, channels,
+            UInt32(buffer.frameLength), buffer.format.isInterleaved
+        )
+    }
+
+    func takePeaks() -> (left: Float, right: Float) {
+        var left: Float = 0
+        var right: Float = 0
+        daw_audio_stereo_meter_take(meter, &left, &right)
+        return (left, right)
+    }
+
+    deinit {
+        daw_audio_stereo_meter_destroy(meter)
+    }
+}
