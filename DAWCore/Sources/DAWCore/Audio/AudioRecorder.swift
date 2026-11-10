@@ -125,11 +125,6 @@ public final class AudioRecorder: ObservableObject {
             let granted = await requestMicrophonePermission()
             guard granted else {
                 debugLog("Microphone permission not granted - cannot monitor input")
-                // Try anyway for non-sandboxed apps
-                debugLog("Attempting to start monitoring anyway...")
-                await MainActor.run {
-                    self.startInputMonitoringInternal()
-                }
                 return
             }
             
@@ -140,6 +135,9 @@ public final class AudioRecorder: ObservableObject {
     }
     
     private func startInputMonitoringInternal() {
+        // Permission requests are async. The user may have started recording
+        // while permission was pending; never replace a recording tap.
+        guard !isMonitoringInput && !isRecording else { return }
         debugLog("startInputMonitoringInternal: Starting...")
         do {
             // Make sure audio engine is running
