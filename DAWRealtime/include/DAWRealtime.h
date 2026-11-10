@@ -24,6 +24,7 @@ bool daw_audio_ring_push(DAWAudioRing *ring,
 uint32_t daw_audio_ring_pop(DAWAudioRing *ring,
                             float *interleavedStereo,
                             uint32_t maximumFrames);
+void daw_audio_ring_mark_dropped(DAWAudioRing *ring, uint32_t frames);
 uint64_t daw_audio_ring_dropped_frames(const DAWAudioRing *ring);
 uint64_t daw_audio_ring_accepted_frames(const DAWAudioRing *ring);
 float daw_audio_ring_take_peak(DAWAudioRing *ring);
