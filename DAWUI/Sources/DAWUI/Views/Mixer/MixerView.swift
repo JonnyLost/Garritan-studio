@@ -11,9 +11,14 @@ public struct MixerView: View {
     
     @State private var showPluginBrowser = false
     @State private var selectedPluginSlot: (TrackID, Int)?
-    
-    public init(viewModel: ProjectViewModel) {
+    @State private var showInsertSlots = true
+    @State private var showMeters = true
+    @State private var showMaster = true
+    private let openStageWorkspace: (() -> Void)?
+
+    public init(viewModel: ProjectViewModel, openStageWorkspace: (() -> Void)? = nil) {
         self.viewModel = viewModel
+        self.openStageWorkspace = openStageWorkspace
     }
     
     public var body: some View {
@@ -23,11 +28,15 @@ public struct MixerView: View {
                 subtitle: "Instrument channels, levels and master output",
                 symbol: "slider.vertical.3"
             ) {
-                // Keep the existing display menu; no audio routing is changed.
+                // Display options only; sends are edited in the existing
+                // Orchestral Stage workspace, not in a placeholder mixer panel.
                 Menu {
-                    Button("Show Sends") {}
-                    Button("Show Inserts") {}
-                    Button("Show I/O") {}
+                    Toggle("Show Insert Slots", isOn: $showInsertSlots)
+                    Toggle("Show Level Meters", isOn: $showMeters)
+                    Toggle("Show Master Channel", isOn: $showMaster)
+                    Divider()
+                    Button("Stage Sends & Reverb…") { openStageWorkspace?() }
+                        .disabled(openStageWorkspace == nil)
                 } label: {
                     Image(systemName: "slider.horizontal.3")
                 }
@@ -44,6 +53,8 @@ public struct MixerView: View {
                                 track: track,
                                 viewModel: viewModel,
                                 isPlaying: viewModel.transportState.isPlaying,
+                                showInsertSlots: showInsertSlots,
+                                showMeters: showMeters,
                                 onPluginSlotClick: { slotIndex in
                                     selectedPluginSlot = (track.id, slotIndex)
                                     showPluginBrowser = true
@@ -53,11 +64,14 @@ public struct MixerView: View {
                         }
                         
                         // Master channel
-                        MasterChannelStripView(
-                            track: viewModel.project.masterTrack,
-                            viewModel: viewModel,
-                            isPlaying: viewModel.transportState.isPlaying
-                        )
+                        if showMaster {
+                            MasterChannelStripView(
+                                track: viewModel.project.masterTrack,
+                                viewModel: viewModel,
+                                isPlaying: viewModel.transportState.isPlaying,
+                                showMeters: showMeters
+                            )
+                        }
                     }
                     .padding(16)
                 }
@@ -122,6 +136,8 @@ struct ChannelStripView: View {
     let track: Track
     @ObservedObject var viewModel: ProjectViewModel
     let isPlaying: Bool
+    let showInsertSlots: Bool
+    let showMeters: Bool
     let onPluginSlotClick: (Int) -> Void
     
     private var meterLevels: (left: Float, right: Float) {
@@ -144,15 +160,17 @@ struct ChannelStripView: View {
             .padding(.top, 7)
             
             // Plugin slot
-            let slot = track.pluginSlots.first
-            PluginSlotView(
-                slot: slot,
-                onClick: { onPluginSlotClick(0) },
-                onOpenEditor: slot?.pluginID != nil ? {
-                    viewModel.openTrackEffectUI(track.id, slotIndex: 0)
-                } : nil
-            )
-            .padding(.vertical, 4)
+            if showInsertSlots {
+                let slot = track.pluginSlots.first
+                PluginSlotView(
+                    slot: slot,
+                    onClick: { onPluginSlotClick(0) },
+                    onOpenEditor: slot?.pluginID != nil ? {
+                        viewModel.openTrackEffectUI(track.id, slotIndex: 0)
+                    } : nil
+                )
+                .padding(.vertical, 4)
+            }
             
             // Pan knob
             KnobView(
@@ -169,8 +187,10 @@ struct ChannelStripView: View {
             
             // Meter and fader side by side
             HStack(spacing: 2) {
-                StereoMeterView(leftLevel: meterLevels.left, rightLevel: meterLevels.right)
-                    .frame(width: 15, height: 145)
+                if showMeters {
+                    StereoMeterView(leftLevel: meterLevels.left, rightLevel: meterLevels.right)
+                        .frame(width: 15, height: 145)
+                }
                 
                 FaderView(
                     value: Binding(
@@ -246,6 +266,7 @@ struct MasterChannelStripView: View {
     let track: Track
     @ObservedObject var viewModel: ProjectViewModel
     let isPlaying: Bool
+    let showMeters: Bool
     
     private var meterLevels: (left: Float, right: Float) {
         viewModel.playbackEngine.masterMeterLevel
@@ -269,8 +290,10 @@ struct MasterChannelStripView: View {
             
             // Meter and fader
             HStack(spacing: 4) {
-                StereoMeterView(leftLevel: meterLevels.left, rightLevel: meterLevels.right)
-                    .frame(width: 17, height: 170)
+                if showMeters {
+                    StereoMeterView(leftLevel: meterLevels.left, rightLevel: meterLevels.right)
+                        .frame(width: 17, height: 170)
+                }
                 
                 FaderView(
                     value: Binding(
