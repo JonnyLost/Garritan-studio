@@ -1127,12 +1127,7 @@ public struct PluginListView: View {
     }
     
     private func openPlugin(at index: Int) {
-        guard let slot = slotAt(index),
-              let pluginID = slot.pluginID,
-              let loadedPlugin = viewModel.pluginHost.loadedPlugins.values.first(where: { $0.identifier == pluginID }),
-              let track = viewModel.project.track(withID: trackID) else { return }
-        
-        PluginWindowManager.shared.openPluginWindow(for: loadedPlugin, trackName: track.name)
+        viewModel.openTrackEffectUI(trackID, slotIndex: index)
     }
     
     private func removePlugin(at index: Int) {
