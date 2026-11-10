@@ -1,0 +1,40 @@
+name: macOS build and tests
+
+on:
+  push:
+    branches:
+      - feature/stage-acoustics-sync
+  pull_request:
+    branches:
+      - garritan-integration
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build app and test DAWCore
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+
+      - name: Show macOS and Swift versions
+        run: |
+          sw_vers
+          swift --version
+
+      - name: Resolve package dependencies
+        run: swift package resolve
+
+      - name: Build all targets
+        run: swift build
+
+      - name: Run regression tests
+        run: swift test --parallel
