@@ -194,11 +194,8 @@ public final class ProjectViewModel: ObservableObject {
     
     private func routeMIDIToInstrument(_ event: IncomingMIDIEvent, trackID: TrackID) {
         guard let track = project.track(withID: trackID) else { return }
-        // All channels (nil) preserves the incoming channel. A selected
-        // channel filters incoming MIDI, as it does for clip playback.
-        if let selectedChannel = track.midiOutputChannel, event.channel != selectedChannel {
-            return
-        }
+        // Share the exact filter with legacy and hybrid MIDI playback.
+        guard track.acceptsMIDIChannel(event.channel) else { return }
 
         // Determine the MIDI destination and channel
         let (instrument, channel): (TrackInstrument?, UInt8) = {
