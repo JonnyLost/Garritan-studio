@@ -124,6 +124,10 @@ uint32_t daw_audio_ring_pop(DAWAudioRing *ring, float *output, uint32_t limit) {
     return count;
 }
 
+void daw_audio_ring_mark_dropped(DAWAudioRing *ring, uint32_t frames) {
+    if (ring) atomic_fetch_add_explicit(&ring->dropped, frames, memory_order_relaxed);
+}
+
 uint64_t daw_audio_ring_dropped_frames(const DAWAudioRing *ring) {
     return ring ? atomic_load_explicit(&ring->dropped, memory_order_acquire) : 0;
 }
