@@ -1070,7 +1070,7 @@ public final class PlaybackEngine: ObservableObject {
             }
             
             // Process note-offs
-            self.processNoteOffsInBuffer(bufferStartBeat: bufferStartBeat, bufferEndBeat: bufferEndBeat, tempo: tempo)
+            self.processNoteOffsInBuffer(bufferEndBeat: bufferEndBeat)
         }
         
         // Update last processed position
@@ -1249,10 +1249,12 @@ public final class PlaybackEngine: ObservableObject {
         }
     }
     
-    /// Process note-offs that fall within the buffer
-    /// Called from midiProcessingQueue - NOT the audio thread
-    private func processNoteOffsInBuffer(bufferStartBeat: Double, bufferEndBeat: Double, tempo: Double) {
-        let notesToStop = activeNotes.filter { $0.endBeat >= bufferStartBeat && $0.endBeat < bufferEndBeat }
+    /// Release all notes due by the end of this buffer, including overdue
+    /// notes when callback delivery or MIDI processing ran late. Previously
+    /// overdue notes were removed without sending their Note Off messages.
+    /// Called from midiProcessingQueue - NOT the audio thread.
+    private func processNoteOffsInBuffer(bufferEndBeat: Double) {
+        let notesToStop = activeNotes.filter { $0.endBeat < bufferEndBeat }
         
         for note in notesToStop {
             let instrument: TrackInstrument? = {
