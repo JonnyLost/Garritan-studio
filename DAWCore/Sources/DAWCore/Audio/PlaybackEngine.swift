@@ -88,6 +88,10 @@ public final class PlaybackEngine: ObservableObject {
     private var midiQueueStartBeat: Double = 0
     private var midiQueueStartSample: Int64 = 0
     private var midiQueueSampleRate: Double = 44100
+    // Playback workers consult queue-owned snapshots, never the mutable
+    // MainActor registries used by UI and AU loading.
+    private var midiQueueTrackInstruments: [TrackID: TrackInstrument] = [:]
+    private var midiQueueRackInstruments: [UUID: TrackInstrument] = [:]
     
     // Timer for processing V-Rack MIDI events in hybrid mode
     // (When Core Audio backend is active, AVAudioEngine's timing tap may not fire)
@@ -249,6 +253,9 @@ public final class PlaybackEngine: ObservableObject {
         try await loadDefaultSound(for: sampler)
         
         trackInstruments[track.id] = .sampler(sampler)
+        midiProcessingQueue.sync {
+            midiQueueTrackInstruments[track.id] = .sampler(sampler)
+        }
         print("[PlaybackEngine] Setup fallback sampler for track: \(track.name)")
     }
     
@@ -264,6 +271,9 @@ public final class PlaybackEngine: ObservableObject {
             _ = try await coreAudioBackend!.loadInstrument(desc, for: trackID)
             // Also store in trackInstruments for UI access
             trackInstruments[trackID] = .auInstrument(audioUnit, pluginID: pluginID)
+            midiProcessingQueue.sync {
+                midiQueueTrackInstruments[trackID] = trackInstruments[trackID]
+            }
             print("[PlaybackEngine] ✓ Instrument loaded via Core Audio backend")
             return
         }
@@ -359,7 +369,10 @@ public final class PlaybackEngine: ObservableObject {
         print("[PlaybackEngine] AU render resources allocated: \(audioUnit.auAudioUnit.renderResourcesAllocated)")
         
         trackInstruments[trackID] = .auInstrument(audioUnit, pluginID: pluginID)
-        
+        midiProcessingQueue.sync {
+            midiQueueTrackInstruments[trackID] = trackInstruments[trackID]
+        }
+
         // Verify we can get the instrument back
         if let inst = trackInstruments[trackID] {
             print("[PlaybackEngine] Instrument stored successfully: \(inst)")
@@ -482,7 +495,10 @@ public final class PlaybackEngine: ObservableObject {
         
         // Store the instrument
         rackInstruments[rackID] = .auInstrument(audioUnit, pluginID: pluginID)
-        
+        midiProcessingQueue.sync {
+            midiQueueRackInstruments[rackID] = rackInstruments[rackID]
+        }
+
         print("[PlaybackEngine] V-Rack instrument loaded successfully: \(audioUnit.name)")
         
         // NOTE: V-Rack instruments stay ONLY in AVAudioEngine
@@ -976,6 +992,8 @@ public final class PlaybackEngine: ObservableObject {
             midiQueueStartBeat = playbackStartBeat
             midiQueueStartSample = playbackStartSample
             midiQueueSampleRate = sampleRate
+            midiQueueTrackInstruments = trackInstruments
+            midiQueueRackInstruments = rackInstruments
             for index in scheduledMIDIEvents.indices
             where scheduledMIDIEvents[index].absoluteBeat < playbackStartBeat {
                 scheduledMIDIEvents[index].processed = true
