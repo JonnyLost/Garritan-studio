@@ -207,15 +207,13 @@ public struct TransportView: View {
             
             Spacer()
             
-            // CPU meter (placeholder)
+            // Avoid displaying a fictitious CPU load until real engine
+            // metering is available.
             HStack(spacing: 4) {
-                Text("CPU")
+                Text("CPU —")
                     .font(.system(size: 9))
                     .foregroundColor(.secondary)
-                
-                ProgressView(value: 0.15)
-                    .progressViewStyle(.linear)
-                    .frame(width: 40)
+                    .help("CPU usage metering is not implemented yet")
             }
             
             // Undo/Redo
