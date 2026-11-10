@@ -1967,13 +1967,24 @@ public final class PlaybackEngine: ObservableObject {
         }
     }
     
+    /// Release every scheduled note before clearing MIDI playback state.
+    /// Active notes are owned by midiProcessingQueue, including V-Rack notes.
+    /// Keeping cleanup on that queue prevents a late buffer callback from
+    /// mutating the list while stop is iterating it.
     private func stopAllNotes() {
-        for (trackID, instrument) in trackInstruments {
-            for note in activeNotes where note.trackID == trackID {
-                instrument.stopNote(note.pitch, channel: note.channel)
+        midiProcessingQueue.sync {
+            for note in activeNotes {
+                let instrument: TrackInstrument?
+                switch note.midiOutput {
+                case .rackInstrument(let rackID, _):
+                    instrument = rackInstruments[rackID]
+                case .trackInstrument, .none:
+                    instrument = trackInstruments[note.trackID]
+                }
+                instrument?.stopNote(note.pitch, channel: note.channel)
             }
+            activeNotes.removeAll()
         }
-        activeNotes.removeAll()
     }
     
     private func stopAllAudioPlayers() {
