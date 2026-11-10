@@ -42,6 +42,20 @@ void daw_audio_peak_meter_measure(DAWAudioPeakMeter *meter,
                                   bool interleaved);
 float daw_audio_peak_meter_take(DAWAudioPeakMeter *meter);
 
+// Independent left/right metering with atomic peak exchange; UI can poll
+// without taking a lock on the audio callback.
+typedef struct DAWAudioStereoMeter DAWAudioStereoMeter;
+DAWAudioStereoMeter *daw_audio_stereo_meter_create(void);
+void daw_audio_stereo_meter_destroy(DAWAudioStereoMeter *meter);
+void daw_audio_stereo_meter_measure(DAWAudioStereoMeter *meter,
+                                    const float *firstChannel,
+                                    const float *secondChannel,
+                                    uint32_t inputChannels,
+                                    uint32_t frames,
+                                    bool interleaved);
+void daw_audio_stereo_meter_take(DAWAudioStereoMeter *meter,
+                                 float *leftPeak, float *rightPeak);
+
 #ifdef __cplusplus
 }
 #endif
