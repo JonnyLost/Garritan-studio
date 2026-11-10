@@ -56,6 +56,13 @@ void daw_audio_stereo_meter_measure(DAWAudioStereoMeter *meter,
 void daw_audio_stereo_meter_take(DAWAudioStereoMeter *meter,
                                  float *leftPeak, float *rightPeak);
 
+// Atomic transport position handoff from render callback to UI timer.
+typedef struct DAWAtomicSamplePosition DAWAtomicSamplePosition;
+DAWAtomicSamplePosition *daw_sample_position_create(void);
+void daw_sample_position_destroy(DAWAtomicSamplePosition *position);
+void daw_sample_position_publish(DAWAtomicSamplePosition *position, int64_t frames);
+int64_t daw_sample_position_load(const DAWAtomicSamplePosition *position);
+
 #ifdef __cplusplus
 }
 #endif
