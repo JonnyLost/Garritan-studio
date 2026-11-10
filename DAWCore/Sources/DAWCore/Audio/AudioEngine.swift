@@ -156,7 +156,7 @@ public final class AudioEngine: ObservableObject {
         }
     }
     
-    @MainActor deinit {
+    deinit {
         engine.stop()
     }
     
