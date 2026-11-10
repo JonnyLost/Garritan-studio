@@ -149,7 +149,7 @@ struct ChannelStripView: View {
                 slot: slot,
                 onClick: { onPluginSlotClick(0) },
                 onOpenEditor: slot?.pluginID != nil ? {
-                    openPluginEditor(for: track.id, slot: slot!)
+                    viewModel.openTrackEffectUI(track.id, slotIndex: 0)
                 } : nil
             )
             .padding(.vertical, 4)
@@ -237,14 +237,6 @@ struct ChannelStripView: View {
         return String(format: "%.1f", db)
     }
     
-    private func openPluginEditor(for trackID: TrackID, slot: PluginSlot) {
-        guard let pluginID = slot.pluginID,
-              let loadedPlugin = viewModel.pluginHost.loadedPlugins.values.first(where: { $0.identifier == pluginID }) else {
-            return
-        }
-        
-        PluginWindowManager.shared.openPluginWindow(for: loadedPlugin, trackName: track.name)
-    }
 }
 
 // MARK: - Master Channel Strip View
