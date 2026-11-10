@@ -1076,7 +1076,10 @@ public final class PlaybackEngine: ObservableObject {
             )
             for index in self.scheduledMIDIEvents.indices {
                 guard !self.scheduledMIDIEvents[index].processed else { continue }
-                switch window.disposition(for: self.scheduledMIDIEvents[index].absoluteBeat) {
+                let disposition = window.disposition(
+                    for: self.scheduledMIDIEvents[index].absoluteBeat
+                )
+                switch disposition {
                 case .beforeSession:
                     // Seeking past a note must not cause it to sound later.
                     self.scheduledMIDIEvents[index].processed = true
@@ -1091,9 +1094,7 @@ public final class PlaybackEngine: ObservableObject {
                     // Events are sorted: nothing else can be due yet.
                     break
                 }
-                if window.disposition(for: self.scheduledMIDIEvents[index].absoluteBeat) == .future {
-                    break
-                }
+                if disposition == .future { break }
             }
 
             self.processNoteOffsInBuffer(bufferEndBeat: bufferEndBeat)
