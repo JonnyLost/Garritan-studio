@@ -83,3 +83,36 @@ explicit approval.
 Score notation, video scoring, expanded MIDI export, sophisticated sends/I/O
 mixing, and major UI architecture changes. Keep the instrument-first direction
 recorded in `docs/INTERFACE_DIRECTION.md`.
+
+## November 10: second stabilization pass (source fixes, not runtime validation)
+
+Additional small commits on `feature/stage-acoustics-sync`:
+
+- **V-Rack note cleanup:** the stop path now releases both track and V-Rack
+  active notes on the serialized MIDI queue, rather than dropping V-Rack notes
+  without sending their Note Off.
+- **Delayed note-offs:** release notes whose ends are already overdue, instead
+  of discarding them if a MIDI worker processed a buffer late.
+- **MIDI channel consistency:** use `Track.acceptsMIDIChannel` for zero-based
+  MIDI channel filtering in live playthrough, legacy scheduling, and hybrid
+  scheduling. Added a pure regression test.
+- **Safer V-Rack channel conversion:** clamp saved one-based channel values
+  into 1...16 before subtracting one.
+- **Input timing:** retain CoreMIDI packet host timestamps when supplied;
+  use callback arrival time only for packets with timestamp zero.
+- **Tap overhead:** remove synchronous diagnostic file writes from the live
+  audio input-monitor callback.
+- **Tests:** fix the outdated project-factory assertion (new projects now have
+  one instrument track), and cover the MIDI channel filter.
+
+**Still unresolved:** the main recording tap allocates buffers and writes
+`AVAudioFile` on a real-time callback; the master audio timing tap still
+reads mutable state and schedules main-actor work per buffer; MIDI worker
+and track/plugin registries are not fully synchronized; track lifecycle
+undo/redo and full project-save crash consistency need additional hardening.
+Changing those requires a focused, testable ownership/buffering design and
+macOS build/runtime validation. The existing ARIA signal chain was not changed.
+
+No macOS compilation, automated test execution, or ARIA listening test has
+been performed for this pass. Keep the consolidated Alpha 1 Mac validation
+gate above. Do not merge without explicit approval.
