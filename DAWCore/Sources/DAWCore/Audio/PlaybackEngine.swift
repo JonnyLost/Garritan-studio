@@ -1206,7 +1206,9 @@ public final class PlaybackEngine: ObservableObject {
         let (instrument, channel): (TrackInstrument?, UInt8) = {
             switch scheduled.midiOutput {
             case .rackInstrument(let rackID, let ch):
-                return (rackInstruments[rackID], ch - 1)
+                // Saved V-Rack destinations are 1-based. Clamp malformed or
+                // old project values before subtraction to avoid UInt8 traps.
+                return (rackInstruments[rackID], min(16, max(1, ch)) - 1)
             case .trackInstrument, .none:
                 return (trackInstruments[scheduled.trackID], scheduled.event.channel)
             }
