@@ -375,8 +375,6 @@ struct PluginSlotView: View {
         .contextMenu {
             if slot?.pluginID != nil {
                 Button("Open Editor") { onOpenEditor?() }
-                Divider()
-                Button("Remove Plugin", role: .destructive) { onClick() }
             }
         }
     }
