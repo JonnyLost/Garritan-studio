@@ -32,8 +32,8 @@ public final class AudioRecorder: ObservableObject {
     
     private let audioEngine: AudioEngine
     private var inputNode: AVAudioInputNode?
-    private var recordingFile: AVAudioFile?
-    private var recordingFormat: AVAudioFormat?
+    private var recordingCapture: BufferedAudioCapture?
+    @Published public private(set) var lastRecordingError: String?
     
     // Recording state
     @Published public private(set) var isRecording: Bool = false
@@ -62,11 +62,8 @@ public final class AudioRecorder: ObservableObject {
     // Level metering
     private var meterTimer: Timer?
     
-    // Waveform buffer for visualization
+    // Waveform history is collected on the writer queue, not in the tap.
     private var waveformBuffer: [Float] = []
-    private let waveformDownsampleFactor: Int = 512  // Samples per waveform point
-    private var sampleAccumulator: Float = 0
-    private var sampleCount: Int = 0
     
     // Combine
     private var cancellables = Set<AnyCancellable>()
@@ -74,6 +71,7 @@ public final class AudioRecorder: ObservableObject {
     // Input monitoring
     private var isMonitoringInput: Bool = false
     private var monitoringTapInstalled: Bool = false
+    private var monitoringMeter: RealtimePeakMeter?
     
     // MARK: - Initialization
     
@@ -152,6 +150,11 @@ public final class AudioRecorder: ObservableObject {
             let inputNode = audioEngine.engine.inputNode
             debugLog("Got input node: \(inputNode)")
             
+            guard let meter = RealtimePeakMeter() else {
+                debugLog("Failed to allocate input peak meter")
+                return
+            }
+
             // Get the input format from the hardware
             let hardwareFormat = inputNode.inputFormat(forBus: 0)
             debugLog("Hardware input format: \(hardwareFormat)")
@@ -177,12 +180,14 @@ public final class AudioRecorder: ObservableObject {
                 }
                 
                 // Install tap with nil format (use default)
-                inputNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buffer, _ in
-                    self?.processMonitoringBuffer(buffer)
+                inputNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { buffer, _ in
+                    meter.measure(buffer)
                 }
-                
+
+                monitoringMeter = meter
                 monitoringTapInstalled = true
                 isMonitoringInput = true
+                startLevelMetering()
                 debugLog("Started input monitoring with default format")
                 return
             }
@@ -194,12 +199,14 @@ public final class AudioRecorder: ObservableObject {
             }
             
             // Install tap for monitoring
-            inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-                self?.processMonitoringBuffer(buffer)
+            inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+                meter.measure(buffer)
             }
-            
+
+            monitoringMeter = meter
             monitoringTapInstalled = true
             isMonitoringInput = true
+            startLevelMetering()
             debugLog("Started input monitoring with format: \(format)")
             
         } catch {
@@ -218,28 +225,10 @@ public final class AudioRecorder: ObservableObject {
         }
         
         isMonitoringInput = false
+        monitoringMeter = nil
+        stopLevelMetering()
         inputLevel = 0
         debugLog("Stopped input monitoring")
-    }
-    
-    private func processMonitoringBuffer(_ buffer: AVAudioPCMBuffer) {
-        guard let channelData = buffer.floatChannelData else { return }
-        
-        var maxSample: Float = 0
-        let frameLength = Int(buffer.frameLength)
-        
-        for channel in 0..<Int(buffer.format.channelCount) {
-            for sample in 0..<frameLength {
-                let absSample = abs(channelData[channel][sample])
-                maxSample = max(maxSample, absSample)
-            }
-        }
-        
-        // A mixer input tap runs on the audio render callback. Do not call
-        // debugLog here: it prints and writes to disk on that thread.
-        Task { @MainActor in
-            self.inputLevel = maxSample
-        }
     }
     
     // MARK: - Input Device Setup
