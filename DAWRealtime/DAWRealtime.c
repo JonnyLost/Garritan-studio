@@ -60,6 +60,11 @@ DAWAudioRing *daw_audio_ring_create(uint32_t requestedFrames) {
     }
     ring->capacity = capacity;
     ring->mask = capacity - 1u;
+    atomic_init(&ring->head, 0);
+    atomic_init(&ring->tail, 0);
+    atomic_init(&ring->dropped, 0);
+    atomic_init(&ring->accepted, 0);
+    atomic_init(&ring->meter.peakBits, 0);
     return ring;
 }
 
@@ -92,6 +97,7 @@ bool daw_audio_ring_push(DAWAudioRing *ring, const float *first,
         atomic_fetch_add_explicit(&ring->dropped, frames, memory_order_relaxed);
         return false;
     }
+    float blockPeak = 0.0f;
     for (uint32_t i = 0; i < frames; i++) {
         uint32_t index = (uint32_t)(head + i) & ring->mask;
         float left = sampleAt(first, second, channels, i, interleaved, 0);
@@ -100,9 +106,9 @@ bool daw_audio_ring_push(DAWAudioRing *ring, const float *first,
         if (!isfinite(right)) right = 0.0f;
         ring->frames[index * 2] = left;
         ring->frames[index * 2 + 1] = right;
-        updatePeak(&ring->meter, left);
-        updatePeak(&ring->meter, right);
+        blockPeak = fmaxf(blockPeak, fmaxf(fabsf(left), fabsf(right)));
     }
+    updatePeak(&ring->meter, blockPeak);
     atomic_store_explicit(&ring->head, head + frames, memory_order_release);
     atomic_fetch_add_explicit(&ring->accepted, frames, memory_order_relaxed);
     return true;
@@ -141,7 +147,9 @@ float daw_audio_ring_take_peak(DAWAudioRing *ring) {
 }
 
 DAWAudioPeakMeter *daw_audio_peak_meter_create(void) {
-    return calloc(1, sizeof(DAWAudioPeakMeter));
+    DAWAudioPeakMeter *meter = calloc(1, sizeof(DAWAudioPeakMeter));
+    if (meter) atomic_init(&meter->peakBits, 0);
+    return meter;
 }
 
 void daw_audio_peak_meter_destroy(DAWAudioPeakMeter *meter) {
@@ -154,11 +162,16 @@ void daw_audio_peak_meter_measure(DAWAudioPeakMeter *meter,
                                   bool interleaved) {
     if (!meter || !first || channels == 0 || (!interleaved && channels > 1 && !second))
         return;
+    float peak = 0.0f;
     for (uint32_t i = 0; i < frames; i++) {
-        updatePeak(meter, sampleAt(first, second, channels, i, interleaved, 0));
-        if (channels > 1)
-            updatePeak(meter, sampleAt(first, second, channels, i, interleaved, 1));
+        float left = sampleAt(first, second, channels, i, interleaved, 0);
+        if (isfinite(left)) peak = fmaxf(peak, fabsf(left));
+        if (channels > 1) {
+            float right = sampleAt(first, second, channels, i, interleaved, 1);
+            if (isfinite(right)) peak = fmaxf(peak, fabsf(right));
+        }
     }
+    updatePeak(meter, peak);
 }
 
 float daw_audio_peak_meter_take(DAWAudioPeakMeter *meter) {
@@ -171,7 +184,12 @@ struct DAWAudioStereoMeter {
 };
 
 DAWAudioStereoMeter *daw_audio_stereo_meter_create(void) {
-    return calloc(1, sizeof(DAWAudioStereoMeter));
+    DAWAudioStereoMeter *meter = calloc(1, sizeof(DAWAudioStereoMeter));
+    if (meter) {
+        atomic_init(&meter->left.peakBits, 0);
+        atomic_init(&meter->right.peakBits, 0);
+    }
+    return meter;
 }
 
 void daw_audio_stereo_meter_destroy(DAWAudioStereoMeter *meter) {
@@ -184,12 +202,15 @@ void daw_audio_stereo_meter_measure(DAWAudioStereoMeter *meter,
                                     bool interleaved) {
     if (!meter || !first || channels == 0 || (!interleaved && channels > 1 && !second))
         return;
+    float leftPeak = 0.0f, rightPeak = 0.0f;
     for (uint32_t i = 0; i < frames; i++) {
         float left = sampleAt(first, second, channels, i, interleaved, 0);
         float right = sampleAt(first, second, channels, i, interleaved, 1);
-        updatePeak(&meter->left, left);
-        updatePeak(&meter->right, right);
+        if (isfinite(left)) leftPeak = fmaxf(leftPeak, fabsf(left));
+        if (isfinite(right)) rightPeak = fmaxf(rightPeak, fabsf(right));
     }
+    updatePeak(&meter->left, leftPeak);
+    updatePeak(&meter->right, rightPeak);
 }
 
 void daw_audio_stereo_meter_take(DAWAudioStereoMeter *meter,
