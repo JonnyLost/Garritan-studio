@@ -164,3 +164,36 @@ void daw_audio_peak_meter_measure(DAWAudioPeakMeter *meter,
 float daw_audio_peak_meter_take(DAWAudioPeakMeter *meter) {
     return takePeak(meter);
 }
+
+struct DAWAudioStereoMeter {
+    struct DAWAudioPeakMeter left;
+    struct DAWAudioPeakMeter right;
+};
+
+DAWAudioStereoMeter *daw_audio_stereo_meter_create(void) {
+    return calloc(1, sizeof(DAWAudioStereoMeter));
+}
+
+void daw_audio_stereo_meter_destroy(DAWAudioStereoMeter *meter) {
+    free(meter);
+}
+
+void daw_audio_stereo_meter_measure(DAWAudioStereoMeter *meter,
+                                    const float *first, const float *second,
+                                    uint32_t channels, uint32_t frames,
+                                    bool interleaved) {
+    if (!meter || !first || channels == 0 || (!interleaved && channels > 1 && !second))
+        return;
+    for (uint32_t i = 0; i < frames; i++) {
+        float left = sampleAt(first, second, channels, i, interleaved, 0);
+        float right = sampleAt(first, second, channels, i, interleaved, 1);
+        updatePeak(&meter->left, left);
+        updatePeak(&meter->right, right);
+    }
+}
+
+void daw_audio_stereo_meter_take(DAWAudioStereoMeter *meter,
+                                 float *leftPeak, float *rightPeak) {
+    if (leftPeak) *leftPeak = meter ? takePeak(&meter->left) : 0;
+    if (rightPeak) *rightPeak = meter ? takePeak(&meter->right) : 0;
+}
