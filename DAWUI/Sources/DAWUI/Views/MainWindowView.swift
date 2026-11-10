@@ -2265,14 +2265,9 @@ struct TrackInspectorSection: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    if let pluginID = track.instrumentSlot?.pluginID {
+                    if track.instrumentSlot?.pluginID != nil {
                         Button {
-                            if let loaded = viewModel.pluginHost.loadedPlugins.values.first(where: {
-                                $0.identifier == pluginID
-                            }) {
-                                PluginWindowManager.shared.openPluginWindow(
-                                    for: loaded, trackName: track.name)
-                            }
+                            viewModel.openTrackInstrumentUI(track.id)
                         } label: {
                             Label("Instrument Controls…", systemImage: "slider.horizontal.3")
                                 .frame(maxWidth: .infinity)
