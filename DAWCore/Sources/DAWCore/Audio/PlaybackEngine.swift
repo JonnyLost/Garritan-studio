@@ -1793,6 +1793,12 @@ public final class PlaybackEngine: ObservableObject {
         let clipEndBeat = clip.timeRange.end.beats(atTempo: project.tempo.bpm)
 
         for event in midiData.events {
+            // Keep legacy playback consistent with the hybrid backend and
+            // live MIDI routing: nil means All, otherwise match the recorded
+            // zero-based MIDI channel.
+            if let selectedChannel = track.midiOutputChannel,
+               event.channel != selectedChannel { continue }
+
             let absoluteBeat = clipStartBeat + event.beatPosition
 
             // Skip events outside clip bounds
