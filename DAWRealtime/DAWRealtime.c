@@ -218,3 +218,25 @@ void daw_audio_stereo_meter_take(DAWAudioStereoMeter *meter,
     if (leftPeak) *leftPeak = meter ? takePeak(&meter->left) : 0;
     if (rightPeak) *rightPeak = meter ? takePeak(&meter->right) : 0;
 }
+
+struct DAWAtomicSamplePosition {
+    _Atomic(int64_t) frames;
+};
+
+DAWAtomicSamplePosition *daw_sample_position_create(void) {
+    DAWAtomicSamplePosition *position = calloc(1, sizeof(DAWAtomicSamplePosition));
+    if (position) atomic_init(&position->frames, 0);
+    return position;
+}
+
+void daw_sample_position_destroy(DAWAtomicSamplePosition *position) {
+    free(position);
+}
+
+void daw_sample_position_publish(DAWAtomicSamplePosition *position, int64_t frames) {
+    if (position) atomic_store_explicit(&position->frames, frames, memory_order_release);
+}
+
+int64_t daw_sample_position_load(const DAWAtomicSamplePosition *position) {
+    return position ? atomic_load_explicit(&position->frames, memory_order_acquire) : 0;
+}
