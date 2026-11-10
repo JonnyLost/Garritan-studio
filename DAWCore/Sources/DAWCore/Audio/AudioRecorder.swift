@@ -222,8 +222,6 @@ public final class AudioRecorder: ObservableObject {
         debugLog("Stopped input monitoring")
     }
     
-    private var monitoringBufferCount = 0
-    
     private func processMonitoringBuffer(_ buffer: AVAudioPCMBuffer) {
         guard let channelData = buffer.floatChannelData else { return }
         
@@ -237,11 +235,8 @@ public final class AudioRecorder: ObservableObject {
             }
         }
         
-        monitoringBufferCount += 1
-        if monitoringBufferCount % 50 == 1 {
-            debugLog("Input monitoring: buffer #\(monitoringBufferCount), level: \(maxSample)")
-        }
-        
+        // A mixer input tap runs on the audio render callback. Do not call
+        // debugLog here: it prints and writes to disk on that thread.
         Task { @MainActor in
             self.inputLevel = maxSample
         }
