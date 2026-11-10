@@ -1410,6 +1410,18 @@ public final class ProjectViewModel: ObservableObject {
             for: loadedPlugin, trackName: track.name, preferNativeARIA: preferNativeARIA)
     }
 
+    /// Open an effect editor for the instance actually inserted in this
+    /// track's audio graph. Identical plug-in types may be loaded on many
+    /// tracks, so matching PluginIdentifier alone is not safe.
+    public func openTrackEffectUI(_ trackID: TrackID, slotIndex: Int) {
+        guard let track = project.track(withID: trackID),
+              let node = audioEngine.pluginNode(on: trackID, at: slotIndex),
+              let loaded = pluginHost.loadedPlugins.values.first(where: { $0.audioUnit === node }) else {
+            return
+        }
+        PluginWindowManager.shared.openPluginWindow(for: loaded, trackName: track.name)
+    }
+
     // MARK: - Plugin State Management
     
     /// Save all loaded plugin states to project before saving
