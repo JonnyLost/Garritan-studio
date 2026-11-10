@@ -315,8 +315,10 @@ public final class MIDIManager: ObservableObject {
     // MARK: - MIDI Input Handling
     
     private func handleMIDIInput(eventList: UnsafePointer<MIDIEventList>) {
-        // CRITICAL: Capture host time IMMEDIATELY at callback time
-        // This is the most accurate timestamp we can get
+        // CoreMIDI UMP packets carry their original host timestamps.
+        // Capture callback time only as a fallback for packets marked
+        // immediate (timestamp == 0). This preserves device-side timing
+        // when input delivery is delayed or batched.
         let callbackHostTime = mach_absolute_time()
         
         let eventList = eventList.pointee
@@ -349,7 +351,9 @@ public final class MIDIManager: ObservableObject {
                                     data1: data1,
                                     data2: data2,
                                     timestamp: packet.pointee.timeStamp,
-                                    hostTime: callbackHostTime
+                                    hostTime: packet.pointee.timeStamp == 0
+                                        ? callbackHostTime
+                                        : packet.pointee.timeStamp
                                 )
                                 
                                 if let event = event {
