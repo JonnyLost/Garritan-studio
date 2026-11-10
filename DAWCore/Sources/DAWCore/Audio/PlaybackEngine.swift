@@ -37,8 +37,11 @@ public final class PlaybackEngine: ObservableObject {
     private var vRackSumMixerConnected: Bool = false
     
     // V-Rack recording state
-    private var vRackRecordingFile: AVAudioFile?
+    private var vRackRecordingCapture: BufferedAudioCapture?
     private var vRackRecordingURL: URL?
+    private var vRackRecordingSampleRate: Double = 44100
+    private var vRackRecordingProgressTimer: Timer?
+    @Published public private(set) var vRackRecordingError: String?
     private var vRackRecordingStartBeat: Double = 0
     @Published public private(set) var isRecordingVRack: Bool = false
     @Published public private(set) var vRackRecordingLevel: Float = 0
@@ -609,146 +612,122 @@ public final class PlaybackEngine: ObservableObject {
         public let latencyCompensation: TimeInterval
     }
     
-    /// Start recording from the V-Rack sum mixer
-    /// - Parameter destinationURL: URL where the WAV file will be saved
-    /// - Returns: True if recording started successfully
+    /// Start a bounded, background-written stereo WAV capture from the
+    /// V-Rack sum mixer. This uses the same realtime-safe writer as input audio.
     @discardableResult
     public func startVRackRecording(to destinationURL: URL) -> Bool {
-        guard let sumMixer = vRackSumMixer else {
-            print("[PlaybackEngine] Cannot start V-Rack recording: sum mixer not available")
-            return false
-        }
-        
-        guard !isRecordingVRack else {
-            print("[PlaybackEngine] V-Rack recording already in progress")
-            return false
-        }
-        
-        // Get the format from the sum mixer
+        guard let sumMixer = vRackSumMixer, !isRecordingVRack else { return false }
+        if isMonitoringVRackInput { stopVRackInputMonitoring() }
         let format = sumMixer.outputFormat(forBus: 0)
-        
-        // Create the audio file for recording
+        guard format.sampleRate > 0, format.channelCount > 0,
+              format.commonFormat == .pcmFormatFloat32 else {
+            vRackRecordingError = "V-Rack output is not Float32 PCM"
+            return false
+        }
+
         do {
-            let audioFile = try AVAudioFile(
+            let file = try AVAudioFile(
                 forWriting: destinationURL,
                 settings: [
                     AVFormatIDKey: kAudioFormatLinearPCM,
                     AVSampleRateKey: format.sampleRate,
-                    AVNumberOfChannelsKey: format.channelCount,
+                    AVNumberOfChannelsKey: 2,
                     AVLinearPCMBitDepthKey: 24,
                     AVLinearPCMIsFloatKey: false,
                     AVLinearPCMIsBigEndianKey: false,
                     AVLinearPCMIsNonInterleaved: false
                 ]
             )
-            
-            vRackRecordingFile = audioFile
+            let capture = try BufferedAudioCapture(file: file, sampleRate: format.sampleRate)
+            sumMixer.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
+                capture.append(buffer)
+            }
+
+            vRackRecordingCapture = capture
             vRackRecordingURL = destinationURL
+            vRackRecordingSampleRate = format.sampleRate
             vRackRecordingStartBeat = transportState?.playheadBeats ?? 0
-            
-            // Clear waveform buffer for new recording
+            vRackRecordingError = nil
+            vRackRecordingLevel = 0
             vRackWaveformBuffer.removeAll()
             vRackWaveformSamples.removeAll()
-            
-            // Install a tap on the sum mixer to capture audio
-            sumMixer.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
-                guard let self = self, let file = self.vRackRecordingFile else { return }
-                
-                do {
-                    try file.write(from: buffer)
-                    
-                    // Calculate level for metering and collect waveform samples
-                    if let channelData = buffer.floatChannelData?[0] {
-                        let frameLength = Int(buffer.frameLength)
-                        var sum: Float = 0
-                        var waveformPoints: [Float] = []
-                        
-                        // Downsample for waveform display (take every Nth sample)
-                        let downsampleFactor = max(1, frameLength / 64)
-                        
-                        for i in 0..<frameLength {
-                            let sample = channelData[i]
-                            sum += sample * sample
-                            
-                            // Collect samples for waveform visualization
-                            if i % downsampleFactor == 0 {
-                                waveformPoints.append(abs(sample))
+            isRecordingVRack = true
+
+            vRackRecordingProgressTimer?.invalidate()
+            vRackRecordingProgressTimer = Timer.scheduledTimer(
+                withTimeInterval: 0.1, repeats: true
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self, let current = self.vRackRecordingCapture else { return }
+                    current.requestProgress { [weak self] progress in
+                        Task { @MainActor [weak self] in
+                            guard let self, self.vRackRecordingCapture === current else { return }
+                            let peak = max(progress.peak, 0.000001)
+                            let db = 20 * log10(peak)
+                            self.vRackRecordingLevel = max(0, min(1, (db + 60) / 60))
+                            if !progress.waveformPoints.isEmpty {
+                                self.vRackWaveformBuffer.append(contentsOf: progress.waveformPoints)
+                                if self.vRackWaveformBuffer.count > self.maxWaveformSamples {
+                                    self.vRackWaveformBuffer.removeFirst(
+                                        self.vRackWaveformBuffer.count - self.maxWaveformSamples
+                                    )
+                                }
+                                self.vRackWaveformSamples = self.vRackWaveformBuffer
                             }
-                        }
-                        
-                        let rms = sqrt(sum / Float(frameLength))
-                        let level = 20 * log10(max(rms, 0.000001))
-                        let normalizedLevel = max(0, min(1, (level + 60) / 60))
-                        
-                        DispatchQueue.main.async {
-                            self.vRackRecordingLevel = normalizedLevel
-                            
-                            // Update waveform buffer
-                            self.vRackWaveformBuffer.append(contentsOf: waveformPoints)
-                            
-                            // Trim buffer if it gets too large
-                            if self.vRackWaveformBuffer.count > self.maxWaveformSamples {
-                                self.vRackWaveformBuffer.removeFirst(self.vRackWaveformBuffer.count - self.maxWaveformSamples)
-                            }
-                            
-                            self.vRackWaveformSamples = self.vRackWaveformBuffer
                         }
                     }
-                } catch {
-                    print("[PlaybackEngine] Error writing V-Rack recording buffer: \(error)")
                 }
             }
-            
-            isRecordingVRack = true
-            print("[PlaybackEngine] V-Rack recording started to: \(destinationURL.lastPathComponent)")
+            print("[PlaybackEngine] Started buffered V-Rack recording: \(destinationURL.lastPathComponent)")
             return true
-            
         } catch {
-            print("[PlaybackEngine] Failed to create V-Rack recording file: \(error)")
+            vRackRecordingError = String(describing: error)
+            try? FileManager.default.removeItem(at: destinationURL)
+            print("[PlaybackEngine] V-Rack capture start failed: \(error)")
             return false
         }
     }
-    
-    /// Stop V-Rack recording and return the result
-    /// - Returns: Recording result containing file info and timing data, or nil if not recording
+
+    /// Stop the tap before draining the recording worker. Any dropped audio
+    /// frames or write errors invalidate the take rather than silently
+    /// returning a corrupted file as though recording succeeded.
     public func stopVRackRecording() -> VRackRecordingResult? {
-        guard isRecordingVRack, let sumMixer = vRackSumMixer else {
-            return nil
-        }
-        
-        // Remove the recording tap
+        guard isRecordingVRack, let sumMixer = vRackSumMixer,
+              let capture = vRackRecordingCapture else { return nil }
+
         sumMixer.removeTap(onBus: 0)
-        
-        // Get recording info before clearing
-        guard let file = vRackRecordingFile, let url = vRackRecordingURL else {
-            isRecordingVRack = false
-            return nil
-        }
-        
-        let durationInSamples = file.length
-        let sampleRate = file.processingFormat.sampleRate
+        vRackRecordingProgressTimer?.invalidate()
+        vRackRecordingProgressTimer = nil
+        let completion = capture.finish()
+        let url = vRackRecordingURL
         let startBeat = vRackRecordingStartBeat
+        let rate = vRackRecordingSampleRate
         let latency = calculateVRackLatency()
-        
-        // Clear recording state
-        vRackRecordingFile = nil
+
+        vRackRecordingCapture = nil
         vRackRecordingURL = nil
         isRecordingVRack = false
         vRackRecordingLevel = 0
         vRackWaveformBuffer.removeAll()
         vRackWaveformSamples.removeAll()
-        
-        print("[PlaybackEngine] V-Rack recording stopped. Duration: \(Double(durationInSamples) / sampleRate)s, Latency compensation: \(latency * 1000)ms")
-        
+
+        guard completion.succeeded, let url else {
+            vRackRecordingError = completion.writeError ??
+                "V-Rack capture overflow: \(completion.droppedFrames) frames lost"
+            print("[PlaybackEngine] V-Rack recording failed: \(vRackRecordingError ?? "Unknown error")")
+            if let url { try? FileManager.default.removeItem(at: url) }
+            return nil
+        }
+        print("[PlaybackEngine] V-Rack recording flushed \(completion.writtenFrames) frames")
         return VRackRecordingResult(
             fileURL: url,
             startBeat: startBeat,
-            durationInSamples: durationInSamples,
-            sampleRate: sampleRate,
+            durationInSamples: completion.writtenFrames,
+            sampleRate: rate,
             latencyCompensation: latency
         )
     }
-    
+
     /// Calculate the maximum latency across all loaded V-Rack instruments
     /// This is used to offset the recorded audio so it aligns with MIDI events
     public func calculateVRackLatency() -> TimeInterval {
