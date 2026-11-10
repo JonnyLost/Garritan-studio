@@ -18,10 +18,19 @@ let package = Package(
         .package(url: "https://github.com/supabase/supabase-swift", from: "2.0.0")
     ],
     targets: [
+        // MARK: - Real-time callback primitives (C11 atomics)
+        .target(
+            name: "DAWRealtime",
+            path: "DAWRealtime",
+            sources: ["DAWRealtime.c"],
+            publicHeadersPath: "include"
+        ),
+
         // MARK: - Core Audio/MIDI Engine
         .target(
             name: "DAWCore",
             dependencies: [
+                "DAWRealtime",
                 .product(name: "Supabase", package: "supabase-swift")
             ],
             path: "DAWCore/Sources/DAWCore",
