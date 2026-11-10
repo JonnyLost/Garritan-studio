@@ -270,9 +270,10 @@ public final class PlaybackEngine: ObservableObject {
             let desc = audioUnit.audioComponentDescription
             _ = try await coreAudioBackend!.loadInstrument(desc, for: trackID)
             // Also store in trackInstruments for UI access
-            trackInstruments[trackID] = .auInstrument(audioUnit, pluginID: pluginID)
+            let loadedInstrument = TrackInstrument.auInstrument(audioUnit, pluginID: pluginID)
+            trackInstruments[trackID] = loadedInstrument
             midiProcessingQueue.sync {
-                midiQueueTrackInstruments[trackID] = trackInstruments[trackID]
+                midiQueueTrackInstruments[trackID] = loadedInstrument
             }
             print("[PlaybackEngine] ✓ Instrument loaded via Core Audio backend")
             return
@@ -368,9 +369,10 @@ public final class PlaybackEngine: ObservableObject {
         // Check if the AU is now rendering
         print("[PlaybackEngine] AU render resources allocated: \(audioUnit.auAudioUnit.renderResourcesAllocated)")
         
-        trackInstruments[trackID] = .auInstrument(audioUnit, pluginID: pluginID)
+        let loadedInstrument = TrackInstrument.auInstrument(audioUnit, pluginID: pluginID)
+        trackInstruments[trackID] = loadedInstrument
         midiProcessingQueue.sync {
-            midiQueueTrackInstruments[trackID] = trackInstruments[trackID]
+            midiQueueTrackInstruments[trackID] = loadedInstrument
         }
 
         // Verify we can get the instrument back
@@ -494,9 +496,10 @@ public final class PlaybackEngine: ObservableObject {
         }
         
         // Store the instrument
-        rackInstruments[rackID] = .auInstrument(audioUnit, pluginID: pluginID)
+        let loadedInstrument = TrackInstrument.auInstrument(audioUnit, pluginID: pluginID)
+        rackInstruments[rackID] = loadedInstrument
         midiProcessingQueue.sync {
-            midiQueueRackInstruments[rackID] = rackInstruments[rackID]
+            midiQueueRackInstruments[rackID] = loadedInstrument
         }
 
         print("[PlaybackEngine] V-Rack instrument loaded successfully: \(audioUnit.name)")
