@@ -7,6 +7,8 @@ import StudioAnalogDSP
 public enum StudioAnalogError: Error, LocalizedError {
     case invalidConfiguration
     case unsupportedAudioBackend
+    case invalidRouting
+    case routingBusy
 
     public var errorDescription: String? {
         switch self {
@@ -14,6 +16,10 @@ public enum StudioAnalogError: Error, LocalizedError {
             return "Studio Analog could not initialize its audio engine."
         case .unsupportedAudioBackend:
             return "Studio Analog currently requires Studio's AVAudioEngine backend."
+        case .invalidRouting:
+            return "Invalid cable: check signal types, input occupancy, cycles and output path."
+        case .routingBusy:
+            return "The previous graph update is still waiting for an audio buffer. Try again."
         }
     }
 }
@@ -94,6 +100,28 @@ public final class StudioAnalogInstrument {
         midiProducerLock.lock()
         defer { midiProducerLock.unlock() }
         return sa_all_notes_off(renderState.synth) != 0
+    }
+
+    /// Validate a new modular routing off the audio thread, then publish an
+    /// immutable graph at the next render boundary. The caller must serialize
+    /// all submissions, currently through ProjectViewModel's MainActor.
+    public func setRouting(_ connections: [StudioAnalogConnection]) throws {
+        guard StudioAnalogConnection.preliminarilyValid(connections) else {
+            throw StudioAnalogError.invalidRouting
+        }
+        let routes = connections.map { cable in
+            SARoute(source: cable.source.rawValue,
+                    destination: cable.destination.rawValue,
+                    destinationInput: cable.input, gain: cable.gain)
+        }
+        let result = routes.withUnsafeBufferPointer { pointer in
+            sa_submit_patch(renderState.synth, pointer.baseAddress, pointer.count)
+        }
+        switch result {
+        case 1: return
+        case -1: throw StudioAnalogError.routingBusy
+        default: throw StudioAnalogError.invalidRouting
+        }
     }
 
     /// Restores every parameter atomically before a newly attached synth

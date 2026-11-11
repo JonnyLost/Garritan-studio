@@ -8,6 +8,13 @@ import DAWCore
 public struct StudioAnalogPanelView: View {
     @ObservedObject private var viewModel: ProjectViewModel
     public let trackID: TrackID
+    @State private var selectedPage: AnalogPage = .analog
+    @State private var panelError: String?
+
+    private enum AnalogPage: String, CaseIterable {
+        case analog = "Analog"
+        case modular = "Modular"
+    }
 
     public init(viewModel: ProjectViewModel, trackID: TrackID) {
         self.viewModel = viewModel
@@ -49,7 +56,8 @@ public struct StudioAnalogPanelView: View {
                 }
                 .foregroundStyle(.secondary)
                 Button {
-                    viewModel.resetStudioAnalogPatch(for: trackID)
+                    do { try viewModel.resetStudioAnalogPatch(for: trackID); panelError = nil }
+                    catch { panelError = error.localizedDescription }
                 } label: {
                     Label("Initialize", systemImage: "arrow.counterclockwise")
                 }
@@ -66,7 +74,34 @@ public struct StudioAnalogPanelView: View {
             .padding(14)
 
             Divider()
+            HStack {
+                Picker("Synthesizer view", selection: $selectedPage) {
+                    ForEach(AnalogPage.allCases, id: \.self) { page in
+                        Text(page.rawValue).tag(page)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 290)
+                Spacer()
+                Text("One sound engine · two views")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            if let panelError {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle")
+                    Text(panelError)
+                    Spacer()
+                    Button("Dismiss") { self.panelError = nil }
+                }
+                .font(.caption).foregroundStyle(.orange).padding(.horizontal, 14)
+            }
+            Divider()
 
+            if selectedPage == .modular {
+                StudioAnalogPatchboardView(viewModel: viewModel, trackID: trackID)
+            } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(spacing: 8) {
@@ -194,6 +229,7 @@ public struct StudioAnalogPanelView: View {
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

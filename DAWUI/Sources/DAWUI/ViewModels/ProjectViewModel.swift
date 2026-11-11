@@ -499,15 +499,34 @@ public final class ProjectViewModel: ObservableObject {
         project.tracks[index].studioAnalogPatch = patch
     }
 
-    /// Restore original engine defaults, including the per-track patch data.
-    public func resetStudioAnalogPatch(for trackID: TrackID) {
+    /// Replace the analog modular patch atomically at an audio buffer boundary.
+    /// No project change is recorded if the native graph rejects the routing.
+    public func setStudioAnalogConnections(_ connections: [StudioAnalogConnection],
+                                           for trackID: TrackID) throws {
         guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
-              project.tracks[index].studioAnalogEnabled == true else { return }
-        let resetPatch = StudioAnalogPatch()
-        if let instrument = playbackEngine.instrument(for: trackID),
-           case .studioAnalog(let synth) = instrument {
-            synth.apply(resetPatch)
+              project.tracks[index].studioAnalogEnabled == true,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioAnalog(let synth) = instrument else {
+            throw StudioAnalogError.invalidConfiguration
         }
+        try synth.setRouting(connections)
+        var patch = project.tracks[index].studioAnalogPatch ?? StudioAnalogPatch()
+        patch.connections = connections
+        patch.version = max(2, patch.version)
+        project.tracks[index].studioAnalogPatch = patch
+    }
+
+    /// Restore original engine defaults, including the per-track patch data.
+    public func resetStudioAnalogPatch(for trackID: TrackID) throws {
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioAnalogEnabled == true,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioAnalog(let synth) = instrument else {
+            throw StudioAnalogError.invalidConfiguration
+        }
+        let resetPatch = StudioAnalogPatch()
+        try synth.setRouting(StudioAnalogConnection.factory)
+        synth.apply(resetPatch)
         project.tracks[index].studioAnalogPatch = resetPatch
     }
 

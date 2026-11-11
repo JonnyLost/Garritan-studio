@@ -167,8 +167,11 @@ public enum StudioAnalogWaveform: Int, CaseIterable, Identifiable {
 /// Future schema versions can add modulation routings without changing
 /// existing projects or StudioAnalogParameter numeric identities.
 public struct StudioAnalogPatch: Codable, Equatable, Sendable {
-    public var version: Int = 1
+    public var version: Int = 2
     public var values: [String: Float] = [:]
+    /// Nil preserves the original factory graph in older project files.
+    /// An explicit array stores the exact audio and modulation cables.
+    public var connections: [StudioAnalogConnection]?
 
     public init() {}
 
@@ -184,7 +187,12 @@ public struct StudioAnalogPatch: Codable, Equatable, Sendable {
         values[String(parameter.rawValue)] = value
     }
 
+    public var activeConnections: [StudioAnalogConnection] {
+        connections ?? StudioAnalogConnection.factory
+    }
+
     public mutating func reset() {
         values.removeAll()
+        connections = nil
     }
 }

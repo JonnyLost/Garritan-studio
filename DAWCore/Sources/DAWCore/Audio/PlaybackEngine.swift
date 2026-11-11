@@ -282,7 +282,15 @@ public final class PlaybackEngine: ObservableObject {
             throw PlaybackError.trackNotFound(trackID)
         }
         let synth = try StudioAnalogInstrument(sampleRate: audioEngine.sampleRate)
-        if let patch { synth.apply(patch) }
+        if let patch {
+            synth.apply(patch)
+            // Corrupt/incompatible saved cables must not prevent the project
+            // from opening. Keep the native factory graph as a fallback.
+            if patch.connections != nil {
+                do { try synth.setRouting(patch.activeConnections) }
+                catch { print("[Studio Analog] Saved graph rejected: \(error)") }
+            }
+        }
         let engine = audioEngine.engine
         let wasRunning = engine.isRunning
         if wasRunning { engine.stop() }
