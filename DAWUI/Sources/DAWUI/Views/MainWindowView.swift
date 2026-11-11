@@ -564,6 +564,8 @@ public struct MainWindowView: View {
         if showInstrumentWorkspace {
             if let track = viewModel.selectedTrack, track.studioAnalogEnabled == true {
                 StudioAnalogPanelView(viewModel: viewModel, trackID: track.id)
+            } else if let track = viewModel.selectedTrack, track.studioSamplerPatch != nil {
+                StudioSamplerMapView(viewModel: viewModel, trackID: track.id)
             } else {
                 VRackView(viewModel: viewModel, expandedOnly: true)
             }
@@ -2185,6 +2187,7 @@ struct TrackInspectorSection: View {
     @State private var trackName: String = ""
     @State private var showGarritanBrowser = false
     @State private var showStudioAnalogPanel = false
+    @State private var showStudioSamplerMap = false
     @State private var availableInputs: [AudioInputDevice] = []
     @State private var selectedInputID: AudioDeviceID = 0
     @State private var selectedChannelID: String = "default-stereo"
@@ -2276,7 +2279,15 @@ struct TrackInspectorSection: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    if track.studioAnalogEnabled == true {
+                    if track.studioSamplerPatch != nil {
+                        Button {
+                            showStudioSamplerMap = true
+                        } label: {
+                            Label("Edit Sample Mapping…", systemImage: "square.stack.3d.up")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    } else if track.studioAnalogEnabled == true {
                         Button {
                             showStudioAnalogPanel = true
                         } label: {
@@ -2474,6 +2485,10 @@ struct TrackInspectorSection: View {
         .sheet(isPresented: $showStudioAnalogPanel) {
             StudioAnalogPanelView(viewModel: viewModel, trackID: track.id)
                 .frame(minWidth: 900, minHeight: 600)
+        }
+        .sheet(isPresented: $showStudioSamplerMap) {
+            StudioSamplerMapView(viewModel: viewModel, trackID: track.id)
+                .frame(minWidth: 930, minHeight: 600)
         }
     }
     
