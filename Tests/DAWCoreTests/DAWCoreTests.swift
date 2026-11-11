@@ -260,6 +260,66 @@ final class ProjectPersistenceSafetyTests: XCTestCase {
         XCTAssertTrue(recovered.audioFiles.isEmpty)
     }
 
+    func testQuickSaveDoesNotOverwritePreviousProjectIfAudioIsMissing() async throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("GarritanQuickSave-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+
+        let package = folder.appendingPathComponent("Orchestra.dawproj")
+        let manager = ProjectFileManager()
+        try await manager.save(project: Project(name: "Good Save"), to: package)
+
+        var edited = Project(name: "Incomplete Save")
+        edited.audioFiles.append(AudioFileReference(
+            originalPath: folder.appendingPathComponent("unrecorded.wav").path,
+            relativePath: "",
+            sampleRate: 44100,
+            channelCount: 2,
+            lengthInSamples: 100,
+            bitDepth: 24
+        ))
+        do {
+            try await manager.saveQuick(project: edited, to: package)
+            XCTFail("Quick Save must reject missing audio")
+        } catch {
+            // Expected: no replacement of the previous complete project.
+        }
+        let preserved = try await manager.load(from: package)
+        XCTAssertEqual(preserved.name, "Good Save")
+        XCTAssertTrue(preserved.audioFiles.isEmpty)
+    }
+
+    func testProjectPackageDirectoryCannotMasqueradeAsAudioFile() async throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("GarritanAudioDirectory-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+
+        let package = folder.appendingPathComponent("Orchestra.dawproj")
+        let manager = ProjectFileManager()
+        try await manager.save(project: Project(name: "Before"), to: package)
+
+        var edited = Project(name: "After")
+        edited.audioFiles.append(AudioFileReference(
+            originalPath: package.path,
+            relativePath: "",
+            sampleRate: 44100,
+            channelCount: 2,
+            lengthInSamples: 500,
+            bitDepth: 24
+        ))
+        do {
+            try await manager.save(project: edited, to: package)
+            XCTFail("The package directory is not a valid audio source")
+        } catch {
+            // Expected: audio sources must be regular files.
+        }
+        let preserved = try await manager.load(from: package)
+        XCTAssertEqual(preserved.name, "Before")
+        XCTAssertTrue(preserved.audioFiles.isEmpty)
+    }
+
     func testUnimplementedMIDIExportNeverWritesMalformedFile() async throws {
         let destination = FileManager.default.temporaryDirectory
             .appendingPathComponent("GarritanExport-\(UUID().uuidString).mid")
