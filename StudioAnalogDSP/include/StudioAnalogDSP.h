@@ -114,6 +114,27 @@ void sa_reset_midi_stopped(SASynth *synth);
  */
 void sa_render(SASynth *synth, float *left, float *right, int32_t frames);
 
+/* Sequenced MIDI for playback: absolute frames relative to the FIRST synth
+ * render buffer following sa_sequence_start(). This is distinct from the
+ * immediate live MIDI queue. The host prepares all track events in advance,
+ * sorted by sampleFrame. Valid message types: 8x/9x/Bx (CC1/64/120/123)/Ex.
+ * A complete immutable timeline is swapped at a render boundary; no file I/O,
+ * memory allocation or sorting occurs on the real-time thread.
+ * 1 = accepted, 0 = invalid or too many events, -1 = already pending/playing.
+ * The first version supports up to 65536 events per Studio Analog track.
+ */
+typedef struct SAScheduledMIDI {
+    uint64_t sampleFrame;
+    uint8_t status;
+    uint8_t data1;
+    uint8_t data2;
+} SAScheduledMIDI;
+
+int32_t sa_sequence_load(SASynth *synth, const SAScheduledMIDI *events, size_t count);
+int32_t sa_sequence_start(SASynth *synth);
+void sa_sequence_stop(SASynth *synth);
+
+
 /* Compiles and publishes a complete, immutable graph snapshot OFF the audio
  * thread. It switches at the next render-block boundary (not mid-block).
  *  1 = accepted; 0 = invalid; -1 = prior swap not yet acknowledged.

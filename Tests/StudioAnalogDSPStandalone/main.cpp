@@ -106,6 +106,33 @@ int main() {
     for (float sample : tl) assert(sample == 0.f);
     sa_destroy(timed);
 
+    // Project notes are pre-scheduled on their exact render frames, including
+    // note-offs, without depending on an asynchronous host MIDI worker.
+    SASynth *sequenceSynth = sa_create(44100, 8);
+    assert(sequenceSynth != nullptr);
+    const SAScheduledMIDI seq[] = {
+        {256, 0x90, 69, 100},
+        {640, 0x80, 69, 0}
+    };
+    assert(sa_sequence_load(sequenceSynth, seq, 2) == 1);
+    assert(sa_sequence_load(sequenceSynth, seq, 2) == -1);
+    assert(sa_sequence_start(sequenceSynth) == 1);
+    std::vector<float> seqL(1024), seqR(1024);
+    sa_render(sequenceSynth, seqL.data(), seqR.data(), 1024);
+    for (int i = 0; i < 256; ++i) assert(seqL[i] == 0.f);
+    float seqPeak = 0.f;
+    for (int i = 256; i < 640; ++i) seqPeak = std::max(seqPeak, std::abs(seqL[i]));
+    assert(seqPeak > 0.001f);
+    sa_render(sequenceSynth, seqL.data(), seqR.data(), 1024);
+    sa_sequence_stop(sequenceSynth);
+    sa_all_notes_off(sequenceSynth);
+    sa_render(sequenceSynth, seqL.data(), seqR.data(), 1024);
+    for (float sample : seqL) assert(sample == 0.f);
+    const SAScheduledMIDI badOrder[] = {{512, 0x90, 60, 100}, {256, 0x80, 60, 0}};
+    assert(sa_sequence_load(sequenceSynth, badOrder, 2) == 0);
+    assert(sa_sequence_load(sequenceSynth, seq, 2) == 0);
+    sa_destroy(sequenceSynth);
+
     sa_destroy(s);
     std::printf("Studio Analog DSP smoke test passed (%.2f Hz)\n", frequency);
     return 0;

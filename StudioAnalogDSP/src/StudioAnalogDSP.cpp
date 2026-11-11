@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <new>
+#include <vector>
 
 namespace {
 constexpr int kNodeCount = 10;
@@ -13,6 +14,7 @@ constexpr int kPorts = 3;
 constexpr int kMaxVoices = 16;
 constexpr int kMaxRoutes = 24;
 constexpr int kQueueCapacity = 256;
+constexpr size_t kMaxSequenceEvents = 65536;
 constexpr double kPi = 3.14159265358979323846;
 
 float clampf(float x, float lo, float hi) noexcept {
@@ -402,6 +404,15 @@ struct SASynth {
     // for events sharing the same frame. No sorting or allocation in render.
     std::array<NoteEvent, kQueueCapacity> pending{};
     uint32_t pendingCount = 0;
+    // Three preallocated identities with control-thread-owned vector storage.
+    // Sequence vectors are never resized or deallocated by the render thread.
+    std::array<std::vector<SAScheduledMIDI>, 3> sequences{};
+    std::atomic<uint8_t> currentSequence{0}, requestedSequence{0};
+    std::atomic<bool> sequenceBegin{false}, sequenceEnd{false};
+    std::atomic<bool> sequencePlaying{false};
+    bool sequenceActive = false;
+    size_t sequenceCursor = 0;
+    uint64_t sequenceFrame = 0;
     std::array<bool, 16> pedal{};
     std::array<uint8_t, 16> modWheel{};
     std::array<uint16_t, 16> bend{};
@@ -558,6 +569,46 @@ void sa_reset_midi_stopped(SASynth *synth) {
         synth->voices[i].stopImmediately();
 }
 
+int32_t sa_sequence_load(SASynth *synth, const SAScheduledMIDI *events, size_t count) {
+    if (!synth || count > kMaxSequenceEvents || (count && !events) ||
+        synth->sequencePlaying.load(std::memory_order_acquire)) return 0;
+    const uint8_t current = synth->currentSequence.load(std::memory_order_acquire);
+    const uint8_t requested = synth->requestedSequence.load(std::memory_order_acquire);
+    if (current != requested) return -1;
+    uint64_t previous = 0;
+    for (size_t i = 0; i < count; ++i) {
+        const SAScheduledMIDI& e = events[i];
+        if (e.data1 > 127 || e.data2 > 127 ||
+            (i > 0 && e.sampleFrame < previous)) return 0;
+        previous = e.sampleFrame;
+        const uint8_t status = e.status & 0xF0;
+        if (status == 0xB0 &&
+            e.data1 != 1 && e.data1 != 64 &&
+            e.data1 != 120 && e.data1 != 123) return 0;
+        if (status != 0x80 && status != 0x90 &&
+            status != 0xB0 && status != 0xE0) return 0;
+    }
+    const uint8_t slot = static_cast<uint8_t>((current + 1) % 3);
+    // Memory allocation and copying happen ONLY on the control thread.
+    if (count == 0) synth->sequences[slot].clear();
+    else synth->sequences[slot].assign(events, events + count);
+    synth->requestedSequence.store(slot, std::memory_order_release);
+    return 1;
+}
+
+int32_t sa_sequence_start(SASynth *synth) {
+    if (!synth) return 0;
+    // A start token is consumed by the next render buffer, resetting the
+    // sequence cursor. It is independent of live note/MIDI playthrough.
+    synth->sequenceBegin.store(true, std::memory_order_release);
+    return 1;
+}
+
+void sa_sequence_stop(SASynth *synth) {
+    if (!synth) return;
+    synth->sequenceEnd.store(true, std::memory_order_release);
+}
+
 void sa_render(SASynth *synth, float *left, float *right, int32_t frames) {
     if (!synth || !left || !right || frames <= 0) return;
     Parameters p;
@@ -580,6 +631,21 @@ void sa_render(SASynth *synth, float *left, float *right, int32_t frames) {
     synth->currentGraph.store(nextGraph, std::memory_order_release);
     const Graph& graph = synth->graphs[nextGraph];
 
+    // Publish ownership before using a new immutable pre-sorted timeline.
+    const uint8_t sequenceID = synth->requestedSequence.load(std::memory_order_acquire);
+    synth->currentSequence.store(sequenceID, std::memory_order_release);
+    const auto& timeline = synth->sequences[sequenceID];
+    if (synth->sequenceEnd.exchange(false, std::memory_order_acq_rel)) {
+        synth->sequenceActive = false;
+        synth->sequencePlaying.store(false, std::memory_order_release);
+    }
+    if (synth->sequenceBegin.exchange(false, std::memory_order_acq_rel)) {
+        synth->sequenceCursor = 0;
+        synth->sequenceFrame = 0;
+        synth->sequenceActive = true;
+        synth->sequencePlaying.store(true, std::memory_order_release);
+    }
+
     std::array<double, 16> bendRatio{};
     auto ratio = [&](int ch) noexcept {
         const double bend = static_cast<int>(synth->bend[ch]) - 8192;
@@ -589,6 +655,26 @@ void sa_render(SASynth *synth, float *left, float *right, int32_t frames) {
     for (int ch = 0; ch < 16; ++ch) bendRatio[ch] = ratio(ch);
 
     for (int32_t frame = 0; frame < frames; ++frame) {
+        // Complete project MIDI is pre-sorted and indexed by the synth's own
+        // sample clock: no worker dispatch and no AU sampleOffset guessing.
+        if (synth->sequenceActive) {
+            while (synth->sequenceCursor < timeline.size() &&
+                   timeline[synth->sequenceCursor].sampleFrame <= synth->sequenceFrame) {
+                const SAScheduledMIDI& e = timeline[synth->sequenceCursor++];
+                NoteEvent scheduled{};
+                const uint8_t type = e.status & 0xF0;
+                scheduled.type = type == 0x80 || (type == 0x90 && e.data2 == 0)
+                    ? EventType::off : type == 0x90 ? EventType::on
+                    : type == 0xB0 ? EventType::control : EventType::bend;
+                scheduled.note = e.data1;
+                scheduled.value = e.data2;
+                scheduled.channel = e.status & 0x0F;
+                synth->event(scheduled);
+                if (scheduled.type == EventType::bend)
+                    bendRatio[scheduled.channel] = ratio(scheduled.channel);
+            }
+            ++synth->sequenceFrame;
+        }
         // Keep order for events at the same offset, including note-off followed
         // by note-on. All queue and bookkeeping storage was preallocated.
         for (uint32_t i = 0; i < synth->pendingCount;) {
