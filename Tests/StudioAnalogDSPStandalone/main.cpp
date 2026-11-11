@@ -56,6 +56,25 @@ int main() {
     sa_render(s, l.data(), r.data(), 128);
     assert(!sa_submit_patch(s, cycle, sizeof(cycle)/sizeof(cycle[0])));
 
+    // The compiled graph must affect sound, not just the UI cable display.
+    SASynth *audible = sa_create(44100.0, 8);
+    assert(audible != nullptr);
+    assert(sa_set_parameter(audible, SA_PARAM_OSC1_LEVEL, 0.f));
+    assert(sa_set_parameter(audible, SA_PARAM_OSC2_LEVEL, 0.5f));
+    assert(sa_note_on(audible, 69, 110));
+    std::vector<float> before(4096), beforeR(4096);
+    sa_render(audible, before.data(), beforeR.data(), 4096);
+    const float initialPeak = *std::max_element(before.begin(), before.end());
+    assert(initialPeak > 0.01f);
+    assert(sa_submit_patch(audible, oscillatorOneOnly, 4) == 1);
+    std::vector<float> after(16384), afterR(16384);
+    sa_render(audible, after.data(), afterR.data(), 16384);
+    float tailPeak = 0.f;
+    for (size_t i = after.size() - 1024; i < after.size(); ++i)
+        tailPeak = std::max(tailPeak, std::abs(after[i]));
+    assert(tailPeak < 0.0001f);
+    sa_destroy(audible);
+
     sa_destroy(s);
     std::printf("Studio Analog DSP smoke test passed (%.2f Hz)\n", frequency);
     return 0;
