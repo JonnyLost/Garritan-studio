@@ -15,6 +15,12 @@ on:
 permissions:
   contents: read
 
+# Push and PR validation otherwise run the same macOS suite twice and queue
+# obsolete commits. Keep only the most recent branch validation active.
+concurrency:
+  group: studio-analog-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   standalone-dsp:
     name: Original DSP / AddressSanitizer
