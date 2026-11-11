@@ -537,7 +537,7 @@ public struct MainWindowView: View {
             if let track = viewModel.selectedTrack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(track.name).font(.subheadline.weight(.semibold))
-                    Text(track.instrumentSlot?.pluginID?.name ?? "No instrument loaded")
+                    Text(track.studioAnalogEnabled == true ? "Studio Analog" : (track.instrumentSlot?.pluginID?.name ?? "No instrument loaded"))
                         .font(.caption).foregroundColor(.secondary)
                 }
                 Spacer()

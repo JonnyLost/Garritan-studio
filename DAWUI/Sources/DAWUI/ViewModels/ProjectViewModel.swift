@@ -453,6 +453,29 @@ public final class ProjectViewModel: ObservableObject {
         }
     }
     
+    /// Select the original built-in analog synth for a track, preserving the
+    /// ARIA plug-in host's independent ownership of its previous instance.
+    public func loadStudioAnalog(for trackID: TrackID) throws {
+        guard var track = project.track(withID: trackID),
+              track.type == .midi || track.type == .instrument else {
+            throw PlaybackError.trackNotFound(trackID)
+        }
+        let previousPluginID: UUID?
+        if let instrument = playbackEngine.instrument(for: trackID),
+           case .auInstrument(_, let id) = instrument {
+            previousPluginID = id
+        } else {
+            previousPluginID = nil
+        }
+        // Only persist native selection after a successful audio graph load.
+        try playbackEngine.loadStudioAnalog(for: trackID)
+        if let previousPluginID { pluginHost.unloadPlugin(id: previousPluginID) }
+        track.instrumentSlot = nil
+        track.garritanProgramID = nil
+        track.studioAnalogEnabled = true
+        updateTrack(track, description: "Load Studio Analog")
+    }
+
     /// Remove the track's audio unit and its corresponding host registry entry.
     /// Use this for both track deletion and "Remove Instrument" in the header.
     public func unloadTrackInstrument(for trackID: TrackID) {

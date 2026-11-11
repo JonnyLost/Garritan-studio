@@ -1,8 +1,11 @@
 # Studio Analog — original modular virtual-analog synth
 
-Status: **Phase 1 DSP foundation**. This branch adds a built-in synthesis engine
-without modifying ARIA, Garritan instrument routing, stage acoustics, or the DAW
-application UI. The synthesizer is not yet selectable as a Studio track instrument.
+Status: **Phase 2 native audio integration**. Studio Analog can now be selected
+in the existing track instrument browser. It uses an in-process
+`AVAudioSourceNode` to route its original DSP through Studio's existing track
+mixer, panner, meters, and Concert Hall sends. No third-party AU is required.
+The traditional synth control panel and visual modular patchboard are still
+future work.
 
 ## Design and provenance
 
@@ -52,9 +55,24 @@ Tests cover 440 Hz pitch, release to silence, polyphonic rendering, parameter
 validation, safe rejection of a cyclic graph and bounded queue behavior.
 Hardware/AVAudioEngine playback is **not** claimed by these tests.
 
+## Phase 2 integration
+
+- The native synth is shown as a built-in instrument in the regular browser.
+  Choosing it loads a dedicated AVAudioSourceNode into the current track's
+  existing mixer path. Selecting a third-party AU later replaces it normally.
+- Track selection is saved with `studioAnalogEnabled` (optional for
+  backward-compatible decoding) and recreated when a project is opened.
+- The render callback owns a retained C++ synth instance and uses planar
+  Float32 output; source-node removal stops the AVAudioEngine before detach.
+- Because live and sequenced MIDI can arrive from two producer threads, the
+  Swift bridge serializes producer pushes with a lock outside the audio thread.
+  The render callback remains lock-free.
+- Current limitations: native synth track audio requires the legacy
+  AVAudioEngine backend; sample-offset MIDI, pitch bend, sustain, editable
+  synth panel and saveable modular patches are not implemented yet.
+- Manual listening and stage-routing verification remain needed on macOS.
+
 ## Next step
 
-Connect the engine through a dedicated Studio audio-source adapter and route
-it to an instrument track with MIDI, mute/solo, stage reverb sends and project
-persistence, before designing the full Analog/Modular SwiftUI panels. Keep
-the adapter independent from ARIA and the existing plugin hosting path.
+Build the Analog control panel and connect live parameter updates, followed
+by the first visual modular patchboard with safely swappable graph snapshots.
