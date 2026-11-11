@@ -1486,23 +1486,48 @@ public final class ProjectViewModel: ObservableObject {
         // First scan for plugins so we have them available
         await pluginHost.scanForPlugins()
         
-        // Restore every saved track instrument (Garritan and other Audio
-        // Units), not only tracks with a Garritan catalog program ID.
+        // Restore saved track instruments without leaking an unattached AU
+        // if the audio graph rejects it. A malformed preset must not discard
+        // a successfully loaded instrument.
         for track in project.tracks {
             guard let slot = track.instrumentSlot, let pluginID = slot.pluginID else { continue }
             do {
                 let format = AVAudioFormat(standardFormatWithSampleRate: audioEngine.sampleRate, channels: 2)!
                 let loaded = try await pluginHost.loadPlugin(identifier: pluginID, format: format)
-                try await playbackEngine.loadInstrument(loaded.audioUnit, for: track.id, pluginID: loaded.id)
-                if let data = slot.stateData,
-                   let state = try PropertyListSerialization.propertyList(
-                       from: data, options: [], format: nil) as? [String: Any] {
-                    loaded.audioUnit.auAudioUnit.fullState = state
+                // The project may have been replaced while instantiation was awaiting.
+                guard project.track(withID: track.id)?.instrumentSlot?.pluginID == pluginID else {
+                    pluginHost.unloadPlugin(id: loaded.id)
+                    continue
+                }
+                let previousPluginID: UUID?
+                if let instrument = playbackEngine.instrument(for: track.id),
+                   case .auInstrument(_, let existingID) = instrument {
+                    previousPluginID = existingID
+                } else {
+                    previousPluginID = nil
+                }
+                do {
+                    try await playbackEngine.loadInstrument(
+                        loaded.audioUnit, for: track.id, pluginID: loaded.id
+                    )
+                } catch {
+                    pluginHost.unloadPlugin(id: loaded.id)
+                    throw error
+                }
+                if let previousPluginID, previousPluginID != loaded.id {
+                    pluginHost.unloadPlugin(id: previousPluginID)
+                }
+                if let data = slot.stateData {
+                    do {
+                        try pluginHost.loadPreset(pluginID: loaded.id, data: data)
+                    } catch {
+                        print("[PluginState] Instrument restored but preset for \\(track.name) failed: \\(error)")
+                    }
                 }
                 restoreInstrumentLevel(for: track.id)
-                print("[PluginState] Restored Garritan track: \\(track.name)")
+                print("[PluginState] Restored instrument for track \\(track.name)")
             } catch {
-                print("[PluginState] Could not restore Garritan track \\(track.name): \\(error)")
+                print("[PluginState] Could not restore track \\(track.name): \\(error)")
             }
         }
 
