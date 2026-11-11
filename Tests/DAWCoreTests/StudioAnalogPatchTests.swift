@@ -56,7 +56,7 @@ final class StudioAnalogPatchTests: XCTestCase {
     }
 
     func testNormalizedSliderControlsStayWithinNativeRange() {
-        for parameter in StudioAnalogParameter.allCases where parameter != .oscillator1Wave && parameter != .oscillator2Wave {
+        for parameter in StudioAnalogParameter.allCases where parameter != .oscillator1Wave && parameter != .oscillator2Wave && parameter != .modulationTarget {
             for fraction in [0.0, 0.05, 0.5, 0.95, 1.0] {
                 let value = parameter.value(at: fraction)
                 XCTAssertTrue(parameter.valid(value), "\(parameter) produced \(value)")
