@@ -345,118 +345,14 @@ public actor ProjectFileManager {
         return nil
     }
     
-    /// Quick save - update project.json and copy any NEW audio files
+    /// Quick Save uses the same staged, rollback-capable package replacement
+    /// as Save. Rewriting project.json in place could previously leave orphan
+    /// audio files, retain missing-file references, or diverge from the manifest.
+    /// A full staged save costs more I/O but protects the previous good project.
     public func saveQuick(project: Project, to url: URL) async throws {
-        let fm = FileManager.default
-        
-        var packageURL = url
-        if packageURL.pathExtension != Self.projectExtension {
-            packageURL = url.deletingPathExtension().appendingPathExtension(Self.projectExtension)
-        }
-        
-        let projectFileURL = packageURL.appendingPathComponent(Self.projectFileName)
-        let audioDir = packageURL.appendingPathComponent(Self.audioFolderName)
-        
-        // If package doesn't exist, do full save
-        guard fm.fileExists(atPath: projectFileURL.path) else {
-            try await save(project: project, to: packageURL)
-            return
-        }
-        
-        // Load existing manifest
-        let existingData = try Data(contentsOf: projectFileURL)
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let existingFile = try decoder.decode(ProjectFile.self, from: existingData)
-        
-        // Collect all audio references from clips
-        var allAudioRefs: [AudioFileReference] = project.audioFiles
-        for track in project.tracks {
-            for clip in track.clips {
-                if case .audio(let audioData) = clip.content {
-                    if !allAudioRefs.contains(where: { $0.fileID == audioData.fileReference.fileID }) {
-                        allAudioRefs.append(audioData.fileReference)
-                    }
-                }
-            }
-        }
-        
-        // Find NEW audio files that aren't in the existing manifest
-        var updatedProject = project
-        var updatedManifest = existingFile.audioFileManifest
-        
-        for audioRef in allAudioRefs {
-            let alreadySaved = existingFile.audioFileManifest.contains { $0.fileID == audioRef.fileID }
-            
-            if !alreadySaved {
-                // This is a NEW audio file - copy it
-                let destFileName = "\(audioRef.fileID.uuidString).\(URL(fileURLWithPath: audioRef.originalPath).pathExtension.isEmpty ? "wav" : URL(fileURLWithPath: audioRef.originalPath).pathExtension)"
-                let destURL = audioDir.appendingPathComponent(destFileName)
-                let relativePath = "\(Self.audioFolderName)/\(destFileName)"
-                
-                // Try to find and copy the source file
-                if let sourceURL = findAudioFile(for: audioRef), fm.fileExists(atPath: sourceURL.path) {
-                    // Make sure audio directory exists
-                    if !fm.fileExists(atPath: audioDir.path) {
-                        try fm.createDirectory(at: audioDir, withIntermediateDirectories: true)
-                    }
-                    
-                    try fm.copyItem(at: sourceURL, to: destURL)
-                    print("[ProjectFileManager] Quick save - copied NEW audio: \(sourceURL.lastPathComponent) -> \(destFileName)")
-                    
-                    // Add to manifest
-                    updatedManifest.append(AudioFileEntry(
-                        fileID: audioRef.fileID,
-                        relativePath: relativePath,
-                        originalPath: audioRef.originalPath,
-                        checksum: nil
-                    ))
-                    
-                    // Update or add the reference in project.audioFiles
-                    if let index = updatedProject.audioFiles.firstIndex(where: { $0.fileID == audioRef.fileID }) {
-                        updatedProject.audioFiles[index].relativePath = relativePath
-                    } else {
-                        // Add to audioFiles if not present
-                        var newRef = audioRef
-                        newRef.relativePath = relativePath
-                        updatedProject.audioFiles.append(newRef)
-                    }
-                    
-                    // Update clips that reference this file
-                    for trackIndex in 0..<updatedProject.tracks.count {
-                        for clipIndex in 0..<updatedProject.tracks[trackIndex].clips.count {
-                            if case .audio(var audioData) = updatedProject.tracks[trackIndex].clips[clipIndex].content {
-                                if audioData.fileReference.fileID == audioRef.fileID {
-                                    audioData.fileReference.relativePath = relativePath
-                                    updatedProject.tracks[trackIndex].clips[clipIndex].content = .audio(audioData)
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    throw PersistenceError.fileNotFound(URL(fileURLWithPath: audioRef.originalPath))
-                }
-            }
-        }
-        
-        // Create updated project file
-        let projectFile = ProjectFile(
-            version: Project.currentFormatVersion,
-            project: updatedProject,
-            audioFileManifest: updatedManifest,
-            pluginStates: existingFile.pluginStates
-        )
-        
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        
-        let data = try encoder.encode(projectFile)
-        try data.write(to: projectFileURL, options: .atomic)
-
-        print("[ProjectFileManager] Quick save complete")
+        try await save(project: project, to: url)
     }
-    
+
     // MARK: - Loading
     
     /// Load project from a URL
