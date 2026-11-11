@@ -233,6 +233,12 @@ public final class PlaybackEngine: ObservableObject {
         // Skip if already set up
         if trackInstruments[track.id] != nil { return }
 
+        // Reopen saved native sampler mappings before the fallback sound bank.
+        if let patch = track.studioSamplerPatch, coreAudioBackend == nil {
+            try loadStudioSampler(for: track.id, patch: patch)
+            return
+        }
+
         // Reopen saved native synthesizers through the same track mixer and
         // stage acoustics as external instruments (no AU host required).
         if track.studioAnalogEnabled == true && coreAudioBackend == nil {
@@ -313,6 +319,40 @@ public final class PlaybackEngine: ObservableObject {
         }
         if wasRunning { try engine.start() }
         print("[Studio Analog] Native synthesizer connected to track \(trackID.rawValue)")
+    }
+
+    /// Decode sample zones completely before touching the audio graph. The
+    /// renderer owns immutable PCM storage and never reads files on the audio
+    /// callback. This RAM-only milestone supports WAV/AIFF and other formats
+    /// handled by AVAudioFile; disk streaming is a later milestone.
+    public func loadStudioSampler(for trackID: TrackID, patch: StudioSamplerPatch) throws {
+        guard coreAudioBackend == nil else {
+            throw StudioSamplerError.unsupportedAudioBackend
+        }
+        guard let trackNode = audioEngine.trackNode(for: trackID) else {
+            throw PlaybackError.trackNotFound(trackID)
+        }
+        let sampler = try StudioSamplerInstrument(sampleRate: audioEngine.sampleRate, patch: patch)
+        let engine = audioEngine.engine
+        let wasRunning = engine.isRunning
+        if wasRunning { engine.stop() }
+        defer {
+            if wasRunning && !engine.isRunning {
+                do { try engine.start() }
+                catch { print("[Studio Sampler] Failed to restore audio engine: \(error)") }
+            }
+        }
+
+        removeInstrument(for: trackID)
+        engine.attach(sampler.audioNode)
+        engine.connect(sampler.audioNode, to: trackNode.inputMixer, format: sampler.format)
+        let loaded = TrackInstrument.studioSampler(sampler)
+        trackInstruments[trackID] = loaded
+        midiProcessingQueue.sync {
+            midiQueueTrackInstruments[trackID] = loaded
+        }
+        if wasRunning { try engine.start() }
+        print("[Studio Sampler] Native sampler connected to track \(trackID.rawValue)")
     }
 
     // Mixer nodes used for sample rate conversion when loading AU instruments
@@ -2343,6 +2383,7 @@ public enum TrackInstrument {
     case auInstrument(AVAudioUnit, pluginID: UUID)
     case sampler(AVAudioUnitSampler)
     case studioAnalog(StudioAnalogInstrument)
+    case studioSampler(StudioSamplerInstrument)
     
     /// The underlying audio unit node
     public var audioNode: AVAudioNode {
@@ -2350,6 +2391,7 @@ public enum TrackInstrument {
         case .auInstrument(let au, _): return au
         case .sampler(let sampler): return sampler
         case .studioAnalog(let synth): return synth.audioNode
+        case .studioSampler(let sampler): return sampler.audioNode
         }
     }
     
@@ -2385,6 +2427,8 @@ public enum TrackInstrument {
         case .studioAnalog(let synth):
             // Audio source callbacks have no AU timestamp scheduler yet.
             synth.noteOn(note, velocity: velocity)
+        case .studioSampler(let sampler):
+            sampler.noteOn(note, velocity: velocity, channel: channel)
         }
     }
     
@@ -2417,6 +2461,8 @@ public enum TrackInstrument {
             sampler.stopNote(note, onChannel: channel)
         case .studioAnalog(let synth):
             synth.noteOff(note)
+        case .studioSampler(let sampler):
+            sampler.noteOff(note, channel: channel)
         }
     }
     
@@ -2440,6 +2486,8 @@ public enum TrackInstrument {
             // MIDI all-notes-off and all-sound-off; other controllers will
             // be mapped once the modular modulation UI is available.
             if controller == 120 || controller == 123 { synth.allNotesOff() }
+        case .studioSampler(let sampler):
+            if controller == 120 || controller == 123 { sampler.allNotesOff() }
         }
     }
     
@@ -2459,7 +2507,7 @@ public enum TrackInstrument {
             }
         case .sampler(let sampler):
             sampler.sendProgramChange(program, onChannel: channel)
-        case .studioAnalog:
+        case .studioAnalog, .studioSampler:
             break // Native patches will use the Studio preset browser.
         }
     }
@@ -2482,7 +2530,7 @@ public enum TrackInstrument {
             }
         case .sampler(let sampler):
             sampler.sendPitchBend(value, onChannel: channel)
-        case .studioAnalog:
+        case .studioAnalog, .studioSampler:
             break // Explicit limitation until per-voice MIDI bend is added.
         }
     }
