@@ -341,7 +341,7 @@ public struct StudioAnalogPresetBrowserView: View {
     }
 
     private func save(name: String, summary: String,
-                      category: StudioAnalogPresetCategory) {
+                      category: StudioAnalogPresetCategory) -> String? {
         do {
             let saved = try store.save(name: name, summary: summary, category: category,
                                        patch: currentPatch)
@@ -351,10 +351,10 @@ public struct StudioAnalogPresetBrowserView: View {
             selectedID = saved.id
             errorMessage = nil
             infoMessage = "Saved \(saved.name) in My Presets."
+            return nil
         } catch {
-            // Keep the save sheet open so the user can correct the name.
-            errorMessage = error.localizedDescription
-            showSaveSheet = false
+            // Keep the save sheet open and report the error within it.
+            return error.localizedDescription
         }
     }
 
@@ -373,12 +373,13 @@ public struct StudioAnalogPresetBrowserView: View {
 }
 
 private struct StudioAnalogPresetSaveView: View {
-    let onSave: (String, String, StudioAnalogPresetCategory) -> Void
+    let onSave: (String, String, StudioAnalogPresetCategory) -> String?
     let onCancel: () -> Void
 
     @State private var name = ""
     @State private var summary = ""
     @State private var category: StudioAnalogPresetCategory = .lead
+    @State private var saveError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 17) {
@@ -409,12 +410,16 @@ private struct StudioAnalogPresetSaveView: View {
                     .textFieldStyle(.roundedBorder)
             }
 
+            if let saveError {
+                Label(saveError, systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
+            }
             HStack {
                 Spacer()
                 Button("Cancel", action: onCancel)
                     .buttonStyle(.bordered)
                 Button {
-                    onSave(name, summary, category)
+                    saveError = onSave(name, summary, category)
                 } label: {
                     Label("Save Preset", systemImage: "checkmark")
                 }
