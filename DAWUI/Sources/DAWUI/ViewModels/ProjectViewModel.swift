@@ -1676,11 +1676,27 @@ public final class ProjectViewModel: ObservableObject {
             playbackEngine.removeRackInstrument(rackID: instrument.id)
         }
         
+        // Remove hosted insert effects before dropping the host registry.
+        // Otherwise their AVAudioUnits stay attached to the audio graph
+        // after a project switch even though the host no longer tracks them.
+        for track in project.tracks {
+            let count = audioEngine.pluginCount(on: track.id)
+            if count > 0 {
+                for index in (0..<count).reversed() {
+                    do {
+                        try audioEngine.removePlugin(at: index, from: track.id)
+                    } catch {
+                        print("[PluginState] Failed removing insert \(index) on \(track.name): \(error)")
+                    }
+                }
+            }
+        }
+
         // Remove all track instruments from audio engine
         for track in project.tracks {
             playbackEngine.removeInstrument(for: track.id)
         }
-        
+
         // Unload all plugins from host
         pluginHost.unloadAllPlugins()
         
