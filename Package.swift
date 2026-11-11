@@ -28,6 +28,15 @@ let package = Package(
             cxxSettings: [.unsafeFlags(["-std=c++17"])]
         ),
 
+        // MARK: - Native, original sample playback DSP (C++17)
+        .target(
+            name: "StudioSamplerDSP",
+            path: "StudioSamplerDSP",
+            sources: ["src/StudioSamplerDSP.cpp"],
+            publicHeadersPath: "include",
+            cxxSettings: [.unsafeFlags(["-std=c++17"])]
+        ),
+
         // MARK: - Real-time callback primitives (C11 atomics)
         .target(
             name: "DAWRealtime",
@@ -41,7 +50,7 @@ let package = Package(
             name: "DAWCore",
             dependencies: [
                 "DAWRealtime",
-                "StudioAnalogDSP",
+                "StudioAnalogDSP",\n                "StudioSamplerDSP",
                 .product(name: "Supabase", package: "supabase-swift")
             ],
             path: "DAWCore/Sources/DAWCore",
