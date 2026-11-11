@@ -81,6 +81,34 @@ final class StudioAnalogDSPTests: XCTestCase {
         XCTAssertGreaterThan(render(synth, frames: 3_000).map { abs($0) }.max() ?? 0, 0.001)
     }
 
+    func testRenderBoundaryLiveGraphSwapsAndBusyBackPressure() {
+        let synth = makeSynth()
+        defer { sa_destroy(synth) }
+        let direct = [
+            SARoute(source: 0, destination: 6, destinationInput: 0, gain: 1),
+            SARoute(source: 6, destination: 8, destinationInput: 0, gain: 1),
+            SARoute(source: 7, destination: 8, destinationInput: 1, gain: 1),
+            SARoute(source: 8, destination: 9, destinationInput: 0, gain: 1)
+        ]
+        func submit(_ routes: [SARoute]) -> Int32 {
+            routes.withUnsafeBufferPointer {
+                sa_submit_patch(synth, $0.baseAddress, $0.count)
+            }
+        }
+        XCTAssertEqual(submit(direct), 1)
+        XCTAssertEqual(submit(direct), -1, "Pending render-boundary swap must not be overwritten")
+        XCTAssertEqual(sa_note_on(synth, 69, 100), 1)
+        let samples = render(synth, frames: 2_048)
+        XCTAssertGreaterThan(samples.map { abs($0) }.max() ?? 0, 0.001)
+        XCTAssertEqual(submit(direct), 1)
+        _ = render(synth, frames: 256)
+        for _ in 0..<100 {
+            XCTAssertEqual(submit(direct), 1)
+            let block = render(synth, frames: 128)
+            XCTAssertTrue(block.allSatisfy(\.isFinite))
+        }
+    }
+
     func testRejectsInvalidConstructionAndMidiQueueIsBounded() {
         XCTAssertNil(sa_create(0, 8))
         XCTAssertNil(sa_create(44_100, 100))

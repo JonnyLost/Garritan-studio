@@ -42,6 +42,20 @@ int main() {
     for (size_t i = tail.size() - 1024; i < tail.size(); ++i)
         assert(std::abs(tail[i]) < 0.00001f);
 
+    // A valid live rewire must not overwrite a pending immutable snapshot.
+    const SARoute oscillatorOneOnly[] = {
+        {SA_NODE_OSC1, SA_NODE_FILTER, 0, 1.f},
+        {SA_NODE_FILTER, SA_NODE_VCA, 0, 1.f},
+        {SA_NODE_AMP_ENV, SA_NODE_VCA, 1, 1.f},
+        {SA_NODE_VCA, SA_NODE_OUTPUT, 0, 1.f}
+    };
+    assert(sa_submit_patch(s, oscillatorOneOnly, 4) == 1);
+    assert(sa_submit_patch(s, oscillatorOneOnly, 4) == -1);
+    sa_render(s, l.data(), r.data(), 128); // Ack at block boundary.
+    assert(sa_submit_patch(s, oscillatorOneOnly, 4) == 1);
+    sa_render(s, l.data(), r.data(), 128);
+    assert(!sa_submit_patch(s, cycle, sizeof(cycle)/sizeof(cycle[0])));
+
     sa_destroy(s);
     std::printf("Studio Analog DSP smoke test passed (%.2f Hz)\n", frequency);
     return 0;

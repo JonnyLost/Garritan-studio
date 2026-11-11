@@ -12,7 +12,8 @@ extern "C" {
  * Every public function returns immediately and never calls macOS APIs.
  * Only sa_render() may run on the render thread.
  * sa_note_on/off/all_notes_off and sa_set_parameter are lock-free control
- * calls (single MIDI producer); do not call sa_load_patch while rendering.
+ * calls (single MIDI producer). Patch submissions are single-control-thread
+ * operations; the audio callback only reads committed immutable snapshots.
  */
 typedef struct SASynth SASynth;
 
@@ -90,11 +91,17 @@ int32_t sa_all_notes_off(SASynth *synth);
  */
 void sa_render(SASynth *synth, float *left, float *right, int32_t frames);
 
-/* Prepare/reconfigure the graph OFF the audio thread, while stopped.
- * Returns 0 for invalid patch and preserves the previous patch.
- * This is intentionally NOT safe while rendering; live patch swaps require
- * a future snapshot/RCU mechanism rather than mutating render state.
+/* Compiles and publishes a complete, immutable graph snapshot OFF the audio
+ * thread. It switches at the next render-block boundary (not mid-block).
+ *  1 = accepted; 0 = invalid; -1 = prior swap not yet acknowledged.
+ * Failed submissions preserve the previously published graph. A single
+ * control thread must serialize submissions. No memory allocations/locks on
+ * the audio thread. Do not destroy SASynth until rendering is stopped.
  */
+int32_t sa_submit_patch(SASynth *synth, const SARoute *routes, size_t count);
+
+/* Backward-compatible alias for sa_submit_patch; the old direct mutation
+ * contract was unsafe during rendering and is no longer used. */
 int32_t sa_load_patch(SASynth *synth, const SARoute *routes, size_t count);
 
 #ifdef __cplusplus

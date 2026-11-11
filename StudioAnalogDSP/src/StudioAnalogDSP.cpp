@@ -348,7 +348,13 @@ struct NoteQueue {
 struct SASynth {
     double sampleRate;
     int voiceCount;
-    Graph graph;
+    // Three preallocated immutable graph slots: one consumed by the render
+    // block, one pending publication, one free for the control thread.
+    // The control thread never edits current or pending; the audio thread
+    // advances current only at a block boundary, before accessing the slot.
+    std::array<Graph, 3> graphs{};
+    std::atomic<uint8_t> currentGraph{0};
+    std::atomic<uint8_t> requestedGraph{0};
     std::array<Voice, kMaxVoices> voices{};
     std::array<std::atomic<float>, SA_PARAMETER_COUNT> params{};
     NoteQueue notes;
@@ -357,7 +363,7 @@ struct SASynth {
     SASynth(double sr, int count) : sampleRate(sr), voiceCount(count) {
         for (size_t i = 0; i < kDefaults.size(); ++i)
             params[i].store(kDefaults[i], std::memory_order_relaxed);
-        graph.compile(kDefaultRoutes.data(), kDefaultRoutes.size());
+        graphs[0].compile(kDefaultRoutes.data(), kDefaultRoutes.size());
         for (int i = 0; i < kMaxVoices; ++i)
             voices[i].noise += static_cast<uint32_t>(0x85ebca6bu*i);
     }
@@ -434,11 +440,18 @@ void sa_render(SASynth *synth, float *left, float *right, int32_t frames) {
     NoteEvent e{};
     while (synth->notes.pop(e)) synth->event(e);
 
+    // Acquire the new immutable snapshot only at a render-block boundary.
+    // Publish render ownership before reading; that makes the previous
+    // slot safely recyclable by the single control thread.
+    const uint8_t nextGraph = synth->requestedGraph.load(std::memory_order_acquire);
+    synth->currentGraph.store(nextGraph, std::memory_order_release);
+    const Graph& graph = synth->graphs[nextGraph];
+
     for (int32_t frame = 0; frame < frames; ++frame) {
         float mix = 0.f;
         for (int i = 0; i < synth->voiceCount; ++i) {
             if (synth->voices[i].active)
-                mix += synth->voices[i].next(synth->graph, p, synth->sampleRate);
+                mix += synth->voices[i].next(graph, p, synth->sampleRate);
         }
         // Bounded, symmetric soft saturation prevents polyphonic clipping.
         const float output = std::tanh(mix*p[SA_PARAM_MASTER_GAIN]);
@@ -447,11 +460,22 @@ void sa_render(SASynth *synth, float *left, float *right, int32_t frames) {
     }
 }
 
-int32_t sa_load_patch(SASynth *synth, const SARoute *routes, size_t count) {
+int32_t sa_submit_patch(SASynth *synth, const SARoute *routes, size_t count) {
     if (!synth) return 0;
+    // Only one control thread may call this method. If a previous update
+    // has not been adopted by the audio callback, do not overwrite it.
+    const uint8_t pending = synth->requestedGraph.load(std::memory_order_acquire);
+    const uint8_t current = synth->currentGraph.load(std::memory_order_acquire);
+    if (pending != current) return -1;
+    const uint8_t freeSlot = static_cast<uint8_t>((current + 1) % 3);
     Graph compiled;
     if (!compiled.compile(routes, count)) return 0;
-    synth->graph = compiled;
+    synth->graphs[freeSlot] = compiled;
+    synth->requestedGraph.store(freeSlot, std::memory_order_release);
     return 1;
+}
+
+int32_t sa_load_patch(SASynth *synth, const SARoute *routes, size_t count) {
+    return sa_submit_patch(synth, routes, count);
 }
 } // extern "C"
