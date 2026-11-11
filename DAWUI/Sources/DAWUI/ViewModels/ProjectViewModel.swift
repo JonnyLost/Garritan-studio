@@ -1448,6 +1448,29 @@ public final class ProjectViewModel: ObservableObject {
             }
         }
 
+        // Effects also carry user-edited AU state. Track and V-Rack
+        // instruments are not the only Audio Units that must survive reopening.
+        // Resolve by the stable slot ID, or by exact AU node for old projects
+        // created before effect instance IDs matched their slot IDs.
+        for trackIndex in project.tracks.indices {
+            let track = project.tracks[trackIndex]
+            for slotIndex in track.pluginSlots.indices {
+                let slot = track.pluginSlots[slotIndex]
+                guard slot.pluginID != nil,
+                      let node = audioEngine.pluginNode(on: track.id, at: slotIndex),
+                      let loaded = pluginHost.loadedPlugins[slot.id] ??
+                          pluginHost.loadedPlugins.values.first(where: {
+                              $0.audioUnit === node
+                          }) else { continue }
+                do {
+                    project.tracks[trackIndex].pluginSlots[slotIndex].stateData =
+                        try pluginHost.savePreset(pluginID: loaded.id)
+                } catch {
+                    print("[PluginState] Could not save insert \(slotIndex) on \(track.name): \(error)")
+                }
+            }
+        }
+
         // Save rack instrument plugin states
         for (index, instrument) in project.vRack.instruments.enumerated() {
             print("[PluginState] Processing: \(instrument.name) (slot: \(instrument.pluginSlot.id.uuidString.prefix(8)))")
