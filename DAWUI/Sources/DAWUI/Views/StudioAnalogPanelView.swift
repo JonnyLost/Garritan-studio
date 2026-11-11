@@ -10,6 +10,7 @@ public struct StudioAnalogPanelView: View {
     public let trackID: TrackID
     @State private var selectedPage: AnalogPage = .analog
     @State private var panelError: String?
+    @State private var showPresetBrowser = false
 
     private enum AnalogPage: String, CaseIterable {
         case analog = "Analog"
@@ -45,6 +46,9 @@ public struct StudioAnalogPanelView: View {
                     Text("\(trackName)  ·  Native virtual analog  ·  8 voices")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    Text(presetLabel)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 8)
                 HStack(spacing: 5) {
@@ -55,6 +59,12 @@ public struct StudioAnalogPanelView: View {
                         .font(.caption2)
                 }
                 .foregroundStyle(.secondary)
+                Button {
+                    showPresetBrowser = true
+                } label: {
+                    Label("Presets", systemImage: "square.stack.3d.up")
+                }
+                .buttonStyle(.bordered)
                 Button {
                     do { try viewModel.resetStudioAnalogPatch(for: trackID); panelError = nil }
                     catch { panelError = error.localizedDescription }
@@ -247,6 +257,20 @@ public struct StudioAnalogPanelView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
+        .sheet(isPresented: $showPresetBrowser) {
+            StudioAnalogPresetBrowserView(viewModel: viewModel, trackID: trackID)
+                .frame(minWidth: 880, minHeight: 570)
+        }
+    }
+
+    private var presetLabel: String {
+        guard let id = viewModel.project.track(withID: trackID)?.studioAnalogPresetID else {
+            return "Edited / initialized sound"
+        }
+        if let factory = StudioAnalogFactoryLibrary.presets.first(where: { $0.id == id }) {
+            return "Factory · \(factory.name)"
+        }
+        return "Saved user preset"
     }
 
     private func value(_ parameter: StudioAnalogParameter) -> Float {
