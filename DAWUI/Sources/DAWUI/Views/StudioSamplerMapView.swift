@@ -56,8 +56,14 @@ public struct StudioSamplerMapView: View {
             if let patch = draft {
                 HStack(spacing: 8) {
                     Text("Velocity 127")
-                    Spacer()
-                    Text("Click a colored zone to edit its key and velocity ranges")
+                    Picker("Selected zone", selection: $selectedIndex) {
+                        ForEach(patch.zones.indices, id: \.self) { index in
+                            Text("\(index + 1): \(patch.zones[index].sampleURL.lastPathComponent)")
+                                .tag(index)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: 360)
                     Spacer()
                     Button("Auto Map") { autoMap() }
                         .help("Rebuild note and velocity boundaries from sample filenames")
