@@ -513,9 +513,20 @@ public final class AudioEngine: ObservableObject {
         } else {
             engine.connect(trackNode.gainNode, to: trackNode.pannerNode, format: format)
         }
-        engine.connect(trackNode.pannerNode, to: trackNode.outputMixer, format: format)
+        // Rebuilding an insert chain must preserve the same post-panner
+        // dry / Concert Hall split established when the track was created.
+        // Connecting only to outputMixer previously disconnected its wet send.
+        engine.connect(
+            trackNode.pannerNode,
+            to: [
+                AVAudioConnectionPoint(node: trackNode.outputMixer, bus: 0),
+                AVAudioConnectionPoint(node: trackNode.concertHallSend, bus: 0)
+            ],
+            fromBus: 0,
+            format: format
+        )
     }
-    
+
     // MARK: - Audio Playback
     
     /// Schedule audio file playback on a track
