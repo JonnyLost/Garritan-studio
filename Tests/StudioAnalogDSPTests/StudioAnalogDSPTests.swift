@@ -159,6 +159,40 @@ final class StudioAnalogDSPTests: XCTestCase {
         XCTAssertLessThan(render(synth, frames: 1024).map { abs($0) }.max() ?? 1, 0.0001)
     }
 
+    func testPreparedTrackSequenceFiresOnExactSamplesAndCanRestart() {
+        let synth = makeSynth()
+        defer { sa_destroy(synth) }
+        var list: [SAScheduledMIDI] = [
+            SAScheduledMIDI(sampleFrame: 300, status: 0x90, data1: 69, data2: 110),
+            SAScheduledMIDI(sampleFrame: 600, status: 0x80, data1: 69, data2: 0)
+        ]
+        func load() -> Int32 {
+            list.withUnsafeBufferPointer {
+                sa_sequence_load(synth, $0.baseAddress, $0.count)
+            }
+        }
+        XCTAssertEqual(load(), 1)
+        XCTAssertEqual(load(), -1)
+        XCTAssertEqual(sa_sequence_start(synth), 1)
+        XCTAssertTrue(render(synth, frames: 128).allSatisfy { $0 == 0 })
+        let second = render(synth, frames: 512)
+        XCTAssertTrue(second.prefix(172).allSatisfy { $0 == 0 })
+        XCTAssertGreaterThan(second.suffix(340).map { abs($0) }.max() ?? 0, 0.001)
+        XCTAssertEqual(load(), 0, "Live timeline is immutable until playback stops")
+        sa_sequence_stop(synth)
+        XCTAssertEqual(load(), 1, "Seek may replace a stopped session without waiting for rendering")
+        XCTAssertEqual(sa_sequence_start(synth), 1)
+        sa_all_notes_off(synth)
+        XCTAssertTrue(render(synth, frames: 128).allSatisfy { $0 == 0 })
+        _ = render(synth, frames: 512)
+        XCTAssertGreaterThan(render(synth, frames: 128).map { abs($0) }.max() ?? 0, 0.001)
+        sa_sequence_stop(synth)
+        sa_all_notes_off(synth)
+        XCTAssertTrue(render(synth, frames: 128).allSatisfy { $0 == 0 })
+        list.swapAt(0, 1)
+        XCTAssertEqual(load(), 0, "Unsorted source timelines must be rejected")
+    }
+
     func testRejectsInvalidConstructionAndMidiQueueIsBounded() {
         XCTAssertNil(sa_create(0, 8))
         XCTAssertNil(sa_create(44_100, 100))

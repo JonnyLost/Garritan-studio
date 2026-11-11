@@ -120,7 +120,8 @@ void sa_render(SASynth *synth, float *left, float *right, int32_t frames);
  * sorted by sampleFrame. Valid message types: 8x/9x/Bx (CC1/64/120/123)/Ex.
  * A complete immutable timeline is swapped at a render boundary; no file I/O,
  * memory allocation or sorting occurs on the real-time thread.
- * 1 = accepted, 0 = invalid or too many events, -1 = already pending/playing.
+ * 1 = accepted, 0 = invalid, too many or already playing without a
+ * stop request, -1 = previous timeline pending render acknowledgment.
  * The first version supports up to 65536 events per Studio Analog track.
  */
 typedef struct SAScheduledMIDI {

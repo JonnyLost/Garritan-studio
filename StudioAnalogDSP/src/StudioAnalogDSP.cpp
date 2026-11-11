@@ -571,7 +571,8 @@ void sa_reset_midi_stopped(SASynth *synth) {
 
 int32_t sa_sequence_load(SASynth *synth, const SAScheduledMIDI *events, size_t count) {
     if (!synth || count > kMaxSequenceEvents || (count && !events) ||
-        synth->sequencePlaying.load(std::memory_order_acquire)) return 0;
+        (synth->sequencePlaying.load(std::memory_order_acquire) &&
+         !synth->sequenceEnd.load(std::memory_order_acquire))) return 0;
     const uint8_t current = synth->currentSequence.load(std::memory_order_acquire);
     const uint8_t requested = synth->requestedSequence.load(std::memory_order_acquire);
     if (current != requested) return -1;
@@ -606,6 +607,7 @@ int32_t sa_sequence_start(SASynth *synth) {
 
 void sa_sequence_stop(SASynth *synth) {
     if (!synth) return;
+    synth->sequenceBegin.store(false, std::memory_order_release);
     synth->sequenceEnd.store(true, std::memory_order_release);
 }
 
