@@ -569,12 +569,24 @@ void sa_render(SASynth *synth, float *left, float *right, int32_t frames) {
     synth->currentGraph.store(nextGraph, std::memory_order_release);
     const Graph& graph = synth->graphs[nextGraph];
 
+    std::array<double, 16> bendRatio{};
+    auto ratio = [&](int ch) noexcept {
+        const double bend = static_cast<int>(synth->bend[ch]) - 8192;
+        const double normalized = bend / (bend >= 0.0 ? 8191.0 : 8192.0);
+        return std::exp2(normalized*p[SA_PARAM_BEND_RANGE]/12.0);
+    };
+    for (int ch = 0; ch < 16; ++ch) bendRatio[ch] = ratio(ch);
+
     for (int32_t frame = 0; frame < frames; ++frame) {
         // Keep order for events at the same offset, including note-off followed
         // by note-on. All queue and bookkeeping storage was preallocated.
         for (uint32_t i = 0; i < synth->pendingCount;) {
             if (synth->pending[i].frameOffset <= static_cast<uint32_t>(frame)) {
-                synth->event(synth->pending[i]);
+                const NoteEvent handled = synth->pending[i];
+                synth->event(handled);
+                if (handled.type == EventType::bend)
+                    bendRatio[handled.channel] = ratio(handled.channel);
+                if (handled.type == EventType::panic) bendRatio.fill(1.0);
                 for (uint32_t j = i + 1; j < synth->pendingCount; ++j)
                     synth->pending[j-1] = synth->pending[j];
                 --synth->pendingCount;
@@ -582,14 +594,7 @@ void sa_render(SASynth *synth, float *left, float *right, int32_t frames) {
                 ++i;
             }
         }
-        std::array<double,16> bendRatio{};
-        // Pitch wheel applies channel-wide; compute ratios once per frame
-        // (controls may change at exact sample offsets).
-        for (int ch = 0; ch < 16; ++ch) {
-            const double bend = static_cast<int>(synth->bend[ch]) - 8192;
-            const double normalized = bend / (bend >= 0.0 ? 8191.0 : 8192.0);
-            bendRatio[ch] = std::exp2(normalized*p[SA_PARAM_BEND_RANGE]/12.0);
-        }
+        // Pitch ratios update only on pitch-wheel events, not per sample.
         float mix = 0.f;
         for (int i = 0; i < synth->voiceCount; ++i) {
             Voice& voice = synth->voices[i];

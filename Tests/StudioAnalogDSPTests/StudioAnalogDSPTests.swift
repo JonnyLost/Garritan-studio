@@ -109,6 +109,56 @@ final class StudioAnalogDSPTests: XCTestCase {
         }
     }
 
+    func testNoteTimingAcrossBlocksAndSustain() {
+        let synth = makeSynth()
+        defer { sa_destroy(synth) }
+        XCTAssertEqual(sa_midi_event(synth, 0x90, 69, 127, 300), 1)
+        XCTAssertTrue(render(synth, frames: 128).allSatisfy { $0 == 0 })
+        let second = render(synth, frames: 256)
+        XCTAssertTrue(second.prefix(172).allSatisfy { $0 == 0 })
+        XCTAssertGreaterThan(second.suffix(84).map { abs($0) }.max() ?? 0, 0.001)
+        XCTAssertEqual(sa_midi_event(synth, 0xB0, 64, 127, 0), 1)
+        XCTAssertEqual(sa_midi_event(synth, 0x80, 69, 0, 0), 1)
+        _ = render(synth, frames: 8192)
+        XCTAssertGreaterThan(render(synth, frames: 512).map { abs($0) }.max() ?? 0, 0.001)
+        XCTAssertEqual(sa_midi_event(synth, 0xB0, 64, 0, 0), 1)
+        _ = render(synth, frames: 22050)
+        XCTAssertLessThan(render(synth, frames: 2048).map { abs($0) }.max() ?? 1, 0.0001)
+    }
+
+    func testPitchWheelRaisesA440ByTwoSemitones() {
+        let synth = makeSynth()
+        defer { sa_destroy(synth) }
+        XCTAssertEqual(sa_set_parameter(synth, 0, 0), 1)
+        XCTAssertEqual(sa_set_parameter(synth, 3, 0), 1)
+        XCTAssertEqual(sa_set_parameter(synth, 6, 18000), 1)
+        XCTAssertEqual(sa_midi_event(synth, 0x90, 69, 127, 0), 1)
+        _ = render(synth, frames: 1000)
+        func crossings(_ samples: [Float]) -> Int {
+            zip(samples, samples.dropFirst()).filter { $0.0 <= 0 && $0.1 > 0 }.count
+        }
+        XCTAssertEqual(crossings(render(synth, frames: 44100)), 440, accuracy: 12)
+        XCTAssertEqual(sa_midi_event(synth, 0xE0, 127, 127, 0), 1)
+        XCTAssertEqual(crossings(render(synth, frames: 44100)), 494, accuracy: 12)
+        XCTAssertEqual(sa_midi_event(synth, 0xB0, 1, 127, 0), 1)
+        XCTAssertEqual(sa_midi_event(synth, 0xB0, 120, 0, 0), 1)
+        XCTAssertTrue(render(synth, frames: 128).allSatisfy { $0 == 0 })
+    }
+
+    func testOverlapNoteOffReleasesOneVoiceOnly() {
+        let synth = makeSynth()
+        defer { sa_destroy(synth) }
+        XCTAssertEqual(sa_midi_event(synth, 0x90, 60, 110, 0), 1)
+        XCTAssertEqual(sa_midi_event(synth, 0x90, 60, 110, 0), 1)
+        _ = render(synth, frames: 512)
+        XCTAssertEqual(sa_midi_event(synth, 0x80, 60, 0, 0), 1)
+        _ = render(synth, frames: 8192)
+        XCTAssertGreaterThan(render(synth, frames: 1024).map { abs($0) }.max() ?? 0, 0.001)
+        XCTAssertEqual(sa_midi_event(synth, 0x80, 60, 0, 0), 1)
+        _ = render(synth, frames: 22050)
+        XCTAssertLessThan(render(synth, frames: 1024).map { abs($0) }.max() ?? 1, 0.0001)
+    }
+
     func testRejectsInvalidConstructionAndMidiQueueIsBounded() {
         XCTAssertNil(sa_create(0, 8))
         XCTAssertNil(sa_create(44_100, 100))

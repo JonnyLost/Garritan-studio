@@ -75,6 +75,30 @@ int main() {
     assert(tailPeak < 0.0001f);
     sa_destroy(audible);
 
+    SASynth *timed = sa_create(44100, 8);
+    assert(timed != nullptr);
+    assert(sa_midi_event(timed, 0x90, 69, 110, 256));
+    std::vector<float> tl(512), tr(512);
+    sa_render(timed, tl.data(), tr.data(), 128);
+    for (int i = 0; i < 128; ++i) assert(tl[i] == 0.f);
+    sa_render(timed, tl.data(), tr.data(), 256);
+    for (int i = 0; i < 128; ++i) assert(tl[i] == 0.f);
+    float peak = 0.f;
+    for (int i = 128; i < 256; ++i) peak = std::max(peak, std::abs(tl[i]));
+    assert(peak > 0.001f);
+    assert(sa_midi_event(timed, 0xB0, 64, 127, 0));
+    assert(sa_midi_event(timed, 0x80, 69, 0, 0));
+    sa_render(timed, tl.data(), tr.data(), 512);
+    assert(*std::max_element(tl.begin(), tl.end()) > 0.001f);
+    assert(sa_midi_event(timed, 0xB0, 64, 0, 0));
+    std::vector<float> release(22050), releaseR(22050);
+    sa_render(timed, release.data(), releaseR.data(), 22050);
+    for (int i = 20000; i < 22050; ++i)
+        assert(std::abs(release[i]) < 0.0001f);
+    assert(!sa_midi_event(timed, 0xF0, 0, 0, 0));
+    assert(!sa_midi_event(timed, 0x90, 69, 100, 65536));
+    sa_destroy(timed);
+
     sa_destroy(s);
     std::printf("Studio Analog DSP smoke test passed (%.2f Hz)\n", frequency);
     return 0;
