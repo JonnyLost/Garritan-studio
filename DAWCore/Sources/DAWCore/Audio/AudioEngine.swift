@@ -192,7 +192,13 @@ public final class AudioEngine: ObservableObject {
     }
     
     // MARK: - Track Management
-    
+
+    /// Mixer graphs currently attached to AVAudioEngine. Used to reconcile
+    /// track add/delete operations performed through undo and redo.
+    public var activeTrackIDs: Set<TrackID> {
+        Set(trackNodes.keys)
+    }
+
     /// Create audio nodes for a track
     public func createTrackNode(for track: Track) throws {
         guard trackNodes[track.id] == nil else { return }
