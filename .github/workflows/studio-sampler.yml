@@ -7,10 +7,10 @@ on:
   pull_request:
     paths:
       - "StudioSamplerDSP/**"
-      - "DAWCore/Sources/DAWCore/Audio/StudioSampler*"
+      - "DAWCore/Sources/DAWCore/Audio/StudioSampler*"\n      - "DAWUI/Sources/DAWUI/Views/StudioSamplerMapView.swift"\n      - "DAWUI/Sources/DAWUI/Views/Timeline/TrackHeaderView.swift"\n      - "DAWUI/Sources/DAWUI/Views/MainWindowView.swift"
       - "DAWCore/Sources/DAWCore/Audio/PlaybackEngine.swift"
       - "DAWCore/Sources/DAWCore/Models/Track.swift"
-      - "Tests/DAWCoreTests/StudioSamplerTrackIntegrationTests.swift"
+      - "Tests/DAWCoreTests/StudioSamplerTrackIntegrationTests.swift"\n      - "Tests/DAWCoreTests/StudioSamplerMappingBuilderTests.swift"
       - "Package.swift"
   workflow_dispatch:
 
