@@ -165,12 +165,24 @@ public actor ProjectFileManager {
             ))
         }
         
-        // Create project file
+        // Preserve any legacy plug-in state records inside the old package.
+        // Existing track and rack slot state is also embedded in updatedProject.
+        // Never silently discard earlier state while replacing an existing save.
+        var legacyPluginStates: [PluginStateEntry] = []
+        let previousJSON = packageURL.appendingPathComponent(Self.projectFileName)
+        if fm.fileExists(atPath: previousJSON.path) {
+            let previousData = try Data(contentsOf: previousJSON)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let previousFile = try decoder.decode(ProjectFile.self, from: previousData)
+            legacyPluginStates = previousFile.pluginStates
+        }
+
         let projectFile = ProjectFile(
             version: Project.currentFormatVersion,
             project: updatedProject,
             audioFileManifest: audioManifest,
-            pluginStates: []  // Plugin states saved separately in future
+            pluginStates: legacyPluginStates
         )
         
         // Encode and save
