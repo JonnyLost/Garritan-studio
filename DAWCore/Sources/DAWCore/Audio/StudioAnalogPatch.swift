@@ -114,7 +114,7 @@ public enum StudioAnalogParameter: Int32, CaseIterable, Codable, Sendable {
         guard value.isFinite else { return false }
         if self == .oscillator1Wave || self == .oscillator2Wave ||
            self == .modulationTarget {
-            return (0...3).contains(value) && value.rounded(.towardZero) == value
+            return range.contains(value) && value.rounded(.towardZero) == value
         }
         return range.contains(value)
     }

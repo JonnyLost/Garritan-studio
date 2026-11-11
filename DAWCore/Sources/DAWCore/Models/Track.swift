@@ -64,6 +64,9 @@ public struct Track: Identifiable, Codable, Sendable {
     public var studioAnalogEnabled: Bool?
     /// Per-track native synthesis controls; nil restores engine defaults.
     public var studioAnalogPatch: StudioAnalogPatch?
+    /// Last loaded native preset ID. Nil after manual edits; sound is always
+    /// embedded in studioAnalogPatch, so deleting a user preset is safe.
+    public var studioAnalogPresetID: String?
     /// Selected Garritan catalog entry (library:path), persisted per track.
     public var garritanProgramID: String?
     
@@ -112,6 +115,7 @@ public struct Track: Identifiable, Codable, Sendable {
         self.instrumentSlot = nil
         self.studioAnalogEnabled = nil
         self.studioAnalogPatch = nil
+        self.studioAnalogPresetID = nil
         self.garritanProgramID = nil
         self.midiOutput = nil  // Default: use track instrument
         self.midiOutputChannel = nil  // All channels
