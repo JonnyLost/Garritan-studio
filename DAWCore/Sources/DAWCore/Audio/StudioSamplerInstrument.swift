@@ -55,6 +55,7 @@ public final class StudioSamplerInstrument {
 
         // Swift owns the C++ sampler immediately, even if decoding throws.
         let state = StudioSamplerRenderState(sampler)
+        var cumulativeFrames: Int64 = 0
         for zone in patch.zones {
             let url = zone.sampleURL
             let file = try AVAudioFile(
@@ -67,7 +68,11 @@ public final class StudioSamplerInstrument {
                 throw StudioSamplerError.unsupportedSampleFormat(url)
             }
             guard file.length >= 2 else { throw StudioSamplerError.invalidSample(url) }
-            guard file.length <= 10_000_000 else { throw StudioSamplerError.sampleTooLarge(url) }
+            guard file.length <= 10_000_000,
+                  cumulativeFrames <= 32_000_000 - file.length else {
+                throw StudioSamplerError.sampleTooLarge(url)
+            }
+            cumulativeFrames += file.length
             let count = AVAudioFrameCount(file.length)
             guard let buffer = AVAudioPCMBuffer(pcmFormat: sourceFormat, frameCapacity: count) else {
                 throw StudioSamplerError.invalidSample(url)
