@@ -469,6 +469,13 @@ public final class AudioEngine: ObservableObject {
         try rebuildPluginChain(for: trackNode)
     }
     
+    /// Number of currently hosted insert effects, independent of placeholder
+    /// slots in the project model. Used to keep insert order and persisted
+    /// slot indices aligned with the actual audio graph.
+    public func pluginCount(on trackID: TrackID) -> Int {
+        trackNodes[trackID]?.pluginNodes.count ?? 0
+    }
+
     /// Return the actual effect Audio Unit connected at a track's insert slot.
     /// Read-only: does not rebuild or otherwise modify the audio graph.
     public func pluginNode(on trackID: TrackID, at slotIndex: Int) -> AVAudioUnit? {
