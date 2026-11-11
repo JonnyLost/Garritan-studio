@@ -56,7 +56,11 @@ typedef struct SASynth SASynth;
 #define SA_PARAM_LFO_DEPTH       18
 #define SA_PARAM_MASTER_GAIN     19
 #define SA_PARAM_PULSE_WIDTH     20
-#define SA_PARAMETER_COUNT       21
+#define SA_PARAM_BEND_RANGE      21  /* semitones, default 2 */
+#define SA_PARAM_MOD_DEPTH       22  /* 0..1, default 0.5 */
+#define SA_PARAM_MOD_TARGET      23  /* 0 vibrato, 1 filter */
+#define SA_PARAM_VELOCITY_FILTER 24  /* 0..1, default 0 */
+#define SA_PARAMETER_COUNT       25
 
 /* Each connection terminates at a numbered input jack.
  * MIXER: audio inputs 0,1,2.
@@ -78,13 +82,30 @@ void sa_destroy(SASynth *synth);
 int32_t sa_set_parameter(SASynth *synth, int32_t parameter, float value);
 float sa_get_parameter(const SASynth *synth, int32_t parameter);
 
-/* Notes and parameters are delivered at the next render block boundary.
+/* Immediate notes are delivered at the next render block boundary.
  * MIDI commands use a bounded single-producer/single-consumer queue.
  * A return of 0 means the queue was full or the arguments were invalid.
  */
 int32_t sa_note_on(SASynth *synth, uint8_t note, uint8_t velocity);
 int32_t sa_note_off(SASynth *synth, uint8_t note);
 int32_t sa_all_notes_off(SASynth *synth);
+
+/* Bounded single-producer MIDI input (status includes channel 0..15).
+ * Supports 0x8n note off, 0x9n note on, 0xBn CC1/64/120/123 and 0xEn
+ * 14-bit pitch wheel. Unsupported status/invalid data returns 0.
+ * frameOffset is relative to the START OF THE NEXT sa_render invocation,
+ * and may extend across subsequent render calls (0..65535 frames).
+ * Send events before the intended buffer starts. A producer arriving late
+ * will necessarily miss that callback; the host must schedule ahead.
+ */
+int32_t sa_midi_event(SASynth *synth, uint8_t status,
+                      uint8_t data1, uint8_t data2, uint32_t frameOffset);
+
+/* Immediately stop and clear all voices, controllers, and queued MIDI.
+ * Must be invoked only with rendering stopped. Do not call from the UI
+ * while the audio engine is running.
+ */
+void sa_reset_midi_stopped(SASynth *synth);
 
 /* Called with already allocated, non-overlapping planar output buffers.
  * No allocations, locks, logging, or graph compilation occur in render.

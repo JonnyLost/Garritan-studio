@@ -28,7 +28,7 @@ struct Parameters {
 constexpr std::array<float, SA_PARAMETER_COUNT> kDefaults = {
     2.f, 3.f, 0.48f, 0.28f, 0.f, 0.f, 6500.f, 0.18f, 0.4f,
     0.01f, 0.25f, 0.5f, 0.3f, 0.005f, 0.18f, 0.75f, 0.25f,
-    4.f, 0.f, 0.45f, 0.5f
+    4.f, 0.f, 0.45f, 0.5f, 2.f, 0.5f, 0.f, 0.f
 };
 
 bool validParameter(int32_t id, float value) noexcept {
@@ -36,6 +36,12 @@ bool validParameter(int32_t id, float value) noexcept {
     switch (id) {
         case SA_PARAM_OSC1_WAVE: case SA_PARAM_OSC2_WAVE:
             return value >= 0.f && value <= 3.f && std::floor(value) == value;
+        case SA_PARAM_MOD_TARGET:
+            return value == 0.f || value == 1.f;
+        case SA_PARAM_BEND_RANGE:
+            return value >= 0.f && value <= 24.f;
+        case SA_PARAM_MOD_DEPTH: case SA_PARAM_VELOCITY_FILTER:
+            return value >= 0.f && value <= 1.f;
         case SA_PARAM_OSC1_LEVEL: case SA_PARAM_OSC2_LEVEL:
         case SA_PARAM_NOISE_LEVEL: case SA_PARAM_RESONANCE:
         case SA_PARAM_FILTER_SUSTAIN: case SA_PARAM_AMP_SUSTAIN:
@@ -231,6 +237,8 @@ struct StateVariableFilter {
 
 struct Voice {
     bool active = false;
+    bool held = false;
+    uint8_t channel = 0;
     uint8_t note = 0;
     float velocity = 0.f;
     double baseFrequency = 440.0;
@@ -241,8 +249,10 @@ struct Voice {
     StateVariableFilter filter;
     Envelope ampEnvelope, filterEnvelope;
 
-    void trigger(uint8_t n, uint8_t v, uint64_t counter) noexcept {
+    void trigger(uint8_t n, uint8_t v, uint8_t ch, uint64_t counter) noexcept {
         active = true;
+        held = true;
+        channel = ch;
         note = n;
         velocity = static_cast<float>(v)/127.f;
         baseFrequency = 440.0*std::pow(2.0, (static_cast<int>(n)-69)/12.0);
@@ -253,12 +263,27 @@ struct Voice {
         filterEnvelope.trigger();
     }
     void release() noexcept {
+        held = false;
         ampEnvelope.noteOff();
         filterEnvelope.noteOff();
     }
-    float next(const Graph& graph, const Parameters& p, double sr) noexcept {
+    void stopImmediately() noexcept {
+        held = false;
+        active = false;
+        ampEnvelope = {};
+        filterEnvelope = {};
+    }
+    float next(const Graph& graph, const Parameters& p, double sr,
+               double bendRatio, float wheel) noexcept {
         std::array<float, kNodeCount> sample{};
-        const double frequency = baseFrequency;
+        // LFO vibrato derives from the same phase as the user-visible LFO node.
+        // It is evaluated before oscillators irrespective of graph topo order.
+        const float lfo = static_cast<float>(std::sin(2.0*kPi*lfoPhase));
+        const float wheelAmount = wheel * p[SA_PARAM_MOD_DEPTH];
+        const bool vibrato = p[SA_PARAM_MOD_TARGET] == 0.f && wheelAmount > 0.f;
+        const double vibratoRatio = vibrato
+            ? std::exp2(2.0 * wheelAmount * lfo / 12.0) : 1.0;
+        const double frequency = baseFrequency * bendRatio * vibratoRatio;
         auto input = [&](int node, int port) noexcept -> float {
             const Input& jack = graph.inputs[node][port];
             return jack.source < 0 ? 0.f : sample[static_cast<size_t>(jack.source)]*jack.gain;
@@ -288,13 +313,16 @@ struct Voice {
                         p[SA_PARAM_FILTER_RELEASE]);
                     break;
                 case SA_NODE_LFO:
-                    sample[id] = static_cast<float>(std::sin(2.0*kPi*lfoPhase));
-                    lfoPhase += p[SA_PARAM_LFO_RATE]/sr;
-                    if (lfoPhase >= 1.0) lfoPhase -= 1.0;
+                    sample[id] = lfo;
                     break;
                 case SA_NODE_FILTER: {
+                    const double wheelFilter = p[SA_PARAM_MOD_TARGET] == 1.f
+                        ? 3.0*wheelAmount : 0.0;
+                    const double velocityFilter = 2.0*p[SA_PARAM_VELOCITY_FILTER]
+                        *(velocity - 0.5f);
                     const double octaves = 4.0*p[SA_PARAM_FILTER_ENV_DEPTH]*input(id, 1)
-                                         + 2.0*p[SA_PARAM_LFO_DEPTH]*input(id, 2);
+                                         + 2.0*p[SA_PARAM_LFO_DEPTH]*input(id, 2)
+                                         + wheelFilter + velocityFilter;
                     const double cutoff = p[SA_PARAM_CUTOFF_HZ]*std::pow(2.0, octaves);
                     sample[id] = filter.next(input(id, 0), cutoff, p[SA_PARAM_RESONANCE], sr);
                     break;
@@ -312,16 +340,23 @@ struct Voice {
                 default: break;
             }
         }
-        if (ampEnvelope.stage == Envelope::Stage::idle) active = false;
+        lfoPhase += p[SA_PARAM_LFO_RATE]/sr;
+        if (lfoPhase >= 1.0) lfoPhase -= 1.0;
+        if (ampEnvelope.stage == Envelope::Stage::idle) {
+            held = false;
+            active = false;
+        }
         return sample[SA_NODE_OUTPUT]*velocity;
     }
 };
 
-enum class EventType : uint8_t { on, off, panic };
+enum class EventType : uint8_t { on, off, control, bend, panic };
 struct NoteEvent {
-    EventType type;
-    uint8_t note;
-    uint8_t velocity;
+    EventType type = EventType::off;
+    uint8_t note = 0;       // Note number, CC controller, or pitch-bend LSB.
+    uint8_t value = 0;      // Velocity, CC value, or pitch-bend MSB.
+    uint8_t channel = 0;    // 0..15
+    uint32_t frameOffset = 0;
 };
 
 struct NoteQueue {
@@ -342,6 +377,9 @@ struct NoteQueue {
         read.store(r+1, std::memory_order_release);
         return true;
     }
+    void resetStopped() noexcept {
+        read.store(write.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    }
 };
 } // namespace
 
@@ -358,24 +396,80 @@ struct SASynth {
     std::array<Voice, kMaxVoices> voices{};
     std::array<std::atomic<float>, SA_PARAMETER_COUNT> params{};
     NoteQueue notes;
+    // Bounded, preallocated render-thread timeline, stable insertion order
+    // for events sharing the same frame. No sorting or allocation in render.
+    std::array<NoteEvent, kQueueCapacity> pending{};
+    uint32_t pendingCount = 0;
+    std::array<bool, 16> pedal{};
+    std::array<uint8_t, 16> modWheel{};
+    std::array<uint16_t, 16> bend{};
     uint64_t counter = 0;
 
     SASynth(double sr, int count) : sampleRate(sr), voiceCount(count) {
         for (size_t i = 0; i < kDefaults.size(); ++i)
             params[i].store(kDefaults[i], std::memory_order_relaxed);
         graphs[0].compile(kDefaultRoutes.data(), kDefaultRoutes.size());
+        bend.fill(8192);
         for (int i = 0; i < kMaxVoices; ++i)
             voices[i].noise += static_cast<uint32_t>(0x85ebca6bu*i);
     }
 
+    void releaseChannel(uint8_t ch, bool hard) noexcept {
+        for (int i = 0; i < voiceCount; ++i) {
+            if (!voices[i].active || voices[i].channel != ch) continue;
+            if (hard) voices[i].stopImmediately();
+            else voices[i].release();
+        }
+    }
+
     void event(NoteEvent e) noexcept {
         if (e.type == EventType::panic) {
-            for (int i = 0; i < voiceCount; ++i) voices[i].release();
+            for (int i = 0; i < voiceCount; ++i) voices[i].stopImmediately();
+            pedal.fill(false);
+            modWheel.fill(0);
+            bend.fill(8192);
             return;
         }
-        if (e.type == EventType::off || e.velocity == 0) {
-            for (int i = 0; i < voiceCount; ++i)
-                if (voices[i].active && voices[i].note == e.note) voices[i].release();
+        const uint8_t ch = e.channel;
+        if (e.type == EventType::control) {
+            switch (e.note) {
+                case 1: modWheel[ch] = e.value; break;
+                case 64: {
+                    const bool wasDown = pedal[ch];
+                    pedal[ch] = e.value >= 64;
+                    if (wasDown && !pedal[ch]) {
+                        for (int i = 0; i < voiceCount; ++i) {
+                            Voice& voice = voices[i];
+                            if (voice.active && voice.channel == ch && !voice.held)
+                                voice.release();
+                        }
+                    }
+                    break;
+                }
+                case 120: releaseChannel(ch, true); break; // All sound off.
+                case 123: releaseChannel(ch, false); break; // All notes off.
+                default: break;
+            }
+            return;
+        }
+        if (e.type == EventType::bend) {
+            bend[ch] = static_cast<uint16_t>(e.note | (uint16_t(e.value) << 7));
+            return;
+        }
+        if (e.type == EventType::off || e.value == 0) {
+            // FIFO matching of overlapping same-pitch note-ons: one note-off
+            // releases one oldest held voice rather than all voices of pitch.
+            Voice *oldest = nullptr;
+            for (int i = 0; i < voiceCount; ++i) {
+                Voice& voice = voices[i];
+                if (voice.active && voice.held && voice.channel == ch &&
+                    voice.note == e.note && (!oldest || voice.age < oldest->age))
+                    oldest = &voice;
+            }
+            if (oldest) {
+                oldest->held = false;
+                if (!pedal[ch]) oldest->release();
+            }
             return;
         }
         Voice *candidate = nullptr;
@@ -384,7 +478,7 @@ struct SASynth {
         }
         if (!candidate) {
             for (int i = 0; i < voiceCount; ++i)
-                if (voices[i].ampEnvelope.stage == Envelope::Stage::release &&
+                if (!voices[i].held &&
                     (!candidate || voices[i].age < candidate->age))
                     candidate = &voices[i];
         }
@@ -393,8 +487,9 @@ struct SASynth {
             for (int i = 1; i < voiceCount; ++i)
                 if (voices[i].age < candidate->age) candidate = &voices[i];
         }
-        candidate->trigger(e.note, e.velocity, ++counter);
+        candidate->trigger(e.note, e.value, ch, ++counter);
     }
+
 };
 
 extern "C" {
@@ -417,16 +512,45 @@ float sa_get_parameter(const SASynth *synth, int32_t parameter) {
     return synth->params[static_cast<size_t>(parameter)].load(std::memory_order_relaxed);
 }
 
+int32_t sa_midi_event(SASynth *synth, uint8_t status,
+                      uint8_t data1, uint8_t data2, uint32_t frameOffset) {
+    if (!synth || data1 > 127 || data2 > 127 || frameOffset > 65535) return 0;
+    const uint8_t type = status & 0xF0;
+    const uint8_t channel = status & 0x0F;
+    EventType eventType;
+    switch (type) {
+        case 0x80: eventType = EventType::off; break;
+        case 0x90: eventType = data2 ? EventType::on : EventType::off; break;
+        case 0xB0:
+            if (data1 != 1 && data1 != 64 && data1 != 120 && data1 != 123) return 0;
+            eventType = EventType::control; break;
+        case 0xE0: eventType = EventType::bend; break;
+        default: return 0;
+    }
+    return synth->notes.push({eventType, data1, data2, channel, frameOffset}) ? 1 : 0;
+}
+
 int32_t sa_note_on(SASynth *synth, uint8_t note, uint8_t velocity) {
-    return synth && note <= 127 && synth->notes.push({EventType::on, note, velocity}) ? 1 : 0;
+    return sa_midi_event(synth, 0x90, note, velocity, 0);
 }
 
 int32_t sa_note_off(SASynth *synth, uint8_t note) {
-    return synth && note <= 127 && synth->notes.push({EventType::off, note, 0}) ? 1 : 0;
+    return sa_midi_event(synth, 0x80, note, 0, 0);
 }
 
 int32_t sa_all_notes_off(SASynth *synth) {
-    return synth && synth->notes.push({EventType::panic, 0, 0}) ? 1 : 0;
+    return synth && synth->notes.push({EventType::panic, 0, 0, 0, 0}) ? 1 : 0;
+}
+
+void sa_reset_midi_stopped(SASynth *synth) {
+    if (!synth) return;
+    synth->notes.resetStopped();
+    synth->pendingCount = 0;
+    synth->pedal.fill(false);
+    synth->modWheel.fill(0);
+    synth->bend.fill(8192);
+    for (int i = 0; i < synth->voiceCount; ++i)
+        synth->voices[i].stopImmediately();
 }
 
 void sa_render(SASynth *synth, float *left, float *right, int32_t frames) {
@@ -434,30 +558,55 @@ void sa_render(SASynth *synth, float *left, float *right, int32_t frames) {
     Parameters p;
     for (int i = 0; i < SA_PARAMETER_COUNT; ++i)
         p.values[i] = synth->params[static_cast<size_t>(i)].load(std::memory_order_relaxed);
+    p.osc2Ratio = std::exp2(p[SA_PARAM_OSC2_SEMITONES]/12.0);
 
-    p.osc2Ratio = std::pow(2.0, p[SA_PARAM_OSC2_SEMITONES]/12.0);
+    NoteEvent incoming{};
+    while (synth->pendingCount < kQueueCapacity && synth->notes.pop(incoming))
+        synth->pending[synth->pendingCount++] = incoming;
 
-    NoteEvent e{};
-    while (synth->notes.pop(e)) synth->event(e);
-
-    // Acquire the new immutable snapshot only at a render-block boundary.
-    // Publish render ownership before reading; that makes the previous
-    // slot safely recyclable by the single control thread.
+    // Render-time ownership of immutable graphs is updated only at buffer start.
     const uint8_t nextGraph = synth->requestedGraph.load(std::memory_order_acquire);
     synth->currentGraph.store(nextGraph, std::memory_order_release);
     const Graph& graph = synth->graphs[nextGraph];
 
     for (int32_t frame = 0; frame < frames; ++frame) {
+        // Keep order for events at the same offset, including note-off followed
+        // by note-on. All queue and bookkeeping storage was preallocated.
+        for (uint32_t i = 0; i < synth->pendingCount;) {
+            if (synth->pending[i].frameOffset <= static_cast<uint32_t>(frame)) {
+                synth->event(synth->pending[i]);
+                for (uint32_t j = i + 1; j < synth->pendingCount; ++j)
+                    synth->pending[j-1] = synth->pending[j];
+                --synth->pendingCount;
+            } else {
+                ++i;
+            }
+        }
+        std::array<double,16> bendRatio{};
+        // Pitch wheel applies channel-wide; compute ratios once per frame
+        // (controls may change at exact sample offsets).
+        for (int ch = 0; ch < 16; ++ch) {
+            const double bend = static_cast<int>(synth->bend[ch]) - 8192;
+            const double normalized = bend / (bend >= 0.0 ? 8191.0 : 8192.0);
+            bendRatio[ch] = std::exp2(normalized*p[SA_PARAM_BEND_RANGE]/12.0);
+        }
         float mix = 0.f;
         for (int i = 0; i < synth->voiceCount; ++i) {
-            if (synth->voices[i].active)
-                mix += synth->voices[i].next(graph, p, synth->sampleRate);
+            Voice& voice = synth->voices[i];
+            if (voice.active)
+                mix += voice.next(graph, p, synth->sampleRate,
+                    bendRatio[voice.channel],
+                    synth->modWheel[voice.channel]/127.f);
         }
-        // Bounded, symmetric soft saturation prevents polyphonic clipping.
         const float output = std::tanh(mix*p[SA_PARAM_MASTER_GAIN]);
         left[frame] = output;
         right[frame] = output;
     }
+
+    // Retain future events through successive buffers. Offsets are relative
+    // to the NEXT block after this one, even when frameCount changes.
+    for (uint32_t i = 0; i < synth->pendingCount; ++i)
+        synth->pending[i].frameOffset -= static_cast<uint32_t>(frames);
 }
 
 int32_t sa_submit_patch(SASynth *synth, const SARoute *routes, size_t count) {
