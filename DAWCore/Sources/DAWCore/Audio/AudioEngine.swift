@@ -500,11 +500,15 @@ public final class AudioEngine: ObservableObject {
 
         let oldNode = trackNode.pluginNodes.remove(at: slotIndex)
         engine.disconnectNodeOutput(oldNode)
+        var detached = false
         do {
             try rebuildPluginChain(for: trackNode)
-            if wasRunning { try engine.start() }
+            // Detach only while stopped; never mutate the live graph.
             engine.detach(oldNode)
+            detached = true
+            if wasRunning { try engine.start() }
         } catch {
+            if detached { engine.attach(oldNode) }
             trackNode.pluginNodes.insert(oldNode, at: slotIndex)
             try? rebuildPluginChain(for: trackNode)
             throw error
