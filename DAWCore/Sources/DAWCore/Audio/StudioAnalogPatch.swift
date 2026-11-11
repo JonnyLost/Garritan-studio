@@ -25,6 +25,10 @@ public enum StudioAnalogParameter: Int32, CaseIterable, Codable, Sendable {
     case lfoDepth = 18
     case masterGain = 19
     case pulseWidth = 20
+    case bendRange = 21
+    case modulationDepth = 22
+    case modulationTarget = 23
+    case velocityToFilter = 24
 
     public var defaultValue: Float {
         switch self {
@@ -49,12 +53,18 @@ public enum StudioAnalogParameter: Int32, CaseIterable, Codable, Sendable {
         case .lfoDepth: return 0
         case .masterGain: return 0.45
         case .pulseWidth: return 0.5
+        case .bendRange: return 2
+        case .modulationDepth: return 0.5
+        case .modulationTarget: return 0
+        case .velocityToFilter: return 0
         }
     }
 
     public var range: ClosedRange<Float> {
         switch self {
         case .oscillator1Wave, .oscillator2Wave: return 0...3
+        case .bendRange: return 0...24
+        case .modulationTarget: return 0...1
         case .oscillator2Semitones: return -24...24
         case .filterCutoff: return 20...20_000
         case .lfoRate: return 0.01...40
@@ -93,12 +103,17 @@ public enum StudioAnalogParameter: Int32, CaseIterable, Codable, Sendable {
         case .lfoDepth: return "Filter Depth"
         case .masterGain: return "Output"
         case .pulseWidth: return "Pulse Width"
+        case .bendRange: return "Pitch Bend Range"
+        case .modulationDepth: return "Mod Wheel Depth"
+        case .modulationTarget: return "Mod Wheel Target"
+        case .velocityToFilter: return "Velocity → Filter"
         }
     }
 
     public func valid(_ value: Float) -> Bool {
         guard value.isFinite else { return false }
-        if self == .oscillator1Wave || self == .oscillator2Wave {
+        if self == .oscillator1Wave || self == .oscillator2Wave ||
+           self == .modulationTarget {
             return (0...3).contains(value) && value.rounded(.towardZero) == value
         }
         return range.contains(value)
@@ -131,6 +146,8 @@ public enum StudioAnalogParameter: Int32, CaseIterable, Codable, Sendable {
         case .oscillator1Wave, .oscillator2Wave:
             return StudioAnalogWaveform(rawValue: Int(value))?.title ?? "Unknown"
         case .oscillator2Semitones: return String(format: "%+.1f st", value)
+        case .bendRange: return String(format: "±%.1f st", value)
+        case .modulationTarget: return value == 0 ? "Vibrato" : "Filter"
         case .filterCutoff:
             return value >= 1_000 ? String(format: "%.2f kHz", value / 1_000) :
                                     String(format: "%.0f Hz", value)

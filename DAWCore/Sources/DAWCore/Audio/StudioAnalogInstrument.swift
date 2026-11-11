@@ -79,20 +79,47 @@ public final class StudioAnalogInstrument {
         }
     }
 
-    /// MIDI is currently delivered at render-block boundaries. Precise event
-    /// offsets, channel expression, sustain and pitch bend follow in later work.
+    /// Relative sample offsets refer to the next source-node render call.
+    /// The caller must submit ahead of that callback; late MIDI from a
+    /// UI/transport worker is played at the next buffer rather than backdated.
+    /// This lock only serializes producers; it is never taken by the callback.
     @discardableResult
-    public func noteOn(_ note: UInt8, velocity: UInt8) -> Bool {
+    public func midiMessage(status: UInt8, data1: UInt8, data2: UInt8,
+                            frameOffset: UInt32 = 0) -> Bool {
         midiProducerLock.lock()
         defer { midiProducerLock.unlock() }
-        return sa_note_on(renderState.synth, note, velocity) != 0
+        return sa_midi_event(renderState.synth, status, data1, data2, frameOffset) != 0
     }
 
     @discardableResult
-    public func noteOff(_ note: UInt8) -> Bool {
-        midiProducerLock.lock()
-        defer { midiProducerLock.unlock() }
-        return sa_note_off(renderState.synth, note) != 0
+    public func noteOn(_ note: UInt8, velocity: UInt8, channel: UInt8 = 0,
+                       frameOffset: UInt32 = 0) -> Bool {
+        midiMessage(status: 0x90 | (channel & 0x0F), data1: note,
+                    data2: velocity, frameOffset: frameOffset)
+    }
+
+    @discardableResult
+    public func noteOff(_ note: UInt8, channel: UInt8 = 0,
+                        frameOffset: UInt32 = 0) -> Bool {
+        midiMessage(status: 0x80 | (channel & 0x0F), data1: note,
+                    data2: 0, frameOffset: frameOffset)
+    }
+
+    @discardableResult
+    public func controller(_ number: UInt8, value: UInt8, channel: UInt8 = 0,
+                           frameOffset: UInt32 = 0) -> Bool {
+        midiMessage(status: 0xB0 | (channel & 0x0F), data1: number,
+                    data2: value, frameOffset: frameOffset)
+    }
+
+    @discardableResult
+    public func pitchBend(_ rawValue: UInt16, channel: UInt8 = 0,
+                          frameOffset: UInt32 = 0) -> Bool {
+        guard rawValue <= 16_383 else { return false }
+        return midiMessage(status: 0xE0 | (channel & 0x0F),
+                           data1: UInt8(rawValue & 0x7F),
+                           data2: UInt8((rawValue >> 7) & 0x7F),
+                           frameOffset: frameOffset)
     }
 
     @discardableResult

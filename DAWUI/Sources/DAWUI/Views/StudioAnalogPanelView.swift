@@ -218,6 +218,19 @@ public struct StudioAnalogPanelView: View {
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
 
+                        AnalogModuleCard(title: "PERFORMANCE MIDI", symbol: "pianokeys",
+                                         accent: .green) {
+                            AnalogParameterControl(viewModel: viewModel, trackID: trackID,
+                                                   parameter: .bendRange, accent: .green)
+                            AnalogModWheelTargetPicker(viewModel: viewModel, trackID: trackID)
+                            AnalogParameterControl(viewModel: viewModel, trackID: trackID,
+                                                   parameter: .modulationDepth, accent: .green)
+                            AnalogParameterControl(viewModel: viewModel, trackID: trackID,
+                                                   parameter: .velocityToFilter, accent: .green)
+                            Text("CC64 sustain · CC1 modulation · pitch wheel per channel")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+
                         AnalogModuleCard(title: "MASTER OUTPUT", symbol: "speaker.wave.3",
                                          accent: .purple) {
                             AnalogParameterControl(viewModel: viewModel, trackID: trackID,
@@ -341,6 +354,26 @@ private struct AnalogDialMarker: View {
                 .offset(y: -8)
                 .rotationEffect(.degrees(-135 + 270 * position))
         }
+    }
+}
+
+private struct AnalogModWheelTargetPicker: View {
+    @ObservedObject var viewModel: ProjectViewModel
+    let trackID: TrackID
+
+    var body: some View {
+        Picker("Mod Wheel", selection: Binding<Int>(
+            get: { Int(viewModel.studioAnalogValue(.modulationTarget, for: trackID)) },
+            set: { rawValue in
+                viewModel.setStudioAnalogParameter(.modulationTarget,
+                    value: Float(rawValue), for: trackID)
+            }
+        )) {
+            Text("Vibrato").tag(0)
+            Text("Filter").tag(1)
+        }
+        .pickerStyle(.segmented)
+        .accessibilityLabel("Modulation wheel target")
     }
 }
 

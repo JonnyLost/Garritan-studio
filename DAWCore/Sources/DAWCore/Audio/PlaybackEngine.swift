@@ -1323,14 +1323,16 @@ public final class PlaybackEngine: ObservableObject {
             ))
             
         case .controlChange(let controller, let value):
-            instrument.sendController(controller, value: value, channel: channel)
+            instrument.sendController(controller, value: value, channel: channel,
+                                      sampleOffset: sampleOffset)
             
         case .programChange(let program):
             instrument.sendProgramChange(program, channel: channel)
             
         case .pitchBend(let value):
             let unsignedValue = UInt16(bitPattern: Int16(value + 8192))
-            instrument.sendPitchBend(unsignedValue, channel: channel)
+            instrument.sendPitchBend(unsignedValue, channel: channel,
+                                     sampleOffset: sampleOffset)
             
         default:
             break
@@ -2383,8 +2385,9 @@ public enum TrackInstrument {
         case .sampler(let sampler):
             sampler.startNote(note, withVelocity: velocity, onChannel: channel)
         case .studioAnalog(let synth):
-            // Audio source callbacks have no AU timestamp scheduler yet.
-            synth.noteOn(note, velocity: velocity)
+            let offset: UInt32 = sampleOffset >= 0 && sampleOffset <= 65_535
+                ? UInt32(sampleOffset) : 0
+            synth.noteOn(note, velocity: velocity, channel: channel, frameOffset: offset)
         }
     }
     
@@ -2416,12 +2419,15 @@ public enum TrackInstrument {
         case .sampler(let sampler):
             sampler.stopNote(note, onChannel: channel)
         case .studioAnalog(let synth):
-            synth.noteOff(note)
+            let offset: UInt32 = sampleOffset >= 0 && sampleOffset <= 65_535
+                ? UInt32(sampleOffset) : 0
+            synth.noteOff(note, channel: channel, frameOffset: offset)
         }
     }
     
     /// Send a control change
-    public func sendController(_ controller: UInt8, value: UInt8, channel: UInt8) {
+    public func sendController(_ controller: UInt8, value: UInt8, channel: UInt8,
+                               sampleOffset: AUEventSampleTime = AUEventSampleTimeImmediate) {
         switch self {
         case .auInstrument(let au, _):
             let status = UInt32(0xB0 | (channel & 0x0F))
@@ -2437,9 +2443,10 @@ public enum TrackInstrument {
         case .sampler(let sampler):
             sampler.sendController(controller, withValue: value, onChannel: channel)
         case .studioAnalog(let synth):
-            // MIDI all-notes-off and all-sound-off; other controllers will
-            // be mapped once the modular modulation UI is available.
-            if controller == 120 || controller == 123 { synth.allNotesOff() }
+            let offset: UInt32 = sampleOffset >= 0 && sampleOffset <= 65_535
+                ? UInt32(sampleOffset) : 0
+            synth.controller(controller, value: value, channel: channel,
+                             frameOffset: offset)
         }
     }
     
@@ -2465,7 +2472,8 @@ public enum TrackInstrument {
     }
 
     /// Send pitch bend
-    public func sendPitchBend(_ value: UInt16, channel: UInt8) {
+    public func sendPitchBend(_ value: UInt16, channel: UInt8,
+                              sampleOffset: AUEventSampleTime = AUEventSampleTimeImmediate) {
         switch self {
         case .auInstrument(let au, _):
             let lsb = UInt8(value & 0x7F)
@@ -2482,8 +2490,10 @@ public enum TrackInstrument {
             }
         case .sampler(let sampler):
             sampler.sendPitchBend(value, onChannel: channel)
-        case .studioAnalog:
-            break // Explicit limitation until per-voice MIDI bend is added.
+        case .studioAnalog(let synth):
+            let offset: UInt32 = sampleOffset >= 0 && sampleOffset <= 65_535
+                ? UInt32(sampleOffset) : 0
+            synth.pitchBend(value, channel: channel, frameOffset: offset)
         }
     }
 }
