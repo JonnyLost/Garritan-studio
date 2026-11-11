@@ -117,11 +117,24 @@ public actor ProjectFileManager {
             // A previously saved recording may live inside the original package.
             // Copy it before replacing that package, even if the external source
             // file was moved or deleted.
-            let existingPackagedFile = packageURL.appendingPathComponent(audioRef.relativePath)
-            let sourceURL = findAudioFile(for: audioRef)
-                ?? (fm.fileExists(atPath: existingPackagedFile.path) ? existingPackagedFile : nil)
-            guard let sourceURL, fm.fileExists(atPath: sourceURL.path) else {
-                // Never successfully save a project with silently missing audio.
+            // Only a real file inside the saved "Audio Files" folder may
+            // satisfy this fallback. An empty relativePath previously resolved
+            // to the .dawproj DIRECTORY itself and was copied as a .wav.
+            let relativeComponents = audioRef.relativePath.split(separator: "/").map(String.init)
+            let isPackagedAudioPath = relativeComponents.count >= 2
+                && relativeComponents.first == Self.audioFolderName
+                && !relativeComponents.contains("..")
+                && !relativeComponents.contains(".")
+                && !audioRef.relativePath.hasPrefix("/")
+            let existingPackagedFile = isPackagedAudioPath
+                ? packageURL.appendingPathComponent(audioRef.relativePath)
+                : nil
+            let originalSource = findAudioFile(for: audioRef)
+            let sourceURL = originalSource.flatMap { Self.isRegularFile($0) ? $0 : nil }
+                ?? existingPackagedFile.flatMap { Self.isRegularFile($0) ? $0 : nil }
+            guard let sourceURL else {
+                // Never silently replace a valid project with missing audio
+                // or a directory masquerading as an audio file.
                 throw PersistenceError.fileNotFound(URL(fileURLWithPath: audioRef.originalPath))
             }
             try fm.copyItem(at: sourceURL, to: destURL)
@@ -191,6 +204,14 @@ public actor ProjectFileManager {
         print("[ProjectFileManager] Saved project to: \(packageURL.path)")
     }
     
+    /// Reject package directories and other non-audio sources before copying.
+    /// FileManager.fileExists alone returns true for directories.
+    private static func isRegularFile(_ url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+            && !isDirectory.boolValue
+    }
+
     /// Find the actual location of an audio file
     private func findAudioFile(for ref: AudioFileReference) -> URL? {
         let fm = FileManager.default
