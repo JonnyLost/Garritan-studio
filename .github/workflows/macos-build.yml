@@ -38,3 +38,8 @@ jobs:
 
       - name: Run regression tests
         run: swift test --parallel
+
+      # The release configuration enables optimization and C++ RELEASE flags;
+      # a successful debug build does not verify this production build path.
+      - name: Build optimized application
+        run: swift build -c release --product DAWApp
