@@ -19,6 +19,48 @@ final class StudioAnalogTrackIntegrationTests: XCTestCase {
         XCTAssertFalse(synth.setParameter(6, value: -1))
     }
 
+    func testNativeSynthRendersAudibleAudioIntoAVAudioEngine() throws {
+        // A self-contained offline render exercises the native source-node
+        // callback without needing an audio device or a user's MIDI hardware.
+        let sampleRate = 44_100.0
+        let synth = try StudioAnalogInstrument(sampleRate: sampleRate)
+        let format = synth.format
+        let engine = AVAudioEngine()
+        engine.attach(synth.audioNode)
+        engine.connect(synth.audioNode, to: engine.mainMixerNode, format: format)
+        try engine.enableManualRenderingMode(
+            .offline, format: format, maximumFrameCount: 512
+        )
+        try engine.start()
+        defer {
+            engine.stop()
+            engine.disableManualRenderingMode()
+        }
+
+        XCTAssertTrue(synth.noteOn(69, velocity: 100))
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 512) else {
+            XCTFail("Could not allocate offline render buffer")
+            return
+        }
+        var maximumPeak: Float = 0
+        for _ in 0..<12 {
+            let status = try engine.renderOffline(512, to: buffer)
+            XCTAssertEqual(status, .success)
+            guard let channels = buffer.floatChannelData else {
+                XCTFail("Expected two planar Float32 channels")
+                return
+            }
+            for i in 0..<Int(buffer.frameLength) {
+                let left = channels[0][i]
+                let right = channels[1][i]
+                XCTAssertTrue(left.isFinite && right.isFinite)
+                maximumPeak = max(maximumPeak, abs(left), abs(right))
+            }
+        }
+        XCTAssertGreaterThan(maximumPeak, 0.01, "The native source node must produce audible samples")
+        XCTAssertTrue(synth.noteOff(69))
+    }
+
     func testNativeInstrumentStatePersistsAndOldProjectStillDecodes() throws {
         var track = Track(name: "Studio Analog", type: .instrument)
         track.studioAnalogEnabled = true
