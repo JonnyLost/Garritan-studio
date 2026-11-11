@@ -9,6 +9,8 @@ public enum StudioAnalogError: Error, LocalizedError {
     case unsupportedAudioBackend
     case invalidRouting
     case routingBusy
+    case sequenceBusy
+    case invalidSequence
 
     public var errorDescription: String? {
         switch self {
@@ -20,7 +22,28 @@ public enum StudioAnalogError: Error, LocalizedError {
             return "Invalid cable: check signal types, input occupancy, cycles and output path."
         case .routingBusy:
             return "The previous graph update is still waiting for an audio buffer. Try again."
+        case .sequenceBusy:
+            return "The previous MIDI timeline is still pending in the audio engine."
+        case .invalidSequence:
+            return "Studio Analog could not load this MIDI sequence; the legacy MIDI fallback is available."
         }
+    }
+}
+
+/// A scheduled track event in native render-frame coordinates. Unlike live
+/// preview MIDI, these are compiled before playback, never dispatched late
+/// from the async DAW MIDI worker.
+public struct StudioAnalogTimedEvent: Sendable, Equatable {
+    public let sampleFrame: UInt64
+    public let status: UInt8
+    public let data1: UInt8
+    public let data2: UInt8
+
+    public init(sampleFrame: UInt64, status: UInt8, data1: UInt8, data2: UInt8) {
+        self.sampleFrame = sampleFrame
+        self.status = status
+        self.data1 = data1
+        self.data2 = data2
     }
 }
 
@@ -127,6 +150,35 @@ public final class StudioAnalogInstrument {
         midiProducerLock.lock()
         defer { midiProducerLock.unlock() }
         return sa_all_notes_off(renderState.synth) != 0
+    }
+
+    /// Prepares an immutable native score timeline off the render thread.
+    /// The caller supplies sorted events measured from the transport seek
+    /// position. This method does not start playback or alter live MIDI.
+    public func loadSequence(_ events: [StudioAnalogTimedEvent]) throws {
+        let native = events.map {
+            SAScheduledMIDI(sampleFrame: $0.sampleFrame,
+                            status: $0.status, data1: $0.data1, data2: $0.data2)
+        }
+        midiProducerLock.lock()
+        defer { midiProducerLock.unlock() }
+        let result = native.withUnsafeBufferPointer { buffer in
+            sa_sequence_load(renderState.synth, buffer.baseAddress, buffer.count)
+        }
+        switch result {
+        case 1: return
+        case -1: throw StudioAnalogError.sequenceBusy
+        default: throw StudioAnalogError.invalidSequence
+        }
+    }
+
+    @discardableResult
+    public func beginSequence() -> Bool {
+        sa_sequence_start(renderState.synth) != 0
+    }
+
+    public func stopSequence() {
+        sa_sequence_stop(renderState.synth)
     }
 
     /// Validate a new modular routing off the audio thread, then publish an
