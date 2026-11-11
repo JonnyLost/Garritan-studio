@@ -164,6 +164,27 @@ final class DAWCoreTests: XCTestCase {
         XCTAssertEqual(project.tracks.first?.type, .instrument)
     }
     
+    func testDeletedTrackUndoPreservesInstrumentAndInsertPresets() {
+        var project = Project(name: "Undo Preset")
+        var track = Track(name: "ARIA Strings", type: .instrument)
+        var instrument = PluginSlot()
+        instrument.stateData = Data([0x10, 0x20, 0x30])
+        var effect = PluginSlot()
+        effect.stateData = Data([0xAA, 0xBB])
+        track.instrumentSlot = instrument
+        track.pluginSlots = [effect]
+        project.tracks.append(track)
+
+        let action = RemoveTrackAction(from: project, trackID: track.id)
+        action.perform(on: &project)
+        XCTAssertFalse(project.tracks.contains { $0.id == track.id })
+
+        action.undo(on: &project)
+        let restored = project.tracks.first { $0.id == track.id }
+        XCTAssertEqual(restored?.instrumentSlot?.stateData, Data([0x10, 0x20, 0x30]))
+        XCTAssertEqual(restored?.pluginSlots.first?.stateData, Data([0xAA, 0xBB]))
+    }
+
     func testProjectTrackManagement() {
         var project = Project(name: "Test")
         
