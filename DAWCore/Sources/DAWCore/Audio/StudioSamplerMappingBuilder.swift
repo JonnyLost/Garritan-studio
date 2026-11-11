@@ -55,8 +55,11 @@ public enum StudioSamplerMappingBuilder {
             for (index, candidate) in group.enumerated() {
                 // Each imported recording gets an audible, non-overlapping
                 // velocity range. User can refine or overlap ranges in the editor.
-                let lowerVelocity = 1 + (index * 127) / group.count
-                let upperVelocity = ((index + 1) * 127) / group.count
+                // With >127 recordings on one root, allow the smallest
+                // possible 1-point overlap rather than generating empty
+                // ranges that make the entire instrument invalid.
+                let lowerVelocity = min(127, 1 + (index * 127) / group.count)
+                let upperVelocity = max(lowerVelocity, ((index + 1) * 127) / group.count)
                 zones.append(StudioSamplerZone(
                     sampleURL: candidate.url,
                     rootNote: UInt8(root),
