@@ -337,6 +337,7 @@ struct InstrumentSlotButton: View {
     let track: Track
     @ObservedObject var viewModel: ProjectViewModel
     @Binding var showBrowser: Bool
+    @State private var showStudioAnalogPanel = false
     
     var body: some View {
         Button(action: {
@@ -369,6 +370,8 @@ struct InstrumentSlotButton: View {
         .contextMenu {
             if track.studioAnalogEnabled == true {
                 Button("Browse / Change Instrument...") { showBrowser = true }
+                Button("Open Studio Analog Controls...") { showStudioAnalogPanel = true }
+                Divider()
                 Button("Remove Studio Analog", role: .destructive) { removeInstrument() }
             } else if track.instrumentSlot?.pluginID != nil {
                 Button("Browse / Change Instrument...") { showBrowser = true }
@@ -378,6 +381,10 @@ struct InstrumentSlotButton: View {
             } else {
                 Button("Load Instrument...") { showBrowser = true }
             }
+        }
+        .sheet(isPresented: $showStudioAnalogPanel) {
+            StudioAnalogPanelView(viewModel: viewModel, trackID: track.id)
+                .frame(minWidth: 900, minHeight: 600)
         }
     }
     

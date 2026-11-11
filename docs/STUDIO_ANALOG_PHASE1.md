@@ -1,11 +1,15 @@
 # Studio Analog — original modular virtual-analog synth
 
-Status: **Phase 2 native audio integration**. Studio Analog can now be selected
+Status: **Phase 3 native control panel**. Studio Analog has a SwiftUI analog
+control surface in the Instruments lower workspace and track/Inspector sheets.
+It displays and edits every sound parameter currently supported by the engine,
+with project-persisted per-track patches and initialized values.
+
+Studio Analog can now be selected
 in the existing track instrument browser. It uses an in-process
 `AVAudioSourceNode` to route its original DSP through Studio's existing track
 mixer, panner, meters, and Concert Hall sends. No third-party AU is required.
-The traditional synth control panel and visual modular patchboard are still
-future work.
+The visual modular patchboard remains future work.
 
 ## Design and provenance
 
@@ -68,11 +72,32 @@ Hardware/AVAudioEngine playback is **not** claimed by these tests.
   Swift bridge serializes producer pushes with a lock outside the audio thread.
   The render callback remains lock-free.
 - Current limitations: native synth track audio requires the legacy
-  AVAudioEngine backend; sample-offset MIDI, pitch bend, sustain, editable
-  synth panel and saveable modular patches are not implemented yet.
+  AVAudioEngine backend; sample-offset MIDI, pitch bend, sustain and live
+  cable-routing are not implemented yet.
 - Manual listening and stage-routing verification remain needed on macOS.
+
+## Phase 3 controls and presets
+
+- Analog control panel: oscillators (sine/triangle/saw/pulse), mixing, shared
+  pulse width, oscillator-2 tuning, resonant filter and envelope depth, ADSR
+  for filter and amplitude, sine LFO rate/depth and master gain.
+- Controls update C++ atomic parameters while sounding; no graph mutations or
+  locks occur in the audio callback. Logarithmic UI travel for frequency and
+  ADSR times makes practical adjustment easier.
+- A versioned optional `studioAnalogPatch` persists only per-track parameter
+  overrides and falls back to engine defaults if absent/invalid. A parameter
+  compatibility test checks every Swift default against C++ runtime values.
+- `Initialize` restores the default sound and saved patch state. `Audition C4`
+  triggers Studio's existing 500 ms MIDI test-note path. The 8-module control
+  surface does not yet provide a freely cabled routing editor.
+- Native sound controls appear in the Instruments lower workspace for the
+  selected Studio Analog track and in a sheet opened from the track slot or
+  inspector. Other instrument tracks still use the existing V-Rack workspace.
+- Slider changes directly update project state rather than generating many
+  undo entries per gesture. A consolidated undoable gesture is future work.
 
 ## Next step
 
-Build the Analog control panel and connect live parameter updates, followed
-by the first visual modular patchboard with safely swappable graph snapshots.
+Implement a visual modular patchboard with typed patch cables, immutable
+compiled graph snapshots and safe render-boundary graph swaps. Add sample-
+offset MIDI, pitch bend and CC routing before production release.
