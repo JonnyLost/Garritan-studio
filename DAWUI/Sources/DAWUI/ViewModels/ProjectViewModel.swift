@@ -1554,6 +1554,68 @@ public final class ProjectViewModel: ObservableObject {
             }
         }
 
+        // Restore insert effects as well as instruments. Preserve their
+        // persisted instance IDs so editor selection and later state saves
+        // resolve the exact hosted Audio Unit on each track.
+        for track in project.tracks {
+            let effectSlots = track.pluginSlots.filter { $0.pluginID != nil }
+            guard !effectSlots.isEmpty else { continue }
+            guard audioEngine.trackNode(for: track.id) != nil else {
+                print("[PluginState] Track graph unavailable for effect restoration: \(track.name)")
+                continue
+            }
+            if let trackIndex = project.tracks.firstIndex(where: { $0.id == track.id }) {
+                // Remove legacy empty placeholders so model indices match
+                // AudioEngine's contiguous ordered AU insert chain.
+                project.tracks[trackIndex].pluginSlots = effectSlots
+            }
+            for slot in effectSlots {
+                guard let identifier = slot.pluginID else { continue }
+                do {
+                    // Avoid adding a second copy when restoration is requested
+                    // again in the same session.
+                    if let existing = pluginHost.loadedPlugins[slot.id],
+                       (0..<audioEngine.pluginCount(on: track.id)).contains(where: {
+                           audioEngine.pluginNode(on: track.id, at: $0) === existing.audioUnit
+                       }) {
+                        continue
+                    }
+                    let format = AVAudioFormat(
+                        standardFormatWithSampleRate: audioEngine.sampleRate, channels: 2
+                    )!
+                    let loaded = try await pluginHost.loadPlugin(
+                        identifier: identifier,
+                        format: format,
+                        instanceID: slot.id
+                    )
+                    // Do not recreate a deleted or replaced track after await.
+                    guard project.track(withID: track.id) != nil else {
+                        pluginHost.unloadPlugin(id: loaded.id)
+                        continue
+                    }
+                    do {
+                        try audioEngine.insertPlugin(
+                            loaded.audioUnit,
+                            on: track.id,
+                            at: audioEngine.pluginCount(on: track.id)
+                        )
+                    } catch {
+                        pluginHost.unloadPlugin(id: loaded.id)
+                        throw error
+                    }
+                    if let state = slot.stateData {
+                        do {
+                            try pluginHost.loadPreset(pluginID: loaded.id, data: state)
+                        } catch {
+                            print("[PluginState] Effect preset for \(track.name) failed: \(error)")
+                        }
+                    }
+                } catch {
+                    print("[PluginState] Could not restore insert on \(track.name): \(error)")
+                }
+            }
+        }
+
         // Restore rack instrument plugin states
         for instrument in project.vRack.instruments {
             guard let pluginID = instrument.pluginSlot.pluginID else { 
