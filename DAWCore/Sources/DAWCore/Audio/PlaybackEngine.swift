@@ -236,7 +236,7 @@ public final class PlaybackEngine: ObservableObject {
         // Reopen saved native synthesizers through the same track mixer and
         // stage acoustics as external instruments (no AU host required).
         if track.studioAnalogEnabled == true && coreAudioBackend == nil {
-            try loadStudioAnalog(for: track.id)
+            try loadStudioAnalog(for: track.id, patch: track.studioAnalogPatch)
             return
         }
 
@@ -274,7 +274,7 @@ public final class PlaybackEngine: ObservableObject {
     /// Install the original Studio Analog source as an instrument track input.
     /// Construct the renderer before stopping the engine; never modify its
     /// source or DSP graph from within the real-time callback.
-    public func loadStudioAnalog(for trackID: TrackID) throws {
+    public func loadStudioAnalog(for trackID: TrackID, patch: StudioAnalogPatch? = nil) throws {
         guard coreAudioBackend == nil else {
             throw StudioAnalogError.unsupportedAudioBackend
         }
@@ -282,6 +282,7 @@ public final class PlaybackEngine: ObservableObject {
             throw PlaybackError.trackNotFound(trackID)
         }
         let synth = try StudioAnalogInstrument(sampleRate: audioEngine.sampleRate)
+        if let patch { synth.apply(patch) }
         let engine = audioEngine.engine
         let wasRunning = engine.isRunning
         if wasRunning { engine.stop() }

@@ -96,6 +96,14 @@ public final class StudioAnalogInstrument {
         return sa_all_notes_off(renderState.synth) != 0
     }
 
+    /// Restores every parameter atomically before a newly attached synth
+    /// begins rendering; this never modifies the modular audio graph.
+    public func apply(_ patch: StudioAnalogPatch) {
+        for parameter in StudioAnalogParameter.allCases {
+            _ = setParameter(parameter.rawValue, value: patch.value(for: parameter))
+        }
+    }
+
     @discardableResult
     public func setParameter(_ identifier: Int32, value: Float) -> Bool {
         sa_set_parameter(renderState.synth, identifier, value) != 0

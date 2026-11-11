@@ -62,6 +62,8 @@ public struct Track: Identifiable, Codable, Sendable {
     /// Native Studio Analog sound engine selection. Optional for older project files.
     /// This is intentionally separate from third-party Audio Unit plug-in slots.
     public var studioAnalogEnabled: Bool?
+    /// Per-track native synthesis controls; nil restores engine defaults.
+    public var studioAnalogPatch: StudioAnalogPatch?
     /// Selected Garritan catalog entry (library:path), persisted per track.
     public var garritanProgramID: String?
     
@@ -109,6 +111,7 @@ public struct Track: Identifiable, Codable, Sendable {
         self.clips = []
         self.instrumentSlot = nil
         self.studioAnalogEnabled = nil
+        self.studioAnalogPatch = nil
         self.garritanProgramID = nil
         self.midiOutput = nil  // Default: use track instrument
         self.midiOutputChannel = nil  // All channels

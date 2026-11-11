@@ -468,12 +468,47 @@ public final class ProjectViewModel: ObservableObject {
             previousPluginID = nil
         }
         // Only persist native selection after a successful audio graph load.
-        try playbackEngine.loadStudioAnalog(for: trackID)
+        try playbackEngine.loadStudioAnalog(for: trackID, patch: track.studioAnalogPatch)
         if let previousPluginID { pluginHost.unloadPlugin(id: previousPluginID) }
         track.instrumentSlot = nil
         track.garritanProgramID = nil
         track.studioAnalogEnabled = true
         updateTrack(track, description: "Load Studio Analog")
+    }
+
+    /// Read a parameter from project state, or the native engine default.
+    public func studioAnalogValue(_ parameter: StudioAnalogParameter, for trackID: TrackID) -> Float {
+        project.track(withID: trackID)?.studioAnalogPatch?.value(for: parameter)
+            ?? parameter.defaultValue
+    }
+
+    /// Apply live control changes without placing hundreds of undo entries
+    /// into the track history during each knob/slider gesture. The updated
+    /// patch is stored in the normal project and saved with the track.
+    public func setStudioAnalogParameter(_ parameter: StudioAnalogParameter,
+                                         value: Float, for trackID: TrackID) {
+        guard parameter.valid(value),
+              let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioAnalogEnabled == true else { return }
+        if let instrument = playbackEngine.instrument(for: trackID),
+           case .studioAnalog(let synth) = instrument {
+            guard synth.setParameter(parameter.rawValue, value: value) else { return }
+        }
+        var patch = project.tracks[index].studioAnalogPatch ?? StudioAnalogPatch()
+        patch.set(value, for: parameter)
+        project.tracks[index].studioAnalogPatch = patch
+    }
+
+    /// Restore original engine defaults, including the per-track patch data.
+    public func resetStudioAnalogPatch(for trackID: TrackID) {
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioAnalogEnabled == true else { return }
+        let resetPatch = StudioAnalogPatch()
+        if let instrument = playbackEngine.instrument(for: trackID),
+           case .studioAnalog(let synth) = instrument {
+            synth.apply(resetPatch)
+        }
+        project.tracks[index].studioAnalogPatch = resetPatch
     }
 
     /// Remove the track's audio unit and its corresponding host registry entry.
