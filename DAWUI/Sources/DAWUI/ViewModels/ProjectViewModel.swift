@@ -473,7 +473,31 @@ public final class ProjectViewModel: ObservableObject {
         track.instrumentSlot = nil
         track.garritanProgramID = nil
         track.studioAnalogEnabled = true
+        track.studioSamplerPatch = nil
         updateTrack(track, description: "Load Studio Analog")
+    }
+
+    /// Select the native Studio Sampler using a user-provided sample mapping.
+    /// Preserve the loaded instrument and project state if sample decoding fails.
+    public func loadStudioSampler(for trackID: TrackID, patch: StudioSamplerPatch) throws {
+        guard var track = project.track(withID: trackID),
+              track.type == .midi || track.type == .instrument else {
+            throw PlaybackError.trackNotFound(trackID)
+        }
+        let previousPluginID: UUID?
+        if let instrument = playbackEngine.instrument(for: trackID),
+           case .auInstrument(_, let id) = instrument {
+            previousPluginID = id
+        } else {
+            previousPluginID = nil
+        }
+        try playbackEngine.loadStudioSampler(for: trackID, patch: patch)
+        if let previousPluginID { pluginHost.unloadPlugin(id: previousPluginID) }
+        track.instrumentSlot = nil
+        track.garritanProgramID = nil
+        track.studioAnalogEnabled = false
+        track.studioSamplerPatch = patch
+        updateTrack(track, description: "Load Studio Sampler")
     }
 
     /// Read a parameter from project state, or the native engine default.
