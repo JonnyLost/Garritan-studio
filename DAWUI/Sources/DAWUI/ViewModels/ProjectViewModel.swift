@@ -497,6 +497,7 @@ public final class ProjectViewModel: ObservableObject {
         var patch = project.tracks[index].studioAnalogPatch ?? StudioAnalogPatch()
         patch.set(value, for: parameter)
         project.tracks[index].studioAnalogPatch = patch
+        project.tracks[index].studioAnalogPresetID = nil
     }
 
     /// Replace the analog modular patch atomically at an audio buffer boundary.
@@ -514,6 +515,7 @@ public final class ProjectViewModel: ObservableObject {
         patch.connections = connections
         patch.version = max(2, patch.version)
         project.tracks[index].studioAnalogPatch = patch
+        project.tracks[index].studioAnalogPresetID = nil
     }
 
     /// Restore original engine defaults, including the per-track patch data.
@@ -528,6 +530,36 @@ public final class ProjectViewModel: ObservableObject {
         try synth.setRouting(StudioAnalogConnection.factory)
         synth.apply(resetPatch)
         project.tracks[index].studioAnalogPatch = resetPatch
+        project.tracks[index].studioAnalogPresetID = nil
+    }
+
+    /// Apply a factory or user preset to the actual native synthesizer.
+    /// Validate and publish the entire routing first; if the graph is invalid
+    /// or busy, leave the parameters and project patch completely unchanged.
+    /// All disk access occurs in the browser, never on the render callback.
+    public func applyStudioAnalogPreset(_ preset: StudioAnalogPreset,
+                                         for trackID: TrackID) throws {
+        try preset.validate()
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioAnalogEnabled == true,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioAnalog(let synth) = instrument else {
+            throw StudioAnalogError.invalidConfiguration
+        }
+        try synth.setRouting(preset.patch.activeConnections)
+        _ = synth.allNotesOff() // Release held voices and old controller state.
+        synth.apply(preset.patch)
+        project.tracks[index].studioAnalogPatch = preset.patch
+        project.tracks[index].studioAnalogPresetID = preset.id
+    }
+
+    /// Mark the current patch with its new user bank identity after a
+    /// successful on-disk save; never mutate the actual audio parameters.
+    public func markStudioAnalogPresetSaved(id: String, for trackID: TrackID) {
+        guard UUID(uuidString: id) != nil,
+              let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioAnalogEnabled == true else { return }
+        project.tracks[index].studioAnalogPresetID = id
     }
 
     /// Remove the track's audio unit and its corresponding host registry entry.
