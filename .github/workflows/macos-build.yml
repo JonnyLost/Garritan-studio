@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/stage-acoustics-sync
+      - feature/ostinato-engine-v1
   pull_request:
     branches:
       - garritan-integration
