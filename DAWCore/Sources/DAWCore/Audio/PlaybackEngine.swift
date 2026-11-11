@@ -2094,6 +2094,19 @@ public final class PlaybackEngine: ObservableObject {
                 instrument?.stopNote(note.pitch, channel: note.channel)
             }
             activeNotes.removeAll()
+            // Normal Note Off can be held by a sustain pedal. Stopping the
+            // transport always silences native synthesizers and clears their
+            // held note/pedal state without changing ARIA or sampler paths.
+            for instrument in midiQueueTrackInstruments.values {
+                if case .studioAnalog(let synth) = instrument {
+                    synth.allNotesOff()
+                }
+            }
+            for instrument in midiQueueRackInstruments.values {
+                if case .studioAnalog(let synth) = instrument {
+                    synth.allNotesOff()
+                }
+            }
         }
     }
     

@@ -97,6 +97,13 @@ int main() {
         assert(std::abs(release[i]) < 0.0001f);
     assert(!sa_midi_event(timed, 0xF0, 0, 0, 0));
     assert(!sa_midi_event(timed, 0x90, 69, 100, 65536));
+    // A full event queue cannot block transport-stop panic.
+    for (int i = 0; i < 256; ++i)
+        assert(sa_midi_event(timed, 0x90, 60, 110, 0));
+    assert(!sa_midi_event(timed, 0x90, 60, 110, 0));
+    assert(sa_all_notes_off(timed));
+    sa_render(timed, tl.data(), tr.data(), 512);
+    for (float sample : tl) assert(sample == 0.f);
     sa_destroy(timed);
 
     sa_destroy(s);

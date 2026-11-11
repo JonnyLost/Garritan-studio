@@ -396,6 +396,8 @@ struct SASynth {
     std::array<Voice, kMaxVoices> voices{};
     std::array<std::atomic<float>, SA_PARAMETER_COUNT> params{};
     NoteQueue notes;
+    // High-priority stop cannot be blocked by a full MIDI queue.
+    std::atomic<bool> panicRequested{false};
     // Bounded, preallocated render-thread timeline, stable insertion order
     // for events sharing the same frame. No sorting or allocation in render.
     std::array<NoteEvent, kQueueCapacity> pending{};
@@ -539,12 +541,15 @@ int32_t sa_note_off(SASynth *synth, uint8_t note) {
 }
 
 int32_t sa_all_notes_off(SASynth *synth) {
-    return synth && synth->notes.push({EventType::panic, 0, 0, 0, 0}) ? 1 : 0;
+    if (!synth) return 0;
+    synth->panicRequested.store(true, std::memory_order_release);
+    return 1;
 }
 
 void sa_reset_midi_stopped(SASynth *synth) {
     if (!synth) return;
     synth->notes.resetStopped();
+    synth->panicRequested.store(false, std::memory_order_relaxed);
     synth->pendingCount = 0;
     synth->pedal.fill(false);
     synth->modWheel.fill(0);
@@ -561,8 +566,14 @@ void sa_render(SASynth *synth, float *left, float *right, int32_t frames) {
     p.osc2Ratio = std::exp2(p[SA_PARAM_OSC2_SEMITONES]/12.0);
 
     NoteEvent incoming{};
-    while (synth->pendingCount < kQueueCapacity && synth->notes.pop(incoming))
-        synth->pending[synth->pendingCount++] = incoming;
+    if (synth->panicRequested.exchange(false, std::memory_order_acq_rel)) {
+        synth->pendingCount = 0;
+        while (synth->notes.pop(incoming)) { /* discard queued notes */ }
+        synth->event({EventType::panic, 0, 0, 0, 0});
+    } else {
+        while (synth->pendingCount < kQueueCapacity && synth->notes.pop(incoming))
+            synth->pending[synth->pendingCount++] = incoming;
+    }
 
     // Render-time ownership of immutable graphs is updated only at buffer start.
     const uint8_t nextGraph = synth->requestedGraph.load(std::memory_order_acquire);

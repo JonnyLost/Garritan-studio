@@ -88,6 +88,8 @@ float sa_get_parameter(const SASynth *synth, int32_t parameter);
  */
 int32_t sa_note_on(SASynth *synth, uint8_t note, uint8_t velocity);
 int32_t sa_note_off(SASynth *synth, uint8_t note);
+/* High-priority panic is accepted even if the MIDI queue is full. It
+ * clears queued and pending events and stops voices at the next buffer. */
 int32_t sa_all_notes_off(SASynth *synth);
 
 /* Bounded single-producer MIDI input (status includes channel 0..15).
