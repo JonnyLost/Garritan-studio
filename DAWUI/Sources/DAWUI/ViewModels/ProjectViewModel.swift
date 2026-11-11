@@ -1773,6 +1773,96 @@ public final class ProjectViewModel: ObservableObject {
         audioEngine.updateSoloState(tracks: project.tracks)
     }
     
+    /// Rehydrate a track restored by Undo. All work happens after its mixer
+    /// node is attached, and every awaited AU load checks the track still exists
+    /// so a subsequent Redo cannot revive a deleted instrument.
+    private func restoreTrackAfterHistoryChange(_ id: TrackID) async {
+        guard let track = project.track(withID: id),
+              audioEngine.trackNode(for: id) != nil else { return }
+
+        if let identifier = track.instrumentSlot?.pluginID {
+            do {
+                let format = AVAudioFormat(
+                    standardFormatWithSampleRate: audioEngine.sampleRate, channels: 2
+                )!
+                let loaded = try await pluginHost.loadPlugin(
+                    identifier: identifier, format: format
+                )
+                guard project.track(withID: id)?.instrumentSlot?.pluginID == identifier,
+                      audioEngine.trackNode(for: id) != nil else {
+                    pluginHost.unloadPlugin(id: loaded.id)
+                    return
+                }
+                do {
+                    try await playbackEngine.loadInstrument(
+                        loaded.audioUnit, for: id, pluginID: loaded.id
+                    )
+                } catch {
+                    pluginHost.unloadPlugin(id: loaded.id)
+                    throw error
+                }
+                if let state = track.instrumentSlot?.stateData {
+                    do {
+                        try pluginHost.loadPreset(pluginID: loaded.id, data: state)
+                    } catch {
+                        print("[Undo] Could not restore instrument preset on \(track.name): \(error)")
+                    }
+                }
+                restoreInstrumentLevel(for: id)
+            } catch {
+                print("[Undo] Could not restore instrument on \(track.name): \(error)")
+            }
+        } else if track.type == .midi || track.type == .instrument {
+            do {
+                try await playbackEngine.setupMIDITrack(track)
+            } catch {
+                print("[Undo] Could not restore fallback sampler on \(track.name): \(error)")
+            }
+        }
+
+        // Recreate saved insert effects in their persisted order.
+        for slot in track.pluginSlots {
+            guard let identifier = slot.pluginID,
+                  project.track(withID: id) != nil,
+                  audioEngine.trackNode(for: id) != nil else { continue }
+            do {
+                let format = AVAudioFormat(
+                    standardFormatWithSampleRate: audioEngine.sampleRate, channels: 2
+                )!
+                let loaded = try await pluginHost.loadPlugin(
+                    identifier: identifier, format: format, instanceID: slot.id
+                )
+                guard project.track(withID: id) != nil,
+                      audioEngine.trackNode(for: id) != nil else {
+                    pluginHost.unloadPlugin(id: loaded.id)
+                    return
+                }
+                do {
+                    try audioEngine.insertPlugin(
+                        loaded.audioUnit, on: id,
+                        at: audioEngine.pluginCount(on: id)
+                    )
+                } catch {
+                    pluginHost.unloadPlugin(id: loaded.id)
+                    throw error
+                }
+                if let state = slot.stateData {
+                    do {
+                        try pluginHost.loadPreset(pluginID: loaded.id, data: state)
+                    } catch {
+                        print("[Undo] Could not restore effect preset on \(track.name): \(error)")
+                    }
+                }
+            } catch {
+                print("[Undo] Could not restore insert on \(track.name): \(error)")
+            }
+        }
+        if let refreshed = project.track(withID: id) {
+            audioEngine.updateTrackParameters(for: refreshed)
+        }
+        audioEngine.updateSoloState(tracks: project.tracks)
+    }
+
     // MARK: - Recording
     
     public func startRecording() {
