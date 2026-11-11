@@ -4,7 +4,7 @@ import XCTest
 final class StudioAnalogPatchTests: XCTestCase {
     func testParameterIdentifiersAndInitialValuesMatchDSP() throws {
         let synth = try StudioAnalogInstrument(sampleRate: 44_100)
-        XCTAssertEqual(StudioAnalogParameter.allCases.count, 21)
+        XCTAssertEqual(StudioAnalogParameter.allCases.count, 25)
         for parameter in StudioAnalogParameter.allCases {
             XCTAssertEqual(synth.parameter(parameter.rawValue), parameter.defaultValue,
                            accuracy: 0.0001, "Default mismatch for \(parameter)")
@@ -35,6 +35,24 @@ final class StudioAnalogPatchTests: XCTestCase {
         let oldTrack = try JSONDecoder().decode(Track.self, from:
                          JSONSerialization.data(withJSONObject: legacy))
         XCTAssertNil(oldTrack.studioAnalogPatch)
+    }
+
+    func testPerformanceSettingsPersistAndRestore() throws {
+        var patch = StudioAnalogPatch()
+        patch.set(12, for: .bendRange)
+        patch.set(0.85, for: .modulationDepth)
+        patch.set(1, for: .modulationTarget)
+        patch.set(0.3, for: .velocityToFilter)
+        let copy = try JSONDecoder().decode(StudioAnalogPatch.self,
+                                            from: JSONEncoder().encode(patch))
+        let synth = try StudioAnalogInstrument(sampleRate: 44_100)
+        synth.apply(copy)
+        XCTAssertEqual(synth.parameter(21), 12)
+        XCTAssertEqual(synth.parameter(22), 0.85, accuracy: 0.001)
+        XCTAssertEqual(synth.parameter(23), 1)
+        XCTAssertEqual(synth.parameter(24), 0.3, accuracy: 0.001)
+        XCTAssertFalse(StudioAnalogParameter.modulationTarget.valid(0.5))
+        XCTAssertFalse(StudioAnalogParameter.bendRange.valid(25))
     }
 
     func testNormalizedSliderControlsStayWithinNativeRange() {

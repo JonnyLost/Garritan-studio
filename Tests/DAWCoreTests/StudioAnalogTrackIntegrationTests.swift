@@ -61,6 +61,20 @@ final class StudioAnalogTrackIntegrationTests: XCTestCase {
         XCTAssertTrue(synth.noteOff(69))
     }
 
+    func testNativeMIDIExpressionBridgeValidatesMessagesAndChannels() throws {
+        let synth = try StudioAnalogInstrument(sampleRate: 44_100)
+        XCTAssertTrue(synth.noteOn(69, velocity: 100, channel: 2, frameOffset: 64))
+        XCTAssertTrue(synth.pitchBend(16_383, channel: 2))
+        XCTAssertTrue(synth.controller(1, value: 127, channel: 2))
+        XCTAssertTrue(synth.controller(64, value: 127, channel: 2))
+        XCTAssertTrue(synth.noteOff(69, channel: 2, frameOffset: 128))
+        XCTAssertTrue(synth.controller(64, value: 0, channel: 2))
+        XCTAssertFalse(synth.pitchBend(16_384, channel: 2))
+        XCTAssertFalse(synth.midiMessage(status: 0xF0, data1: 0, data2: 0))
+        XCTAssertFalse(synth.midiMessage(status: 0x90, data1: 60,
+                                        data2: 120, frameOffset: 65_536))
+    }
+
     func testNativeInstrumentStatePersistsAndOldProjectStillDecodes() throws {
         var track = Track(name: "Studio Analog", type: .instrument)
         track.studioAnalogEnabled = true
