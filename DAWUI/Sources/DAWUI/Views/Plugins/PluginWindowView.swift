@@ -1132,15 +1132,29 @@ public struct PluginListView: View {
     
     private func removePlugin(at index: Int) {
         guard var track = viewModel.project.track(withID: trackID),
-              track.pluginSlots.indices.contains(index) else { return }
-        
-        track.pluginSlots[index] = PluginSlot()
-        viewModel.updateTrack(track, description: "Remove Plugin")
-        
+              track.pluginSlots.indices.contains(index),
+              let audioUnit = viewModel.audioEngine.pluginNode(on: trackID, at: index) else {
+            return
+        }
+
+        // Identify the actual hosted AU before detaching it. Never unload
+        // another track's effect merely because it has the same plugin type.
+        let instanceID = viewModel.pluginHost.loadedPlugins.values.first(where: {
+            $0.audioUnit === audioUnit
+        })?.id
         do {
             try viewModel.audioEngine.removePlugin(at: index, from: trackID)
         } catch {
+            // Leave model and registry untouched if the graph edit failed.
             print("Failed to remove plugin: \(error)")
+            return
+        }
+        // AudioEngine removes the AU from the ordered effect chain; shift
+        // project slots too instead of leaving an untracked empty placeholder.
+        track.pluginSlots.remove(at: index)
+        viewModel.updateTrack(track, description: "Remove Plugin")
+        if let instanceID {
+            viewModel.pluginHost.unloadPlugin(id: instanceID)
         }
     }
     
