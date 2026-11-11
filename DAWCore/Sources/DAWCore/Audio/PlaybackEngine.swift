@@ -1845,7 +1845,8 @@ public final class PlaybackEngine: ObservableObject {
                                 invalid = true
                                 continue
                             }
-                            timeline.append(StudioAnalogTimedEvent(sampleFrame: end,
+                            timeline.append(StudioAnalogTimedEvent(
+                                sampleFrame: max(start + 1, end),
                                 status: 0x80 | channel, data1: note.pitch, data2: 0))
                         }
                     case .controlChange(let cc, let value):

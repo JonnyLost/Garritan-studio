@@ -130,7 +130,9 @@ int main() {
     for (float sample : seqL) assert(sample == 0.f);
     const SAScheduledMIDI badOrder[] = {{512, 0x90, 60, 100}, {256, 0x80, 60, 0}};
     assert(sa_sequence_load(sequenceSynth, badOrder, 2) == 0);
-    assert(sa_sequence_load(sequenceSynth, seq, 2) == 0);
+    // After the sequence has stopped and the render thread has acknowledged
+    // it, a fresh playback/seek timeline may be prepared safely.
+    assert(sa_sequence_load(sequenceSynth, seq, 2) == 1);
     sa_destroy(sequenceSynth);
 
     sa_destroy(s);
