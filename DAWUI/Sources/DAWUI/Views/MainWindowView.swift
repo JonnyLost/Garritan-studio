@@ -537,7 +537,7 @@ public struct MainWindowView: View {
             if let track = viewModel.selectedTrack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(track.name).font(.subheadline.weight(.semibold))
-                    Text(track.studioAnalogEnabled == true ? "Studio Analog" : (track.instrumentSlot?.pluginID?.name ?? "No instrument loaded"))
+                    Text(track.studioSamplerPatch != nil ? "Studio Sampler" : (track.studioAnalogEnabled == true ? "Studio Analog" : (track.instrumentSlot?.pluginID?.name ?? "No instrument loaded")))
                         .font(.caption).foregroundColor(.secondary)
                 }
                 Spacer()
@@ -2253,10 +2253,12 @@ struct TrackInspectorSection: View {
                               ? "pianokeys" : "waveform")
                             .foregroundColor(.accentColor)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(track.studioAnalogEnabled == true ? "Studio Analog" : (track.instrumentSlot?.pluginID?.name ?? "No instrument loaded"))
+                            Text(track.studioSamplerPatch != nil ? "Studio Sampler" : (track.studioAnalogEnabled == true ? "Studio Analog" : (track.instrumentSlot?.pluginID?.name ?? "No instrument loaded")))
                                 .font(.subheadline.weight(.medium))
                                 .lineLimit(2)
-                            Text(track.studioAnalogEnabled == true
+                            Text(track.studioSamplerPatch != nil
+                                 ? "Built-in native sample playback"
+                                 : track.studioAnalogEnabled == true
                                  ? "Built-in modular virtual-analog synthesizer"
                                  : (track.instrumentSlot?.pluginID == nil
                                     ? "Choose an instrument for this track."
