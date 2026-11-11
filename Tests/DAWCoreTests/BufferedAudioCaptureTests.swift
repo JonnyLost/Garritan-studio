@@ -10,7 +10,7 @@ final class BufferedAudioCaptureTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let output = directory.appendingPathComponent("capture.wav")
 
-        let file = try AVAudioFile(forWriting: output, settings: [
+        var file: AVAudioFile? = try AVAudioFile(forWriting: output, settings: [
             AVFormatIDKey: kAudioFormatLinearPCM,
             AVSampleRateKey: 44_100.0,
             AVNumberOfChannelsKey: 2,
@@ -20,8 +20,11 @@ final class BufferedAudioCaptureTests: XCTestCase {
             AVLinearPCMIsNonInterleaved: false
         ])
         var capture: BufferedAudioCapture? = try BufferedAudioCapture(
-            file: file, sampleRate: 44_100
+            file: try XCTUnwrap(file), sampleRate: 44_100
         )
+        // The capture must own the only file handle: the WAV header is
+        // finalized when that handle is released after finish().
+        file = nil
         let format = try XCTUnwrap(
             AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2)
         )
