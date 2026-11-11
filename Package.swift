@@ -50,7 +50,8 @@ let package = Package(
             name: "DAWCore",
             dependencies: [
                 "DAWRealtime",
-                "StudioAnalogDSP",\n                "StudioSamplerDSP",
+                "StudioAnalogDSP",
+                "StudioSamplerDSP",
                 .product(name: "Supabase", package: "supabase-swift")
             ],
             path: "DAWCore/Sources/DAWCore",
