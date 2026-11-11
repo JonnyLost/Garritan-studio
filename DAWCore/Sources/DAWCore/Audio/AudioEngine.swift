@@ -11,6 +11,7 @@ public enum AudioEngineError: Error, LocalizedError {
     case invalidFormat
     case bufferAllocationFailed
     case nodeNotFound(TrackID)
+    case invalidPluginSlot(Int)
     case fileLoadFailed(URL, Error)
     
     public var errorDescription: String? {
@@ -27,6 +28,8 @@ public enum AudioEngineError: Error, LocalizedError {
             return "Failed to allocate audio buffer"
         case .nodeNotFound(let id):
             return "Audio node not found for track: \(id.rawValue)"
+        case .invalidPluginSlot(let index):
+            return "Invalid insert effect slot: \(index)"
         case .fileLoadFailed(let url, let error):
             return "Failed to load audio file at \(url): \(error.localizedDescription)"
         }
@@ -433,7 +436,8 @@ public final class AudioEngine: ObservableObject {
         try insertPlugin(audioUnit, at: slotIndex, in: trackID)
     }
     
-    /// Insert an Audio Unit at a slot in a track (alternate signature)
+    /// Insert an Audio Unit at a slot in a track (alternate signature).
+    /// Stop the engine for graph changes, as for track creation/removal.
     public func insertPlugin(
         _ audioUnit: AVAudioUnit,
         at slotIndex: Int,
@@ -442,33 +446,65 @@ public final class AudioEngine: ObservableObject {
         guard let trackNode = trackNodes[trackID] else {
             throw AudioEngineError.nodeNotFound(trackID)
         }
-        
-        // Attach the audio unit to the engine
+        guard slotIndex >= 0 && slotIndex <= trackNode.pluginNodes.count else {
+            throw AudioEngineError.invalidPluginSlot(slotIndex)
+        }
+
+        let wasRunning = engine.isRunning
+        if wasRunning { engine.stop() }
+        defer {
+            if wasRunning && !engine.isRunning {
+                do { try engine.start() }
+                catch { print("[AudioEngine] Failed to restore engine after insert: \(error)") }
+            }
+        }
         engine.attach(audioUnit)
-        
-        // Rebuild the plugin chain
-        try rebuildPluginChain(for: trackNode, inserting: audioUnit, at: slotIndex)
+        do {
+            try rebuildPluginChain(
+                for: trackNode, inserting: audioUnit, at: slotIndex
+            )
+            if wasRunning { try engine.start() }
+        } catch {
+            // Keep the original graph if the inserted AU cannot be connected.
+            trackNode.pluginNodes.removeAll { $0 === audioUnit }
+            engine.disconnectNodeOutput(audioUnit)
+            engine.detach(audioUnit)
+            try? rebuildPluginChain(for: trackNode)
+            throw error
+        }
     }
-    
-    /// Remove a plugin from a track
+
+    /// Remove an insert effect, preserving the other slots and hall send.
     public func removePlugin(at slotIndex: Int, from trackID: TrackID) throws {
         guard let trackNode = trackNodes[trackID] else {
             throw AudioEngineError.nodeNotFound(trackID)
         }
-        
-        guard slotIndex < trackNode.pluginNodes.count else { return }
-        
-        let auNode = trackNode.pluginNodes[slotIndex]
-        
-        // Disconnect and detach
-        engine.disconnectNodeOutput(auNode)
-        engine.detach(auNode)
-        
-        // Rebuild chain without this plugin
-        trackNode.pluginNodes.remove(at: slotIndex)
-        try rebuildPluginChain(for: trackNode)
+        guard trackNode.pluginNodes.indices.contains(slotIndex) else {
+            throw AudioEngineError.invalidPluginSlot(slotIndex)
+        }
+
+        let wasRunning = engine.isRunning
+        if wasRunning { engine.stop() }
+        defer {
+            if wasRunning && !engine.isRunning {
+                do { try engine.start() }
+                catch { print("[AudioEngine] Failed to restore engine after remove: \(error)") }
+            }
+        }
+
+        let oldNode = trackNode.pluginNodes.remove(at: slotIndex)
+        engine.disconnectNodeOutput(oldNode)
+        do {
+            try rebuildPluginChain(for: trackNode)
+            if wasRunning { try engine.start() }
+            engine.detach(oldNode)
+        } catch {
+            trackNode.pluginNodes.insert(oldNode, at: slotIndex)
+            try? rebuildPluginChain(for: trackNode)
+            throw error
+        }
     }
-    
+
     /// Number of currently hosted insert effects, independent of placeholder
     /// slots in the project model. Used to keep insert order and persisted
     /// slot indices aligned with the actual audio graph.
