@@ -1342,41 +1342,62 @@ public final class ProjectViewModel: ObservableObject {
         project.vRack.updateInstrument(instrument)
     }
     
-    /// Load a plugin into a rack instrument
+    /// Replace the V-Rack's hosted Audio Unit only after loading a fresh
+    /// instance. Never overwrite the registry entry of the still-attached AU.
     public func loadRackInstrumentPlugin(_ rackID: UUID, pluginID: PluginIdentifier) async {
         guard var instrument = project.vRack.instrument(withID: rackID) else { return }
-        
-        // Find the plugin description
-        guard let pluginDesc = pluginHost.availableInstruments.first(where: {
+        guard pluginHost.availableInstruments.contains(where: {
             $0.identifier == pluginID
         }) else {
             print("[V-Rack] Plugin not found: \(pluginID.name)")
             return
         }
-        
+
+        let previousIdentifier = instrument.pluginSlot.pluginID
+        let previousHostedID: UUID?
+        if let existing = playbackEngine.rackInstrument(for: rackID),
+           case .auInstrument(_, let instanceID) = existing {
+            previousHostedID = instanceID
+        } else {
+            previousHostedID = nil
+        }
+
         do {
-            // Load the AU using the same method as track instruments
-            let format = AVAudioFormat(standardFormatWithSampleRate: audioEngine.sampleRate, channels: 2)!
-            let loadedPlugin = try await pluginHost.loadPlugin(
-                identifier: pluginID,
-                format: format,
-                instanceID: instrument.pluginSlot.id
+            let format = AVAudioFormat(
+                standardFormatWithSampleRate: audioEngine.sampleRate, channels: 2
+            )!
+            let loaded = try await pluginHost.loadPlugin(
+                identifier: pluginID, format: format, instanceID: UUID()
             )
-            
-            // Load into engine
-            try await playbackEngine.loadRackInstrument(loadedPlugin.audioUnit, rackID: rackID, pluginID: instrument.pluginSlot.id)
-            
-            // Update the rack instrument
+            guard project.vRack.instrument(withID: rackID) != nil else {
+                pluginHost.unloadPlugin(id: loaded.id)
+                return
+            }
+            do {
+                try await playbackEngine.loadRackInstrument(
+                    loaded.audioUnit, rackID: rackID, pluginID: loaded.id
+                )
+            } catch {
+                pluginHost.unloadPlugin(id: loaded.id)
+                throw error
+            }
+            if let previousHostedID, previousHostedID != loaded.id {
+                pluginHost.unloadPlugin(id: previousHostedID)
+            }
+            instrument = project.vRack.instrument(withID: rackID) ?? instrument
+            instrument.pluginSlot.id = loaded.id
             instrument.pluginSlot.pluginID = pluginID
+            if previousIdentifier != pluginID {
+                instrument.pluginSlot.stateData = nil
+            }
             instrument.name = pluginID.name
             project.vRack.updateInstrument(instrument)
-            
             print("[V-Rack] Loaded plugin: \(pluginID.name)")
         } catch {
             print("[V-Rack] Failed to load plugin: \(error)")
         }
     }
-    
+
     /// Open the plugin UI for a rack instrument
     public func openRackInstrumentUI(_ rackID: UUID, preferNativeARIA: Bool = false) {
         guard let instrument = project.vRack.instrument(withID: rackID),
@@ -1635,7 +1656,8 @@ public final class ProjectViewModel: ObservableObject {
             await loadRackInstrumentPlugin(instrument.id, pluginID: pluginID)
             
             // Check if it loaded
-            guard let loaded = pluginHost.loadedPlugins[instrument.pluginSlot.id] else {
+            guard let activeSlot = project.vRack.instrument(withID: instrument.id)?.pluginSlot,
+                  let loaded = pluginHost.loadedPlugins[activeSlot.id] else {
                 print("[PluginState]   ❌ Plugin failed to load")
                 continue
             }
@@ -1649,7 +1671,7 @@ public final class ProjectViewModel: ObservableObject {
             // Then restore its state if we have it
             if let stateData = instrument.pluginSlot.stateData {
                 do {
-                    try pluginHost.loadPreset(pluginID: instrument.pluginSlot.id, data: stateData)
+                    try pluginHost.loadPreset(pluginID: loaded.id, data: stateData)
                     print("[PluginState]   ✅ State restored (\(stateData.count) bytes)")
                     
                     // Give the plugin time to apply the state
