@@ -284,6 +284,17 @@ public final class PlaybackEngine: ObservableObject {
             return
         }
         
+        // Validate the target and Audio Unit before disconnecting an
+        // existing, working track instrument. Earlier code removed the old
+        // instrument and only then checked whether the track node existed.
+        guard audioEngine.trackNode(for: trackID) != nil else {
+            throw PlaybackError.trackNotFound(trackID)
+        }
+        let auFormat = audioUnit.outputFormat(forBus: 0)
+        guard auFormat.sampleRate > 0, auFormat.channelCount > 0 else {
+            throw AudioEngineError.invalidFormat
+        }
+
         // Legacy AVAudioEngine path
         print("[PlaybackEngine] ========================================")
         print("[PlaybackEngine] Loading AU instrument: \(audioUnit.name)")
@@ -311,8 +322,7 @@ public final class PlaybackEngine: ObservableObject {
         // Remove the old instrument only after stopping the graph.
         removeInstrument(for: trackID)
 
-        // Get the output format from the AU
-        let auFormat = audioUnit.outputFormat(forBus: 0)
+        // Already validated above; old AU has only now been detached.
         print("[PlaybackEngine] AU native format: \(auFormat)")
         
         // Engine format
@@ -450,6 +460,11 @@ public final class PlaybackEngine: ObservableObject {
     
     /// Load an AU instrument plugin for the V-Rack
     public func loadRackInstrument(_ audioUnit: AVAudioUnit, rackID: UUID, pluginID: UUID) async throws {
+        // Preflight before removing the previously hosted V-Rack instrument.
+        let auFormat = audioUnit.outputFormat(forBus: 0)
+        guard auFormat.sampleRate > 0, auFormat.channelCount > 0 else {
+            throw AudioEngineError.invalidFormat
+        }
         print("[PlaybackEngine] ========================================")
         print("[PlaybackEngine] Loading V-Rack AU instrument: \(audioUnit.name)")
         print("[PlaybackEngine] Rack ID: \(rackID)")
@@ -480,8 +495,7 @@ public final class PlaybackEngine: ObservableObject {
         audioEngine.engine.attach(converterMixer)
         rackInstrumentMixers[rackID] = converterMixer
         
-        // Get the AU's native output format
-        let auFormat = audioUnit.outputFormat(forBus: 0)
+        // AU format was checked before disconnecting the old instrument.
         // Use a standard format for the engine side (more reliable than querying stopped engine)
         let engineFormat = AVAudioFormat(standardFormatWithSampleRate: audioEngine.sampleRate, channels: 2)!
         
