@@ -339,6 +339,7 @@ struct InstrumentSlotButton: View {
     @ObservedObject var viewModel: ProjectViewModel
     @Binding var showBrowser: Bool
     @State private var showStudioAnalogPanel = false
+    @State private var showStudioSamplerMap = false
     
     var body: some View {
         Button(action: {
@@ -375,6 +376,7 @@ struct InstrumentSlotButton: View {
         .contextMenu {
             if track.studioSamplerPatch != nil {
                 Button("Browse / Change Instrument...") { showBrowser = true }
+                Button("Edit Studio Sampler Mapping...") { showStudioSamplerMap = true }
                 Divider()
                 Button("Remove Studio Sampler", role: .destructive) { removeInstrument() }
             } else if track.studioAnalogEnabled == true {
@@ -394,6 +396,10 @@ struct InstrumentSlotButton: View {
         .sheet(isPresented: $showStudioAnalogPanel) {
             StudioAnalogPanelView(viewModel: viewModel, trackID: track.id)
                 .frame(minWidth: 900, minHeight: 600)
+        }
+        .sheet(isPresented: $showStudioSamplerMap) {
+            StudioSamplerMapView(viewModel: viewModel, trackID: track.id)
+                .frame(minWidth: 930, minHeight: 600)
         }
     }
     
@@ -606,14 +612,14 @@ struct InstrumentBrowserSheet: View {
                     .foregroundColor(.teal)
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Studio Sampler").font(.subheadline.weight(.semibold))
-                    Text("Native sample playback · choose a WAV or AIFF file · mapped from C4")
+                    Text("Native sampling · import multiple files · automatic key and velocity mapping")
                         .font(.caption).foregroundColor(.secondary)
                 }
                 Spacer()
                 Button {
                     showSampleImporter = true
                 } label: {
-                    Label("Load Sample…", systemImage: "waveform")
+                    Label("Load Samples…", systemImage: "waveform")
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(isLoading)
@@ -829,19 +835,28 @@ struct InstrumentBrowserSheet: View {
             }
         }
         .frame(width: 920, height: 610)
-        .fileImporter(isPresented: $showSampleImporter, allowedContentTypes: [.audio]) { result in
+        .fileImporter(
+            isPresented: $showSampleImporter,
+            allowedContentTypes: [.audio],
+            allowsMultipleSelection: true
+        ) { result in
             switch result {
-            case .success(let url):
-                let scoped = url.startAccessingSecurityScopedResource()
-                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            case .success(let urls):
+                guard !urls.isEmpty else { return }
+                isLoading = true
                 loadError = nil
-                do {
-                    try viewModel.loadStudioSampler(
-                        for: trackID, patch: StudioSamplerPatch(sampleURL: url)
-                    )
-                    isPresented = false
-                } catch {
-                    loadError = error.localizedDescription
+                Task { @MainActor in
+                    defer { isLoading = false }
+                    do {
+                        let files = try await Task.detached(priority: .userInitiated) {
+                            try StudioSamplerSampleLibrary.importFiles(urls)
+                        }.value
+                        let patch = try StudioSamplerMappingBuilder.makePatch(urls: files)
+                        try viewModel.loadStudioSampler(for: trackID, patch: patch)
+                        isPresented = false
+                    } catch {
+                        loadError = error.localizedDescription
+                    }
                 }
             case .failure(let error):
                 loadError = error.localizedDescription
