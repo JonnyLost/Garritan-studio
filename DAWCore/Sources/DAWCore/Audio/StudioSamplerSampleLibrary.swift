@@ -23,6 +23,7 @@ public enum StudioSamplerSampleLibrary {
         )
 
         var copied: [URL] = []
+        var newlyCreated: [URL] = []
         do {
             for url in urls {
                 let access = url.startAccessingSecurityScopedResource()
@@ -36,18 +37,14 @@ public enum StudioSamplerSampleLibrary {
                     "\(UUID().uuidString)-\(url.lastPathComponent)"
                 )
                 try fileManager.copyItem(at: url, to: destination)
+                newlyCreated.append(destination)
                 copied.append(destination)
             }
             return copied
         } catch {
-            // Only undo imports staged by this batch; never delete a source file
-            // already inside our sample library.
-            for url in copied where url.deletingLastPathComponent().standardizedFileURL ==
-                folder.standardizedFileURL {
-                if url.lastPathComponent.contains("-") {
-                    try? fileManager.removeItem(at: url)
-                }
-            }
+            // Only undo copies created during this batch, never pre-existing
+            // files (including files the user already imported previously).
+            for url in newlyCreated { try? fileManager.removeItem(at: url) }
             throw error
         }
     }
