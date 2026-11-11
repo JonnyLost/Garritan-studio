@@ -9,7 +9,7 @@ application UI. The synthesizer is not yet selectable as a Studio track instrume
 - DSP is authored for Garritan Studio in C++17; there is **no third-party synth
   engine, synthesis library, sample content, or bundled vendor code**.
 - Apple/Swift Package toolchains supply standard C++ facilities and build support.
-- \`StudioAnalogDSP.h\` exposes a stable C ABI that Swift can use without enabling
+- `StudioAnalogDSP.h` exposes a stable C ABI that Swift can use without enabling
   C++ interoperability for the existing DAW targets.
 - Graph nodes: two oscillators, noise, mixer, filter envelope, LFO, resonant
   low-pass filter, amplitude envelope, VCA, output.
@@ -25,13 +25,13 @@ application UI. The synthesizer is not yet selectable as a Studio track instrume
 
 ## Threading rules
 
-\`sa_render\` is exclusively called from **one** audio render thread. It performs
+`sa_render` is exclusively called from **one** audio render thread. It performs
 no heap allocation, lock acquisition, logging, or graph recompilation.
-\`sa_note_on\`, \`sa_note_off\` and \`sa_all_notes_off\` use a bounded, lock-free
+`sa_note_on`, `sa_note_off` and `sa_all_notes_off` use a bounded, lock-free
 single-producer/single-consumer MIDI ring. Call them from one producer thread.
 Parameter values are exchanged atomically and snapshotted at render-block start.
 
-**Important:** \`sa_load_patch\` is intentionally **not live-edit safe**. It is
+**Important:** `sa_load_patch` is intentionally **not live-edit safe**. It is
 used while audio is stopped. Before enabling interactive patch cables, add
 versioned immutable graph snapshots and a safe render-boundary swap with
 lifetime management. Do not mutate the graph from a SwiftUI callback.
@@ -43,10 +43,10 @@ are next-stage work.
 
 ## Tests
 
-\`\`\`sh
+```sh
 swift test --filter StudioAnalogDSPTests
 swift build --target StudioAnalogDSP
-\`\`\`
+```
 
 Tests cover 440 Hz pitch, release to silence, polyphonic rendering, parameter
 validation, safe rejection of a cyclic graph and bounded queue behavior.

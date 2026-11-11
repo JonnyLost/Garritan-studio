@@ -21,6 +21,7 @@ float clampf(float x, float lo, float hi) noexcept {
 
 struct Parameters {
     std::array<float, SA_PARAMETER_COUNT> values{};
+    double osc2Ratio = 1.0;
     float operator[](int i) const noexcept { return values[static_cast<size_t>(i)]; }
 };
 
@@ -121,7 +122,7 @@ struct Graph {
     }
 };
 
-constexpr std::array<SARoute, 10> kDefaultRoutes{{
+constexpr std::array<SARoute, 9> kDefaultRoutes{{
     {SA_NODE_OSC1, SA_NODE_MIXER, 0, 1.f},
     {SA_NODE_OSC2, SA_NODE_MIXER, 1, 1.f},
     {SA_NODE_NOISE, SA_NODE_MIXER, 2, 1.f},
@@ -130,8 +131,7 @@ constexpr std::array<SARoute, 10> kDefaultRoutes{{
     {SA_NODE_LFO, SA_NODE_FILTER, 2, 1.f},
     {SA_NODE_FILTER, SA_NODE_VCA, 0, 1.f},
     {SA_NODE_AMP_ENV, SA_NODE_VCA, 1, 1.f},
-    {SA_NODE_VCA, SA_NODE_OUTPUT, 0, 1.f},
-    {SA_NODE_OSC1, SA_NODE_FILTER, 0, 0.f} // Removed below in constructor.
+    {SA_NODE_VCA, SA_NODE_OUTPUT, 0, 1.f}
 }};
 
 // Antialias discontinuities in saw and pulse oscillators.
@@ -233,6 +233,7 @@ struct Voice {
     bool active = false;
     uint8_t note = 0;
     float velocity = 0.f;
+    double baseFrequency = 440.0;
     uint64_t age = 0;
     uint32_t noise = 0x9e3779b9u;
     double lfoPhase = 0.0;
@@ -244,6 +245,7 @@ struct Voice {
         active = true;
         note = n;
         velocity = static_cast<float>(v)/127.f;
+        baseFrequency = 440.0*std::pow(2.0, (static_cast<int>(n)-69)/12.0);
         age = counter;
         osc1.phase = osc2.phase = lfoPhase = 0.0;
         filter = {};
@@ -256,7 +258,7 @@ struct Voice {
     }
     float next(const Graph& graph, const Parameters& p, double sr) noexcept {
         std::array<float, kNodeCount> sample{};
-        const double frequency = 440.0*std::pow(2.0, (static_cast<int>(note)-69)/12.0);
+        const double frequency = baseFrequency;
         auto input = [&](int node, int port) noexcept -> float {
             const Input& jack = graph.inputs[node][port];
             return jack.source < 0 ? 0.f : sample[static_cast<size_t>(jack.source)]*jack.gain;
@@ -268,7 +270,7 @@ struct Voice {
                                            p[SA_PARAM_PULSE_WIDTH], sr)*p[SA_PARAM_OSC1_LEVEL];
                     break;
                 case SA_NODE_OSC2:
-                    sample[id] = osc2.next(frequency*std::pow(2.0, p[SA_PARAM_OSC2_SEMITONES]/12.0),
+                    sample[id] = osc2.next(frequency*p.osc2Ratio,
                                            static_cast<int>(p[SA_PARAM_OSC2_WAVE]),
                                            p[SA_PARAM_PULSE_WIDTH], sr)*p[SA_PARAM_OSC2_LEVEL];
                     break;
@@ -355,8 +357,7 @@ struct SASynth {
     SASynth(double sr, int count) : sampleRate(sr), voiceCount(count) {
         for (size_t i = 0; i < kDefaults.size(); ++i)
             params[i].store(kDefaults[i], std::memory_order_relaxed);
-        // The first nine routes form the default analog patch.
-        graph.compile(kDefaultRoutes.data(), 9);
+        graph.compile(kDefaultRoutes.data(), kDefaultRoutes.size());
         for (int i = 0; i < kMaxVoices; ++i)
             voices[i].noise += static_cast<uint32_t>(0x85ebca6bu*i);
     }
@@ -427,6 +428,8 @@ void sa_render(SASynth *synth, float *left, float *right, int32_t frames) {
     Parameters p;
     for (int i = 0; i < SA_PARAMETER_COUNT; ++i)
         p.values[i] = synth->params[static_cast<size_t>(i)].load(std::memory_order_relaxed);
+
+    p.osc2Ratio = std::pow(2.0, p[SA_PARAM_OSC2_SEMITONES]/12.0);
 
     NoteEvent e{};
     while (synth->notes.pop(e)) synth->event(e);
