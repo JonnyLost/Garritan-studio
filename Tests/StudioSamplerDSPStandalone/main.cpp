@@ -37,6 +37,37 @@ int main() {
     ss_render(sampler, outL.data(), outR.data(), 1024);
     for (size_t i = 512; i < 1024; ++i) assert(outL[i] == 0);
     assert(!ss_note_on(sampler, 128, 90, 0));
+    // Explicit velocity layers and separate key regions must select the
+    // intended zone rather than mixing all matching samples together.
+    SSSampler *layers = ss_create(44100, 4);
+    assert(layers);
+    std::vector<float> quiet(2048, .2f);
+    std::vector<float> loud(2048, .8f);
+    std::vector<float> high(2048, -.5f);
+    assert(ss_add_zone(layers, 60, 0, 63, 1, 63, 44100,
+                       quiet.data(), nullptr, 2048));
+    assert(ss_add_zone(layers, 60, 0, 63, 64, 127, 44100,
+                       loud.data(), nullptr, 2048));
+    assert(ss_add_zone(layers, 67, 64, 127, 1, 127, 44100,
+                       high.data(), nullptr, 2048));
+    assert(ss_zone_count(layers) == 3);
+    assert(ss_note_on(layers, 60, 50, 0));
+    ss_render(layers, outL.data(), outR.data(), 256);
+    const float quietLevel = outL[220];
+    assert(quietLevel > .015f && quietLevel < .03f);
+    assert(ss_note_off(layers, 60, 0));
+    ss_render(layers, outL.data(), outR.data(), 256);
+    assert(ss_note_on(layers, 60, 100, 0));
+    ss_render(layers, outL.data(), outR.data(), 256);
+    const float loudLevel = outL[220];
+    assert(loudLevel > quietLevel * 4.f);
+    assert(ss_all_notes_off(layers));
+    ss_render(layers, outL.data(), outR.data(), 256);
+    assert(ss_note_on(layers, 67, 100, 0));
+    ss_render(layers, outL.data(), outR.data(), 256);
+    assert(outL[220] < -0.05f);
+    ss_destroy(layers);
+
     ss_destroy(sampler);
     std::printf("Studio Sampler DSP smoke test passed (%.1f Hz)\n", frequency);
     return 0;
