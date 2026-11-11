@@ -1,0 +1,49 @@
+#ifndef STUDIO_SAMPLER_DSP_H
+#define STUDIO_SAMPLER_DSP_H
+
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* Native Studio Sampler, authored for this project. No third-party DSP.
+ * Build all zones OFF the audio thread, before attaching the renderer.
+ * Once rendering starts, zone storage is immutable until destruction.
+ * Only ss_render() runs on the audio thread; it never allocates or locks.
+ * MIDI submissions use a bounded SPSC queue (one serialized producer).
+ */
+typedef struct SSSampler SSSampler;
+
+SSSampler *ss_create(double output_sample_rate, int32_t max_voices);
+void ss_destroy(SSSampler *sampler);
+
+/* Samples are copied into sampler-owned RAM before first render.
+ * left/right are planar Float32; right may be NULL for mono.
+ * Returns 1 on success, 0 for invalid input, exceeded limits or allocation.
+ * Velocity and note bounds are inclusive. One selected zone plays per note
+ * during milestone 1; multi-layer crossfading comes later.
+ */
+int32_t ss_add_zone(SSSampler *sampler,
+                    uint8_t root_note, uint8_t lowest_note, uint8_t highest_note,
+                    uint8_t lowest_velocity, uint8_t highest_velocity,
+                    double source_sample_rate,
+                    const float *left, const float *right, uint32_t frames);
+int32_t ss_zone_count(const SSSampler *sampler);
+
+/* MIDI events take effect at the next rendering block boundary.
+ * Each submission returns 0 if the queue is full or the data is invalid.
+ * Channels are MIDI 0...15. */
+int32_t ss_note_on(SSSampler *sampler, uint8_t note, uint8_t velocity, uint8_t channel);
+int32_t ss_note_off(SSSampler *sampler, uint8_t note, uint8_t channel);
+int32_t ss_all_notes_off(SSSampler *sampler);
+
+/* Two non-overlapping planar output buffers, frames > 0.
+ * No malloc/free, locks, file I/O, Objective-C, Swift, or logging.
+ */
+void ss_render(SSSampler *sampler, float *left, float *right, int32_t frames);
+
+#ifdef __cplusplus
+}
+#endif
+#endif
