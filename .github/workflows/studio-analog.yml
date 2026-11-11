@@ -4,21 +4,15 @@ on:
   push:
     branches:
       - feature/studio-analog
-  pull_request:
-    paths:
-      - "StudioAnalogDSP/**"
-      - "Tests/StudioAnalogDSPTests/**"
-      - "Tests/StudioAnalogDSPStandalone/**"
-      - "Package.swift"
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Push and PR validation otherwise run the same macOS suite twice and queue
-# obsolete commits. Keep only the most recent branch validation active.
+# Run exactly once per Studio Analog branch push; draft PR #2 is updated
+# by the same commits. Cancel obsolete runs on the branch.
 concurrency:
-  group: studio-analog-${{ github.head_ref || github.ref_name }}
+  group: studio-analog-${{ github.ref_name }}
   cancel-in-progress: true
 
 jobs:
