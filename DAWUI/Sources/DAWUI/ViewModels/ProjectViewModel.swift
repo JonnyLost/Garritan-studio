@@ -434,7 +434,12 @@ public final class ProjectViewModel: ObservableObject {
     
     public func deleteTrack(id: TrackID) {
         guard project.tracks.contains(where: { $0.id == id }) else { return }
-        
+
+        // Capture the currently edited ARIA and effect presets BEFORE the undo
+        // action snapshots this track. Otherwise undo can restore the model
+        // but cannot recreate the sound that was actually playing.
+        saveAllPluginStates()
+
         let action = RemoveTrackAction(from: project, trackID: id)
         undoManager.registerAction(action, project: &project)
         
@@ -1715,10 +1720,53 @@ public final class ProjectViewModel: ObservableObject {
         synchronizeTrackAudioAfterHistoryChange()
     }
 
-    /// Undo/redo edits the project model directly and bypasses updateTrack(_:).
-    /// Reapply gain, pan, mute, stage send and solo state to the live track
-    /// nodes so the saved model and sounding audio do not diverge.
+    /// Undo/redo updates the model directly. Reconcile added or removed
+    /// mixer graphs as well as scalar track parameters. Structural changes
+    /// stop transport so no callback can address an AU being detached.
     private func synchronizeTrackAudioAfterHistoryChange() {
+        let desiredIDs = Set(project.tracks.map { $0.id })
+        let attachedIDs = audioEngine.activeTrackIDs
+        let removedIDs = attachedIDs.subtracting(desiredIDs)
+        let addedIDs = desiredIDs.subtracting(attachedIDs)
+
+        if !removedIDs.isEmpty || !addedIDs.isEmpty {
+            if isRecording { stopRecording() }
+            playbackEngine.stopPlayback()
+            transportState.stop()
+        }
+
+        for id in removedIDs {
+            unloadTrackInstrument(for: id)
+            let count = audioEngine.pluginCount(on: id)
+            if count > 0 {
+                for index in (0..<count).reversed() {
+                    let node = audioEngine.pluginNode(on: id, at: index)
+                    let hostedID = pluginHost.loadedPlugins.values.first(where: {
+                        guard let node else { return false }
+                        return $0.audioUnit === node
+                    })?.id
+                    do {
+                        try audioEngine.removePlugin(at: index, from: id)
+                        if let hostedID { pluginHost.unloadPlugin(id: hostedID) }
+                    } catch {
+                        print("[Undo] Failed to detach insert \(index): \(error)")
+                    }
+                }
+            }
+            audioEngine.removeTrackNode(for: id)
+        }
+
+        for track in project.tracks where addedIDs.contains(track.id) {
+            do {
+                try audioEngine.createTrackNode(for: track)
+                Task { [weak self] in
+                    await self?.restoreTrackAfterHistoryChange(track.id)
+                }
+            } catch {
+                print("[Undo] Failed to reconstruct track graph \(track.name): \(error)")
+            }
+        }
+
         for track in project.tracks {
             audioEngine.updateTrackParameters(for: track)
         }
