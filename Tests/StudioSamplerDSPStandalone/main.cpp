@@ -414,6 +414,36 @@ int main() {
     assert(ss_stream_underrun_frames(streamed) == 0);
     ss_destroy(streamed);
 
+    // Streamed sustain-loop wrap and positive pitch transposition must
+    // continue using worker-owned pages with no callback file reads.
+    SSSampler *streamLoop = ss_create(44100, 4);
+    assert(streamLoop);
+    assert(ss_add_stream_zone(streamLoop, 60, 60, 72, 1, 127, 44100,
+        longL.data(), longR.data(), 32768, 4096, 0, 32768,
+        12000, 24000, 128, 0, 0, 0, 0, 0));
+    std::vector<float> streamLoopL(512), streamLoopR(512);
+    assert(ss_note_on(streamLoop, 72, 110, 0)); // one octave above root
+    int loopSupplied = 0;
+    for (int block = 0; block < 100; ++block) {
+        ss_render(streamLoop, streamLoopL.data(), streamLoopR.data(), 512);
+        SSStreamRequest request{};
+        while (ss_stream_claim(streamLoop, &request)) {
+            assert(ss_stream_supply(streamLoop, &request,
+                longL.data() + request.start_frame,
+                longR.data() + request.start_frame, request.frame_count));
+            ++loopSupplied;
+        }
+        if (block > 35) {
+            assert(streamLoopL[400] > .01f);
+            assert(streamLoopR[400] < -.005f);
+        }
+    }
+    assert(loopSupplied >= 6);
+    assert(ss_stream_underrun_frames(streamLoop) == 0);
+    assert(ss_note_off(streamLoop, 72, 0));
+    ss_render(streamLoop, streamLoopL.data(), streamLoopR.data(), 512);
+    ss_destroy(streamLoop);
+
     // Delayed worker completion cannot cause the render callback to wait.
     // Unavailable PCM fades toward silence and is counted as an underrun.
     SSSampler *starved = ss_create(44100, 1);
