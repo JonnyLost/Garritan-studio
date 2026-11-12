@@ -291,9 +291,13 @@ struct SSSampler {
         const uint32_t currentPage = (target / kPageFrames) * kPageFrames;
         requestPage(voice, currentPage, currentPage);
         uint32_t following = currentPage + kPageFrames;
+        // Do not evict the sequential next page merely because a loop
+        // entrance exists. Prefetch the entrance once the playhead reaches
+        // the page containing the loop's actual ending/crossfade.
+        const uint32_t loopExitPage = sample.loopEnd > 0
+            ? ((sample.loopEnd - 1) / kPageFrames) * kPageFrames : 0;
         if (sample.loopEnd != 0 && voice.stage != EnvelopeStage::release &&
-            sample.loopEnd > position && sample.loopEnd - position <= kPageFrames * 2 &&
-            sample.loopStart < currentPage) {
+            currentPage >= loopExitPage && sample.loopStart < currentPage) {
             // Loop wrap will seek backwards; start fetching the loop entrance.
             following = (sample.loopStart / kPageFrames) * kPageFrames;
         }
