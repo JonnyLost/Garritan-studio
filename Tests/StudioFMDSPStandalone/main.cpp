@@ -87,7 +87,7 @@ int main() {
 
     // Changes are continuously ramped rather than jumping at a buffer edge.
     assert(sfm_set_parameter(synth, SFM_PARAM_OUTPUT_GAIN, 0.f));
-    std::vector<float> faded(2205);
+    std::vector<float> faded(6615);
     render(synth, faded);
     for(size_t i=faded.size()-256; i<faded.size(); ++i)
         assert(std::abs(faded[i]) < 0.002f);

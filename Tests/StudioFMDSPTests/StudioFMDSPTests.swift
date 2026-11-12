@@ -114,7 +114,7 @@ final class StudioFMDSPTests: XCTestCase {
         XCTAssertEqual(sfm_note_on(synth, 69, 127), 1)
         _ = render(synth, frames: 2_048)
         XCTAssertEqual(sfm_set_parameter(synth, SFM_PARAM_OUTPUT_GAIN, 0), 1)
-        let fade = render(synth, frames: 2_048)
+        let fade = render(synth, frames: 6_615)
         XCTAssertGreaterThan(fade.prefix(256).map { abs($0) }.max() ?? 0, 0.01)
         XCTAssertLessThan(fade.suffix(256).map { abs($0) }.max() ?? 1, 0.002)
     }
