@@ -401,9 +401,9 @@ public struct StudioSynthPanelView: View {
                 .accessibilityLabel("Wavetable waveform morph preview")
 
             HStack(spacing: 6) {
-                ForEach(Array(["Sine", "Triangle", "Saw", "Square",
-                               "Glass", "Custom"].enumerated()), id: \.offset) { index, name in
-                    Button(name) {
+                ForEach(0..<6, id: \.self) { index in
+                    Button(["Sine", "Triangle", "Saw", "Square",
+                            "Glass", "Custom"][index]) {
                         viewModel.setStudioSynthWavetableParameter(
                             .osc1Position, value: Float(index),
                             for: trackID, layerID: layer.id)
