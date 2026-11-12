@@ -68,6 +68,57 @@ final class StudioFMDSPTests: XCTestCase {
         XCTAssertEqual(sfm_midi_event(synth, 0xB0, 20, 100, 0), 0)
     }
 
+
+    func testCC1ModulatesHarmonicBrightnessOnlyWhenEnabled() {
+        let dry = makeSynth()
+        let driven = makeSynth()
+        defer { sfm_destroy(dry); sfm_destroy(driven) }
+        for s in [dry, driven] {
+            XCTAssertEqual(sfm_set_parameter(s, SFM_PARAM_MOD_TARGET, 1), 1)
+            XCTAssertEqual(sfm_set_parameter(s, SFM_PARAM_MOD_DEPTH, 1), 1)
+            XCTAssertEqual(sfm_set_parameter(s, SFM_OP2_BASE + SFM_OP_LEVEL, 0.75), 1)
+            XCTAssertEqual(sfm_set_parameter(s, SFM_OP3_BASE + SFM_OP_LEVEL, 0), 1)
+            XCTAssertEqual(sfm_set_parameter(s, SFM_OP4_BASE + SFM_OP_LEVEL, 0), 1)
+            XCTAssertEqual(sfm_note_on(s, 69, 110), 1)
+        }
+        XCTAssertEqual(sfm_midi_event(driven, 0xB0, 1, 127, 0), 1)
+        let withoutWheel = render(dry, frames: 4_096)
+        let withWheel = render(driven, frames: 4_096)
+        let difference = zip(withoutWheel, withWheel)
+            .reduce(0.0) { $0 + Double(abs($1.0 - $1.1)) }
+        XCTAssertGreaterThan(difference, 5,
+                             "CC1 should change the actual rendered FM spectrum")
+    }
+
+    func testVelocityBrightensModulatorsWithoutOnlyChangingOutputAmplitude() {
+        let soft = makeSynth()
+        let neutral = makeSynth()
+        defer { sfm_destroy(soft); sfm_destroy(neutral) }
+        for s in [soft, neutral] {
+            XCTAssertEqual(sfm_set_parameter(s, SFM_OP2_BASE + SFM_OP_LEVEL, 0.8), 1)
+            XCTAssertEqual(sfm_set_parameter(s, SFM_OP3_BASE + SFM_OP_LEVEL, 0), 1)
+            XCTAssertEqual(sfm_set_parameter(s, SFM_OP4_BASE + SFM_OP_LEVEL, 0), 1)
+            XCTAssertEqual(sfm_note_on(s, 69, 40), 1)
+        }
+        XCTAssertEqual(sfm_set_parameter(soft, SFM_PARAM_VELOCITY_BRIGHTNESS, 1), 1)
+        let softened = render(soft, frames: 4_096)
+        let unchanged = render(neutral, frames: 4_096)
+        let difference = zip(softened, unchanged)
+            .reduce(0.0) { $0 + Double(abs($1.0 - $1.1)) }
+        XCTAssertGreaterThan(difference, 3)
+    }
+
+    func testOutputGainSlewsRatherThanCuttingAtBlockBoundary() {
+        let synth = makeSynth()
+        defer { sfm_destroy(synth) }
+        XCTAssertEqual(sfm_note_on(synth, 69, 127), 1)
+        _ = render(synth, frames: 2_048)
+        XCTAssertEqual(sfm_set_parameter(synth, SFM_PARAM_OUTPUT_GAIN, 0), 1)
+        let fade = render(synth, frames: 2_048)
+        XCTAssertGreaterThan(fade.prefix(256).map { abs($0) }.max() ?? 0, 0.01)
+        XCTAssertLessThan(fade.suffix(256).map { abs($0) }.max() ?? 1, 0.002)
+    }
+
     func testSustainPedalAndRelease() {
         let synth = makeSynth()
         defer { sfm_destroy(synth) }

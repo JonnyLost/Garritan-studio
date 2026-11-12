@@ -121,6 +121,32 @@ public struct StudioFMPanelView: View {
                         }
                     }
 
+                    StudioFMControlCard(title: "MIDI EXPRESSION",
+                                        systemImage: "pianokeys") {
+                        StudioFMParameterSlider(viewModel: viewModel, trackID: trackID,
+                                                parameter: .velocityBrightness)
+                        Picker("Mod Wheel", selection: Binding<Int>(
+                            get: {
+                                Int(viewModel.studioFMValue(.modTarget, for: trackID))
+                            },
+                            set: { value in
+                                viewModel.setStudioFMParameter(.modTarget,
+                                    value: Float(value), for: trackID)
+                            }
+                        )) {
+                            Text("Vibrato").tag(0)
+                            Text("Brightness").tag(1)
+                        }
+                        .pickerStyle(.segmented)
+                        .accessibilityLabel("FM modulation wheel destination")
+                        StudioFMParameterSlider(viewModel: viewModel, trackID: trackID,
+                                                parameter: .modDepth)
+                        StudioFMParameterSlider(viewModel: viewModel, trackID: trackID,
+                                                parameter: .modRate)
+                        Text("Soft notes use a lower FM modulation index. CC1 adds vibrato or brightness; CC64 sustains notes.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     HStack(alignment: .top, spacing: 12) {
                         StudioFMControlCard(title: "GLOBAL", systemImage: "dial.medium") {
                             StudioFMParameterSlider(viewModel: viewModel, trackID: trackID,
@@ -130,7 +156,7 @@ public struct StudioFMPanelView: View {
                             StudioFMParameterSlider(viewModel: viewModel, trackID: trackID,
                                                     parameter: .outputGain)
                         }
-                        Text("Pitch bend responds to the MIDI wheel; CC64 sustains notes. All sound synthesis happens directly inside Studio, using no external samples or plugin.")
+                        Text("Pitch bend and CC1 respond per MIDI channel. Operator levels, ratios, feedback, wheel depth and output gain change smoothly inside the native DSP. No external samples or plugins required.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .padding(14)

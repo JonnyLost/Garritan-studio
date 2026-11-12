@@ -17,7 +17,7 @@ final class StudioFMTrackIntegrationTests: XCTestCase {
         XCTAssertFalse(synth.pitchBend(16_384, channel: 2))
         XCTAssertTrue(synth.controller(64, value: 127, channel: 2))
         XCTAssertTrue(synth.controller(64, value: 0, channel: 2))
-        XCTAssertFalse(synth.controller(1, value: 127, channel: 2))
+        XCTAssertTrue(synth.controller(1, value: 127, channel: 2))
         XCTAssertFalse(synth.midiMessage(status: 0xF0, data1: 0, data2: 0))
         XCTAssertTrue(synth.allNotesOff())
     }
@@ -60,7 +60,7 @@ final class StudioFMTrackIntegrationTests: XCTestCase {
 
     func testParameterDefaultsAndVersionedPatchRoundTrip() throws {
         let synth = try StudioFMInstrument(sampleRate: 44_100)
-        XCTAssertEqual(StudioFMParameter.allCases.count, 28)
+        XCTAssertEqual(StudioFMParameter.allCases.count, 32)
         for parameter in StudioFMParameter.allCases {
             XCTAssertEqual(synth.parameter(parameter), parameter.defaultValue,
                            accuracy: 0.0001, "\(parameter)")
@@ -70,12 +70,20 @@ final class StudioFMTrackIntegrationTests: XCTestCase {
         patch.set(3.5, for: .op2Ratio)
         patch.set(0.8, for: .op4Level)
         patch.set(0.7, for: .feedback)
+        patch.set(0.85, for: .velocityBrightness)
+        patch.set(1, for: .modTarget)
+        patch.set(0.75, for: .modDepth)
+        patch.set(6.3, for: .modRate)
         patch.set(.nan, for: .op1Level)
         XCTAssertEqual(patch.value(for: .op1Level), StudioFMParameter.op1Level.defaultValue)
         XCTAssertTrue(patch.validate())
         try synth.apply(patch)
         XCTAssertEqual(synth.parameter(.op2Ratio), 3.5)
         XCTAssertEqual(synth.parameter(.algorithm), 2)
+        XCTAssertEqual(synth.parameter(.velocityBrightness), 0.85, accuracy: 0.0001)
+        XCTAssertEqual(synth.parameter(.modTarget), 1)
+        XCTAssertEqual(synth.parameter(.modDepth), 0.75, accuracy: 0.0001)
+        XCTAssertEqual(synth.parameter(.modRate), 6.3, accuracy: 0.0001)
 
         var track = Track(name: "FM Electric Piano", type: .instrument)
         track.studioFMEnabled = true
@@ -120,6 +128,30 @@ final class StudioFMTrackIntegrationTests: XCTestCase {
         }
     }
 
+    func testFMModWheelDestinationIsDiscreteAndNewControlsPersist() throws {
+        let synth = try StudioFMInstrument(sampleRate: 44_100)
+        XCTAssertTrue(StudioFMParameter.velocityBrightness.valid(0))
+        XCTAssertTrue(StudioFMParameter.velocityBrightness.valid(1))
+        XCTAssertFalse(StudioFMParameter.velocityBrightness.valid(1.1))
+        XCTAssertFalse(StudioFMParameter.modTarget.valid(0.5))
+        XCTAssertFalse(StudioFMParameter.modRate.valid(0))
+        XCTAssertFalse(StudioFMParameter.modRate.valid(20.1))
+        XCTAssertNil(StudioFMParameter.velocityBrightness.operatorIndex)
+        XCTAssertNil(StudioFMParameter.modDepth.operatorControl)
+        var saved = StudioFMPatch()
+        saved.set(0.63, for: .velocityBrightness)
+        saved.set(1, for: .modTarget)
+        saved.set(0.75, for: .modDepth)
+        saved.set(5.4, for: .modRate)
+        let decoded = try JSONDecoder().decode(StudioFMPatch.self,
+                                               from: JSONEncoder().encode(saved))
+        XCTAssertEqual(decoded, saved)
+        try synth.apply(decoded)
+        XCTAssertEqual(synth.parameter(.velocityBrightness), 0.63, accuracy: 0.001)
+        XCTAssertEqual(synth.parameter(.modTarget), 1)
+        XCTAssertEqual(synth.parameter(.modRate), 5.4, accuracy: 0.001)
+    }
+
     func testTrackInstrumentFMUsesSameGenericMidiBridge() throws {
         let synth = try StudioFMInstrument(sampleRate: 44_100)
         let instrument = TrackInstrument.studioFM(synth)
@@ -127,6 +159,7 @@ final class StudioFMTrackIntegrationTests: XCTestCase {
         instrument.startNote(60, velocity: 80, channel: 0)
         instrument.sendPitchBend(8_192, channel: 0)
         instrument.sendController(64, value: 127, channel: 0)
+        instrument.sendController(1, value: 100, channel: 0)
         instrument.stopNote(60, channel: 0)
         instrument.sendController(64, value: 0, channel: 0)
         XCTAssertTrue(synth.allNotesOff())

@@ -85,6 +85,27 @@ int main() {
     for(size_t i=0;i<serial.size();++i) difference+=std::abs(serial[i]-parallel[i]);
     assert(difference > 15.f);
 
+    // Changes are continuously ramped rather than jumping at a buffer edge.
+    assert(sfm_set_parameter(synth, SFM_PARAM_OUTPUT_GAIN, 0.f));
+    std::vector<float> faded(2205);
+    render(synth, faded);
+    for(size_t i=faded.size()-256; i<faded.size(); ++i)
+        assert(std::abs(faded[i]) < 0.002f);
+    assert(sfm_set_parameter(synth, SFM_PARAM_OUTPUT_GAIN, 0.8f));
+    render(synth, faded);
+
+    // All four new expression parameters preserve old numeric IDs.
+    assert(sfm_set_parameter(synth,SFM_PARAM_VELOCITY_BRIGHTNESS,1.f));
+    assert(sfm_set_parameter(synth,SFM_PARAM_MOD_TARGET,1.f));
+    assert(sfm_set_parameter(synth,SFM_PARAM_MOD_DEPTH,0.8f));
+    assert(sfm_set_parameter(synth,SFM_PARAM_MOD_RATE,6.f));
+    assert(!sfm_set_parameter(synth,SFM_PARAM_MOD_TARGET,0.5f));
+    assert(!sfm_set_parameter(synth,SFM_PARAM_MOD_RATE,20.1f));
+    assert(sfm_get_parameter(synth,SFM_PARAM_MOD_DEPTH)==0.8f);
+    assert(sfm_midi_event(synth,0xB0,1,127,0));
+    render(synth, faded);
+    assert(sfm_midi_event(synth,0xB0,1,0,0));
+    render(synth, faded);
     assert(sfm_all_notes_off(synth));
     render(synth,blockA);
     for(float x:blockA) assert(x==0.f);
