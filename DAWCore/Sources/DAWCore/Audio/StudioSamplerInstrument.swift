@@ -117,7 +117,7 @@ public final class StudioSamplerInstrument {
             }
             let right: UnsafePointer<Float>? = sourceFormat.channelCount == 2
                 ? UnsafePointer(samples[1]) : nil
-            guard ss_add_zone_with_options(
+            guard ss_add_zone_with_variation(
                 sampler, zone.rootNote, zone.lowestNote, zone.highestNote,
                 zone.lowestVelocity, zone.highestVelocity, sourceFormat.sampleRate,
                 samples[0], right, buffer.frameLength,
@@ -125,7 +125,8 @@ public final class StudioSamplerInstrument {
                 zone.loopStartFrame ?? 0, zone.loopEndFrame ?? 0,
                 zone.loopCrossfadeFrames ?? 0,
                 zone.fadeInFrames ?? 0, zone.fadeOutFrames ?? 0,
-                zone.articulationID ?? 0
+                zone.articulationID ?? 0,
+                zone.roundRobinIndex ?? 0, zone.isReleaseTrigger == true ? 1 : 0
             ) == 1 else {
                 throw StudioSamplerError.couldNotLoadZone(url)
             }
