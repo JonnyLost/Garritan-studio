@@ -518,6 +518,7 @@ public final class ProjectViewModel: ObservableObject {
         var patch = project.tracks[index].studioFMPatch ?? StudioFMPatch()
         patch.set(value, for: parameter)
         project.tracks[index].studioFMPatch = patch
+        project.tracks[index].studioFMPresetID = nil
     }
 
     public func resetStudioFMPatch(for trackID: TrackID) throws {
@@ -531,6 +532,31 @@ public final class ProjectViewModel: ObservableObject {
         _ = synth.allNotesOff()
         try synth.apply(patch)
         project.tracks[index].studioFMPatch = patch
+        project.tracks[index].studioFMPresetID = nil
+    }
+
+    /// Load a complete validated factory or user FM sound. Its values are
+    /// embedded in the project; the user bank file is not needed to reopen.
+    public func applyStudioFMPreset(_ preset: StudioFMPreset,
+                                    for trackID: TrackID) throws {
+        try preset.validate()
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioFMEnabled == true,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioFM(let synth) = instrument else {
+            throw StudioFMError.invalidConfiguration
+        }
+        _ = synth.allNotesOff()
+        try synth.apply(preset.patch)
+        project.tracks[index].studioFMPatch = preset.patch
+        project.tracks[index].studioFMPresetID = preset.id
+    }
+
+    public func markStudioFMPresetSaved(id: String, for trackID: TrackID) {
+        guard UUID(uuidString: id) != nil,
+              let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioFMEnabled == true else { return }
+        project.tracks[index].studioFMPresetID = id
     }
 
     /// Read a parameter from project state, or the native engine default.

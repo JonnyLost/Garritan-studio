@@ -8,6 +8,7 @@ public struct StudioFMPanelView: View {
     @ObservedObject private var viewModel: ProjectViewModel
     public let trackID: TrackID
     @State private var errorMessage: String?
+    @State private var showPresetBrowser = false
 
     public init(viewModel: ProjectViewModel, trackID: TrackID) {
         self.viewModel = viewModel
@@ -40,6 +41,9 @@ public struct StudioFMPanelView: View {
                     Text("\(trackName) · Original 4-operator FM · 8 voices")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    Text(presetLabel)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 8)
                 HStack(spacing: 6) {
@@ -50,6 +54,12 @@ public struct StudioFMPanelView: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
+                Button {
+                    showPresetBrowser = true
+                } label: {
+                    Label("Presets", systemImage: "square.stack.3d.up")
+                }
+                .buttonStyle(.bordered)
                 Button {
                     do {
                         try viewModel.resetStudioFMPatch(for: trackID)
@@ -132,6 +142,20 @@ public struct StudioFMPanelView: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .frame(minWidth: 540, minHeight: 410)
+        .sheet(isPresented: $showPresetBrowser) {
+            StudioFMPresetBrowserView(viewModel: viewModel, trackID: trackID)
+                .frame(minWidth: 880, minHeight: 570)
+        }
+    }
+
+    private var presetLabel: String {
+        guard let id = viewModel.project.track(withID: trackID)?.studioFMPresetID else {
+            return "Edited / initialized FM sound"
+        }
+        if let factory = StudioFMFactoryLibrary.presets.first(where: { $0.id == id }) {
+            return "Factory · \(factory.name)"
+        }
+        return "Saved user FM preset"
     }
 
     private var trackName: String {

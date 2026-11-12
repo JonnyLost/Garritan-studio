@@ -71,6 +71,8 @@ public struct Track: Identifiable, Codable, Sendable {
     /// Optional so projects written before FM decode unchanged.
     public var studioFMEnabled: Bool?
     public var studioFMPatch: StudioFMPatch?
+    /// Last selected native FM sound. Projects embed the full patch.
+    public var studioFMPresetID: String?
     /// Selected Garritan catalog entry (library:path), persisted per track.
     public var garritanProgramID: String?
     
@@ -122,6 +124,7 @@ public struct Track: Identifiable, Codable, Sendable {
         self.studioAnalogPresetID = nil
         self.studioFMEnabled = nil
         self.studioFMPatch = nil
+        self.studioFMPresetID = nil
         self.garritanProgramID = nil
         self.midiOutput = nil  // Default: use track instrument
         self.midiOutputChannel = nil  // All channels
