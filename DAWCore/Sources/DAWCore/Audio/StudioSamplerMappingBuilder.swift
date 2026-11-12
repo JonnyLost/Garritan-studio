@@ -22,6 +22,8 @@ public enum StudioSamplerMappingBuilder {
         var url: URL
         var root: Int
         var velocity: Int?
+        var roundRobin: UInt8?
+        var isRelease: Bool
     }
 
     public static func makePatch(urls: [URL]) throws -> StudioSamplerPatch {
@@ -34,7 +36,9 @@ public enum StudioSamplerMappingBuilder {
         let candidates = sorted.enumerated().map { index, url in
             Candidate(url: url,
                       root: noteNumber(in: url) ?? min(127, 60 + index),
-                      velocity: velocityHint(in: url))
+                      velocity: velocityHint(in: url),
+                      roundRobin: roundRobinHint(in: url),
+                      isRelease: releaseHint(in: url))
         }
         let roots = Array(Set(candidates.map(\.root))).sorted()
         var zones: [StudioSamplerZone] = []
@@ -43,31 +47,51 @@ public enum StudioSamplerMappingBuilder {
             let lowestKey = rootIndex == 0 ? 0 : (roots[rootIndex - 1] + root) / 2 + 1
             let highestKey = rootIndex + 1 == roots.count
                 ? 127 : (root + roots[rootIndex + 1]) / 2
-            let group = candidates.filter { $0.root == root }.sorted { left, right in
-                if (left.velocity ?? 64) != (right.velocity ?? 64) {
-                    return (left.velocity ?? 64) < (right.velocity ?? 64)
-                }
-                return left.url.lastPathComponent.localizedStandardCompare(
-                    right.url.lastPathComponent
-                ) == .orderedAscending
-            }
 
-            for (index, candidate) in group.enumerated() {
-                // Each imported recording gets an audible, non-overlapping
-                // velocity range. User can refine or overlap ranges in the editor.
-                // With >127 recordings on one root, allow the smallest
-                // possible 1-point overlap rather than generating empty
-                // ranges that make the entire instrument invalid.
-                let lowerVelocity = min(127, 1 + (index * 127) / group.count)
-                let upperVelocity = max(lowerVelocity, ((index + 1) * 127) / group.count)
-                zones.append(StudioSamplerZone(
-                    sampleURL: candidate.url,
-                    rootNote: UInt8(root),
-                    lowestNote: UInt8(lowestKey),
-                    highestNote: UInt8(highestKey),
-                    lowestVelocity: UInt8(lowerVelocity),
-                    highestVelocity: UInt8(upperVelocity)
-                ))
+            // Attack and release recordings are mapped independently so
+            // one release tail can serve every velocity without stealing
+            // a band from sustain samples. Explicit RR takes share a band.
+            for isRelease in [false, true] {
+                let group = candidates.filter {
+                    $0.root == root && $0.isRelease == isRelease
+                }.sorted { left, right in
+                    if (left.velocity ?? 64) != (right.velocity ?? 64) {
+                        return (left.velocity ?? 64) < (right.velocity ?? 64)
+                    }
+                    return left.url.lastPathComponent.localizedStandardCompare(
+                        right.url.lastPathComponent
+                    ) == .orderedAscending
+                }
+                guard !group.isEmpty else { continue }
+                var bands: [[Candidate]] = []
+                for candidate in group {
+                    if candidate.roundRobin != nil,
+                       let last = bands.indices.last,
+                       let first = bands[last].first,
+                       first.roundRobin != nil &&
+                       (first.velocity ?? 64) == (candidate.velocity ?? 64) {
+                        bands[last].append(candidate)
+                    } else {
+                        bands.append([candidate])
+                    }
+                }
+                for (index, band) in bands.enumerated() {
+                    let low = min(127, 1 + (index * 127) / bands.count)
+                    let high = max(low, (index + 1) * 127 / bands.count)
+                    for candidate in band {
+                        var zone = StudioSamplerZone(
+                            sampleURL: candidate.url,
+                            rootNote: UInt8(root),
+                            lowestNote: UInt8(lowestKey),
+                            highestNote: UInt8(highestKey),
+                            lowestVelocity: UInt8(low),
+                            highestVelocity: UInt8(high)
+                        )
+                        zone.roundRobinIndex = candidate.roundRobin
+                        zone.isReleaseTrigger = candidate.isRelease ? true : nil
+                        zones.append(zone)
+                    }
+                }
             }
         }
         return StudioSamplerPatch(zones: zones)
@@ -112,6 +136,28 @@ public enum StudioSamplerMappingBuilder {
             }
         }
         return nil
+    }
+
+    /// rr1...rr8, take1...take8 and alt1...alt8 map to 0...7.
+    /// These are metadata hints, not a change to the imported recording.
+    public static func roundRobinHint(in url: URL) -> UInt8? {
+        for token in filenameTokens(url) {
+            let lower = token.lowercased()
+            for prefix in ["roundrobin", "take", "alt", "rr"]
+                where lower.hasPrefix(prefix) {
+                let suffix = lower.dropFirst(prefix.count)
+                if let index = Int(suffix), (1...8).contains(index) {
+                    return UInt8(index - 1)
+                }
+            }
+        }
+        return nil
+    }
+
+    public static func releaseHint(in url: URL) -> Bool {
+        filenameTokens(url).contains {
+            ["release", "rel", "noteoff"].contains($0.lowercased())
+        }
     }
 
     private static func filenameTokens(_ url: URL) -> [String] {
