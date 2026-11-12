@@ -19,7 +19,7 @@ public enum StudioSamplerError: Error, LocalizedError {
         case .invalidPatch: return "The Studio Sampler instrument has invalid sample mapping."
         case .unsupportedAudioBackend: return "Studio Sampler currently requires the AVAudioEngine backend."
         case .unsupportedSampleFormat(let url): return "Studio Sampler requires mono or stereo audio: \(url.lastPathComponent)"
-        case .sampleTooLarge(let url): return "This sample is too large for the first RAM-only sampler: \(url.lastPathComponent)"
+        case .sampleTooLarge(let url): return "This sample exceeds the current Studio Sampler limits: \(url.lastPathComponent)"
         case .invalidSample(let url): return "The sample has no usable audio data: \(url.lastPathComponent)"
         case .couldNotLoadZone(let url): return "Studio Sampler could not load the sample: \(url.lastPathComponent)"
         case .invalidLoop(let url): return "The loop markers are outside the recording: \(url.lastPathComponent)"
@@ -31,8 +31,14 @@ public enum StudioSamplerError: Error, LocalizedError {
 /// Attachment must stop before the instrument's final release.
 private final class StudioSamplerRenderState {
     let sampler: OpaquePointer
+    var diskWorker: StudioSamplerDiskWorker?
     init(_ sampler: OpaquePointer) { self.sampler = sampler }
-    deinit { ss_destroy(sampler) }
+    deinit {
+        // The worker must finish every outstanding page fill BEFORE any
+        // sampler memory can be released. This is never called on audio RT.
+        diskWorker?.shutdown()
+        ss_destroy(sampler)
+    }
 }
 
 /// Native Studio sample playback using the same track routing as Studio Analog.
@@ -42,6 +48,10 @@ public final class StudioSamplerInstrument {
     public let audioNode: AVAudioSourceNode
     public let format: AVAudioFormat
     public let patch: StudioSamplerPatch
+    public let isUsingDiskStreaming: Bool
+    public var streamUnderrunFrames: UInt64 {
+        ss_stream_underrun_frames(renderState.sampler)
+    }
     private let renderState: StudioSamplerRenderState
     private let midiProducerLock = NSLock()
 
@@ -75,7 +85,9 @@ public final class StudioSamplerInstrument {
             }
         }
         guard configurationSucceeded else { throw StudioSamplerError.invalidPatch }
-        var cumulativeFrames: Int64 = 0
+        var cumulativeResidentFrames: Int64 = 0
+        var streamSources: [URL?] = []
+        streamSources.reserveCapacity(patch.zones.count)
         for zone in patch.zones {
             let url = zone.sampleURL
             let file = try AVAudioFile(
@@ -87,24 +99,14 @@ public final class StudioSamplerInstrument {
                   !sourceFormat.isInterleaved else {
                 throw StudioSamplerError.unsupportedSampleFormat(url)
             }
-            guard file.length >= 2 else { throw StudioSamplerError.invalidSample(url) }
-            guard file.length <= 10_000_000,
-                  cumulativeFrames <= 32_000_000 - file.length else {
+            let totalFrames = file.length
+            guard totalFrames >= 2, totalFrames <= 500_000_000 else {
                 throw StudioSamplerError.sampleTooLarge(url)
             }
-            cumulativeFrames += file.length
-            let count = AVAudioFrameCount(file.length)
-            guard let buffer = AVAudioPCMBuffer(pcmFormat: sourceFormat, frameCapacity: count) else {
-                throw StudioSamplerError.invalidSample(url)
-            }
-            try file.read(into: buffer, frameCount: count)
-            guard buffer.frameLength >= 2, let samples = buffer.floatChannelData else {
-                throw StudioSamplerError.invalidSample(url)
-            }
             let playbackStart = zone.trimStartFrame ?? 0
-            let playbackEnd = zone.trimEndFrame ?? buffer.frameLength
+            let playbackEnd = zone.trimEndFrame ?? UInt32(totalFrames)
             guard playbackStart < playbackEnd,
-                  playbackEnd <= buffer.frameLength,
+                  Int64(playbackEnd) <= totalFrames,
                   playbackEnd - playbackStart >= 2 else {
                 throw StudioSamplerError.invalidSample(url)
             }
@@ -115,21 +117,70 @@ public final class StudioSamplerInstrument {
                     <= UInt64(playbackEnd - playbackStart) else {
                 throw StudioSamplerError.invalidSample(url)
             }
+
+            // Keep short samples RAM-resident. Long recordings read only their
+            // first ~250 ms into immutable attack memory and stream later PCM.
+            let streamingThreshold = max(4_096.0, sourceFormat.sampleRate * 3.0)
+            let useStreaming = Double(totalFrames) > streamingThreshold
+            let count: AVAudioFrameCount
+            if useStreaming {
+                count = AVAudioFrameCount(min(
+                    Int64(StudioSamplerStreamBudget.attackFrames(
+                        sampleRate: sourceFormat.sampleRate
+                    )),
+                    totalFrames - Int64(playbackStart)
+                ))
+                file.framePosition = AVAudioFramePosition(playbackStart)
+            } else {
+                guard totalFrames <= 10_000_000,
+                      cumulativeResidentFrames <= 32_000_000 - totalFrames else {
+                    throw StudioSamplerError.sampleTooLarge(url)
+                }
+                cumulativeResidentFrames += totalFrames
+                count = AVAudioFrameCount(totalFrames)
+            }
+
+            guard count >= 2,
+                  let buffer = AVAudioPCMBuffer(
+                      pcmFormat: sourceFormat, frameCapacity: count
+                  ) else {
+                throw StudioSamplerError.invalidSample(url)
+            }
+            try file.read(into: buffer, frameCount: count)
+            guard buffer.frameLength == count, let samples = buffer.floatChannelData else {
+                throw StudioSamplerError.invalidSample(url)
+            }
             let right: UnsafePointer<Float>? = sourceFormat.channelCount == 2
                 ? UnsafePointer(samples[1]) : nil
-            guard ss_add_zone_with_variation(
-                sampler, zone.rootNote, zone.lowestNote, zone.highestNote,
-                zone.lowestVelocity, zone.highestVelocity, sourceFormat.sampleRate,
-                samples[0], right, buffer.frameLength,
-                playbackStart, playbackEnd,
-                zone.loopStartFrame ?? 0, zone.loopEndFrame ?? 0,
-                zone.loopCrossfadeFrames ?? 0,
-                zone.fadeInFrames ?? 0, zone.fadeOutFrames ?? 0,
-                zone.articulationID ?? 0,
-                zone.roundRobinIndex ?? 0, zone.isReleaseTrigger == true ? 1 : 0
-            ) == 1 else {
-                throw StudioSamplerError.couldNotLoadZone(url)
+
+            let loaded: Bool
+            if useStreaming {
+                loaded = ss_add_stream_zone(
+                    sampler, zone.rootNote, zone.lowestNote, zone.highestNote,
+                    zone.lowestVelocity, zone.highestVelocity, sourceFormat.sampleRate,
+                    samples[0], right, UInt32(totalFrames), buffer.frameLength,
+                    playbackStart, playbackEnd,
+                    zone.loopStartFrame ?? 0, zone.loopEndFrame ?? 0,
+                    zone.loopCrossfadeFrames ?? 0,
+                    zone.fadeInFrames ?? 0, zone.fadeOutFrames ?? 0,
+                    zone.articulationID ?? 0,
+                    zone.roundRobinIndex ?? 0, zone.isReleaseTrigger == true ? 1 : 0
+                ) == 1
+            } else {
+                loaded = ss_add_zone_with_variation(
+                    sampler, zone.rootNote, zone.lowestNote, zone.highestNote,
+                    zone.lowestVelocity, zone.highestVelocity, sourceFormat.sampleRate,
+                    samples[0], right, buffer.frameLength,
+                    playbackStart, playbackEnd,
+                    zone.loopStartFrame ?? 0, zone.loopEndFrame ?? 0,
+                    zone.loopCrossfadeFrames ?? 0,
+                    zone.fadeInFrames ?? 0, zone.fadeOutFrames ?? 0,
+                    zone.articulationID ?? 0,
+                    zone.roundRobinIndex ?? 0, zone.isReleaseTrigger == true ? 1 : 0
+                ) == 1
             }
+            guard loaded else { throw StudioSamplerError.couldNotLoadZone(url) }
+            streamSources.append(useStreaming ? url : nil)
         }
         // Prepare the controller state and crossfade mode before the
         // AVAudioSourceNode is attached or can start rendering.
@@ -142,6 +193,14 @@ public final class StudioSamplerInstrument {
               ss_control_change(sampler, 11, patch.expressionCC11 ?? 127, 0) == 1 else {
             throw StudioSamplerError.invalidConfiguration
         }
+        // A worker only exists for instruments containing long recordings.
+        // The worker owns AVAudioFile instances on its own serial queue.
+        if streamSources.contains(where: { $0 != nil }) {
+            state.diskWorker = StudioSamplerDiskWorker(
+                sampler: sampler, sourceURLs: streamSources
+            )
+        }
+        self.isUsingDiskStreaming = state.diskWorker != nil
         self.format = format
         self.patch = patch
         self.renderState = state
