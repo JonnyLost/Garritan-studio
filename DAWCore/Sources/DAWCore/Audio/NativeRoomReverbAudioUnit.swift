@@ -10,6 +10,10 @@ public final class NativeRoomReverbAudioUnit: AUAudioUnit {
     private var inputs: AUAudioUnitBusArray!
     private var outputs: AUAudioUnitBusArray!
     private var processor: NativeRoomReverbProcessor?
+    private var roomParameter: AUParameter!
+
+    /// Numeric room index, only interpreted using the stable starterProfiles order.
+    public static let roomParameterAddress: AUParameterAddress = 0
 
     public static let componentDescription = AudioComponentDescription(
         componentType: kAudioUnitType_Effect,
@@ -46,6 +50,18 @@ public final class NativeRoomReverbAudioUnit: AUAudioUnit {
         outputBus = try AUAudioUnitBus(format: format)
         inputs = AUAudioUnitBusArray(audioUnit: self, busType: .input, busses: [inputBus])
         outputs = AUAudioUnitBusArray(audioUnit: self, busType: .output, busses: [outputBus])
+        roomParameter = AUParameterTree.createParameter(
+            withIdentifier: "room",
+            name: "Room Profile",
+            address: Self.roomParameterAddress,
+            min: 0, max: AUValue(StudioRoomAcousticProfile.starterProfiles.count - 1),
+            unit: .indexed, unitName: nil,
+            flags: [.flag_IsReadable, .flag_IsWritable],
+            valueStrings: StudioRoomAcousticProfile.starterProfiles.map(\.name),
+            dependentParameters: nil
+        )
+        parameterTree = AUParameterTree.createTree(withChildren: [roomParameter])
+        roomParameter.value = 0
     }
 
     public override func allocateRenderResources() throws {
@@ -57,7 +73,10 @@ public final class NativeRoomReverbAudioUnit: AUAudioUnit {
             super.deallocateRenderResources()
             throw NSError(domain: NSOSStatusErrorDomain, code: Int(kAudioUnitErr_FormatNotSupported))
         }
-        processor = NativeRoomReverbProcessor(sampleRate: format.sampleRate)
+        processor = NativeRoomReverbProcessor(
+            sampleRate: format.sampleRate,
+            profiles: StudioRoomAcousticProfile.starterProfiles
+        )
     }
 
     public override func deallocateRenderResources() {
@@ -76,6 +95,14 @@ public final class NativeRoomReverbAudioUnit: AUAudioUnit {
                   let left = buffers[0].mData?.assumingMemoryBound(to: Float.self),
                   let right = buffers[1].mData?.assumingMemoryBound(to: Float.self)
             else { return kAudioUnitErr_FormatNotSupported }
+            // AUParameter receives host/UI writes; expensive coefficient calculations
+            // and all room taps were prepared in allocateRenderResources().
+            let requested = roomParameter.value
+            let index = requested.isFinite ? min(
+                StudioRoomAcousticProfile.starterProfiles.count - 1,
+                max(0, Int(requested.rounded()))
+            ) : 0
+            processor.selectProfile(at: index)
             processor.process(left: left, right: right, frameCount: Int(frameCount))
             return noErr
         }
