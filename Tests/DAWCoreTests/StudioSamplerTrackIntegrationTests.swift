@@ -316,6 +316,79 @@ final class StudioSamplerTrackIntegrationTests: XCTestCase {
         XCTAssertFalse(patch.isValid)
     }
 
+    func testRoundRobinAndReleaseZoneMetadataAreBackwardCompatible() throws {
+        let url = URL(fileURLWithPath: "/tmp/native-strings.wav")
+        var attack = StudioSamplerZone(sampleURL: url, rootNote: 60)
+        attack.roundRobinIndex = 1
+        var release = StudioSamplerZone(sampleURL: url, rootNote: 60)
+        release.roundRobinIndex = 1
+        release.isReleaseTrigger = true
+        let patch = StudioSamplerPatch(zones: [attack, release])
+        XCTAssertTrue(patch.isValid)
+        let roundTrip = try JSONDecoder().decode(
+            StudioSamplerPatch.self, from: JSONEncoder().encode(patch)
+        )
+        XCTAssertEqual(roundTrip, patch)
+        XCTAssertEqual(roundTrip.zones[1].roundRobinIndex, 1)
+        XCTAssertTrue(roundTrip.zones[1].isReleaseTrigger == true)
+
+        release.loopStartFrame = 20
+        release.loopEndFrame = 100
+        XCTAssertFalse(StudioSamplerPatch(zones: [attack, release]).isValid)
+        release.loopStartFrame = nil
+        release.loopEndFrame = nil
+        release.roundRobinIndex = 8
+        XCTAssertFalse(StudioSamplerPatch(zones: [attack, release]).isValid)
+        release.roundRobinIndex = 1
+        XCTAssertTrue(StudioSamplerPatch(zones: [attack, release]).isValid)
+
+        let legacy = StudioSamplerPatch(sampleURL: url)
+        let old = try JSONDecoder().decode(
+            StudioSamplerPatch.self, from: JSONEncoder().encode(legacy)
+        )
+        XCTAssertNil(old.zones[0].isReleaseTrigger)
+        XCTAssertNil(old.zones[0].roundRobinIndex)
+    }
+
+    func testReleaseZonePlaysThroughNativeOfflineRendering() throws {
+        let attackFile = try makeSample()
+        let releaseFile = try makeSample()
+        defer {
+            try? FileManager.default.removeItem(at: attackFile)
+            try? FileManager.default.removeItem(at: releaseFile)
+        }
+        var attack = StudioSamplerZone(sampleURL: attackFile, rootNote: 69)
+        attack.roundRobinIndex = 0
+        var release = StudioSamplerZone(sampleURL: releaseFile, rootNote: 69)
+        release.isReleaseTrigger = true
+        release.roundRobinIndex = 0
+        let sampler = try StudioSamplerInstrument(
+            sampleRate: 44_100, patch: StudioSamplerPatch(zones: [attack, release])
+        )
+        let engine = AVAudioEngine()
+        engine.attach(sampler.audioNode)
+        engine.connect(sampler.audioNode, to: engine.mainMixerNode, format: sampler.format)
+        try engine.enableManualRenderingMode(
+            .offline, format: sampler.format, maximumFrameCount: 512
+        )
+        try engine.start()
+        defer { engine.stop(); engine.disableManualRenderingMode() }
+        let buffer = try XCTUnwrap(
+            AVAudioPCMBuffer(pcmFormat: sampler.format, frameCapacity: 512)
+        )
+        XCTAssertTrue(sampler.noteOn(69, velocity: 100, channel: 0))
+        XCTAssertEqual(try engine.renderOffline(512, to: buffer), .success)
+        XCTAssertTrue(sampler.noteOff(69, channel: 0))
+        // Attack release envelope is finished; the release sample should
+        // still be audible after 512 frames.
+        XCTAssertEqual(try engine.renderOffline(512, to: buffer), .success)
+        let audio = try XCTUnwrap(buffer.floatChannelData)
+        let peak = (128..<512).reduce(Float.zero) {
+            max($0, abs(audio[0][$1]))
+        }
+        XCTAssertGreaterThan(peak, 0.001)
+    }
+
     func testBadMappingDoesNotAttachAnInstrument() throws {
         var patch = StudioSamplerPatch(zones: [])
         XCTAssertFalse(patch.isValid)
