@@ -1,6 +1,53 @@
 import SwiftUI
 import Foundation
+import AppKit
 import DAWCore
+
+// Native mouse tracking is required for reliable MIDI note-off. SwiftUI's
+// zero-distance DragGesture can lose its end event when the view re-renders.
+private struct KeyboardMouseCapture: NSViewRepresentable {
+    var onPress: () -> Void
+    var onRelease: () -> Void
+
+    func makeNSView(context: Context) -> MouseKeyView {
+        let view = MouseKeyView()
+        view.onPress = onPress
+        view.onRelease = onRelease
+        return view
+    }
+
+    func updateNSView(_ view: MouseKeyView, context: Context) {
+        view.onPress = onPress
+        view.onRelease = onRelease
+    }
+
+    final class MouseKeyView: NSView {
+        var onPress: (() -> Void)?
+        var onRelease: (() -> Void)?
+        private var isPressed = false
+
+        override func mouseDown(with event: NSEvent) {
+            guard !isPressed else { return }
+            isPressed = true
+            onPress?()
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            release()
+        }
+
+        override func viewWillMove(toWindow newWindow: NSWindow?) {
+            if newWindow == nil { release() }
+            super.viewWillMove(toWindow: newWindow)
+        }
+
+        private func release() {
+            guard isPressed else { return }
+            isPressed = false
+            onRelease?()
+        }
+    }
+}
 
 // Read-only first pass. MIDI triggering is intentionally deferred until ARIA octave
 // numbering and patch identity have been verified on the user's installation.
@@ -149,25 +196,30 @@ struct ArticulationsWorkspaceView: View {
             }
             .frame(width: width, height: black ? height * 0.61 : height)
             .contentShape(Rectangle())
-            .gesture(DragGesture(minimumDistance: 0)
-                .onChanged { _ in
-                    let note = UInt8(pitch)
-                    guard pressedPitch != note else { return }
-                    if let previous = pressedPitch { viewModel.stopNotePreview(pitch: previous) }
-                    pressedPitch = note
-                    viewModel.playNotePreview(pitch: note)
-                    if canSendKeyswitch, let assignment = referenceKeyswitch(pitch) {
-                        selectedArticulationID = assignment.id
+            .overlay {
+                KeyboardMouseCapture(
+                    onPress: {
+                        let note = UInt8(pitch)
+                        guard pressedPitch != note else { return }
+                        if let previous = pressedPitch {
+                            viewModel.stopNotePreview(pitch: previous)
+                        }
+                        pressedPitch = note
+                        viewModel.playNotePreview(pitch: note)
+                        if canSendKeyswitch, let assignment = referenceKeyswitch(pitch) {
+                            selectedArticulationID = assignment.id
+                        }
+                    },
+                    onRelease: {
+                        // AppKit delivers mouseUp to the original key even when
+                        // the pointer has been dragged beyond its bounds.
+                        if let activePitch = pressedPitch {
+                            viewModel.stopNotePreview(pitch: activePitch)
+                            pressedPitch = nil
+                        }
                     }
-                }
-                .onEnded { _ in
-                    // A drag can leave this key before mouse-up; release the
-                    // active note rather than the key view's original pitch.
-                    if let activePitch = pressedPitch {
-                        viewModel.stopNotePreview(pitch: activePitch)
-                        pressedPitch = nil
-                    }
-                })
+                )
+            }
             .help(reference.map { "\($0.articulation) — \($0.note)" } ?? "MIDI note \(pitch)")
     }
 
