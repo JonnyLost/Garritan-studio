@@ -22,6 +22,7 @@ assert(patch.validate())
 let encoded = try JSONEncoder().encode(patch)
 let decoded = try JSONDecoder().decode(StudioSynthPatch.self, from: encoded)
 assert(decoded == patch)
+settings.lfo1Rate = 1
 assert(abs(StudioSynthModulationMath.signal(
     .lfo1, seconds: 0.25, settings: settings, envelope: 0, wheel: 0) - 1) < 0.0001)
 settings.lfo2Rate = 1
