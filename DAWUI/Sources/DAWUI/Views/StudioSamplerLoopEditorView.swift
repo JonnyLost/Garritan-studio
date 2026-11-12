@@ -122,7 +122,11 @@ public struct StudioSamplerLoopEditorView: View {
                 .disabled(isFindingLoop || frames < 512 || trimEnd - trimStart < 512)
                 Toggle("Sustain Loop", isOn: loopEnabled)
                     .toggleStyle(.switch)
-                    .disabled(frames < 8 || trimEnd - trimStart < 8)
+                    .disabled(zone.isReleaseTrigger == true ||
+                              frames < 8 || trimEnd - trimStart < 8)
+                .help(zone.isReleaseTrigger == true ?
+                      "Release-trigger samples are one-shots and cannot sustain-loop." :
+                      "Repeat the selected region while a note is held.")
             }
 
             if let loopSuggestionMessage {
