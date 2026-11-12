@@ -815,7 +815,7 @@ int32_t ss_add_stream_zone(SSSampler *sampler,
     if (!sampler || !attack_left || full_frames < 2 ||
         full_frames > kMaxStreamFrames || !validRegion || !validFade ||
         (!noLoop && !validLoop) || (release_trigger == 1 && !noLoop) ||
-        attack_frames < kPageFrames || attack_frames > kMaxAttackFrames ||
+        attack_frames < 2 || attack_frames > kMaxAttackFrames ||
         uint64_t(attack_frames) > uint64_t(full_frames) - playback_start_frame ||
         sampler->samples.size() >= kMaxZones || !validRate(source_sample_rate) ||
         root_note > 127 || lowest_note > highest_note || highest_note > 127 ||
