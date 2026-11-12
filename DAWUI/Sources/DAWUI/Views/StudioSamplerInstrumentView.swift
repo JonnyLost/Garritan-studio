@@ -45,12 +45,13 @@ public struct StudioSamplerInstrumentView: View {
                         case .choirAndTextures: choirAndTextures(patch)
                         case .general: generalInstrument(patch)
                         }
-                        HStack(spacing: 14) {
+                        HStack(alignment: .top, spacing: 14) {
                             controllerPanel
-                            sampleOverview(patch)
+                            envelopePanel
                         }
+                        sampleOverview(patch)
                         keyboard
-                        Text("Envelope editing, sustain loops, microphone groups, legato transitions and articulation switching are future sampler milestones.")
+                        Text("Sustain-loop markers are editable under Edit Mapping → Loop. Legato transitions, keyswitch articulations and mic groups remain future milestones.")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -282,6 +283,68 @@ public struct StudioSamplerInstrumentView: View {
             .disabled(!isLoaded)
             Text(caption).font(.caption2).foregroundStyle(.secondary)
         }
+    }
+
+    private enum ADSRField {
+        case attack, decay, sustain, release
+    }
+
+    private func envelopeValue(_ field: ADSRField) -> Double {
+        let envelope = patch?.envelope ?? StudioSamplerEnvelope()
+        switch field {
+        case .attack: return Double(envelope.attackSeconds)
+        case .decay: return Double(envelope.decaySeconds)
+        case .sustain: return Double(envelope.sustainLevel)
+        case .release: return Double(envelope.releaseSeconds)
+        }
+    }
+
+    private func setEnvelopeValue(_ field: ADSRField, value: Double) {
+        var envelope = patch?.envelope ?? StudioSamplerEnvelope()
+        switch field {
+        case .attack: envelope.attackSeconds = Float(value)
+        case .decay: envelope.decaySeconds = Float(value)
+        case .sustain: envelope.sustainLevel = Float(value)
+        case .release: envelope.releaseSeconds = Float(value)
+        }
+        _ = viewModel.setStudioSamplerEnvelope(envelope, for: trackID)
+    }
+
+    private func envelopeControl(_ label: String, field: ADSRField,
+                                 range: ClosedRange<Double>) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text(label).font(.caption.weight(.medium))
+                Spacer()
+                Text(field == .sustain
+                     ? String(format: "%.0f%%", envelopeValue(field) * 100)
+                     : String(format: "%.0f ms", envelopeValue(field) * 1000))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            Slider(value: Binding(
+                get: { envelopeValue(field) },
+                set: { setEnvelopeValue(field, value: $0) }
+            ), in: range)
+            .disabled(!isLoaded)
+        }
+    }
+
+    private var envelopePanel: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            Label("Amplitude Envelope (ADSR)", systemImage: "waveform.path")
+                .font(.subheadline.weight(.semibold))
+            envelopeControl("Attack", field: .attack, range: 0...5)
+            envelopeControl("Decay", field: .decay, range: 0...5)
+            envelopeControl("Sustain", field: .sustain, range: 0...1)
+            envelopeControl("Release", field: .release, range: 0...10)
+            Text("ADSR changes apply to newly played notes. Release works with mapped sustain loops.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 9))
     }
 
     private func sampleOverview(_ patch: StudioSamplerPatch) -> some View {
