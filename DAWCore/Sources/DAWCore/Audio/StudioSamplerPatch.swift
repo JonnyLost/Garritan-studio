@@ -17,6 +17,11 @@ public struct StudioSamplerZone: Codable, Equatable, Sendable {
     /// Source-frame playback bounds; nil means full source recording.
     public var trimStartFrame: UInt32?
     public var trimEndFrame: UInt32?
+    /// Nondestructive gain ramps at the playback-region boundaries.
+    public var fadeInFrames: UInt32?
+    public var fadeOutFrames: UInt32?
+    /// ID 0 is the original/default articulation; 1...15 select others.
+    public var articulationID: UInt8?
 
     public var hasSustainLoop: Bool {
         loopStartFrame != nil && loopEndFrame != nil
@@ -36,7 +41,8 @@ public struct StudioSamplerZone: Codable, Equatable, Sendable {
     public var isValid: Bool {
         rootNote <= 127 && lowestNote <= highestNote && highestNote <= 127 &&
         lowestVelocity >= 1 && lowestVelocity <= highestVelocity &&
-        highestVelocity <= 127 && !filePath.isEmpty && validLoop && validTrim
+        highestVelocity <= 127 && !filePath.isEmpty && validLoop && validTrim &&
+        (articulationID ?? 0) <= 15 && validFades
     }
 
     public var validTrim: Bool {
@@ -45,6 +51,16 @@ public struct StudioSamplerZone: Codable, Equatable, Sendable {
         }
         let start = trimStartFrame ?? 0
         return end >= 2 && start < end && end - start >= 2
+    }
+
+    public var validFades: Bool {
+        guard (fadeInFrames ?? 0) <= 10_000_000,
+              (fadeOutFrames ?? 0) <= 10_000_000 else { return false }
+        if let end = trimEndFrame {
+            let length = end - (trimStartFrame ?? 0)
+            return UInt64(fadeInFrames ?? 0) + UInt64(fadeOutFrames ?? 0) <= UInt64(length)
+        }
+        return true
     }
 
     public var validLoop: Bool {
@@ -59,6 +75,25 @@ public struct StudioSamplerZone: Codable, Equatable, Sendable {
     }
 
     public var sampleURL: URL { URL(fileURLWithPath: filePath) }
+}
+
+/// A keyswitch is consumed by the sampler on note-on and chooses which
+/// recorded sample group will respond to subsequent played notes.
+public struct StudioSamplerArticulation: Codable, Equatable, Sendable, Identifiable {
+    public var id: UInt8
+    public var name: String
+    public var keyswitchNote: UInt8
+
+    public init(id: UInt8, name: String, keyswitchNote: UInt8) {
+        self.id = id
+        self.name = name
+        self.keyswitchNote = keyswitchNote
+    }
+
+    public var isValid: Bool {
+        (1...15).contains(id) && keyswitchNote <= 127 &&
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && name.count <= 48
+    }
 }
 
 /// ADSR in seconds and linear sustain gain; optional on old projects.
@@ -119,6 +154,10 @@ public struct StudioSamplerPatch: Codable, Equatable, Sendable {
     public var expressionCC11: UInt8?
     /// Applied to new notes without sample data reload or graph rewiring.
     public var envelope: StudioSamplerEnvelope?
+    /// Optional user-defined articulation assignments; ID 0 is Default.
+    public var articulations: [StudioSamplerArticulation]?
+    /// Restored selection when opening the saved instrument.
+    public var selectedArticulationID: UInt8?
 
     public var presentation: StudioSamplerInstrumentKind { instrumentKind ?? .general }
 
@@ -135,6 +174,16 @@ public struct StudioSamplerPatch: Codable, Equatable, Sendable {
         zones.allSatisfy(\.isValid) &&
         (dynamicsCC1 == nil || dynamicsCC1! <= 127) &&
         (expressionCC11 == nil || expressionCC11! <= 127) &&
-        (envelope?.isValid ?? true)
+        (envelope?.isValid ?? true) && validArticulations
+    }
+
+    public var validArticulations: Bool {
+        let items = articulations ?? []
+        guard items.count <= 15 && items.allSatisfy(\.isValid) &&
+              Set(items.map(\.id)).count == items.count &&
+              Set(items.map(\.keyswitchNote)).count == items.count else { return false }
+        let ids = Set(items.map(\.id)).union([0])
+        return ids.contains(selectedArticulationID ?? 0) &&
+            zones.allSatisfy { ids.contains($0.articulationID ?? 0) }
     }
 }
