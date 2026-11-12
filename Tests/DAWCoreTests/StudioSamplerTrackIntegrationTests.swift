@@ -108,6 +108,69 @@ final class StudioSamplerTrackIntegrationTests: XCTestCase {
         XCTAssertThrowsError(try reader.readPage(startFrame: 10, requestedFrames: 0))
     }
 
+    func testLongSampleStreamsThroughNativeOfflineEngine() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("studio-stream-\(UUID().uuidString).wav")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let format = try XCTUnwrap(
+            AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2)
+        )
+        let frames: AVAudioFrameCount = 176_400 // four-second recording
+        let buffer = try XCTUnwrap(
+            AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames)
+        )
+        buffer.frameLength = frames
+        let pcm = try XCTUnwrap(buffer.floatChannelData)
+        for i in 0..<Int(frames) {
+            let sample = Float(sin(Double(i) * .pi * 2 * 220 / 44_100))
+            pcm[0][i] = sample
+            pcm[1][i] = -sample * 0.5
+        }
+        do {
+            let file = try AVAudioFile(
+                forWriting: url, settings: format.settings,
+                commonFormat: .pcmFormatFloat32, interleaved: false
+            )
+            try file.write(from: buffer)
+        }
+        let sampler = try StudioSamplerInstrument(
+            sampleRate: 44_100,
+            patch: StudioSamplerPatch(sampleURL: url, rootNote: 69)
+        )
+        XCTAssertTrue(sampler.isUsingDiskStreaming)
+
+        let engine = AVAudioEngine()
+        engine.attach(sampler.audioNode)
+        engine.connect(sampler.audioNode, to: engine.mainMixerNode, format: sampler.format)
+        try engine.enableManualRenderingMode(
+            .offline, format: sampler.format, maximumFrameCount: 512
+        )
+        try engine.start()
+        defer { engine.stop(); engine.disableManualRenderingMode() }
+        let output = try XCTUnwrap(
+            AVAudioPCMBuffer(pcmFormat: sampler.format, frameCapacity: 512)
+        )
+        XCTAssertTrue(sampler.noteOn(69, velocity: 127, channel: 0))
+        var latePeak: Float = 0
+        for block in 0..<150 {
+            XCTAssertEqual(try engine.renderOffline(512, to: output), .success)
+            if block >= 100 {
+                let channels = try XCTUnwrap(output.floatChannelData)
+                for frame in 0..<Int(output.frameLength) {
+                    XCTAssertTrue(channels[0][frame].isFinite)
+                    XCTAssertTrue(channels[1][frame].isFinite)
+                    latePeak = max(latePeak, abs(channels[0][frame]))
+                }
+            }
+            // The worker must be scheduled as an independent background
+            // producer. Offline mode otherwise races through PCM far faster
+            // than realtime playback could.
+            Thread.sleep(forTimeInterval: 0.003)
+        }
+        XCTAssertGreaterThan(latePeak, 0.01)
+        XCTAssertTrue(sampler.noteOff(69, channel: 0))
+    }
+
     func testSamplerPatchSurvivesSavingAndOldTrackDecodes() throws {
         var track = Track(name: "Sampled instrument", type: .instrument)
         let url = URL(fileURLWithPath: "/tmp/studio-sample.wav")
