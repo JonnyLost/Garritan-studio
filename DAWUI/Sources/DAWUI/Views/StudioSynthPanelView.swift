@@ -86,6 +86,9 @@ public struct StudioSynthPanelView: View {
                     Button("New FM Instrument") {
                         replace(with: StudioSynthPatch.individual(.fm))
                     }
+                    Button("New Wavetable Instrument") {
+                        replace(with: StudioSynthPatch.individual(.wavetable))
+                    }
                     Button("New Analog + FM Hybrid") {
                         replace(with: StudioSynthPatch())
                     }
@@ -95,6 +98,7 @@ public struct StudioSynthPanelView: View {
                 Menu {
                     Button("Analog Layer") { addLayer(.analog) }
                     Button("FM Layer") { addLayer(.fm) }
+                    Button("Wavetable Layer") { addLayer(.wavetable) }
                 } label: {
                     Label("Add Layer", systemImage: "plus")
                 }
@@ -141,6 +145,25 @@ public struct StudioSynthPanelView: View {
                                     } label: {
                                         Label("Analog Factory Sounds", systemImage: "square.stack.3d.up")
                                     }
+                                } else if layer.engine == .wavetable {
+                                    Menu {
+                                        ForEach(["Keys", "Lead", "Pad", "Bass", "Texture"],
+                                                id: \.self) { family in
+                                            Menu(family) {
+                                                ForEach(StudioWavetableFactoryLibrary.presets.filter {
+                                                    $0.family == family
+                                                }) { preset in
+                                                    Button(preset.name) {
+                                                        loadWavetablePreset(preset.patch,
+                                                                            layerID: layer.id)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } label: {
+                                        Label("Wavetable Factory Sounds",
+                                              systemImage: "waveform.path.ecg.rectangle")
+                                    }
                                 } else {
                                     Menu {
                                         ForEach(StudioFMFactoryLibrary.presets) { preset in
@@ -156,6 +179,8 @@ public struct StudioSynthPanelView: View {
                             Divider()
                             if layer.engine == .analog {
                                 analogEditor(layer)
+                            } else if layer.engine == .wavetable {
+                                wavetableEditor(layer)
                             } else {
                                 fmEditor(layer)
                             }
@@ -298,6 +323,15 @@ public struct StudioSynthPanelView: View {
         replace(with: changed)
     }
 
+    private func loadWavetablePreset(_ preset: StudioWavetablePatch, layerID: UUID) {
+        var changed = patch
+        guard let index = changed.layers.firstIndex(where: { $0.id == layerID }) else {
+            return
+        }
+        changed.layers[index].wavetablePatch = preset
+        replace(with: changed)
+    }
+
     private func loadFMPreset(_ preset: StudioFMPatch, layerID: UUID) {
         var changed = patch
         guard let index = changed.layers.firstIndex(where: { $0.id == layerID }) else {
@@ -305,6 +339,118 @@ public struct StudioSynthPanelView: View {
         }
         changed.layers[index].fmPatch = preset
         replace(with: changed)
+    }
+
+    private func wavetableValue(_ parameter: StudioWavetableParameter,
+                                layerID: UUID) -> Float {
+        currentLayer(layerID)?.wavetablePatch?.value(for: parameter)
+            ?? parameter.defaultValue
+    }
+
+    private func wavetableSlider(_ parameter: StudioWavetableParameter,
+                                 layerID: UUID) -> some View {
+        let value = wavetableValue(parameter, layerID: layerID)
+        return HStack(spacing: 8) {
+            Text(parameter.name)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 110, alignment: .leading)
+            Slider(value: Binding<Double>(
+                get: {
+                    parameter.position(for: wavetableValue(parameter, layerID: layerID))
+                },
+                set: { position in
+                    viewModel.setStudioSynthWavetableParameter(
+                        parameter, value: parameter.value(at: position),
+                        for: trackID, layerID: layerID)
+                }), in: 0...1)
+                .tint(.cyan)
+            Text(parameter.displayValue(value))
+                .font(.caption.monospacedDigit())
+                .frame(width: 74, alignment: .trailing)
+        }
+    }
+
+    private func wavetableEditor(_ layer: StudioSynthLayer) -> some View {
+        let harmonics = (0..<16).map {
+            wavetableValue(StudioWavetableParameter.partial($0)!, layerID: layer.id)
+        }
+        let position = wavetableValue(.osc1Position, layerID: layer.id)
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("WAVETABLE MORPH")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.cyan)
+                    Text("Six spectral frames · original bandlimited oscillators")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("Frame \(String(format: "%.2f", position)) / 5")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.cyan)
+            }
+
+            StudioWavetableWaveformPreview(position: Double(position),
+                                            harmonics: harmonics)
+                .frame(height: 245)
+                .background(Color.black.opacity(0.45),
+                            in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(Color.cyan.opacity(0.22)))
+                .accessibilityLabel("Wavetable waveform morph preview")
+
+            HStack(spacing: 6) {
+                ForEach(Array(["Sine", "Triangle", "Saw", "Square",
+                               "Glass", "Custom"].enumerated()), id: \.offset) { index, name in
+                    Button(name) {
+                        viewModel.setStudioSynthWavetableParameter(
+                            .osc1Position, value: Float(index),
+                            for: trackID, layerID: layer.id)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(abs(position-Float(index)) < 0.4 ? .cyan : .gray)
+                }
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible(minimum: 260)),
+                                GridItem(.flexible(minimum: 260))], spacing: 11) {
+                ForEach(StudioWavetableParameter.allCases.filter {
+                    $0.harmonicIndex == nil
+                }, id: \.rawValue) { parameter in
+                    wavetableSlider(parameter, layerID: layer.id)
+                }
+            }
+
+            Divider()
+
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("CUSTOM HARMONIC WAVEFORM")
+                        .font(.caption.weight(.bold))
+                    Text("Select frame Custom (position 5) to hear your 16-partial design. Edits update the active native sound and are saved in this project.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Use Custom") {
+                    viewModel.setStudioSynthWavetableParameter(
+                        .osc1Position, value: 5,
+                        for: trackID, layerID: layer.id)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.cyan)
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible(minimum: 280)),
+                                GridItem(.flexible(minimum: 280))], spacing: 9) {
+                ForEach(0..<16, id: \.self) { index in
+                    if let parameter = StudioWavetableParameter.partial(index) {
+                        wavetableSlider(parameter, layerID: layer.id)
+                    }
+                }
+            }
+        }
     }
 
     @ViewBuilder
