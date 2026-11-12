@@ -2487,7 +2487,7 @@ public enum TrackInstrument {
             // be mapped once the modular modulation UI is available.
             if controller == 120 || controller == 123 { synth.allNotesOff() }
         case .studioSampler(let sampler):
-            if controller == 120 || controller == 123 { sampler.allNotesOff() }
+            _ = sampler.controller(controller, value: value, channel: channel)
         }
     }
     
