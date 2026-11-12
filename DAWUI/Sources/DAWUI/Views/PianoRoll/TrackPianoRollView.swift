@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import DAWCore
 
 // MARK: - Scroll Offset Tracking
@@ -16,6 +17,86 @@ private struct HorizontalScrollOffsetKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
+    }
+}
+
+// Capture the actual piano-roll keyboard (the Canvas next to the note grid).
+// Keep mouse-down/up paired even if SwiftUI redraws the Canvas while pressed.
+private struct PianoRollKeyboardMouseCapture: NSViewRepresentable {
+    let highestPitch: Int
+    let keyHeight: CGFloat
+    let onPitchChanged: (Int?) -> Void
+    let onRelease: () -> Void
+
+    func makeNSView(context: Context) -> CaptureView {
+        CaptureView()
+    }
+
+    func updateNSView(_ view: CaptureView, context: Context) {
+        view.highestPitch = highestPitch
+        view.keyHeight = keyHeight
+        view.onPitchChanged = onPitchChanged
+        view.onRelease = onRelease
+    }
+
+    final class CaptureView: NSView {
+        override var isFlipped: Bool { true }
+
+        var highestPitch = 127
+        var keyHeight: CGFloat = 14
+        var onPitchChanged: ((Int?) -> Void)?
+        var onRelease: (() -> Void)?
+        private var isPressed = false
+        private var mouseUpMonitor: Any?
+
+        override func mouseDown(with event: NSEvent) {
+            guard !isPressed else { return }
+            isPressed = true
+            mouseUpMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] event in
+                self?.release()
+                return event
+            }
+            updatePitch(for: event)
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            if isPressed { updatePitch(for: event) }
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            release()
+        }
+
+        override func viewWillMove(toWindow newWindow: NSWindow?) {
+            if newWindow == nil { release() }
+            super.viewWillMove(toWindow: newWindow)
+        }
+
+        deinit {
+            if let mouseUpMonitor { NSEvent.removeMonitor(mouseUpMonitor) }
+        }
+
+        private func updatePitch(for event: NSEvent) {
+            let local = convert(event.locationInWindow, from: nil)
+            let note: Int?
+            if keyHeight > 0 && bounds.contains(local) {
+                let candidate = highestPitch - Int(local.y / keyHeight)
+                note = (0...127).contains(candidate) ? candidate : nil
+            } else {
+                note = nil
+            }
+            onPitchChanged?(note)
+        }
+
+        private func release() {
+            guard isPressed else { return }
+            isPressed = false
+            if let mouseUpMonitor {
+                NSEvent.removeMonitor(mouseUpMonitor)
+                self.mouseUpMonitor = nil
+            }
+            onRelease?()
+        }
     }
 }
 
@@ -298,6 +379,13 @@ public struct TrackPianoRollView: View {
         .focusable()
         .focused($isViewFocused)
         .focusEffectDisabled()
+        .onDisappear {
+            releaseCanvasPreview()
+            stopDragAudition()
+            if let pitch = pencilPreviewPitch, pencilPreviewStart != nil {
+                viewModel.stopNotePreview(pitch: UInt8(max(0, min(127, pitch))), on: trackID)
+            }
+        }
         .onKeyPress { keyPress in
             // CMD + Arrow keys for zoom
             if keyPress.modifiers.contains(.command) {
@@ -807,7 +895,7 @@ public struct TrackPianoRollView: View {
                         pencilPreviewStart = snapBeat(beat)
                         pencilPreviewPitch = pitch
                         pencilPreviewDuration = snapMode.division > 0 ? snapMode.division : 0.25
-                        viewModel.playNotePreview(pitch: UInt8(pitch))
+                        viewModel.playNotePreview(pitch: UInt8(max(0, min(127, pitch))), on: trackID)
                     } else if let start = pencilPreviewStart {
                         pencilPreviewDuration = max(snapMode.division > 0 ? snapMode.division : 0.25, snapBeat(beat) - start)
                     }
@@ -861,11 +949,8 @@ public struct TrackPianoRollView: View {
                         currentDragBeatDelta = beatDelta
                         currentDragPitchDelta = pitchDelta
                         
-                        // Audition pitch change
-                        if pitch != lastAuditionedPitch {
-                            viewModel.playNotePreview(pitch: UInt8(max(0, min(127, pitch))))
-                            lastAuditionedPitch = pitch
-                        }
+                        // Release the prior pitch before auditioning a new one.
+                        auditionDragPitch(pitch)
                     } else if isMarqueeSelecting {
                         let origin = CGPoint(
                             x: min(value.startLocation.x, value.location.x),
@@ -894,6 +979,9 @@ public struct TrackPianoRollView: View {
                     if let start = pencilPreviewStart, let notePitch = pencilPreviewPitch {
                         createNote(at: start, pitch: notePitch, duration: pencilPreviewDuration)
                     }
+                    if let pitch = pencilPreviewPitch {
+                        viewModel.stopNotePreview(pitch: UInt8(max(0, min(127, pitch))), on: trackID)
+                    }
                     pencilPreviewStart = nil
                     pencilPreviewPitch = nil
                     pencilPreviewDuration = 0
@@ -904,7 +992,7 @@ public struct TrackPianoRollView: View {
                         commitNotesMove(beatDelta: currentDragBeatDelta, pitchDelta: currentDragPitchDelta)
                         draggedNoteID = nil
                         dragStartPositions.removeAll()
-                        lastAuditionedPitch = nil
+                        stopDragAudition()
                         currentDragBeatDelta = 0
                         currentDragPitchDelta = 0
                     } else if isMarqueeSelecting, let rect = selectionRect {
@@ -931,8 +1019,8 @@ public struct TrackPianoRollView: View {
                     AdvancedPianoKeyView(
                         pitch: UInt8(pitch),
                         noteHeight: noteHeight,
-                        onPress: { viewModel.playNotePreview(pitch: UInt8(pitch)) },
-                        onRelease: { viewModel.stopNotePreview(pitch: UInt8(pitch)) }
+                        onPress: { viewModel.playNotePreview(pitch: UInt8(pitch), on: trackID) },
+                        onRelease: { viewModel.stopNotePreview(pitch: UInt8(pitch), on: trackID) }
                     )
                 }
             }
@@ -953,7 +1041,9 @@ public struct TrackPianoRollView: View {
                 // Key background (white keys = white, black keys = black)
                 let keyRect = CGRect(x: 0, y: y, width: size.width, height: Double(noteHeight))
                 
-                if isBlackKey {
+                if pressedCanvasPitch == pitch {
+                    context.fill(Path(keyRect), with: .color(Color.accentColor))
+                } else if isBlackKey {
                     context.fill(Path(keyRect), with: .color(Color.black))
                 } else {
                     context.fill(Path(keyRect), with: .color(Color.white.opacity(0.85)))
@@ -976,31 +1066,49 @@ public struct TrackPianoRollView: View {
                 }
             }
         }
-        .contentShape(Rectangle())
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { value in
-                    let pitch = pitchFromY(value.location.y)
-                    let validPitch = (0...127).contains(pitch) ? pitch : nil
-                    guard validPitch != pressedCanvasPitch else { return }
+        .overlay {
+            PianoRollKeyboardMouseCapture(
+                highestPitch: pitchOffset,
+                keyHeight: noteHeight,
+                onPitchChanged: { note in
+                    guard note != pressedCanvasPitch else { return }
                     if let previous = pressedCanvasPitch {
-                        viewModel.stopNotePreview(pitch: UInt8(previous))
+                        viewModel.stopNotePreview(pitch: UInt8(previous), on: trackID)
                     }
-                    pressedCanvasPitch = validPitch
-                    if let current = validPitch {
-                        viewModel.playNotePreview(pitch: UInt8(current))
+                    pressedCanvasPitch = note
+                    if let note {
+                        viewModel.playNotePreview(pitch: UInt8(note), on: trackID)
                     }
+                },
+                onRelease: {
+                    releaseCanvasPreview()
                 }
-                .onEnded { _ in
-                    if let pitch = pressedCanvasPitch {
-                        viewModel.stopNotePreview(pitch: UInt8(pitch))
-                    }
-                    pressedCanvasPitch = nil
-                }
-        )
+            )
+        }
     }
-    
-    
+
+    private func releaseCanvasPreview() {
+        if let pitch = pressedCanvasPitch {
+            viewModel.stopNotePreview(pitch: UInt8(pitch), on: trackID)
+            pressedCanvasPitch = nil
+        }
+    }
+
+    private func auditionDragPitch(_ rawPitch: Int) {
+        let pitch = max(0, min(127, rawPitch))
+        guard lastAuditionedPitch != pitch else { return }
+        stopDragAudition()
+        lastAuditionedPitch = pitch
+        viewModel.playNotePreview(pitch: UInt8(pitch), on: trackID)
+    }
+
+    private func stopDragAudition() {
+        if let previous = lastAuditionedPitch {
+            viewModel.stopNotePreview(pitch: UInt8(max(0, min(127, previous))), on: trackID)
+            lastAuditionedPitch = nil
+        }
+    }
+
     // MARK: - Helper Functions
     
     private func pitchFromY(_ y: CGFloat) -> Int {
@@ -1252,10 +1360,7 @@ public struct TrackPianoRollView: View {
         switch dragMode {
         case .move:
             let newPitch = max(0, min(127, dragStartPitch + pitchDelta))
-            if newPitch != lastAuditionedPitch {
-                viewModel.playNotePreview(pitch: UInt8(newPitch))
-                lastAuditionedPitch = newPitch
-            }
+            auditionDragPitch(newPitch)
             
             // Update notes in track
             for clipIndex in 0..<track.clips.count {
@@ -1332,7 +1437,7 @@ public struct TrackPianoRollView: View {
         draggedNoteID = nil
         dragMode = .none
         dragStartPositions.removeAll()
-        lastAuditionedPitch = nil
+        stopDragAudition()
         isCopyingNotes = false
     }
     
