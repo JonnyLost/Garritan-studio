@@ -59,6 +59,13 @@ public struct StudioSynthPanelView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(!connected)
                 Button {
+                    viewModel.playbackEngine.silenceAllNotes()
+                } label: {
+                    Label("Silence Notes", systemImage: "speaker.slash.fill")
+                }
+                .buttonStyle(.bordered)
+                .help("Emergency stop for held MIDI notes on all instruments")
+                Button {
                     dismiss()
                 } label: {
                     Label("Close", systemImage: "xmark")
