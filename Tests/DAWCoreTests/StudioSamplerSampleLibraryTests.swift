@@ -148,6 +148,30 @@ final class StudioSamplerSampleLibraryTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: actual), Data([3, 2, 1]))
     }
 
+    func testReopeningLegacyProjectPreservesUnresolvedSampleMapping() async throws {
+        let root = try temporaryFolder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let path = root.appendingPathComponent("LegacyProject.json")
+        var project = Project(name: "Missing sample recovery")
+        var track = Track(name: "Native Strings", type: .instrument)
+        let patch = StudioSamplerPatch(
+            sampleURL: URL(fileURLWithPath: "/a/removed/drive/violin.wav")
+        )
+        track.studioSamplerPatch = patch
+        project.addTrack(track)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(project).write(to: path)
+
+        // A missing sample must not cause the user's entire composition to
+        // disappear. Only instrument attachment may fail until relinked.
+        let manager = ProjectFileManager()
+        let reopened = try await manager.load(from: path)
+        XCTAssertEqual(reopened.name, project.name)
+        XCTAssertEqual(reopened.tracks.count, 1)
+        XCTAssertEqual(reopened.tracks[0].studioSamplerPatch, patch)
+    }
+
     func testOrdinaryExternalReferenceRemainsSupported() throws {
         let root = try temporaryFolder()
         defer { try? FileManager.default.removeItem(at: root) }
