@@ -182,6 +182,65 @@ int main() {
     assert(trimmedL[380] > .05f);
     ss_destroy(trimLoop);
 
+    // Source-relative fades operate within the trimmed playback region
+    // rather than changing sample memory or the global ADSR settings.
+    SSSampler *fades = ss_create(44100, 8);
+    assert(fades);
+    std::vector<float> fadeWave(2000, .6f);
+    assert(!ss_add_zone_with_options(fades, 60, 60, 60, 1, 127,
+        44100, fadeWave.data(), nullptr, 2000, 100, 1100,
+        0, 0, 0, 800, 400, 0)); // fade sum exceeds trim length
+    assert(ss_add_zone_with_options(fades, 60, 60, 60, 1, 127,
+        44100, fadeWave.data(), nullptr, 2000, 100, 1100,
+        0, 0, 0, 256, 256, 0));
+    assert(ss_note_on(fades, 60, 127, 0));
+    std::vector<float> fadeOut(1500), fadeOther(1500);
+    ss_render(fades, fadeOut.data(), fadeOther.data(), 1500);
+    assert(fadeOut[10] < fadeOut[220]);
+    assert(fadeOut[600] > fadeOut[945]);
+    assert(fadeOut[1200] == 0.f);
+    assert(std::abs(fadeOut[600] - fadeOther[600]) < .00001f);
+    ss_destroy(fades);
+
+    // Active articulations are per MIDI channel and obey explicit keyswitch
+    // priority. A keyswitch never plays sample audio itself.
+    SSSampler *artic = ss_create(44100, 8);
+    assert(artic);
+    std::vector<float> held(4096, .8f);
+    std::vector<float> shortHit(4096, -.8f);
+    assert(ss_add_zone_with_options(artic, 60, 60, 60, 1, 127,
+        44100, held.data(), nullptr, 4096, 0, 4096,
+        0, 0, 0, 0, 0, 0));
+    assert(ss_add_zone_with_options(artic, 60, 60, 60, 1, 127,
+        44100, shortHit.data(), nullptr, 4096, 0, 4096,
+        0, 0, 0, 0, 0, 1));
+    uint8_t keys[] = {24};
+    uint8_t articulationIDs[] = {1};
+    assert(!ss_configure_keyswitches(artic, keys, articulationIDs, 16));
+    assert(ss_configure_keyswitches(artic, keys, articulationIDs, 1));
+    assert(!ss_select_articulation(artic, 16, 0));
+    std::vector<float> output(512), other(512);
+    assert(ss_note_on(artic, 24, 127, 0));
+    ss_render(artic, output.data(), other.data(), 512);
+    for (float value : output) assert(value == 0.f);
+    assert(ss_note_on(artic, 60, 127, 0));
+    ss_render(artic, output.data(), other.data(), 512);
+    assert(output[400] < -.10f);
+    assert(ss_note_off(artic, 60, 0));
+    ss_render(artic, output.data(), other.data(), 512);
+    assert(ss_select_articulation(artic, 0, 0));
+    assert(ss_note_on(artic, 60, 127, 0));
+    ss_render(artic, output.data(), other.data(), 512);
+    assert(output[400] > .10f);
+    // Channel 1 stays on its initial default articulation even after a
+    // keyswitch on channel 0; changing channels does not mutate samples.
+    assert(ss_note_off(artic, 60, 0));
+    ss_render(artic, output.data(), other.data(), 512);
+    assert(ss_note_on(artic, 60, 127, 1));
+    ss_render(artic, output.data(), other.data(), 512);
+    assert(output[400] > .10f);
+    ss_destroy(artic);
+
     ss_destroy(sampler);
     std::printf("Studio Sampler DSP smoke test passed (%.1f Hz)\n", frequency);
     return 0;
