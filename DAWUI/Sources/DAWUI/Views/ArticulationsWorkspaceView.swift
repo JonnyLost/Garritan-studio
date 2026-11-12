@@ -112,6 +112,7 @@ struct ArticulationsWorkspaceView: View {
     @State private var selectedPatchName: String?
     @State private var keyboardOctave = 3
     @State private var pressedPitch: UInt8?
+    @State private var pressedPreviewTrackID: TrackID?
 
     private var selectedArticulationID: String? {
         get {
@@ -182,8 +183,9 @@ struct ArticulationsWorkspaceView: View {
         guard canSendKeyswitch, let pitch = referencePitch(assignment.note) else { return }
         selectedArticulationID = assignment.id
         let note = UInt8(pitch)
-        viewModel.playNotePreview(pitch: note)
-        viewModel.stopNotePreview(pitch: note)
+        let target = viewModel.selectedTrackID
+        viewModel.playNotePreview(pitch: note, on: target)
+        viewModel.stopNotePreview(pitch: note, on: target)
     }
 
     private func referenceKeyswitch(_ pitch: Int) -> GPOKeyswitchCatalog.Assignment? {
@@ -220,10 +222,11 @@ struct ArticulationsWorkspaceView: View {
                         let note = UInt8(pitch)
                         guard pressedPitch != note else { return }
                         if let previous = pressedPitch {
-                            viewModel.stopNotePreview(pitch: previous)
+                            viewModel.stopNotePreview(pitch: previous, on: pressedPreviewTrackID)
                         }
+                        pressedPreviewTrackID = viewModel.selectedTrackID
                         pressedPitch = note
-                        viewModel.playNotePreview(pitch: note)
+                        viewModel.playNotePreview(pitch: note, on: pressedPreviewTrackID)
                         if canSendKeyswitch, let assignment = referenceKeyswitch(pitch) {
                             selectedArticulationID = assignment.id
                         }
@@ -232,8 +235,9 @@ struct ArticulationsWorkspaceView: View {
                         // AppKit delivers mouseUp to the original key even when
                         // the pointer has been dragged beyond its bounds.
                         if let activePitch = pressedPitch {
-                            viewModel.stopNotePreview(pitch: activePitch)
+                            viewModel.stopNotePreview(pitch: activePitch, on: pressedPreviewTrackID)
                             pressedPitch = nil
+                            pressedPreviewTrackID = nil
                         }
                     }
                 )
@@ -655,13 +659,17 @@ struct ArticulationsWorkspaceView: View {
         .tint(palette.accent)
         .onDisappear {
             if let activePitch = pressedPitch {
-                viewModel.stopNotePreview(pitch: activePitch)
+                viewModel.stopNotePreview(pitch: activePitch, on: pressedPreviewTrackID)
                 pressedPitch = nil
+                pressedPreviewTrackID = nil
             }
         }
         .onChange(of: viewModel.selectedTrackID) { _, _ in
-            if let pressedPitch { viewModel.stopNotePreview(pitch: pressedPitch) }
+            if let pressedPitch {
+                viewModel.stopNotePreview(pitch: pressedPitch, on: pressedPreviewTrackID)
+            }
             pressedPitch = nil
+            pressedPreviewTrackID = nil
             selectedPatchName = nil
             selectedArticulationID = nil
         }
