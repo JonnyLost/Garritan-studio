@@ -427,12 +427,15 @@ public struct StudioSamplerMapView: View {
             patch.envelope = draft.envelope
             patch.articulations = draft.articulations
             patch.selectedArticulationID = draft.selectedArticulationID
-            // Re-map key/velocity assignments without throwing away sustain
-            // loops on the same imported recordings.
+            // Preserve distinct edits when the same imported recording
+            // appears in multiple articulations or velocity zones. Consume
+            // each matching old zone only once during automatic remapping.
+            var unmatched = draft.zones
             for index in patch.zones.indices {
-                if let oldZone = draft.zones.first(where: {
+                if let previous = unmatched.firstIndex(where: {
                     $0.filePath == patch.zones[index].filePath
                 }) {
+                    let oldZone = unmatched.remove(at: previous)
                     patch.zones[index].loopStartFrame = oldZone.loopStartFrame
                     patch.zones[index].loopEndFrame = oldZone.loopEndFrame
                     patch.zones[index].loopCrossfadeFrames = oldZone.loopCrossfadeFrames
