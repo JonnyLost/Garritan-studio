@@ -161,8 +161,12 @@ struct ArticulationsWorkspaceView: View {
                     }
                 }
                 .onEnded { _ in
-                    viewModel.stopNotePreview(pitch: UInt8(pitch))
-                    if pressedPitch == UInt8(pitch) { pressedPitch = nil }
+                    // A drag can leave this key before mouse-up; release the
+                    // active note rather than the key view's original pitch.
+                    if let activePitch = pressedPitch {
+                        viewModel.stopNotePreview(pitch: activePitch)
+                        pressedPitch = nil
+                    }
                 })
             .help(reference.map { "\($0.articulation) — \($0.note)" } ?? "MIDI note \(pitch)")
     }
@@ -579,6 +583,12 @@ struct ArticulationsWorkspaceView: View {
         }
         .background(palette.canvas)
         .tint(palette.accent)
+        .onDisappear {
+            if let activePitch = pressedPitch {
+                viewModel.stopNotePreview(pitch: activePitch)
+                pressedPitch = nil
+            }
+        }
         .onChange(of: viewModel.selectedTrackID) { _, _ in
             if let pressedPitch { viewModel.stopNotePreview(pitch: pressedPitch) }
             pressedPitch = nil
