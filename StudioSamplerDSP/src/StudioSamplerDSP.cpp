@@ -451,7 +451,7 @@ int32_t ss_configure_keyswitches(SSSampler *sampler,
     for (int32_t i = 0; i < count; ++i) {
         const uint8_t id = articulation_ids[i];
         const uint8_t note = notes[i];
-        if (id < 1 || id > 15 || usedIDs[id] || prepared[note] != 255) return 0;
+        if (id > 15 || usedIDs[id] || prepared[note] != 255) return 0;
         usedIDs[id] = true;
         prepared[note] = id;
     }
