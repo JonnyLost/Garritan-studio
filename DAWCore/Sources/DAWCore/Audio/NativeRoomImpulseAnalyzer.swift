@@ -34,7 +34,16 @@ public enum NativeRoomImpulseAnalyzer {
         var right = left
         left[0] = 1
         right[0] = 1
-        let processor = NativeRoomReverbProcessor(sampleRate: sampleRate, profile: room)
+        // Mirror the actual native hall: one position-aware track ER path
+        // summed with the shared FDN (which must NOT duplicate those taps).
+        var earlyLeft = left
+        var earlyRight = right
+        let late = NativeRoomReverbProcessor(sampleRate: sampleRate,
+                                             profiles: [room],
+                                             includeEarlyReflections: false)
+        let early = NativeStageEarlyReflectionProcessor(sampleRate: sampleRate,
+                                                        profiles: [room])
+        early.update(roomIndex: 0, pan: 0, zone: 2)
         left.withUnsafeMutableBufferPointer { lb in
             right.withUnsafeMutableBufferPointer { rb in
                 guard let l = lb.baseAddress, let r = rb.baseAddress else { return }
@@ -42,11 +51,28 @@ public enum NativeRoomImpulseAnalyzer {
                 var offset = 0
                 while offset < frames {
                     let count = min(chunk, frames - offset)
-                    processor.process(left: l.advanced(by: offset),
-                                      right: r.advanced(by: offset), frameCount: count)
+                    late.process(left: l.advanced(by: offset),
+                                 right: r.advanced(by: offset), frameCount: count)
                     offset += count
                 }
             }
+        }
+        earlyLeft.withUnsafeMutableBufferPointer { lb in
+            earlyRight.withUnsafeMutableBufferPointer { rb in
+                guard let l = lb.baseAddress, let r = rb.baseAddress else { return }
+                let chunk = 512
+                var offset = 0
+                while offset < frames {
+                    let count = min(chunk, frames - offset)
+                    early.process(left: l.advanced(by: offset),
+                                  right: r.advanced(by: offset), frameCount: count)
+                    offset += count
+                }
+            }
+        }
+        for index in left.indices {
+            left[index] += earlyLeft[index]
+            right[index] += earlyRight[index]
         }
         return (left, right)
     }
