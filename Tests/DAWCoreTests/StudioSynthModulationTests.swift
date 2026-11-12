@@ -111,7 +111,10 @@ final class StudioSynthModulationTests: XCTestCase {
         adsr.trigger()
         XCTAssertEqual(adsr.advance(seconds: 0.08, settings: settings), 1,
                        accuracy: 0.001)
-        XCTAssertEqual(adsr.advance(seconds: 0.3, settings: settings), 0.7,
+        // The control worker caps each time step at 200 ms to avoid a
+        // long scheduler stall jumping an envelope multiple stages.
+        _ = adsr.advance(seconds: 0.15, settings: settings)
+        XCTAssertEqual(adsr.advance(seconds: 0.15, settings: settings), 0.7,
                        accuracy: 0.001)
         adsr.release()
         XCTAssertGreaterThan(adsr.advance(seconds: 0.2, settings: settings), 0)
