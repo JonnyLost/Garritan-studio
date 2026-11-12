@@ -500,6 +500,49 @@ public final class ProjectViewModel: ObservableObject {
         updateTrack(track, description: "Load Studio Sampler")
     }
 
+    /// Choose a presentation layout without rebuilding or replacing samples.
+    /// All three instrument faces use the same native voice engine.
+    public func setStudioSamplerInstrumentKind(_ kind: StudioSamplerInstrumentKind,
+                                                for trackID: TrackID) {
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              var patch = project.tracks[index].studioSamplerPatch else { return }
+        patch.instrumentKind = kind
+        project.tracks[index].studioSamplerPatch = patch
+    }
+
+    /// Switch between discrete velocity selection and live CC1 layer morphing.
+    /// The sampler applies the change to newly triggered notes on the render
+    /// thread; the change never reloads samples or interrupts other tracks.
+    @discardableResult
+    public func setStudioSamplerCC1Crossfade(_ enabled: Bool,
+                                              for trackID: TrackID) -> Bool {
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              var patch = project.tracks[index].studioSamplerPatch,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSampler(let sampler) = instrument,
+              sampler.setCC1Crossfade(enabled) else { return false }
+        patch.cc1Crossfade = enabled
+        project.tracks[index].studioSamplerPatch = patch
+        return true
+    }
+
+    /// Live controller changes go through the same serialized command path
+    /// as incoming MIDI. Persist values for the next project load.
+    @discardableResult
+    public func setStudioSamplerController(_ controller: UInt8, value: UInt8,
+                                            for trackID: TrackID) -> Bool {
+        guard controller == 1 || controller == 11,
+              let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              var patch = project.tracks[index].studioSamplerPatch,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSampler(let sampler) = instrument,
+              sampler.controller(controller, value: value, channel: 0) else { return false }
+        if controller == 1 { patch.dynamicsCC1 = value }
+        else { patch.expressionCC11 = value }
+        project.tracks[index].studioSamplerPatch = patch
+        return true
+    }
+
     /// Read a parameter from project state, or the native engine default.
     public func studioAnalogValue(_ parameter: StudioAnalogParameter, for trackID: TrackID) -> Float {
         project.track(withID: trackID)?.studioAnalogPatch?.value(for: parameter)
