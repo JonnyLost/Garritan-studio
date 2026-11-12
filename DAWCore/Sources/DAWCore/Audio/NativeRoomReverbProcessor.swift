@@ -109,7 +109,8 @@ public final class NativeRoomReverbProcessor {
     }
 
     /// Profiles and all delay/filter coefficients are prepared off the audio thread.
-    public init(sampleRate: Double, profiles: [StudioRoomAcousticProfile]) {
+    public init(sampleRate: Double, profiles: [StudioRoomAcousticProfile],
+                includeEarlyReflections: Bool = true) {
         let rate = sampleRate.isFinite && (8_000...192_000).contains(sampleRate)
             ? sampleRate : 48_000
         let selected = profiles.isEmpty ? [StudioRoomAcousticProfile.abbeyRoadStudioOne] : profiles
@@ -118,7 +119,10 @@ public final class NativeRoomReverbProcessor {
                       sampleRate: rate, profiles: selected)
         }
         presetReflections = selected.map { profile in
-            profile.earlyReflections.prefix(32).compactMap { tap -> ReflectionTap? in
+            // In the AVAudioEngine, a distinct per-track sidechain owns
+            // source-positioned early reflections. Prevent a doubled ER field.
+            (includeEarlyReflections ? profile.earlyReflections : []).prefix(32)
+                .compactMap { tap -> ReflectionTap? in
                 guard tap.delayMilliseconds.isFinite, tap.delayMilliseconds >= 0,
                       tap.leftGain.isFinite, tap.rightGain.isFinite else { return nil }
                 let offset = Int((Double(min(200, tap.delayMilliseconds)) * rate / 1000).rounded())
