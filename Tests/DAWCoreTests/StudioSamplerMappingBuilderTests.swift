@@ -47,6 +47,36 @@ final class StudioSamplerMappingBuilderTests: XCTestCase {
         XCTAssertEqual(patch.zones.map(\.highestNote), [60, 127])
     }
 
+    func testRoundRobinImportsShareVelocityBandsAndSeparateReleaseSamples() throws {
+        let urls = [
+            file("Violin_C4_pp_rr1.wav"), file("Violin_C4_pp_rr2.wav"),
+            file("Violin_C4_ff_rr1.wav"), file("Violin_C4_ff_rr2.wav"),
+            file("Violin_C4_release_rr1.wav"), file("Violin_C4_release_rr2.wav")
+        ]
+        let patch = try StudioSamplerMappingBuilder.makePatch(urls: urls)
+        XCTAssertTrue(patch.isValid)
+        XCTAssertEqual(patch.zones.count, 6)
+        let attacks = patch.zones.filter { $0.isReleaseTrigger != true }
+        let releases = patch.zones.filter { $0.isReleaseTrigger == true }
+        XCTAssertEqual(attacks.count, 4)
+        XCTAssertEqual(releases.count, 2)
+        XCTAssertEqual(attacks.map(\.lowestVelocity), [1, 1, 64, 64])
+        XCTAssertEqual(attacks.map(\.highestVelocity), [63, 63, 127, 127])
+        XCTAssertEqual(attacks.map(\.roundRobinIndex), [0, 1, 0, 1])
+        XCTAssertEqual(releases.map(\.lowestVelocity), [1, 1])
+        XCTAssertEqual(releases.map(\.highestVelocity), [127, 127])
+        XCTAssertEqual(releases.map(\.roundRobinIndex), [0, 1])
+    }
+
+    func testRoundRobinFilenameHintsDoNotChangeOrdinaryVelocityMapping() {
+        XCTAssertEqual(StudioSamplerMappingBuilder.roundRobinHint(in: file("C4_rr1.wav")), 0)
+        XCTAssertEqual(StudioSamplerMappingBuilder.roundRobinHint(in: file("C4_take8.wav")), 7)
+        XCTAssertNil(StudioSamplerMappingBuilder.roundRobinHint(in: file("C4_rr9.wav")))
+        XCTAssertNil(StudioSamplerMappingBuilder.roundRobinHint(in: file("C4.wav")))
+        XCTAssertTrue(StudioSamplerMappingBuilder.releaseHint(in: file("Violin_C4_rel_rr2.wav")))
+        XCTAssertFalse(StudioSamplerMappingBuilder.releaseHint(in: file("Violin_C4_sus_rr2.wav")))
+    }
+
     func testOversizedImportRejected() {
         XCTAssertThrowsError(try StudioSamplerMappingBuilder.makePatch(urls: []))
         XCTAssertThrowsError(
