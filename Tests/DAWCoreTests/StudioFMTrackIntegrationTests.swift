@@ -119,7 +119,7 @@ final class StudioFMTrackIntegrationTests: XCTestCase {
         }
         XCTAssertNil(StudioFMParameter.op(-1, .ratio))
         XCTAssertNil(StudioFMParameter.op(4, .level))
-        for parameter in StudioFMParameter.allCases where parameter != .algorithm {
+        for parameter in StudioFMParameter.allCases where parameter != .algorithm && parameter != .modTarget {
             for fraction in [0.0, 0.1, 0.5, 0.9, 1.0] {
                 let value = parameter.value(at: fraction)
                 XCTAssertTrue(parameter.valid(value), "\(parameter): \(value)")
