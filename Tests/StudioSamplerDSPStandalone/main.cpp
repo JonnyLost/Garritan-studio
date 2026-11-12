@@ -306,6 +306,73 @@ int main() {
     assert(alternatedL[300] == 0.f);
     ss_destroy(panic);
 
+    // Overlapping repeated note-ons must have distinct MIDI lifetimes,
+    // even with different round-robin takes and release recordings.
+    SSSampler *overlap = ss_create(44100, 8);
+    assert(overlap);
+    std::vector<float> overA(8192, .8f), overB(8192, -.8f);
+    std::vector<float> offA(8192, .2f), offB(8192, -.2f);
+    auto addOverlap = [&](const std::vector<float>& pcm, uint8_t rr,
+                          uint8_t isRelease) {
+        return ss_add_zone_with_variation(overlap, 60, 60, 60, 1, 127,
+            44100, pcm.data(), nullptr, 8192, 0, 8192, 0, 0, 0,
+            0, 0, 0, rr, isRelease);
+    };
+    assert(addOverlap(overA, 0, 0));
+    assert(addOverlap(overB, 1, 0));
+    assert(addOverlap(offA, 0, 1));
+    assert(addOverlap(offB, 1, 1));
+    std::vector<float> overlapL(512), overlapR(512);
+    assert(ss_note_on(overlap, 60, 127, 0)); // positive RR0
+    ss_render(overlap, overlapL.data(), overlapR.data(), 512);
+    assert(ss_note_on(overlap, 60, 80, 0)); // negative RR1
+    ss_render(overlap, overlapL.data(), overlapR.data(), 512);
+    assert(overlapL[400] > 0.f); // both attacks are sounding
+    assert(ss_note_off(overlap, 60, 0)); // FIFO: release positive RR0 only
+    ss_render(overlap, overlapL.data(), overlapR.data(), 512);
+    assert(overlapL[400] < -.02f); // second attack still held
+    assert(ss_note_off(overlap, 60, 0)); // release negative RR1
+    ss_render(overlap, overlapL.data(), overlapR.data(), 512);
+    assert(overlapL[400] < -.02f);
+    assert(ss_note_off(overlap, 60, 0)); // stray off, no third tail
+    ss_render(overlap, overlapL.data(), overlapR.data(), 512);
+    ss_destroy(overlap);
+
+    // At full polyphony, the stolen voice continues a 64-sample fade
+    // while the new one fades in. Hard cuts create a sample discontinuity.
+    SSSampler *stealing = ss_create(44100, 1);
+    assert(stealing);
+    std::vector<float> pos(4000, .8f), neg(4000, -.8f);
+    assert(ss_add_zone(stealing, 60, 60, 60, 1, 127,
+                       44100, pos.data(), nullptr, 4000));
+    assert(ss_add_zone(stealing, 61, 61, 61, 1, 127,
+                       44100, neg.data(), nullptr, 4000));
+    std::vector<float> stealL(512), stealR(512);
+    assert(ss_note_on(stealing, 60, 127, 0));
+    ss_render(stealing, stealL.data(), stealR.data(), 512);
+    const float beforeSteal = stealL[511];
+    assert(beforeSteal > .1f);
+    assert(ss_note_on(stealing, 61, 127, 0));
+    ss_render(stealing, stealL.data(), stealR.data(), 512);
+    assert(std::abs(stealL[0] - beforeSteal) < .02f);
+    for (int i = 1; i < 100; ++i)
+        assert(std::abs(stealL[i] - stealL[i - 1]) < .04f);
+    assert(stealL[200] < -.1f);
+    ss_destroy(stealing);
+
+    // Bounded eight-deep note bookkeeping must tolerate bursts and panic.
+    SSSampler *burst = ss_create(44100, 2);
+    assert(burst);
+    assert(ss_add_zone(burst, 60, 60, 60, 1, 127,
+                       44100, pos.data(), nullptr, 4000));
+    for (int i = 0; i < 24; ++i) assert(ss_note_on(burst, 60, 127, 0));
+    ss_render(burst, stealL.data(), stealR.data(), 512);
+    assert(ss_all_notes_off(burst));
+    for (int i = 0; i < 24; ++i) assert(ss_note_off(burst, 60, 0));
+    ss_render(burst, stealL.data(), stealR.data(), 512);
+    assert(stealL[511] == 0.f);
+    ss_destroy(burst);
+
     ss_destroy(sampler);
     std::printf("Studio Sampler DSP smoke test passed (%.1f Hz)\n", frequency);
     return 0;
