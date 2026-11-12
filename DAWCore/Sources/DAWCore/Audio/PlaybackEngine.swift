@@ -78,6 +78,10 @@ public final class PlaybackEngine: ObservableObject {
     // Scheduled events for the current playback session
     private var scheduledMIDIEvents: [ScheduledEvent] = []
     private var activeNotes: [ActiveNote] = []
+
+    // Debug-only preview bookkeeping lives on MainActor, never the render
+    // callback. It lets a single mouse audition expose missing note-offs.
+    private var previewHeldPitches: [TrackID: Set<UInt8>] = [:]
     
     // Last processed sample position (for tracking what's been played)
     private var lastProcessedSample: Int64 = 0
@@ -635,6 +639,7 @@ public final class PlaybackEngine: ObservableObject {
         }
         
         trackInstruments.removeValue(forKey: trackID)
+        previewHeldPitches.removeValue(forKey: trackID)
         print("[PlaybackEngine] Removed instrument from track: \(trackID.rawValue)")
     }
     
@@ -2490,30 +2495,139 @@ public final class PlaybackEngine: ObservableObject {
     
     // MARK: - Note Preview
     
-    /// Play a note immediately for preview (piano roll, keyboard)
+    /// Play a note immediately for preview (piano roll, keyboard).
+    /// Trace only these UI events; never log from a real-time audio callback.
     public func playNotePreview(pitch: UInt8, velocity: UInt8, on trackID: TrackID) {
-        // Core Audio backend path
         if let backend = coreAudioBackend {
+            #if DEBUG
+            print("[Preview MIDI] ON backend=CoreAudio track=\(trackID.rawValue) pitch=\(pitch) velocity=\(velocity)")
+            #endif
             backend.sendImmediateMIDI(status: 0x90, data1: pitch, data2: velocity, to: trackID)
             return
         }
-        
-        // Legacy path
-        guard let instrument = trackInstruments[trackID] else { return }
-        instrument.startNote(pitch, velocity: velocity, channel: 0)
+
+        guard let instrument = trackInstruments[trackID] else {
+            #if DEBUG
+            print("[Preview MIDI] ON missing-instrument track=\(trackID.rawValue) pitch=\(pitch)")
+            #endif
+            return
+        }
+        let alreadyHeld = previewHeldPitches[trackID]?.contains(pitch) ?? false
+        // Accepted means the native instrument queued the MIDI event, not that
+        // its render thread has consumed it or that the voice is audible.
+        let accepted: Bool
+        let route: String
+        switch instrument {
+        case .studioAnalog(let synth):
+            route = "Analog"
+            accepted = synth.noteOn(pitch, velocity: velocity, channel: 0)
+        case .studioFM(let synth):
+            route = "FM"
+            accepted = synth.noteOn(pitch, velocity: velocity, channel: 0)
+        case .studioSynth(let synth):
+            route = "UnifiedSynth"
+            accepted = synth.noteOn(pitch, velocity: velocity, channel: 0)
+        case .studioSampler(let sampler):
+            route = "NativeSampler"
+            accepted = sampler.noteOn(pitch, velocity: velocity, channel: 0)
+        default:
+            route = "AudioUnitOrSampler"
+            instrument.startNote(pitch, velocity: velocity, channel: 0)
+            accepted = true // API does not report successful MIDI delivery.
+        }
+        if accepted {
+            previewHeldPitches[trackID, default: []].insert(pitch)
+        }
+        #if DEBUG
+        print("[Preview MIDI] ON route=\(route) track=\(trackID.rawValue) pitch=\(pitch) velocity=\(velocity) queued=\(accepted) duplicate=\(alreadyHeld)")
+        #endif
     }
-    
-    /// Stop a preview note
+
+    /// Stop the preview on the track that received its note-on.
     public func stopNotePreview(pitch: UInt8, on trackID: TrackID) {
-        // Core Audio backend path
         if let backend = coreAudioBackend {
+            #if DEBUG
+            print("[Preview MIDI] OFF backend=CoreAudio track=\(trackID.rawValue) pitch=\(pitch)")
+            #endif
             backend.sendImmediateMIDI(status: 0x80, data1: pitch, data2: 0, to: trackID)
             return
         }
-        
-        // Legacy path
-        guard let instrument = trackInstruments[trackID] else { return }
-        instrument.stopNote(pitch, channel: 0)
+
+        guard let instrument = trackInstruments[trackID] else {
+            #if DEBUG
+            print("[Preview MIDI] OFF missing-instrument track=\(trackID.rawValue) pitch=\(pitch)")
+            #endif
+            previewHeldPitches[trackID]?.remove(pitch)
+            return
+        }
+        let wasHeld = previewHeldPitches[trackID]?.contains(pitch) ?? false
+        let accepted: Bool
+        let route: String
+        switch instrument {
+        case .studioAnalog(let synth):
+            route = "Analog"
+            accepted = synth.noteOff(pitch, channel: 0)
+        case .studioFM(let synth):
+            route = "FM"
+            accepted = synth.noteOff(pitch, channel: 0)
+        case .studioSynth(let synth):
+            route = "UnifiedSynth"
+            accepted = synth.noteOff(pitch, channel: 0)
+        case .studioSampler(let sampler):
+            route = "NativeSampler"
+            accepted = sampler.noteOff(pitch, channel: 0)
+        default:
+            route = "AudioUnitOrSampler"
+            instrument.stopNote(pitch, channel: 0)
+            accepted = true // Delivery is not confirmed by this API.
+        }
+        if accepted { previewHeldPitches[trackID]?.remove(pitch) }
+        #if DEBUG
+        print("[Preview MIDI] OFF route=\(route) track=\(trackID.rawValue) pitch=\(pitch) queued=\(accepted) hadON=\(wasHeld)")
+        #endif
+    }
+
+    /// Emergency mute for stuck MIDI voices. Native engines use their
+    /// high-priority render-thread panic flag (works even with a full queue).
+    /// This does not rebuild the audio graph or unload any instrument.
+    public func silenceAllNotes() {
+        stopAllNotes()
+        // AllNotesOff above handles sequenced and native voices; additionally
+        // notify externally hosted AUs, which are not in the native panic path.
+        for instrument in trackInstruments.values {
+            if case .auInstrument = instrument {
+                for channel in UInt8(0)...UInt8(15) {
+                    instrument.sendController(120, value: 0, channel: channel)
+                    instrument.sendController(123, value: 0, channel: channel)
+                }
+            } else if case .sampler = instrument {
+                for channel in UInt8(0)...UInt8(15) {
+                    instrument.sendController(120, value: 0, channel: channel)
+                    instrument.sendController(123, value: 0, channel: channel)
+                }
+            }
+        }
+        for instrument in rackInstruments.values {
+            if case .auInstrument = instrument {
+                for channel in UInt8(0)...UInt8(15) {
+                    instrument.sendController(120, value: 0, channel: channel)
+                    instrument.sendController(123, value: 0, channel: channel)
+                }
+            }
+        }
+        if let backend = coreAudioBackend {
+            for trackID in previewHeldPitches.keys {
+                for channel in UInt8(0)...UInt8(15) {
+                    backend.sendImmediateMIDI(status: 0xB0 | channel, data1: 120, data2: 0, to: trackID)
+                    backend.sendImmediateMIDI(status: 0xB0 | channel, data1: 123, data2: 0, to: trackID)
+                }
+            }
+        }
+        #if DEBUG
+        let count = previewHeldPitches.values.reduce(0) { $0 + $1.count }
+        print("[Preview MIDI] PANIC requested. Tracked preview pitches=\(count)")
+        #endif
+        previewHeldPitches.removeAll()
     }
     
     /// Play a test note to verify audio is working
