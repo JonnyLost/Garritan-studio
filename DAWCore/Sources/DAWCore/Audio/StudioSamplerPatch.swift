@@ -22,6 +22,10 @@ public struct StudioSamplerZone: Codable, Equatable, Sendable {
     public var fadeOutFrames: UInt32?
     /// ID 0 is the original/default articulation; 1...15 select others.
     public var articulationID: UInt8?
+    /// 0...7 selects an alternate recorded take within the same velocity layer.
+    public var roundRobinIndex: UInt8?
+    /// Release triggers play on MIDI note-off, independently of the note-on sample.
+    public var isReleaseTrigger: Bool?
 
     public var hasSustainLoop: Bool {
         loopStartFrame != nil && loopEndFrame != nil
@@ -42,7 +46,8 @@ public struct StudioSamplerZone: Codable, Equatable, Sendable {
         rootNote <= 127 && lowestNote <= highestNote && highestNote <= 127 &&
         lowestVelocity >= 1 && lowestVelocity <= highestVelocity &&
         highestVelocity <= 127 && !filePath.isEmpty && validLoop && validTrim &&
-        (articulationID ?? 0) <= 15 && validFades
+        (articulationID ?? 0) <= 15 && (roundRobinIndex ?? 0) < 8 &&
+        (isReleaseTrigger != true || !hasSustainLoop) && validFades
     }
 
     public var validTrim: Bool {
