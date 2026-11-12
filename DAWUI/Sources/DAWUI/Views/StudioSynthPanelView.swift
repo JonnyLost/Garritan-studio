@@ -125,6 +125,8 @@ public struct StudioSynthPanelView: View {
 
                     layerOverview
 
+                    StudioSynthModulationView(viewModel: viewModel, trackID: trackID)
+
                     if let layer = selectedLayer {
                         VStack(alignment: .leading, spacing: 12) {
                             HStack {
