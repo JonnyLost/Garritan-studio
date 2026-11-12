@@ -1,0 +1,52 @@
+name: Studio Synth shared native engine
+
+on:
+  push:
+    branches:
+      - feature/studio-synth
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-synth
+  cancel-in-progress: true
+
+jobs:
+  analog-and-fm-dsp:
+    name: Native Analog and FM DSP / AddressSanitizer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Original analog DSP
+        run: |
+          clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I StudioAnalogDSP/include \
+            StudioAnalogDSP/src/StudioAnalogDSP.cpp \
+            Tests/StudioAnalogDSPStandalone/main.cpp \
+            -o /tmp/studio-analog-synth
+          ASAN_OPTIONS=detect_leaks=1 /tmp/studio-analog-synth
+      - name: Original FM DSP
+        run: |
+          clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I StudioFMDSP/include \
+            StudioFMDSP/src/StudioFMDSP.cpp \
+            Tests/StudioFMDSPStandalone/main.cpp \
+            -o /tmp/studio-fm-synth
+          ASAN_OPTIONS=detect_leaks=1 /tmp/studio-fm-synth
+
+  macos-regression:
+    name: macOS Swift build, regression tests and release app
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve packages
+        run: swift package resolve
+      - name: Build all targets
+        run: swift build
+      - name: Run DAW and native synth tests
+        run: swift test --parallel
+      - name: Build optimized DAWApp
+        run: swift build -c release --product DAWApp
