@@ -52,6 +52,7 @@ let package = Package(
             dependencies: [
                 "DAWRealtime",
                 "StudioAnalogDSP",
+                "StudioFMDSP",
                 .product(name: "Supabase", package: "supabase-swift")
             ],
             path: "DAWCore/Sources/DAWCore",
