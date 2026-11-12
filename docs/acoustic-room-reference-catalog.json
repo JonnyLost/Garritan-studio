@@ -1,0 +1,1450 @@
+{
+  "schemaVersion": 1,
+  "generatedOn": "2026-11-11",
+  "purpose": "Research reference for native algorithmic reverb; not playable or verified Studio presets",
+  "disclaimer": "Facility names identify acoustic inspirations, not affiliations or licensing. RT values are from the cited source under its documented circumstances. Published, reported, model-derived and historical measurements must not be equated. Unknown RT is intentionally omitted. Do not present any row as a calibrated reproduction.",
+  "entries": [
+    {
+      "id": "abbey-road-studio-one-london-united-kingdom",
+      "name": "Abbey Road Studio One",
+      "location": "London, United Kingdom",
+      "category": "scoring_stage",
+      "evidence": "published",
+      "publishedRTSeconds": {
+        "min": 2.2,
+        "qualifier": "at least"
+      },
+      "rtContext": "midband; acoustic study; no occupancy equivalence",
+      "note": "Very live orchestral tracking room; 2.2+ s is not interchangeable with a concert hall measurement.",
+      "sourceUrls": [
+        "https://acousticstoday.org/issues/2013AT/Apr2013/files/basic-html/page24.html",
+        "https://www.abbeyroad.com/the-studios"
+      ]
+    },
+    {
+      "id": "abbey-road-studio-two-london-united-kingdom",
+      "name": "Abbey Road Studio Two",
+      "location": "London, United Kingdom",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "Iconic band/pop/strings room; do not infer RT60 from the previous speculative 1.2 s figure.",
+      "sourceUrls": [
+        "https://www.abbeyroad.com/the-studios"
+      ]
+    },
+    {
+      "id": "abbey-road-studio-three-london-united-kingdom",
+      "name": "Abbey Road Studio Three",
+      "location": "London, United Kingdom",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "Smaller original Abbey Road tracking room.",
+      "sourceUrls": [
+        "https://www.abbeyroad.com/the-studios"
+      ]
+    },
+    {
+      "id": "abbey-road-angel-one-london-united-kingdom",
+      "name": "Abbey Road Angel One",
+      "location": "London, United Kingdom",
+      "category": "scoring_stage",
+      "evidence": "geometry_or_character_documented",
+      "note": "Former Angel recording location under Abbey Road; large ensemble reference.",
+      "sourceUrls": [
+        "https://www.abbeyroad.com/angel-studios"
+      ]
+    },
+    {
+      "id": "air-lyndhurst-hall-london-united-kingdom",
+      "name": "AIR Lyndhurst Hall",
+      "location": "London, United Kingdom",
+      "category": "scoring_stage",
+      "evidence": "geometry_or_character_documented",
+      "note": "300 m² hexagonal floor, three galleries, movable acoustic canopy; strong adjustable-room modeling candidate.",
+      "sourceUrls": [
+        "https://www.airstudios.com/lyndhurst-hall/"
+      ]
+    },
+    {
+      "id": "synchron-stage-vienna-stage-a-vienna-austria",
+      "name": "Synchron Stage Vienna — Stage A",
+      "location": "Vienna, Austria",
+      "category": "scoring_stage",
+      "evidence": "studio_reported",
+      "publishedRTSeconds": {
+        "min": 1.6,
+        "max": 1.8
+      },
+      "rtContext": "studio-reported reverberation range",
+      "note": "540 m² trapezoidal hall; height 10.5–12 m; strongly documented.",
+      "sourceUrls": [
+        "https://www.vsl.co.at/manuals/mir-roompacks/roompack6"
+      ]
+    },
+    {
+      "id": "synchron-stage-vienna-stage-b-vienna-austria",
+      "name": "Synchron Stage Vienna — Stage B",
+      "location": "Vienna, Austria",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "Secondary stage; separate acoustic measurement needed.",
+      "sourceUrls": [
+        "https://www.vsl.co.at/manuals/mir-roompacks/roompack6"
+      ]
+    },
+    {
+      "id": "skywalker-sound-scoring-stage-nicasio-california-usa",
+      "name": "Skywalker Sound Scoring Stage",
+      "location": "Nicasio, California, USA",
+      "category": "scoring_stage",
+      "evidence": "studio_reported",
+      "publishedRTSeconds": {
+        "min": 0.6,
+        "max": 3
+      },
+      "rtContext": "adjustable; studio-reported",
+      "note": "60 × 80 × 30 ft; highly adjustable acoustics.",
+      "sourceUrls": [
+        "https://www.skysound.com/services/"
+      ]
+    },
+    {
+      "id": "mgm-sony-scoring-stage-culver-city-california-usa",
+      "name": "MGM / Sony Scoring Stage",
+      "location": "Culver City, California, USA",
+      "category": "scoring_stage",
+      "evidence": "published",
+      "publishedRTSeconds": {
+        "min": 1,
+        "max": 1.3
+      },
+      "rtContext": "midband; historical acoustic overview",
+      "note": "Main scoring room roughly 66 × 93 ft, ~160,000 ft³; same venue as Sony Barbra Streisand stage.",
+      "sourceUrls": [
+        "https://acousticstoday.org/issues/2013AT/Apr2013/files/basic-html/page24.html",
+        "https://www.sonypicturesstudios.com/scoring.php"
+      ]
+    },
+    {
+      "id": "warner-bros-eastwood-scoring-stage-burbank-california-usa",
+      "name": "Warner Bros. Eastwood Scoring Stage",
+      "location": "Burbank, California, USA",
+      "category": "scoring_stage",
+      "evidence": "geometry_or_character_documented",
+      "note": "Historic ~5,000 ft² scoring venue; acoustic study notes lower decay than MGM but no dependable figure.",
+      "sourceUrls": [
+        "https://www.wbppcs.com/facilities/scoring/",
+        "https://acousticstoday.org/issues/2013AT/Apr2013/files/basic-html/page24.html"
+      ]
+    },
+    {
+      "id": "fox-newman-scoring-stage-century-city-california-usa",
+      "name": "Fox Newman Scoring Stage",
+      "location": "Century City, California, USA",
+      "category": "scoring_stage",
+      "evidence": "geometry_or_character_documented",
+      "note": "Historic film stage; acoustics study reports decay below MGM's; current operation/configuration requires verification.",
+      "sourceUrls": [
+        "https://acousticstoday.org/issues/2013AT/Apr2013/files/basic-html/page24.html",
+        "https://scoringsessions.com/stages"
+      ]
+    },
+    {
+      "id": "cbs-todd-ao-scoring-stage-studio-city-california-usa",
+      "name": "CBS / Todd-AO Scoring Stage",
+      "location": "Studio City, California, USA",
+      "category": "historic_scoring_stage",
+      "evidence": "published",
+      "publishedRTSeconds": 1.8,
+      "rtContext": "historical midband; stage closed",
+      "note": "72 × 108 ft, approximately 250,000 ft³; archived/historical sonic profile only.",
+      "sourceUrls": [
+        "https://acousticstoday.org/issues/2013AT/Apr2013/files/basic-html/page24.html"
+      ]
+    },
+    {
+      "id": "teldex-studio-berlin-the-hall-berlin-germany",
+      "name": "Teldex Studio Berlin — The Hall",
+      "location": "Berlin, Germany",
+      "category": "scoring_stage",
+      "evidence": "geometry_or_character_documented",
+      "note": "455 m² late-19th-century former ballroom; flexible orchestral recording hall.",
+      "sourceUrls": [
+        "https://teldexstudio.de/studios/"
+      ]
+    },
+    {
+      "id": "galaxy-studios-galaxy-hall-mol-belgium",
+      "name": "Galaxy Studios — Galaxy Hall",
+      "location": "Mol, Belgium",
+      "category": "scoring_stage",
+      "evidence": "studio_reported",
+      "publishedRTSeconds": {
+        "min": 0.8,
+        "max": 2.4
+      },
+      "rtContext": "adjustable; venue-reported",
+      "note": "330 m² hall, 7.5–8 m height, nonparallel boundaries.",
+      "sourceUrls": [
+        "https://www.galaxystudios.com/studio/galaxy-hall"
+      ]
+    },
+    {
+      "id": "ocean-way-nashville-studio-a-nashville-tennessee-usa",
+      "name": "Ocean Way Nashville — Studio A",
+      "location": "Nashville, Tennessee, USA",
+      "category": "scoring_stage",
+      "evidence": "geometry_or_character_documented",
+      "note": "38 × 50 × 30 ft former church sanctuary, suitable for orchestra; no source RT.",
+      "sourceUrls": [
+        "https://oceanwaynashville.com/pages/studio-a"
+      ]
+    },
+    {
+      "id": "trackdown-simon-leadley-scoring-stage-sydney-australia",
+      "name": "Trackdown — Simon Leadley Scoring Stage",
+      "location": "Sydney, Australia",
+      "category": "scoring_stage",
+      "evidence": "geometry_or_character_documented",
+      "note": "440 m² and 10 m ceiling; capacity 100+ musicians.",
+      "sourceUrls": [
+        "https://www.trackdown.com.au/space"
+      ]
+    },
+    {
+      "id": "bratislava-symphony-orchestra-studio-1-bratislava-slovakia",
+      "name": "Bratislava Symphony Orchestra — Studio 1",
+      "location": "Bratislava, Slovakia",
+      "category": "scoring_stage",
+      "evidence": "geometry_or_character_documented",
+      "note": "Stone-built 1970s large hall/studio for orchestra and choir.",
+      "sourceUrls": [
+        "https://www.bso.sk/bso-studio1"
+      ]
+    },
+    {
+      "id": "bratislava-symphony-orchestra-studio-2-bratislava-slovakia",
+      "name": "Bratislava Symphony Orchestra — Studio 2",
+      "location": "Bratislava, Slovakia",
+      "category": "scoring_stage",
+      "evidence": "geometry_or_character_documented",
+      "note": "Medium scoring studio; orchestras up to 65.",
+      "sourceUrls": [
+        "https://www.bso.sk/studios"
+      ]
+    },
+    {
+      "id": "bratislava-symphony-orchestra-studio-4-bratislava-slovakia",
+      "name": "Bratislava Symphony Orchestra — Studio 4",
+      "location": "Bratislava, Slovakia",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "Small room for up to 15, chamber/solo ensembles.",
+      "sourceUrls": [
+        "https://www.bso.sk/studios"
+      ]
+    },
+    {
+      "id": "capitol-studios-studio-a-los-angeles-california-usa",
+      "name": "Capitol Studios — Studio A",
+      "location": "Los Angeles, California, USA",
+      "category": "scoring_stage",
+      "evidence": "geometry_or_character_documented",
+      "note": "Over 1,500 ft², variable decay from louvered wall panels; no measured RT published here.",
+      "sourceUrls": [
+        "https://www.capitolstudios.com/"
+      ]
+    },
+    {
+      "id": "capitol-studios-studio-b-los-angeles-california-usa",
+      "name": "Capitol Studios — Studio B",
+      "location": "Los Angeles, California, USA",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "Can be coupled with Studio A; individual RT unknown.",
+      "sourceUrls": [
+        "https://www.capitolstudios.com/"
+      ]
+    },
+    {
+      "id": "capitol-studios-studio-c-los-angeles-california-usa",
+      "name": "Capitol Studios — Studio C",
+      "location": "Los Angeles, California, USA",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "Reference room; individual RT unknown.",
+      "sourceUrls": [
+        "https://www.capitolstudios.com/"
+      ]
+    },
+    {
+      "id": "the-village-moroccan-ballroom-los-angeles-california-usa",
+      "name": "The Village — Moroccan Ballroom",
+      "location": "Los Angeles, California, USA",
+      "category": "scoring_stage",
+      "evidence": "geometry_or_character_documented",
+      "note": "42 × 33 ft architecturally distinct live room.",
+      "sourceUrls": [
+        "https://www.villagestudios.com/moroccanroom"
+      ]
+    },
+    {
+      "id": "the-village-studio-a-los-angeles-california-usa",
+      "name": "The Village — Studio A",
+      "location": "Los Angeles, California, USA",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "Historic Village live/tracking room; separate measurements needed.",
+      "sourceUrls": [
+        "https://www.villagestudios.com/studios"
+      ]
+    },
+    {
+      "id": "the-village-studio-b-los-angeles-california-usa",
+      "name": "The Village — Studio B",
+      "location": "Los Angeles, California, USA",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "Historic Village studio; separate measurements needed.",
+      "sourceUrls": [
+        "https://www.villagestudios.com/studios"
+      ]
+    },
+    {
+      "id": "the-village-studio-d-los-angeles-california-usa",
+      "name": "The Village — Studio D",
+      "location": "Los Angeles, California, USA",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "Historic Village studio; separate measurements needed.",
+      "sourceUrls": [
+        "https://www.villagestudios.com/studios"
+      ]
+    },
+    {
+      "id": "the-village-studio-f-los-angeles-california-usa",
+      "name": "The Village — Studio F",
+      "location": "Los Angeles, California, USA",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "Village studio room; acoustic specifics not yet verified.",
+      "sourceUrls": [
+        "https://www.villagestudios.com/studios"
+      ]
+    },
+    {
+      "id": "the-village-auditorium-los-angeles-california-usa",
+      "name": "The Village — Auditorium",
+      "location": "Los Angeles, California, USA",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "Village auditorium; acoustic specifics not yet verified.",
+      "sourceUrls": [
+        "https://www.villagestudios.com/studios"
+      ]
+    },
+    {
+      "id": "henson-recording-studios-stage-a-los-angeles-california-usa",
+      "name": "Henson Recording Studios — Stage A",
+      "location": "Los Angeles, California, USA",
+      "category": "scoring_stage",
+      "evidence": "directory_candidate",
+      "note": "Listed in specialist scoring-stage directory; acoustic dimensions/RT60 not yet substantiated.",
+      "sourceUrls": [
+        "https://scoringsessions.com/stages"
+      ]
+    },
+    {
+      "id": "eastwest-studios-stage-a-los-angeles-california-usa",
+      "name": "EastWest Studios — Stage A",
+      "location": "Los Angeles, California, USA",
+      "category": "recording_studio",
+      "evidence": "directory_candidate",
+      "note": "Listed in specialist scoring-stage directory; acoustic dimensions/RT60 not yet substantiated.",
+      "sourceUrls": [
+        "https://scoringsessions.com/stages"
+      ]
+    },
+    {
+      "id": "conway-recording-studios-stage-c-los-angeles-california-usa",
+      "name": "Conway Recording Studios — Stage C",
+      "location": "Los Angeles, California, USA",
+      "category": "recording_studio",
+      "evidence": "directory_candidate",
+      "note": "Listed in specialist scoring-stage directory; acoustic dimensions/RT60 not yet substantiated.",
+      "sourceUrls": [
+        "https://scoringsessions.com/stages"
+      ]
+    },
+    {
+      "id": "bandrika-scoring-stage-tarzana-california-usa",
+      "name": "Bandrika Scoring Stage",
+      "location": "Tarzana, California, USA",
+      "category": "scoring_stage",
+      "evidence": "directory_candidate",
+      "note": "Listed in specialist scoring-stage directory; acoustic dimensions/RT60 not yet substantiated.",
+      "sourceUrls": [
+        "https://scoringsessions.com/stages"
+      ]
+    },
+    {
+      "id": "bridge-recording-glendale-california-usa",
+      "name": "Bridge Recording",
+      "location": "Glendale, California, USA",
+      "category": "scoring_stage",
+      "evidence": "directory_candidate",
+      "note": "Listed in specialist scoring-stage directory; acoustic dimensions/RT60 not yet substantiated.",
+      "sourceUrls": [
+        "https://scoringsessions.com/stages"
+      ]
+    },
+    {
+      "id": "fame-s-recording-studio-skopje-north-macedonia",
+      "name": "FAME’S Recording Studio",
+      "location": "Skopje, North Macedonia",
+      "category": "scoring_stage",
+      "evidence": "directory_candidate",
+      "note": "Listed in specialist scoring-stage directory; acoustic dimensions/RT60 not yet substantiated.",
+      "sourceUrls": [
+        "https://scoringsessions.com/stages"
+      ]
+    },
+    {
+      "id": "smecky-music-studio-prague-czech-republic",
+      "name": "Smecky Music Studio",
+      "location": "Prague, Czech Republic",
+      "category": "scoring_stage",
+      "evidence": "directory_candidate",
+      "note": "Listed in specialist scoring-stage directory; acoustic dimensions/RT60 not yet substantiated.",
+      "sourceUrls": [
+        "https://scoringsessions.com/stages"
+      ]
+    },
+    {
+      "id": "bratislava-radio-studio-2-bratislava-slovakia",
+      "name": "Bratislava Radio — Studio 2",
+      "location": "Bratislava, Slovakia",
+      "category": "scoring_stage",
+      "evidence": "directory_candidate",
+      "note": "Listed in specialist scoring-stage directory; acoustic dimensions/RT60 not yet substantiated.",
+      "sourceUrls": [
+        "https://scoringsessions.com/stages"
+      ]
+    },
+    {
+      "id": "rsno-centre-scotland-s-studio-glasgow-united-kingdom",
+      "name": "RSNO Centre — Scotland’s Studio",
+      "location": "Glasgow, United Kingdom",
+      "category": "scoring_stage",
+      "evidence": "directory_candidate",
+      "note": "Listed in specialist scoring-stage directory; acoustic dimensions/RT60 not yet substantiated.",
+      "sourceUrls": [
+        "https://scoringsessions.com/stages"
+      ]
+    },
+    {
+      "id": "sinfonianord-hof-hall-a-akureyri-iceland",
+      "name": "SinfoniaNord — Hof Hall A",
+      "location": "Akureyri, Iceland",
+      "category": "scoring_stage",
+      "evidence": "directory_candidate",
+      "note": "Listed in specialist scoring-stage directory; acoustic dimensions/RT60 not yet substantiated.",
+      "sourceUrls": [
+        "https://scoringsessions.com/stages"
+      ]
+    },
+    {
+      "id": "paramount-pictures-stage-m-hollywood-california-usa",
+      "name": "Paramount Pictures — Stage M",
+      "location": "Hollywood, California, USA",
+      "category": "historic_scoring_stage",
+      "evidence": "directory_candidate",
+      "note": "Directory-listed/historic; availability and acoustics not established here.",
+      "sourceUrls": [
+        "https://scoringsessions.com/stages"
+      ]
+    },
+    {
+      "id": "o-henry-recording-studio-a-burbank-california-usa",
+      "name": "O’Henry Recording — Studio A",
+      "location": "Burbank, California, USA",
+      "category": "recording_studio",
+      "evidence": "directory_candidate",
+      "note": "Listed in specialist scoring-stage directory; acoustic dimensions/RT60 not yet substantiated.",
+      "sourceUrls": [
+        "https://scoringsessions.com/stages"
+      ]
+    },
+    {
+      "id": "slovak-radio-large-concert-hall-bratislava-slovakia",
+      "name": "Slovak Radio Large Concert Hall",
+      "location": "Bratislava, Slovakia",
+      "category": "scoring_stage",
+      "evidence": "directory_candidate",
+      "note": "Listed in specialist scoring-stage directory; acoustic dimensions/RT60 not yet substantiated.",
+      "sourceUrls": [
+        "https://scoringsessions.com/stages"
+      ]
+    },
+    {
+      "id": "cbc-studio-one-vancouver-canada",
+      "name": "CBC Studio One",
+      "location": "Vancouver, Canada",
+      "category": "scoring_stage",
+      "evidence": "directory_candidate",
+      "note": "Listed in specialist scoring-stage directory; acoustic dimensions/RT60 not yet substantiated.",
+      "sourceUrls": [
+        "https://scoringsessions.com/stages"
+      ]
+    },
+    {
+      "id": "studio-no-22-east-connection-budapest-hungary",
+      "name": "Studio No. 22 — East Connection",
+      "location": "Budapest, Hungary",
+      "category": "recording_studio",
+      "evidence": "directory_candidate",
+      "note": "Listed in specialist scoring-stage directory; acoustic dimensions/RT60 not yet substantiated.",
+      "sourceUrls": [
+        "https://scoringsessions.com/stages"
+      ]
+    },
+    {
+      "id": "studio-x-seattle-washington-usa",
+      "name": "Studio X",
+      "location": "Seattle, Washington, USA",
+      "category": "recording_studio",
+      "evidence": "directory_candidate",
+      "note": "Listed in specialist scoring-stage directory; acoustic dimensions/RT60 not yet substantiated.",
+      "sourceUrls": [
+        "https://scoringsessions.com/stages"
+      ]
+    },
+    {
+      "id": "remote-control-studio-a-santa-monica-california-usa",
+      "name": "Remote Control — Studio A",
+      "location": "Santa Monica, California, USA",
+      "category": "recording_studio",
+      "evidence": "directory_candidate",
+      "note": "Listed in specialist scoring-stage directory; acoustic dimensions/RT60 not yet substantiated.",
+      "sourceUrls": [
+        "https://scoringsessions.com/stages"
+      ]
+    },
+    {
+      "id": "ocean-way-hollywood-studio-a-hollywood-california-usa",
+      "name": "Ocean Way — Hollywood Studio A",
+      "location": "Hollywood, California, USA",
+      "category": "historic_recording_studio",
+      "evidence": "directory_candidate",
+      "note": "Listed in specialist scoring-stage directory; acoustic dimensions/RT60 not yet substantiated.",
+      "sourceUrls": [
+        "https://scoringsessions.com/stages"
+      ]
+    },
+    {
+      "id": "hugesound-scoring-stage-salt-lake-city-utah-usa",
+      "name": "HUGESound Scoring Stage",
+      "location": "Salt Lake City, Utah, USA",
+      "category": "scoring_stage",
+      "evidence": "directory_candidate",
+      "note": "Listed in specialist scoring-stage directory; acoustic dimensions/RT60 not yet substantiated.",
+      "sourceUrls": [
+        "https://scoringsessions.com/stages"
+      ]
+    },
+    {
+      "id": "musikverein-grosser-saal-vienna-austria",
+      "name": "Musikverein — Grosser Saal",
+      "location": "Vienna, Austria",
+      "category": "concert_hall",
+      "evidence": "published",
+      "publishedRTSeconds": 2,
+      "rtContext": "occupied midband, historical survey",
+      "note": "Shoebox; historical unoccupied measurements can exceed 3 s.",
+      "sourceUrls": [
+        "https://www.akutek.info/concert_hall_acoustics_files/data.htm",
+        "https://www.researchgate.net/publication/228346559_Concert_Hall_Acoustics-2008"
+      ]
+    },
+    {
+      "id": "concertgebouw-grote-zaal-amsterdam-netherlands",
+      "name": "Concertgebouw — Grote Zaal",
+      "location": "Amsterdam, Netherlands",
+      "category": "concert_hall",
+      "evidence": "published",
+      "publishedRTSeconds": 2,
+      "rtContext": "occupied midband average, historical survey",
+      "note": "Shoebox, very rich lateral reflection pattern.",
+      "sourceUrls": [
+        "https://www.akutek.info/concert_hall_acoustics_files/data.htm",
+        "https://www.researchgate.net/publication/228346559_Concert_Hall_Acoustics-2008"
+      ]
+    },
+    {
+      "id": "boston-symphony-hall-boston-massachusetts-usa",
+      "name": "Boston Symphony Hall",
+      "location": "Boston, Massachusetts, USA",
+      "category": "concert_hall",
+      "evidence": "published",
+      "publishedRTSeconds": 1.9,
+      "rtContext": "occupied midband, Beranek survey",
+      "note": "Shoebox; first important reflection ~15 ms in representative configuration.",
+      "sourceUrls": [
+        "https://www.researchgate.net/publication/228346559_Concert_Hall_Acoustics-2008",
+        "https://hyperphysics.phy-astr.gsu.edu/hbase/Acoustic/revlow.html"
+      ]
+    },
+    {
+      "id": "carnegie-hall-stern-auditorium-new-york-new-york-usa",
+      "name": "Carnegie Hall — Stern Auditorium",
+      "location": "New York, New York, USA",
+      "category": "concert_hall",
+      "evidence": "published",
+      "publishedRTSeconds": 1.8,
+      "rtContext": "occupied midband, Beranek survey",
+      "note": "Historic concert hall; actual response varies by seat.",
+      "sourceUrls": [
+        "https://www.researchgate.net/publication/228346559_Concert_Hall_Acoustics-2008"
+      ]
+    },
+    {
+      "id": "berliner-philharmonie-gro-er-saal-berlin-germany",
+      "name": "Berliner Philharmonie — Großer Saal",
+      "location": "Berlin, Germany",
+      "category": "concert_hall",
+      "evidence": "published",
+      "publishedRTSeconds": 1.9,
+      "rtContext": "occupied midband, Beranek survey",
+      "note": "Vineyard geometry; distinct early-reflection field.",
+      "sourceUrls": [
+        "https://www.researchgate.net/publication/228346559_Concert_Hall_Acoustics-2008"
+      ]
+    },
+    {
+      "id": "walt-disney-concert-hall-los-angeles-california-usa",
+      "name": "Walt Disney Concert Hall",
+      "location": "Los Angeles, California, USA",
+      "category": "concert_hall",
+      "evidence": "published",
+      "publishedRTSeconds": 1.85,
+      "rtContext": "occupied midband, Beranek survey",
+      "note": "Surround/audience-around-stage architecture.",
+      "sourceUrls": [
+        "https://www.researchgate.net/publication/228346559_Concert_Hall_Acoustics-2008",
+        "https://aes.org/publications/elibrary/elibrary-page/?id=14398"
+      ]
+    },
+    {
+      "id": "elbphilharmonie-grand-hall-hamburg-germany",
+      "name": "Elbphilharmonie — Grand Hall",
+      "location": "Hamburg, Germany",
+      "category": "concert_hall",
+      "evidence": "published_estimate",
+      "publishedRTSeconds": 2.3,
+      "rtContext": "estimated occupied 500 Hz; original acoustics study",
+      "note": "Unoccupied measured 2.5 s at 500 Hz; settings change with curtains.",
+      "sourceUrls": [
+        "https://www.ioa.org.uk/system/files/proceedings/k_oguchi_m_quiquerez_y_toyota_acoustical_design_of_elbphilharmonie.pdf"
+      ]
+    },
+    {
+      "id": "suntory-hall-main-hall-tokyo-japan",
+      "name": "Suntory Hall — Main Hall",
+      "location": "Tokyo, Japan",
+      "category": "concert_hall",
+      "evidence": "studio_reported",
+      "publishedRTSeconds": 2.1,
+      "rtContext": "occupied midband; hall operator",
+      "note": "Vineyard layout, sound reflectors.",
+      "sourceUrls": [
+        "https://www.suntory.com/culture-sports/suntoryhall/facility/hall.html"
+      ]
+    },
+    {
+      "id": "tokyo-opera-city-concert-hall-tokyo-japan",
+      "name": "Tokyo Opera City Concert Hall",
+      "location": "Tokyo, Japan",
+      "category": "concert_hall",
+      "evidence": "measured",
+      "publishedRTSeconds": 1.95,
+      "rtContext": "occupied with audience and orchestra; peer reviewed",
+      "note": "Rectangular room, asymmetric pyramidal ceiling.",
+      "sourceUrls": [
+        "https://pubmed.ncbi.nlm.nih.gov/10641644/"
+      ]
+    },
+    {
+      "id": "st-david-s-hall-cardiff-wales-united-kingdom",
+      "name": "St David’s Hall",
+      "location": "Cardiff, Wales, United Kingdom",
+      "category": "concert_hall",
+      "evidence": "published",
+      "publishedRTSeconds": 1.95,
+      "rtContext": "occupied midband historical Beranek",
+      "note": "Historic benchmark; refurbishment may change acoustics.",
+      "sourceUrls": [
+        "https://www.researchgate.net/publication/228346559_Concert_Hall_Acoustics-2008"
+      ]
+    },
+    {
+      "id": "severance-hall-cleveland-ohio-usa",
+      "name": "Severance Hall",
+      "location": "Cleveland, Ohio, USA",
+      "category": "concert_hall",
+      "evidence": "published",
+      "publishedRTSeconds": 1.6,
+      "rtContext": "historical occupied measurement; pre-renovation",
+      "note": "Current room differs from historical benchmark.",
+      "sourceUrls": [
+        "https://www.researchgate.net/publication/228346559_Concert_Hall_Acoustics-2008"
+      ]
+    },
+    {
+      "id": "davies-symphony-hall-san-francisco-california-usa",
+      "name": "Davies Symphony Hall",
+      "location": "San Francisco, California, USA",
+      "category": "concert_hall",
+      "evidence": "published",
+      "publishedRTSeconds": 1.85,
+      "rtContext": "historical occupied; pre-renovation",
+      "note": "Current room differs from historical benchmark.",
+      "sourceUrls": [
+        "https://www.researchgate.net/publication/228346559_Concert_Hall_Acoustics-2008"
+      ]
+    },
+    {
+      "id": "royal-festival-hall-london-united-kingdom",
+      "name": "Royal Festival Hall",
+      "location": "London, United Kingdom",
+      "category": "concert_hall",
+      "evidence": "published",
+      "publishedRTSeconds": 1.45,
+      "rtContext": "historical occupied; pre-renovation",
+      "note": "Later alterations are not represented by this historic value.",
+      "sourceUrls": [
+        "https://www.researchgate.net/publication/228346559_Concert_Hall_Acoustics-2008",
+        "https://www.akutek.info/concert_hall_acoustics_files/data.htm"
+      ]
+    },
+    {
+      "id": "salle-pleyel-paris-france",
+      "name": "Salle Pleyel",
+      "location": "Paris, France",
+      "category": "historic_concert_hall",
+      "evidence": "published",
+      "publishedRTSeconds": 1.5,
+      "rtContext": "historical occupied; pre-renovation",
+      "note": "Historical concert-hall reference only.",
+      "sourceUrls": [
+        "https://www.researchgate.net/publication/228346559_Concert_Hall_Acoustics-2008"
+      ]
+    },
+    {
+      "id": "kennedy-center-concert-hall-washington-dc-usa",
+      "name": "Kennedy Center — Concert Hall",
+      "location": "Washington, DC, USA",
+      "category": "concert_hall",
+      "evidence": "published",
+      "publishedRTSeconds": 1.7,
+      "rtContext": "historical occupied; Beranek",
+      "note": "Not a current-room measurement.",
+      "sourceUrls": [
+        "https://www.researchgate.net/publication/228346559_Concert_Hall_Acoustics-2008"
+      ]
+    },
+    {
+      "id": "gasteig-philharmonie-munich-germany",
+      "name": "Gasteig — Philharmonie",
+      "location": "Munich, Germany",
+      "category": "historic_concert_hall",
+      "evidence": "published",
+      "publishedRTSeconds": 1.8,
+      "rtContext": "historical occupied; Beranek",
+      "note": "Building usage/renovation changes; historic acoustic reference.",
+      "sourceUrls": [
+        "https://www.researchgate.net/publication/228346559_Concert_Hall_Acoustics-2008"
+      ]
+    },
+    {
+      "id": "barbican-hall-london-united-kingdom",
+      "name": "Barbican Hall",
+      "location": "London, United Kingdom",
+      "category": "concert_hall",
+      "evidence": "modeled_occupied",
+      "publishedRTSeconds": 1.7,
+      "rtContext": "occupied; model-derived from unoccupied measurements",
+      "note": "Measured unoccupied mid-band average ~2.0 s.",
+      "sourceUrls": [
+        "https://www.akutek.info/concert_hall_acoustics_files/data.htm"
+      ]
+    },
+    {
+      "id": "gothenburg-concert-hall-gothenburg-sweden",
+      "name": "Gothenburg Concert Hall",
+      "location": "Gothenburg, Sweden",
+      "category": "concert_hall",
+      "evidence": "modeled_occupied",
+      "publishedRTSeconds": 1.6,
+      "rtContext": "occupied; model-derived from unoccupied measurements",
+      "note": "Measured unoccupied mid-band average ~1.7 s.",
+      "sourceUrls": [
+        "https://www.akutek.info/concert_hall_acoustics_files/data.htm"
+      ]
+    },
+    {
+      "id": "stuttgart-liederhalle-stuttgart-germany",
+      "name": "Stuttgart Liederhalle",
+      "location": "Stuttgart, Germany",
+      "category": "concert_hall",
+      "evidence": "published",
+      "publishedRTSeconds": 1.6,
+      "rtContext": "historic occupied measurement with chorus",
+      "note": "Acoustic condition is dated; consult primary survey.",
+      "sourceUrls": [
+        "https://www.akutek.info/concert_hall_acoustics_files/data.htm"
+      ]
+    },
+    {
+      "id": "usher-hall-edinburgh-united-kingdom",
+      "name": "Usher Hall",
+      "location": "Edinburgh, United Kingdom",
+      "category": "concert_hall",
+      "evidence": "published",
+      "publishedRTSeconds": 1.3,
+      "rtContext": "historical occupied value",
+      "note": "Room modifications may invalidate this as a present-day target.",
+      "sourceUrls": [
+        "https://www.akutek.info/concert_hall_acoustics_files/data.htm"
+      ]
+    },
+    {
+      "id": "salzburg-gro-es-festspielhaus-salzburg-austria",
+      "name": "Salzburg Großes Festspielhaus",
+      "location": "Salzburg, Austria",
+      "category": "concert_hall",
+      "evidence": "modeled_occupied",
+      "publishedRTSeconds": 1.5,
+      "rtContext": "occupied; model-derived from unoccupied measurements",
+      "note": "Unoccupied historical midband 1.9 s.",
+      "sourceUrls": [
+        "https://www.akutek.info/concert_hall_acoustics_files/data.htm"
+      ]
+    },
+    {
+      "id": "royal-derngate-derngate-northampton-united-kingdom",
+      "name": "Royal & Derngate — Derngate",
+      "location": "Northampton, United Kingdom",
+      "category": "concert_hall",
+      "evidence": "modeled_occupied",
+      "publishedRTSeconds": 1.7,
+      "rtContext": "occupied; model-derived/secondary data",
+      "note": "Historical midband benchmark.",
+      "sourceUrls": [
+        "https://www.akutek.info/concert_hall_acoustics_files/data.htm"
+      ]
+    },
+    {
+      "id": "muziekgebouw-aan-t-ij-grote-zaal-amsterdam-netherlands",
+      "name": "Muziekgebouw aan ’t IJ — Grote Zaal",
+      "location": "Amsterdam, Netherlands",
+      "category": "concert_hall",
+      "evidence": "studio_reported",
+      "publishedRTSeconds": {
+        "min": 1.7,
+        "max": 2.4
+      },
+      "rtContext": "operator technical specification; adjustable",
+      "note": "Moveable floor/walls/ceiling; verify source configuration before calibration.",
+      "sourceUrls": [
+        "https://www.muziekgebouw.nl/en/building-and-concert-hall-m98x"
+      ]
+    },
+    {
+      "id": "royal-albert-hall-london-united-kingdom",
+      "name": "Royal Albert Hall",
+      "location": "London, United Kingdom",
+      "category": "concert_hall",
+      "evidence": "geometry_or_character_documented",
+      "note": "Large dome hall. Multiple historical estimates differ by audience/measurement condition; do not assign one universal RT.",
+      "sourceUrls": [
+        "https://hyperphysics.phy-astr.gsu.edu/hbase/Acoustic/revlow.html"
+      ]
+    },
+    {
+      "id": "sydney-opera-house-concert-hall-sydney-australia",
+      "name": "Sydney Opera House — Concert Hall",
+      "location": "Sydney, Australia",
+      "category": "concert_hall",
+      "evidence": "geometry_or_character_documented",
+      "note": "Renovations significantly change reference measurements; seek post-renovation authoritative data.",
+      "sourceUrls": [
+        "https://www.researchgate.net/publication/228346559_Concert_Hall_Acoustics-2008"
+      ]
+    },
+    {
+      "id": "philharmonie-de-paris-grande-salle-paris-france",
+      "name": "Philharmonie de Paris — Grande Salle",
+      "location": "Paris, France",
+      "category": "concert_hall",
+      "evidence": "geometry_or_character_documented",
+      "note": "Targeted long decay with extensive early reflectors; architectural/design reference.",
+      "sourceUrls": [
+        "https://www.researchgate.net/publication/228346559_Concert_Hall_Acoustics-2008"
+      ]
+    },
+    {
+      "id": "kkl-luzern-concert-hall-lucerne-switzerland",
+      "name": "KKL Luzern — Concert Hall",
+      "location": "Lucerne, Switzerland",
+      "category": "concert_hall",
+      "evidence": "geometry_or_character_documented",
+      "note": "Adjustable reverberation and isolation; needs primary measurement verification.",
+      "sourceUrls": [
+        "https://www.researchgate.net/publication/228346559_Concert_Hall_Acoustics-2008"
+      ]
+    },
+    {
+      "id": "harpa-eldborg-reykjavik-iceland",
+      "name": "Harpa — Eldborg",
+      "location": "Reykjavík, Iceland",
+      "category": "concert_hall",
+      "evidence": "geometry_or_character_documented",
+      "note": "Orchestral room with adjustable reverberation via built-in technology.",
+      "sourceUrls": [
+        "https://orkestra.is/"
+      ]
+    },
+    {
+      "id": "harpa-nor-urljos-aurora-hall-reykjavik-iceland",
+      "name": "Harpa — Norðurljós / Aurora Hall",
+      "location": "Reykjavík, Iceland",
+      "category": "chamber_hall",
+      "evidence": "geometry_or_character_documented",
+      "note": "Medium hall with adjustable reverberation; confirm naming/configuration.",
+      "sourceUrls": [
+        "https://orkestra.is/"
+      ]
+    },
+    {
+      "id": "harpa-kaldalon-reykjavik-iceland",
+      "name": "Harpa — Kaldalón",
+      "location": "Reykjavík, Iceland",
+      "category": "chamber_hall",
+      "evidence": "geometry_or_character_documented",
+      "note": "Smaller intimate ensemble hall; adjustable acoustics.",
+      "sourceUrls": [
+        "https://orkestra.is/"
+      ]
+    },
+    {
+      "id": "sage-gateshead-hall-one-gateshead-united-kingdom",
+      "name": "Sage Gateshead — Hall One",
+      "location": "Gateshead, United Kingdom",
+      "category": "concert_hall",
+      "evidence": "geometry_or_character_documented",
+      "note": "Contemporary hall for comparison; RT not independently verified here.",
+      "sourceUrls": [
+        "https://www.researchgate.net/publication/228346559_Concert_Hall_Acoustics-2008"
+      ]
+    },
+    {
+      "id": "bridgewater-hall-manchester-united-kingdom",
+      "name": "Bridgewater Hall",
+      "location": "Manchester, United Kingdom",
+      "category": "concert_hall",
+      "evidence": "geometry_or_character_documented",
+      "note": "Modern concert hall reference; acoustical benchmarks need primary-source validation.",
+      "sourceUrls": [
+        "https://www.researchgate.net/publication/228346559_Concert_Hall_Acoustics-2008"
+      ]
+    },
+    {
+      "id": "teatro-colon-buenos-aires-argentina",
+      "name": "Teatro Colón",
+      "location": "Buenos Aires, Argentina",
+      "category": "opera_house",
+      "evidence": "published",
+      "publishedRTSeconds": 1.53,
+      "rtContext": "historic occupied mid-frequency; opera house survey",
+      "note": "Source in orchestra pit; historic benchmark not necessarily present-day renovated room.",
+      "sourceUrls": [
+        "https://av-info.eu/acoustic/concerthall.html"
+      ]
+    },
+    {
+      "id": "new-national-theatre-opera-palace-tokyo-japan",
+      "name": "New National Theatre — Opera Palace",
+      "location": "Tokyo, Japan",
+      "category": "opera_house",
+      "evidence": "published",
+      "publishedRTSeconds": 1.49,
+      "rtContext": "historic occupied mid-frequency; opera house survey",
+      "note": "Source in orchestra pit; historic benchmark not necessarily present-day renovated room.",
+      "sourceUrls": [
+        "https://av-info.eu/acoustic/concerthall.html"
+      ]
+    },
+    {
+      "id": "palais-garnier-opera-garnier-paris-france",
+      "name": "Palais Garnier — Opéra Garnier",
+      "location": "Paris, France",
+      "category": "opera_house",
+      "evidence": "published",
+      "publishedRTSeconds": 1.15,
+      "rtContext": "historic occupied mid-frequency; opera house survey",
+      "note": "Source in orchestra pit; historic benchmark not necessarily present-day renovated room.",
+      "sourceUrls": [
+        "https://av-info.eu/acoustic/concerthall.html"
+      ]
+    },
+    {
+      "id": "prague-state-opera-prague-czech-republic",
+      "name": "Prague State Opera",
+      "location": "Prague, Czech Republic",
+      "category": "opera_house",
+      "evidence": "published",
+      "publishedRTSeconds": 1.21,
+      "rtContext": "historic occupied mid-frequency; opera house survey",
+      "note": "Source in orchestra pit; historic benchmark not necessarily present-day renovated room.",
+      "sourceUrls": [
+        "https://av-info.eu/acoustic/concerthall.html"
+      ]
+    },
+    {
+      "id": "vienna-state-opera-vienna-austria",
+      "name": "Vienna State Opera",
+      "location": "Vienna, Austria",
+      "category": "opera_house",
+      "evidence": "published",
+      "publishedRTSeconds": 1.35,
+      "rtContext": "historic occupied mid-frequency; opera house survey",
+      "note": "Source in orchestra pit; historic benchmark not necessarily present-day renovated room.",
+      "sourceUrls": [
+        "https://av-info.eu/acoustic/concerthall.html"
+      ]
+    },
+    {
+      "id": "metropolitan-opera-house-new-york-new-york-usa",
+      "name": "Metropolitan Opera House",
+      "location": "New York, New York, USA",
+      "category": "opera_house",
+      "evidence": "published",
+      "publishedRTSeconds": 1.48,
+      "rtContext": "historic occupied mid-frequency; opera house survey",
+      "note": "Source in orchestra pit; historic benchmark not necessarily present-day renovated room.",
+      "sourceUrls": [
+        "https://av-info.eu/acoustic/concerthall.html"
+      ]
+    },
+    {
+      "id": "hamburg-state-opera-hamburg-germany",
+      "name": "Hamburg State Opera",
+      "location": "Hamburg, Germany",
+      "category": "opera_house",
+      "evidence": "published",
+      "publishedRTSeconds": 1.23,
+      "rtContext": "historic occupied mid-frequency; opera house survey",
+      "note": "Source in orchestra pit; historic benchmark not necessarily present-day renovated room.",
+      "sourceUrls": [
+        "https://av-info.eu/acoustic/concerthall.html"
+      ]
+    },
+    {
+      "id": "deutsche-oper-berlin-berlin-germany",
+      "name": "Deutsche Oper Berlin",
+      "location": "Berlin, Germany",
+      "category": "opera_house",
+      "evidence": "published",
+      "publishedRTSeconds": 1.32,
+      "rtContext": "historic occupied mid-frequency; opera house survey",
+      "note": "Source in orchestra pit; historic benchmark not necessarily present-day renovated room.",
+      "sourceUrls": [
+        "https://av-info.eu/acoustic/concerthall.html"
+      ]
+    },
+    {
+      "id": "civic-opera-house-chicago-illinois-usa",
+      "name": "Civic Opera House",
+      "location": "Chicago, Illinois, USA",
+      "category": "opera_house",
+      "evidence": "published",
+      "publishedRTSeconds": 1.52,
+      "rtContext": "historic occupied mid-frequency; opera house survey",
+      "note": "Source in orchestra pit; historic benchmark not necessarily present-day renovated room.",
+      "sourceUrls": [
+        "https://av-info.eu/acoustic/concerthall.html"
+      ]
+    },
+    {
+      "id": "dutch-national-opera-ballet-muziektheater-amsterdam-netherlands",
+      "name": "Dutch National Opera & Ballet — Muziektheater",
+      "location": "Amsterdam, Netherlands",
+      "category": "opera_house",
+      "evidence": "published",
+      "publishedRTSeconds": 1.29,
+      "rtContext": "historic occupied mid-frequency; opera house survey",
+      "note": "Source in orchestra pit; historic benchmark not necessarily present-day renovated room.",
+      "sourceUrls": [
+        "https://av-info.eu/acoustic/concerthall.html"
+      ]
+    },
+    {
+      "id": "aalto-theatre-essen-germany",
+      "name": "Aalto Theatre",
+      "location": "Essen, Germany",
+      "category": "opera_house",
+      "evidence": "published",
+      "publishedRTSeconds": 1.46,
+      "rtContext": "historic occupied mid-frequency; opera house survey",
+      "note": "Source in orchestra pit; historic benchmark not necessarily present-day renovated room.",
+      "sourceUrls": [
+        "https://av-info.eu/acoustic/concerthall.html"
+      ]
+    },
+    {
+      "id": "tokyo-bunka-kaikan-tokyo-japan",
+      "name": "Tokyo Bunka Kaikan",
+      "location": "Tokyo, Japan",
+      "category": "opera_house",
+      "evidence": "published",
+      "publishedRTSeconds": 1.49,
+      "rtContext": "historic occupied mid-frequency; opera house survey",
+      "note": "Source in orchestra pit; historic benchmark not necessarily present-day renovated room.",
+      "sourceUrls": [
+        "https://av-info.eu/acoustic/concerthall.html"
+      ]
+    },
+    {
+      "id": "kennedy-center-opera-house-washington-dc-usa",
+      "name": "Kennedy Center — Opera House",
+      "location": "Washington, DC, USA",
+      "category": "opera_house",
+      "evidence": "published",
+      "publishedRTSeconds": 1.25,
+      "rtContext": "historic occupied mid-frequency; opera house survey",
+      "note": "Source in orchestra pit; historic benchmark not necessarily present-day renovated room.",
+      "sourceUrls": [
+        "https://av-info.eu/acoustic/concerthall.html"
+      ]
+    },
+    {
+      "id": "bayreuth-festspielhaus-bayreuth-germany",
+      "name": "Bayreuth Festspielhaus",
+      "location": "Bayreuth, Germany",
+      "category": "opera_house",
+      "evidence": "studio_reported",
+      "publishedRTSeconds": 1.5,
+      "rtContext": "venue-listed reverberation",
+      "note": "Distinctly recessed orchestra pit and wood interior; occupancy condition not specified on venue page.",
+      "sourceUrls": [
+        "https://www.bayreuther-festspiele.de/en/festival/festspielhaus/"
+      ]
+    },
+    {
+      "id": "hansa-studios-meistersaal-berlin-germany",
+      "name": "Hansa Studios — Meistersaal",
+      "location": "Berlin, Germany",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "266 m², 7 m high wooden coffered ceiling; originally Studio Two.",
+      "sourceUrls": [
+        "https://hansastudios.de/meistersaal/"
+      ]
+    },
+    {
+      "id": "real-world-studios-big-room-box-wiltshire-united-kingdom",
+      "name": "Real World Studios — Big Room",
+      "location": "Box, Wiltshire, United Kingdom",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "~2000 ft² combined control/tracking room, with acoustic screens.",
+      "sourceUrls": [
+        "https://realworldstudios.com/studios/"
+      ]
+    },
+    {
+      "id": "real-world-studios-wood-room-box-wiltshire-united-kingdom",
+      "name": "Real World Studios — Wood Room",
+      "location": "Box, Wiltshire, United Kingdom",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "Acoustically distinct adjacent tracking room.",
+      "sourceUrls": [
+        "https://realworldstudios.com/studios/"
+      ]
+    },
+    {
+      "id": "sunset-sound-studio-1-live-room-los-angeles-california-usa",
+      "name": "Sunset Sound — Studio 1 Live Room",
+      "location": "Los Angeles, California, USA",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "Historic tracking room; individual impulse measurements needed.",
+      "sourceUrls": [
+        "https://www.sunsetsound.com/echo-chamber/"
+      ]
+    },
+    {
+      "id": "sunset-sound-studio-2-live-room-los-angeles-california-usa",
+      "name": "Sunset Sound — Studio 2 Live Room",
+      "location": "Los Angeles, California, USA",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "Historic tracking room; individual impulse measurements needed.",
+      "sourceUrls": [
+        "https://www.sunsetsound.com/echo-chamber/"
+      ]
+    },
+    {
+      "id": "sunset-sound-studio-3-live-room-los-angeles-california-usa",
+      "name": "Sunset Sound — Studio 3 Live Room",
+      "location": "Los Angeles, California, USA",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "Historic tracking room; individual impulse measurements needed.",
+      "sourceUrls": [
+        "https://www.sunsetsound.com/echo-chamber/"
+      ]
+    },
+    {
+      "id": "blackbird-studio-room-a-nashville-tennessee-usa",
+      "name": "Blackbird Studio — Room A",
+      "location": "Nashville, Tennessee, USA",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "Recording/mix space from operator directory; distinct per-room acoustic parameters not reported.",
+      "sourceUrls": [
+        "https://blackbirdstudio.com/studios/"
+      ]
+    },
+    {
+      "id": "blackbird-studio-room-b-nashville-tennessee-usa",
+      "name": "Blackbird Studio — Room B",
+      "location": "Nashville, Tennessee, USA",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "Recording/mix space from operator directory; distinct per-room acoustic parameters not reported.",
+      "sourceUrls": [
+        "https://blackbirdstudio.com/studios/"
+      ]
+    },
+    {
+      "id": "blackbird-studio-room-c-nashville-tennessee-usa",
+      "name": "Blackbird Studio — Room C",
+      "location": "Nashville, Tennessee, USA",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "Recording/mix space from operator directory; distinct per-room acoustic parameters not reported.",
+      "sourceUrls": [
+        "https://blackbirdstudio.com/studios/"
+      ]
+    },
+    {
+      "id": "blackbird-studio-room-d-nashville-tennessee-usa",
+      "name": "Blackbird Studio — Room D",
+      "location": "Nashville, Tennessee, USA",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "Recording/mix space from operator directory; distinct per-room acoustic parameters not reported.",
+      "sourceUrls": [
+        "https://blackbirdstudio.com/studios/"
+      ]
+    },
+    {
+      "id": "blackbird-studio-room-e-nashville-tennessee-usa",
+      "name": "Blackbird Studio — Room E",
+      "location": "Nashville, Tennessee, USA",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "Recording/mix space from operator directory; distinct per-room acoustic parameters not reported.",
+      "sourceUrls": [
+        "https://blackbirdstudio.com/studios/"
+      ]
+    },
+    {
+      "id": "blackbird-studio-room-f-nashville-tennessee-usa",
+      "name": "Blackbird Studio — Room F",
+      "location": "Nashville, Tennessee, USA",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "Recording/mix space from operator directory; distinct per-room acoustic parameters not reported.",
+      "sourceUrls": [
+        "https://blackbirdstudio.com/studios/"
+      ]
+    },
+    {
+      "id": "blackbird-studio-room-h-nashville-tennessee-usa",
+      "name": "Blackbird Studio — Room H",
+      "location": "Nashville, Tennessee, USA",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "Recording/mix space from operator directory; distinct per-room acoustic parameters not reported.",
+      "sourceUrls": [
+        "https://blackbirdstudio.com/studios/"
+      ]
+    },
+    {
+      "id": "blackbird-studio-room-i-nashville-tennessee-usa",
+      "name": "Blackbird Studio — Room I",
+      "location": "Nashville, Tennessee, USA",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "Recording/mix space from operator directory; distinct per-room acoustic parameters not reported.",
+      "sourceUrls": [
+        "https://blackbirdstudio.com/studios/"
+      ]
+    },
+    {
+      "id": "electric-lady-studios-studio-a-new-york-new-york-usa",
+      "name": "Electric Lady Studios — Studio A",
+      "location": "New York, New York, USA",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "35 × 38 ft live room.",
+      "sourceUrls": [
+        "https://electricladystudios.com/studio-a/"
+      ]
+    },
+    {
+      "id": "electric-lady-studios-studio-b-new-york-new-york-usa",
+      "name": "Electric Lady Studios — Studio B",
+      "location": "New York, New York, USA",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "21 × 19 ft live room; intimate tracking space.",
+      "sourceUrls": [
+        "https://electricladystudios.com/studio-b/"
+      ]
+    },
+    {
+      "id": "abbey-road-the-gatehouse-london-united-kingdom",
+      "name": "Abbey Road — The Gatehouse",
+      "location": "London, United Kingdom",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "Smaller contemporary live room; multi-surface.",
+      "sourceUrls": [
+        "https://www.abbeyroad.com/the-studios"
+      ]
+    },
+    {
+      "id": "abbey-road-the-front-room-london-united-kingdom",
+      "name": "Abbey Road — The Front Room",
+      "location": "London, United Kingdom",
+      "category": "recording_studio",
+      "evidence": "geometry_or_character_documented",
+      "note": "Intimate isolation room for 2–3 players.",
+      "sourceUrls": [
+        "https://www.abbeyroad.com/the-studios"
+      ]
+    },
+    {
+      "id": "capitol-studios-eight-echo-chambers-los-angeles-california-usa",
+      "name": "Capitol Studios — Eight Echo Chambers",
+      "location": "Los Angeles, California, USA",
+      "category": "echo_chamber",
+      "evidence": "studio_reported",
+      "publishedRTSeconds": {
+        "min": 3,
+        "max": 5
+      },
+      "rtContext": "studio-reported approximate reverberation range across chambers",
+      "note": "Eight distinct physical chambers as a collection; individual chamber RTs not published here.",
+      "sourceUrls": [
+        "https://www.capitolstudios.com/"
+      ]
+    },
+    {
+      "id": "sunset-sound-echo-chamber-1-los-angeles-california-usa",
+      "name": "Sunset Sound — Echo Chamber 1",
+      "location": "Los Angeles, California, USA",
+      "category": "echo_chamber",
+      "evidence": "geometry_or_character_documented",
+      "note": "Original 1960 chamber; no individual RT reported.",
+      "sourceUrls": [
+        "https://www.sunsetsound.com/echo-chamber/"
+      ]
+    },
+    {
+      "id": "sunset-sound-echo-chamber-2-los-angeles-california-usa",
+      "name": "Sunset Sound — Echo Chamber 2",
+      "location": "Los Angeles, California, USA",
+      "category": "echo_chamber",
+      "evidence": "geometry_or_character_documented",
+      "note": "Larger successor chamber from late 1970s; no individual RT reported.",
+      "sourceUrls": [
+        "https://www.sunsetsound.com/echo-chamber/"
+      ]
+    },
+    {
+      "id": "sunset-sound-echo-chamber-3-los-angeles-california-usa",
+      "name": "Sunset Sound — Echo Chamber 3",
+      "location": "Los Angeles, California, USA",
+      "category": "echo_chamber",
+      "evidence": "geometry_or_character_documented",
+      "note": "Largest chamber and longest tail of the three; no individual RT reported.",
+      "sourceUrls": [
+        "https://www.sunsetsound.com/echo-chamber/"
+      ]
+    },
+    {
+      "id": "abbey-road-studio-two-echo-chamber-london-united-kingdom",
+      "name": "Abbey Road Studio Two — Echo Chamber",
+      "location": "London, United Kingdom",
+      "category": "echo_chamber",
+      "evidence": "geometry_or_character_documented",
+      "note": "Historic acoustic chamber; room identity and original configuration described.",
+      "sourceUrls": [
+        "https://www.abbeyroad.com/audio-products/71/modal"
+      ]
+    },
+    {
+      "id": "abbey-road-mirror-room-london-united-kingdom",
+      "name": "Abbey Road — Mirror Room",
+      "location": "London, United Kingdom",
+      "category": "echo_chamber",
+      "evidence": "geometry_or_character_documented",
+      "note": "Famous historic chamber configuration; no trustworthy individual RT found.",
+      "sourceUrls": [
+        "https://www.abbeyroad.com/audio-products/71/modal"
+      ]
+    },
+    {
+      "id": "olympic-studios-stone-room-london-united-kingdom",
+      "name": "Olympic Studios — Stone Room",
+      "location": "London, United Kingdom",
+      "category": "historic_echo_chamber",
+      "evidence": "geometry_or_character_documented",
+      "note": "Historical stone room; operator reference via Abbey Road chambers history.",
+      "sourceUrls": [
+        "https://www.abbeyroad.com/audio-products/71/modal"
+      ]
+    },
+    {
+      "id": "st-paul-s-cathedral-nave-london-united-kingdom",
+      "name": "St Paul's Cathedral — Nave",
+      "location": "London, United Kingdom",
+      "category": "sacred_space",
+      "evidence": "measured",
+      "publishedRTSeconds": 10.7,
+      "rtContext": "2022 empty; measured 500 Hz; source under dome/receiver in nave",
+      "note": "Multi-slope, highly position-dependent response. Historic 1984 500 Hz ~11.2 s.",
+      "sourceUrls": [
+        "https://www.mdpi.com/2624-599X/7/3/49"
+      ]
+    },
+    {
+      "id": "notre-dame-de-paris-nave-pre-fire-paris-france",
+      "name": "Notre-Dame de Paris — Nave (pre-fire)",
+      "location": "Paris, France",
+      "category": "historic_sacred_space",
+      "evidence": "measured",
+      "publishedRTSeconds": 7.4,
+      "rtContext": "measured 500 Hz before April 2019 fire",
+      "note": "Historic baseline, not the acoustics of the restored cathedral.",
+      "sourceUrls": [
+        "https://doi.org/10.1016/j.culher.2022.09.006"
+      ]
+    }
+  ]
+}
