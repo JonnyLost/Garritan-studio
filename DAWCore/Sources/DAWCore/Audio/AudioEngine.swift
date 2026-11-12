@@ -67,6 +67,8 @@ public final class AudioEngine: ObservableObject {
         StudioRoomAcousticProfile.abbeyRoadStudioOne.id
     private let concertHallSendMixer = AVAudioMixerNode()
     private let concertHallReturnMixer = AVAudioMixerNode()
+    private let nativeEarlyReflectionMixer = AVAudioMixerNode()
+    private var nativeEarlyReflectionMixerConnected = false
     /// Shared hall return level, independent of individual instrument sends.
     @Published public private(set) var concertHallOverallReverb: Float = 1.0
 
@@ -283,6 +285,9 @@ public final class AudioEngine: ObservableObject {
         )
         print("[Track Audio] Split connected; connecting master output")
         engine.connect(trackNode.outputMixer, to: masterMixer, format: format)
+        if usesNativeConcertHallReverb {
+            installStageEarlyReflections(for: trackNode, format: format)
+        }
         let dryEdges = engine.outputConnectionPoints(for: trackNode.outputMixer, outputBus: 0)
         print("[ConcertHall] Dry track \(track.id.rawValue) -> master: \(dryEdges.contains { $0.node === masterMixer })")
         print("[ConcertHall] Track output format: \(trackNode.outputMixer.outputFormat(forBus: 0))")
@@ -298,7 +303,8 @@ public final class AudioEngine: ObservableObject {
         let depth = max(0, min(5, track.stageReverbZone ?? 2))
         trackNode.setStageAcoustics(
             directLevel: Self.stageDirectLevels[depth],
-            hallSendLevel: Self.concertHallSendLevels[depth] * max(0, track.stageWetTrim ?? 1)
+            hallSendLevel: Self.concertHallSendLevels[depth] * max(0, track.stageWetTrim ?? 1),
+            zone: depth
         )
 
         trackNodes[track.id] = trackNode
@@ -369,6 +375,8 @@ public final class AudioEngine: ObservableObject {
         engine.disconnectNodeOutput(trackNode.pannerNode)
         engine.disconnectNodeOutput(trackNode.outputMixer)
         engine.disconnectNodeOutput(trackNode.concertHallSend)
+        if let send = trackNode.earlyReflectionSend { engine.disconnectNodeOutput(send) }
+        if let effect = trackNode.earlyReflectionNode { engine.disconnectNodeOutput(effect) }
         
         engine.detach(trackNode.inputMixer)
         engine.detach(trackNode.gainNode)
@@ -376,6 +384,8 @@ public final class AudioEngine: ObservableObject {
         engine.detach(trackNode.pannerNode)
         engine.detach(trackNode.outputMixer)
         engine.detach(trackNode.concertHallSend)
+        if let send = trackNode.earlyReflectionSend { engine.detach(send) }
+        if let effect = trackNode.earlyReflectionNode { engine.detach(effect) }
         
         // Detach plugin nodes
         for auNode in trackNode.pluginNodes {
@@ -404,7 +414,8 @@ public final class AudioEngine: ObservableObject {
         let trim = wetTrim.isFinite ? min(2, max(0, wetTrim)) : 1
         trackNodes[trackID]?.setStageAcoustics(
             directLevel: Self.stageDirectLevels[safeDepth],
-            hallSendLevel: Self.concertHallSendLevels[safeDepth] * trim
+            hallSendLevel: Self.concertHallSendLevels[safeDepth] * trim,
+            zone: safeDepth
         )
     }
 
@@ -441,6 +452,21 @@ public final class AudioEngine: ObservableObject {
             standardFormatWithSampleRate: sampleRate, channels: 2
         )!
 
+        // Install source-positioned ER only if native room processing is selected.
+        if enabled {
+            NativeStageEarlyReflectionAudioUnit.registerIfNeeded()
+            if !nativeEarlyReflectionMixerConnected {
+                nativeEarlyReflectionMixer.outputVolume = 0
+                engine.attach(nativeEarlyReflectionMixer)
+                engine.connect(nativeEarlyReflectionMixer, to: concertHallReturnMixer,
+                               format: format)
+                nativeEarlyReflectionMixerConnected = true
+            }
+            for node in trackNodes.values {
+                installStageEarlyReflections(for: node, format: format)
+            }
+        }
+
         func route(_ effect: AVAudioNode) {
             engine.disconnectNodeOutput(concertHallSendMixer)
             engine.disconnectNodeOutput(concertHallReverb)
@@ -452,6 +478,7 @@ public final class AudioEngine: ObservableObject {
         }
 
         route(target)
+        nativeEarlyReflectionMixer.outputVolume = enabled ? 1 : 0
         do {
             if wasRunning { try engine.start() }
             usesNativeConcertHallReverb = enabled
@@ -460,6 +487,7 @@ public final class AudioEngine: ObservableObject {
             // The original Concert Hall routing is the rollback boundary.
             engine.stop()
             route(previous)
+            nativeEarlyReflectionMixer.outputVolume = usesNativeConcertHallReverb ? 1 : 0
             if wasRunning { try? engine.start() }
             isRunning = engine.isRunning
             throw AudioEngineError.failedToStart(underlying: error)
@@ -479,7 +507,32 @@ public final class AudioEngine: ObservableObject {
             .parameter(withAddress: NativeRoomReverbAudioUnit.roomParameterAddress) {
             roomParameter.value = AUValue(index)
         }
+        for node in trackNodes.values { node.setNativeRoomProfileIndex(index) }
         return true
+    }
+
+    /// One optional wet-only early-reflection Audio Unit per instrument.
+    /// Called only with the audio engine stopped, with the dry edges intact.
+    private func installStageEarlyReflections(for node: TrackAudioNode,
+                                              format: AVAudioFormat) {
+        guard node.earlyReflectionNode == nil else { return }
+        let send = AVAudioMixerNode()
+        let effect = AVAudioUnitEffect(
+            audioComponentDescription: NativeStageEarlyReflectionAudioUnit.componentDescription
+        )
+        engine.attach(send)
+        engine.attach(effect)
+        engine.connect(send, to: effect, format: format)
+        engine.connect(effect, to: nativeEarlyReflectionMixer, format: format)
+        node.installEarlyReflection(send: send, effect: effect)
+        node.setNativeRoomProfileIndex(
+            StudioRoomAcousticProfile.index(forID: selectedNativeRoomProfileID) ?? 0
+        )
+        engine.connect(node.pannerNode, to: [
+            AVAudioConnectionPoint(node: node.outputMixer, bus: 0),
+            AVAudioConnectionPoint(node: node.concertHallSend, bus: 0),
+            AVAudioConnectionPoint(node: send, bus: 0)
+        ], fromBus: 0, format: format)
     }
 
     /// Get track node for external access
@@ -1034,6 +1087,10 @@ public final class TrackAudioNode {
     public var stereoPositionNode: AVAudioUnitEffect?
     public let outputMixer: AVAudioMixerNode
     public let concertHallSend: AVAudioMixerNode
+    public private(set) var earlyReflectionSend: AVAudioMixerNode?
+    public private(set) var earlyReflectionNode: AVAudioUnitEffect?
+    private var stagePan: Float = 0
+    private var stageZone = 2
     
     // Plugin chain (Audio Units)
     public var pluginNodes: [AVAudioUnit] = []
@@ -1066,13 +1123,37 @@ public final class TrackAudioNode {
 
     /// Apply distance-dependent direct level and room send together.
     /// This does not change the user's saved track volume.
-    public func setStageAcoustics(directLevel: Float, hallSendLevel: Float) {
+    public func setStageAcoustics(directLevel: Float, hallSendLevel: Float,
+                                  zone: Int = 2) {
         stageDirectLevel = directLevel.isFinite ? min(1, max(0, directLevel)) : 1
         concertHallSendLevel = hallSendLevel.isFinite ? max(0, hallSendLevel) : 0
+        stageZone = min(5, max(0, zone))
+        earlyReflectionNode?.auAudioUnit.parameterTree?
+            .parameter(withAddress: NativeStageEarlyReflectionAudioUnit.zoneAddress)?
+            .value = AUValue(stageZone)
         updateOutputVolume()
+    }
+
+    public func installEarlyReflection(send: AVAudioMixerNode,
+                                       effect: AVAudioUnitEffect) {
+        earlyReflectionSend = send
+        earlyReflectionNode = effect
+        setPan(stagePan)
+        setStageAcoustics(directLevel: stageDirectLevel,
+                         hallSendLevel: concertHallSendLevel, zone: stageZone)
+    }
+
+    public func setNativeRoomProfileIndex(_ index: Int) {
+        earlyReflectionNode?.auAudioUnit.parameterTree?
+            .parameter(withAddress: NativeStageEarlyReflectionAudioUnit.roomAddress)?
+            .value = AUValue(index)
     }
     
     public func setPan(_ pan: Float) {
+        stagePan = pan.isFinite ? min(1, max(-1, pan)) : 0
+        earlyReflectionNode?.auAudioUnit.parameterTree?
+            .parameter(withAddress: NativeStageEarlyReflectionAudioUnit.panAddress)?
+            .value = stagePan
         if let parameter = stereoPositionNode?.auAudioUnit.parameterTree?.parameter(withAddress: 0) {
             // The mixer must remain centered: otherwise its stereo balance
             // would undo the processor's stereo-preserving position.
@@ -1095,6 +1176,7 @@ public final class TrackAudioNode {
         // follow volume and mute (including solo) to prevent wet-only audio.
         // Keep the room send separate from direct-sound distance attenuation.
         concertHallSend.outputVolume = dryGain * concertHallSendLevel
+        earlyReflectionSend?.outputVolume = dryGain * concertHallSendLevel
     }
 }
 
