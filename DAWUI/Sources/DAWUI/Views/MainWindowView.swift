@@ -537,7 +537,9 @@ public struct MainWindowView: View {
             if let track = viewModel.selectedTrack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(track.name).font(.subheadline.weight(.semibold))
-                    Text(track.studioAnalogEnabled == true ? "Studio Analog" : (track.instrumentSlot?.pluginID?.name ?? "No instrument loaded"))
+                    Text(track.studioFMEnabled == true ? "Studio FM" :
+                         (track.studioAnalogEnabled == true ? "Studio Analog" :
+                          (track.instrumentSlot?.pluginID?.name ?? "No instrument loaded")))
                         .font(.caption).foregroundColor(.secondary)
                 }
                 Spacer()
@@ -562,7 +564,9 @@ public struct MainWindowView: View {
     @ViewBuilder
     private var bottomPanel: some View {
         if showInstrumentWorkspace {
-            if let track = viewModel.selectedTrack, track.studioAnalogEnabled == true {
+            if let track = viewModel.selectedTrack, track.studioFMEnabled == true {
+                StudioFMPanelView(viewModel: viewModel, trackID: track.id)
+            } else if let track = viewModel.selectedTrack, track.studioAnalogEnabled == true {
                 StudioAnalogPanelView(viewModel: viewModel, trackID: track.id)
             } else {
                 VRackView(viewModel: viewModel, expandedOnly: true)
@@ -2185,6 +2189,7 @@ struct TrackInspectorSection: View {
     @State private var trackName: String = ""
     @State private var showGarritanBrowser = false
     @State private var showStudioAnalogPanel = false
+    @State private var showStudioFMPanel = false
     @State private var availableInputs: [AudioInputDevice] = []
     @State private var selectedInputID: AudioDeviceID = 0
     @State private var selectedChannelID: String = "default-stereo"
@@ -2253,14 +2258,18 @@ struct TrackInspectorSection: View {
                               ? "pianokeys" : "waveform")
                             .foregroundColor(.accentColor)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(track.studioAnalogEnabled == true ? "Studio Analog" : (track.instrumentSlot?.pluginID?.name ?? "No instrument loaded"))
+                            Text(track.studioFMEnabled == true ? "Studio FM" :
+                                 (track.studioAnalogEnabled == true ? "Studio Analog" :
+                                  (track.instrumentSlot?.pluginID?.name ?? "No instrument loaded")))
                                 .font(.subheadline.weight(.medium))
                                 .lineLimit(2)
-                            Text(track.studioAnalogEnabled == true
-                                 ? "Built-in modular virtual-analog synthesizer"
-                                 : (track.instrumentSlot?.pluginID == nil
+                            Text(track.studioFMEnabled == true
+                                 ? "Built-in native four-operator FM synthesizer"
+                                 : (track.studioAnalogEnabled == true
+                                    ? "Built-in modular virtual-analog synthesizer"
+                                    : (track.instrumentSlot?.pluginID == nil
                                     ? "Choose an instrument for this track."
-                                    : "Instrument assigned to this track"))
+                                    : "Instrument assigned to this track")))
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                         }
@@ -2274,7 +2283,15 @@ struct TrackInspectorSection: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    if track.studioAnalogEnabled == true {
+                    if track.studioFMEnabled == true {
+                        Button {
+                            showStudioFMPanel = true
+                        } label: {
+                            Label("Studio FM Controls…", systemImage: "slider.horizontal.3")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    } else if track.studioAnalogEnabled == true {
                         Button {
                             showStudioAnalogPanel = true
                         } label: {
@@ -2472,6 +2489,10 @@ struct TrackInspectorSection: View {
         .sheet(isPresented: $showStudioAnalogPanel) {
             StudioAnalogPanelView(viewModel: viewModel, trackID: track.id)
                 .frame(minWidth: 900, minHeight: 600)
+        }
+        .sheet(isPresented: $showStudioFMPanel) {
+            StudioFMPanelView(viewModel: viewModel, trackID: track.id)
+                .frame(minWidth: 830, minHeight: 630)
         }
     }
     

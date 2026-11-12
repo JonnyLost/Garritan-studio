@@ -11,6 +11,7 @@ let package = Package(
     products: [
         .library(name: "DAWCore", targets: ["DAWCore"]),
         .library(name: "StudioAnalogDSP", targets: ["StudioAnalogDSP"]),
+        .library(name: "StudioFMDSP", targets: ["StudioFMDSP"]),
         .library(name: "DAWUI", targets: ["DAWUI"]),
         .library(name: "VST3Bridge", targets: ["VST3Bridge"]),
         .executable(name: "DAWApp", targets: ["DAWApp"])
@@ -24,6 +25,15 @@ let package = Package(
             name: "StudioAnalogDSP",
             path: "StudioAnalogDSP",
             sources: ["src/StudioAnalogDSP.cpp"],
+            publicHeadersPath: "include",
+            cxxSettings: [.unsafeFlags(["-std=c++17"])]
+        ),
+
+        // MARK: - Original four-operator FM engine
+        .target(
+            name: "StudioFMDSP",
+            path: "StudioFMDSP",
+            sources: ["src/StudioFMDSP.cpp"],
             publicHeadersPath: "include",
             cxxSettings: [.unsafeFlags(["-std=c++17"])]
         ),
@@ -42,6 +52,7 @@ let package = Package(
             dependencies: [
                 "DAWRealtime",
                 "StudioAnalogDSP",
+                "StudioFMDSP",
                 .product(name: "Supabase", package: "supabase-swift")
             ],
             path: "DAWCore/Sources/DAWCore",
@@ -96,6 +107,11 @@ let package = Package(
         ),
         
         // MARK: - Tests
+        .testTarget(
+            name: "StudioFMDSPTests",
+            dependencies: ["StudioFMDSP"],
+            path: "Tests/StudioFMDSPTests"
+        ),
         .testTarget(
             name: "StudioAnalogDSPTests",
             dependencies: ["StudioAnalogDSP"],

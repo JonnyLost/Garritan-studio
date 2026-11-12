@@ -238,6 +238,10 @@ public final class PlaybackEngine: ObservableObject {
 
         // Reopen saved native synthesizers through the same track mixer and
         // stage acoustics as external instruments (no AU host required).
+        if track.studioFMEnabled == true && coreAudioBackend == nil {
+            try loadStudioFM(for: track.id, patch: track.studioFMPatch)
+            return
+        }
         if track.studioAnalogEnabled == true && coreAudioBackend == nil {
             try loadStudioAnalog(for: track.id, patch: track.studioAnalogPatch)
             return
@@ -316,6 +320,41 @@ public final class PlaybackEngine: ObservableObject {
         }
         if wasRunning { try engine.start() }
         print("[Studio Analog] Native synthesizer connected to track \(trackID.rawValue)")
+    }
+
+    /// Attach the original four-operator FM engine using the same existing
+    /// per-track input mixer, stage acoustics, fader and pan as Studio Analog.
+    /// Sound initialization happens off the audio callback.
+    public func loadStudioFM(for trackID: TrackID, patch: StudioFMPatch? = nil) throws {
+        guard coreAudioBackend == nil else {
+            throw StudioFMError.unsupportedAudioBackend
+        }
+        guard let trackNode = audioEngine.trackNode(for: trackID) else {
+            throw PlaybackError.trackNotFound(trackID)
+        }
+        let synth = try StudioFMInstrument(sampleRate: audioEngine.sampleRate)
+        if let patch {
+            try synth.apply(patch)
+        }
+        let engine = audioEngine.engine
+        let wasRunning = engine.isRunning
+        if wasRunning { engine.stop() }
+        defer {
+            if wasRunning && !engine.isRunning {
+                do { try engine.start() }
+                catch { print("[Studio FM] Failed to restore engine after graph change: \(error)") }
+            }
+        }
+        removeInstrument(for: trackID)
+        engine.attach(synth.audioNode)
+        engine.connect(synth.audioNode, to: trackNode.inputMixer, format: synth.format)
+        let loaded = TrackInstrument.studioFM(synth)
+        trackInstruments[trackID] = loaded
+        midiProcessingQueue.sync {
+            midiQueueTrackInstruments[trackID] = loaded
+        }
+        if wasRunning { try engine.start() }
+        print("[Studio FM] Native synthesizer connected to track \(trackID.rawValue)")
     }
 
     // Mixer nodes used for sample rate conversion when loading AU instruments
@@ -2215,13 +2254,17 @@ public final class PlaybackEngine: ObservableObject {
             // transport always silences native synthesizers and clears their
             // held note/pedal state without changing ARIA or sampler paths.
             for instrument in midiQueueTrackInstruments.values {
-                if case .studioAnalog(let synth) = instrument {
-                    synth.allNotesOff()
+                switch instrument {
+                case .studioAnalog(let synth): synth.allNotesOff()
+                case .studioFM(let synth): synth.allNotesOff()
+                default: break
                 }
             }
             for instrument in midiQueueRackInstruments.values {
-                if case .studioAnalog(let synth) = instrument {
-                    synth.allNotesOff()
+                switch instrument {
+                case .studioAnalog(let synth): synth.allNotesOff()
+                case .studioFM(let synth): synth.allNotesOff()
+                default: break
                 }
             }
         }
@@ -2475,6 +2518,7 @@ public enum TrackInstrument {
     case auInstrument(AVAudioUnit, pluginID: UUID)
     case sampler(AVAudioUnitSampler)
     case studioAnalog(StudioAnalogInstrument)
+    case studioFM(StudioFMInstrument)
     
     /// The underlying audio unit node
     public var audioNode: AVAudioNode {
@@ -2482,6 +2526,7 @@ public enum TrackInstrument {
         case .auInstrument(let au, _): return au
         case .sampler(let sampler): return sampler
         case .studioAnalog(let synth): return synth.audioNode
+        case .studioFM(let synth): return synth.audioNode
         }
     }
     
@@ -2515,6 +2560,10 @@ public enum TrackInstrument {
         case .sampler(let sampler):
             sampler.startNote(note, withVelocity: velocity, onChannel: channel)
         case .studioAnalog(let synth):
+            let offset: UInt32 = sampleOffset >= 0 && sampleOffset <= 65_535
+                ? UInt32(sampleOffset) : 0
+            synth.noteOn(note, velocity: velocity, channel: channel, frameOffset: offset)
+        case .studioFM(let synth):
             let offset: UInt32 = sampleOffset >= 0 && sampleOffset <= 65_535
                 ? UInt32(sampleOffset) : 0
             synth.noteOn(note, velocity: velocity, channel: channel, frameOffset: offset)
@@ -2552,6 +2601,10 @@ public enum TrackInstrument {
             let offset: UInt32 = sampleOffset >= 0 && sampleOffset <= 65_535
                 ? UInt32(sampleOffset) : 0
             synth.noteOff(note, channel: channel, frameOffset: offset)
+        case .studioFM(let synth):
+            let offset: UInt32 = sampleOffset >= 0 && sampleOffset <= 65_535
+                ? UInt32(sampleOffset) : 0
+            synth.noteOff(note, channel: channel, frameOffset: offset)
         }
     }
     
@@ -2577,6 +2630,11 @@ public enum TrackInstrument {
                 ? UInt32(sampleOffset) : 0
             synth.controller(controller, value: value, channel: channel,
                              frameOffset: offset)
+        case .studioFM(let synth):
+            let offset: UInt32 = sampleOffset >= 0 && sampleOffset <= 65_535
+                ? UInt32(sampleOffset) : 0
+            synth.controller(controller, value: value, channel: channel,
+                             frameOffset: offset)
         }
     }
     
@@ -2596,8 +2654,8 @@ public enum TrackInstrument {
             }
         case .sampler(let sampler):
             sampler.sendProgramChange(program, onChannel: channel)
-        case .studioAnalog:
-            break // Native patches will use the Studio preset browser.
+        case .studioAnalog, .studioFM:
+            break // Native patches use Studio's own controls and preset browsers.
         }
     }
 
@@ -2621,6 +2679,10 @@ public enum TrackInstrument {
         case .sampler(let sampler):
             sampler.sendPitchBend(value, onChannel: channel)
         case .studioAnalog(let synth):
+            let offset: UInt32 = sampleOffset >= 0 && sampleOffset <= 65_535
+                ? UInt32(sampleOffset) : 0
+            synth.pitchBend(value, channel: channel, frameOffset: offset)
+        case .studioFM(let synth):
             let offset: UInt32 = sampleOffset >= 0 && sampleOffset <= 65_535
                 ? UInt32(sampleOffset) : 0
             synth.pitchBend(value, channel: channel, frameOffset: offset)

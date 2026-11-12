@@ -473,7 +473,90 @@ public final class ProjectViewModel: ObservableObject {
         track.instrumentSlot = nil
         track.garritanProgramID = nil
         track.studioAnalogEnabled = true
+        track.studioFMEnabled = false
         updateTrack(track, description: "Load Studio Analog")
+    }
+
+    /// Install Studio's original native four-operator FM synth in an
+    /// instrument/MIDI track, preserving the previous AU if loading fails.
+    public func loadStudioFM(for trackID: TrackID) throws {
+        guard var track = project.track(withID: trackID),
+              track.type == .midi || track.type == .instrument else {
+            throw PlaybackError.trackNotFound(trackID)
+        }
+        let previousPluginID: UUID?
+        if let instrument = playbackEngine.instrument(for: trackID),
+           case .auInstrument(_, let id) = instrument {
+            previousPluginID = id
+        } else {
+            previousPluginID = nil
+        }
+        try playbackEngine.loadStudioFM(for: trackID, patch: track.studioFMPatch)
+        if let previousPluginID { pluginHost.unloadPlugin(id: previousPluginID) }
+        track.instrumentSlot = nil
+        track.garritanProgramID = nil
+        track.studioAnalogEnabled = false
+        track.studioFMEnabled = true
+        updateTrack(track, description: "Load Studio FM")
+    }
+
+    /// Live FM control updates are atomic in the DSP and persist on the track.
+    /// Do not add an undo transaction for every slider substep.
+    public func studioFMValue(_ parameter: StudioFMParameter, for trackID: TrackID) -> Float {
+        project.track(withID: trackID)?.studioFMPatch?.value(for: parameter)
+            ?? parameter.defaultValue
+    }
+
+    public func setStudioFMParameter(_ parameter: StudioFMParameter,
+                                     value: Float, for trackID: TrackID) {
+        guard parameter.valid(value),
+              let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioFMEnabled == true,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioFM(let synth) = instrument,
+              synth.setParameter(parameter, value: value) else { return }
+        var patch = project.tracks[index].studioFMPatch ?? StudioFMPatch()
+        patch.set(value, for: parameter)
+        project.tracks[index].studioFMPatch = patch
+        project.tracks[index].studioFMPresetID = nil
+    }
+
+    public func resetStudioFMPatch(for trackID: TrackID) throws {
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioFMEnabled == true,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioFM(let synth) = instrument else {
+            throw StudioFMError.invalidConfiguration
+        }
+        let patch = StudioFMPatch()
+        _ = synth.allNotesOff()
+        try synth.apply(patch)
+        project.tracks[index].studioFMPatch = patch
+        project.tracks[index].studioFMPresetID = nil
+    }
+
+    /// Load a complete validated factory or user FM sound. Its values are
+    /// embedded in the project; the user bank file is not needed to reopen.
+    public func applyStudioFMPreset(_ preset: StudioFMPreset,
+                                    for trackID: TrackID) throws {
+        try preset.validate()
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioFMEnabled == true,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioFM(let synth) = instrument else {
+            throw StudioFMError.invalidConfiguration
+        }
+        _ = synth.allNotesOff()
+        try synth.apply(preset.patch)
+        project.tracks[index].studioFMPatch = preset.patch
+        project.tracks[index].studioFMPresetID = preset.id
+    }
+
+    public func markStudioFMPresetSaved(id: String, for trackID: TrackID) {
+        guard UUID(uuidString: id) != nil,
+              let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioFMEnabled == true else { return }
+        project.tracks[index].studioFMPresetID = id
     }
 
     /// Read a parameter from project state, or the native engine default.
