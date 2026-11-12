@@ -93,6 +93,64 @@ int main() {
     assert(!ss_control_change(morph, 200, 30, 0));
     ss_destroy(morph);
 
+    // ADSR: attack rises, decay reaches the sustain level, and note-off
+    // releases progressively instead of stopping at a fixed 64-frame fade.
+    SSSampler *adsr = ss_create(44100, 4);
+    assert(adsr);
+    std::vector<float> steady(30000, 1.f);
+    assert(ss_add_zone(adsr, 60, 60, 60, 1, 127, 44100,
+                       steady.data(), nullptr, 30000));
+    assert(!ss_set_adsr(adsr, -.01f, .01f, .5f, .03f));
+    assert(!ss_set_adsr(adsr, .01f, .01f, 1.2f, .03f));
+    assert(ss_set_adsr(adsr, .01f, .02f, .4f, .04f));
+    assert(ss_note_on(adsr, 60, 127, 0));
+    std::vector<float> envL(4096), envR(4096);
+    ss_render(adsr, envL.data(), envR.data(), 200);
+    assert(envL[10] > 0.f && envL[10] < envL[150]);
+    assert(envL[150] < .25f);
+    ss_render(adsr, envL.data(), envR.data(), 2200);
+    assert(std::abs(envL[2199] - .1f) < .001f);
+    assert(ss_note_off(adsr, 60, 0));
+    ss_render(adsr, envL.data(), envR.data(), 400);
+    assert(envL[399] > 0.f && envL[399] < .1f);
+    ss_render(adsr, envL.data(), envR.data(), 2048);
+    for (int i = 1920; i < 2048; ++i) assert(envL[i] == 0.f);
+    ss_destroy(adsr);
+
+    // Sustain loops: a short recording must repeat while the note remains
+    // held, then exit the loop and release naturally on MIDI note-off.
+    SSSampler *loop = ss_create(44100, 4);
+    assert(loop);
+    std::vector<float> shortSample(128, .5f);
+    assert(!ss_add_zone_with_loop(loop, 60, 60, 60, 1, 127, 44100,
+                                  shortSample.data(), nullptr, 128,
+                                  100, 80, 0));
+    assert(!ss_add_zone_with_loop(loop, 60, 60, 60, 1, 127, 44100,
+                                  shortSample.data(), nullptr, 128,
+                                  32, 150, 0));
+    assert(!ss_add_zone_with_loop(loop, 60, 60, 60, 1, 127, 44100,
+                                  shortSample.data(), nullptr, 128,
+                                  32, 96, 33));
+    assert(!ss_add_zone_with_loop(loop, 60, 60, 60, 1, 127, 44100,
+                                  shortSample.data(), nullptr, 128,
+                                  0, 0, 1));
+    assert(ss_add_zone_with_loop(loop, 60, 60, 60, 1, 127, 44100,
+                                 shortSample.data(), nullptr, 128,
+                                 32, 96, 16));
+    assert(ss_note_on(loop, 60, 127, 0));
+    std::vector<float> loopL(4096), loopR(4096);
+    ss_render(loop, loopL.data(), loopR.data(), 4096);
+    assert(loopL[4095] > .01f); // still sounding > 30 samples' worth
+    for (int i = 1; i < 4096; ++i) {
+        assert(std::isfinite(loopL[i]));
+        assert(std::abs(loopL[i] - loopL[i-1]) < .1f);
+    }
+    assert(ss_note_off(loop, 60, 0));
+    ss_render(loop, loopL.data(), loopR.data(), 512);
+    assert(loopL[0] > 0.f);
+    assert(loopL[511] == 0.f);
+    ss_destroy(loop);
+
     ss_destroy(sampler);
     std::printf("Studio Sampler DSP smoke test passed (%.1f Hz)\n", frequency);
     return 0;
