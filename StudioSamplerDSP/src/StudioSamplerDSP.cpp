@@ -33,6 +33,9 @@ struct Sample {
     uint32_t loopStart = 0;
     uint32_t loopEnd = 0; // exclusive; zero disables looping
     uint32_t loopCrossfade = 0;
+    uint32_t fadeIn = 0;
+    uint32_t fadeOut = 0;
+    uint8_t articulation = 0;
 };
 
 struct ADSR {
@@ -64,7 +67,7 @@ struct Voice {
     bool active = false;
 };
 
-enum class CommandKind : uint8_t { on, off, allOff, controller, crossfade, envelope };
+enum class CommandKind : uint8_t { on, off, allOff, controller, crossfade, envelope, articulation };
 struct Command {
     CommandKind kind;
     uint8_t note;
@@ -100,6 +103,8 @@ struct SSSampler {
         smoothCC11.fill(127.f);
         targetCC1.fill(127.f);
         targetCC11.fill(127.f);
+        keyswitchArticulations.fill(255); // 255 denotes ordinary musical note
+        selectedArticulations.fill(0); // default articulation for all MIDI channels
         // Defaults match the original short anti-click fades.
         activeADSR.attack = float(kFadeFrames / outputRate);
         activeADSR.release = float(kFadeFrames / outputRate);
@@ -109,6 +114,8 @@ struct SSSampler {
     std::vector<Sample> samples;
     std::vector<Voice> voices;
     uint64_t nextSerial = 0;
+    std::array<uint8_t, 128> keyswitchArticulations{};
+    std::array<uint8_t, 16> selectedArticulations{};
     ADSR activeADSR{};
     bool cc1Crossfade = false; // mutated only while consuming RT commands
     std::array<float, 16> smoothCC1{};
@@ -203,6 +210,7 @@ struct SSSampler {
                                float(selected->maxVelocity)) * 0.5f;
         for (const auto& sample : samples) {
             if (&sample == selected || sample.root != selected->root ||
+                sample.articulation != selected->articulation ||
                 note < sample.low || note > sample.high) continue;
             const float other = (float(sample.minVelocity) +
                                  float(sample.maxVelocity)) * 0.5f;
@@ -223,10 +231,18 @@ struct SSSampler {
     // A note can activate multiple matching dynamic layers. Layers run in
     // sync from their beginnings; the smoothed CC1 controls their gains.
     void start(uint8_t note, uint8_t velocity, uint8_t channel) {
+        // Keyswitches are MIDI-only events; they do not sound themselves.
+        const uint8_t keyswitch = keyswitchArticulations[note];
+        if (keyswitch != 255) {
+            selectedArticulations[channel] = keyswitch;
+            return;
+        }
+        const uint8_t activeArticulation = selectedArticulations[channel];
         const Sample *selected = nullptr;
         int bestDistance = std::numeric_limits<int>::max();
         for (const auto& sample : samples) {
-            if (note < sample.low || note > sample.high ||
+            if (sample.articulation != activeArticulation ||
+                note < sample.low || note > sample.high ||
                 (!cc1Crossfade &&
                  (velocity < sample.minVelocity || velocity > sample.maxVelocity))) continue;
             const int distance = std::abs(int(note) - int(sample.root));
@@ -245,6 +261,7 @@ struct SSSampler {
         int started = 0;
         for (const auto& sample : samples) {
             if (sample.root != selected->root ||
+                sample.articulation != activeArticulation ||
                 note < sample.low || note > sample.high) continue;
             if (started >= 8) break;
             startVoice(&sample, note, velocity, channel);
@@ -269,6 +286,7 @@ struct SSSampler {
     }
 
     void stop(uint8_t note, uint8_t channel) {
+        if (keyswitchArticulations[note] != 255) return;
         for (auto& voice : voices) {
             if (voice.active && voice.note == note && voice.channel == channel)
                 startRelease(voice);
@@ -303,6 +321,9 @@ struct SSSampler {
                 break;
             case CommandKind::envelope:
                 activeADSR = command.adsr;
+                break;
+            case CommandKind::articulation:
+                selectedArticulations[command.channel] = command.note;
                 break;
             }
             read = (read + 1) % kCommandCapacity;
@@ -353,6 +374,22 @@ int32_t ss_add_zone_with_region(SSSampler *sampler,
                     uint32_t playback_start_frame, uint32_t playback_end_frame,
                     uint32_t loop_start_frame, uint32_t loop_end_frame,
                     uint32_t loop_crossfade_frames) {
+    return ss_add_zone_with_options(sampler, root_note, lowest_note, highest_note,
+        lowest_velocity, highest_velocity, source_sample_rate, left, right, frames,
+        playback_start_frame, playback_end_frame, loop_start_frame,
+        loop_end_frame, loop_crossfade_frames, 0, 0, 0);
+}
+
+int32_t ss_add_zone_with_options(SSSampler *sampler,
+                    uint8_t root_note, uint8_t lowest_note, uint8_t highest_note,
+                    uint8_t lowest_velocity, uint8_t highest_velocity,
+                    double source_sample_rate,
+                    const float *left, const float *right, uint32_t frames,
+                    uint32_t playback_start_frame, uint32_t playback_end_frame,
+                    uint32_t loop_start_frame, uint32_t loop_end_frame,
+                    uint32_t loop_crossfade_frames,
+                    uint32_t fade_in_frames, uint32_t fade_out_frames,
+                    uint8_t articulation_id) {
     const bool validRegion = playback_start_frame < playback_end_frame &&
         playback_end_frame <= frames && playback_end_frame - playback_start_frame >= 2;
     const bool noLoop = loop_start_frame == 0 && loop_end_frame == 0 &&
@@ -362,7 +399,11 @@ int32_t ss_add_zone_with_region(SSSampler *sampler,
         loop_start_frame <= loop_end_frame &&
         loop_end_frame - loop_start_frame >= 4 &&
         loop_crossfade_frames <= (loop_end_frame - loop_start_frame) / 2;
-    if (!validRegion || (!noLoop && !validLoop) ||
+    const bool validFade = validRegion &&
+        uint64_t(fade_in_frames) + uint64_t(fade_out_frames) <=
+            uint64_t(playback_end_frame - playback_start_frame);
+    if (!validRegion || !validFade || articulation_id > 15 ||
+        (!noLoop && !validLoop) ||
         !sampler || !left || frames < 2 || frames > kMaxSampleFrames ||
         sampler->samples.size() >= kMaxZones || !validRate(source_sample_rate) ||
         root_note > 127 || lowest_note > highest_note || highest_note > 127 ||
@@ -386,6 +427,9 @@ int32_t ss_add_zone_with_region(SSSampler *sampler,
         zone.loopStart = loop_start_frame;
         zone.loopEnd = loop_end_frame;
         zone.loopCrossfade = loop_crossfade_frames;
+        zone.fadeIn = fade_in_frames;
+        zone.fadeOut = fade_out_frames;
+        zone.articulation = articulation_id;
         sampler->samples.emplace_back(std::move(zone));
         return 1;
     } catch (...) { return 0; }
@@ -393,6 +437,32 @@ int32_t ss_add_zone_with_region(SSSampler *sampler,
 
 int32_t ss_zone_count(const SSSampler *sampler) {
     return sampler ? static_cast<int32_t>(sampler->samples.size()) : 0;
+}
+
+int32_t ss_configure_keyswitches(SSSampler *sampler,
+                                const uint8_t *notes,
+                                const uint8_t *articulation_ids,
+                                int32_t count) {
+    if (!sampler || count < 0 || count > 15 ||
+        (count > 0 && (!notes || !articulation_ids))) return 0;
+    std::array<uint8_t, 128> prepared{};
+    std::array<bool, 16> usedIDs{};
+    prepared.fill(255);
+    for (int32_t i = 0; i < count; ++i) {
+        const uint8_t id = articulation_ids[i];
+        const uint8_t note = notes[i];
+        if (id < 1 || id > 15 || usedIDs[id] || prepared[note] != 255) return 0;
+        usedIDs[id] = true;
+        prepared[note] = id;
+    }
+    sampler->keyswitchArticulations = prepared;
+    return 1;
+}
+
+int32_t ss_select_articulation(SSSampler *sampler,
+                              uint8_t articulation_id, uint8_t channel) {
+    if (!sampler || articulation_id > 15 || channel > 15) return 0;
+    return sampler->enqueue({CommandKind::articulation, articulation_id, 0, channel}) ? 1 : 0;
 }
 
 int32_t ss_note_on(SSSampler *sampler, uint8_t note, uint8_t velocity, uint8_t channel) {
@@ -488,6 +558,18 @@ void ss_render(SSSampler *sampler, float *left, float *right, int32_t frames) {
                 amplitude *= dynamics / 127.f;
             }
             amplitude *= std::max(0.f, voice.envelopeLevel);
+            // Source-relative anti-click ramps. Preserve the original PCM,
+            // including when sample playback is transposed or looped.
+            if (sample->fadeIn > 0) {
+                amplitude *= std::min(1.f, std::max(0.f,
+                    float((voice.position - double(sample->playbackStart) + 1.0) /
+                          double(sample->fadeIn))));
+            }
+            if (sample->fadeOut > 0) {
+                amplitude *= std::min(1.f, std::max(0.f,
+                    float((double(sample->playbackEnd) - voice.position) /
+                          double(sample->fadeOut))));
+            }
             float sampleL = readLinear(sample->left, voice.position);
             float sampleR = readLinear(sample->right, voice.position);
             if (looping && sample->loopCrossfade > 0) {
