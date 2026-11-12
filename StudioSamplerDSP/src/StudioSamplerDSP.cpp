@@ -28,7 +28,19 @@ struct Sample {
     uint8_t high = 127;
     uint8_t minVelocity = 1;
     uint8_t maxVelocity = 127;
+    uint32_t loopStart = 0;
+    uint32_t loopEnd = 0; // exclusive; zero disables looping
+    uint32_t loopCrossfade = 0;
 };
+
+struct ADSR {
+    float attack = 0.0f;
+    float decay = 0.0f;
+    float sustain = 1.0f;
+    float release = 0.0f;
+};
+
+enum class EnvelopeStage : uint8_t { attack, decay, sustain, release, done };
 
 struct Voice {
     const Sample *sample = nullptr;
@@ -42,17 +54,27 @@ struct Voice {
     uint64_t serial = 0;
     uint8_t note = 0;
     uint8_t channel = 0;
-    int attackFrames = 0;
-    int releaseFrames = 0;
+    ADSR adsr{};
+    EnvelopeStage stage = EnvelopeStage::done;
+    float envelopeLevel = 0.f;
+    float envelopeDelta = 0.f;
+    int stageFrames = 0;
     bool active = false;
 };
 
-enum class CommandKind : uint8_t { on, off, allOff, controller, crossfade };
+enum class CommandKind : uint8_t { on, off, allOff, controller, crossfade, envelope };
 struct Command {
-    CommandKind kind = CommandKind::allOff;
-    uint8_t note = 0;
-    uint8_t velocity = 0;
-    uint8_t channel = 0;
+    CommandKind kind;
+    uint8_t note;
+    uint8_t velocity;
+    uint8_t channel;
+    ADSR adsr;
+
+    Command(CommandKind kindValue = CommandKind::allOff, uint8_t noteValue = 0,
+            uint8_t velocityValue = 0, uint8_t channelValue = 0,
+            ADSR envelopeValue = ADSR{})
+      : kind(kindValue), note(noteValue), velocity(velocityValue),
+        channel(channelValue), adsr(envelopeValue) {}
 };
 
 inline bool validRate(double rate) {
@@ -76,12 +98,16 @@ struct SSSampler {
         smoothCC11.fill(127.f);
         targetCC1.fill(127.f);
         targetCC11.fill(127.f);
+        // Defaults match the original short anti-click fades.
+        activeADSR.attack = float(kFadeFrames / outputRate);
+        activeADSR.release = float(kFadeFrames / outputRate);
     }
 
     double outputRate;
     std::vector<Sample> samples;
     std::vector<Voice> voices;
     uint64_t nextSerial = 0;
+    ADSR activeADSR{};
     bool cc1Crossfade = false; // mutated only while consuming RT commands
     std::array<float, 16> smoothCC1{};
     std::array<float, 16> smoothCC11{};
@@ -90,6 +116,55 @@ struct SSSampler {
     std::array<Command, kCommandCapacity> commands{};
     std::atomic<uint32_t> commandWrite{0};
     std::atomic<uint32_t> commandRead{0};
+
+    int framesForSeconds(float seconds, int minimumFrames) const {
+        const double requested = std::ceil(double(seconds) * outputRate);
+        return std::max(minimumFrames, static_cast<int>(requested));
+    }
+
+    void startRelease(Voice& voice) {
+        if (!voice.active || voice.stage == EnvelopeStage::release ||
+            voice.stage == EnvelopeStage::done) return;
+        voice.stage = EnvelopeStage::release;
+        voice.stageFrames = framesForSeconds(voice.adsr.release, kFadeFrames);
+        voice.envelopeDelta = -voice.envelopeLevel / float(voice.stageFrames);
+    }
+
+    void nextEnvelopeFrame(Voice& voice) {
+        if (voice.stage == EnvelopeStage::sustain) {
+            voice.envelopeLevel = voice.adsr.sustain;
+            return;
+        }
+        if (voice.stage == EnvelopeStage::done) return;
+        voice.envelopeLevel += voice.envelopeDelta;
+        if (--voice.stageFrames > 0) return;
+        switch (voice.stage) {
+        case EnvelopeStage::attack:
+            voice.envelopeLevel = 1.f;
+            if (voice.adsr.decay > 0.f) {
+                voice.stage = EnvelopeStage::decay;
+                voice.stageFrames = framesForSeconds(voice.adsr.decay, 1);
+                voice.envelopeDelta =
+                    (voice.adsr.sustain - 1.f) / float(voice.stageFrames);
+            } else {
+                voice.stage = EnvelopeStage::sustain;
+                voice.envelopeLevel = voice.adsr.sustain;
+            }
+            break;
+        case EnvelopeStage::decay:
+            voice.stage = EnvelopeStage::sustain;
+            voice.envelopeLevel = voice.adsr.sustain;
+            break;
+        case EnvelopeStage::release:
+            voice.envelopeLevel = 0.f;
+            voice.stage = EnvelopeStage::done;
+            voice.active = false;
+            break;
+        case EnvelopeStage::sustain:
+        case EnvelopeStage::done:
+            break;
+        }
+    }
 
     bool enqueue(Command value) {
         const auto write = commandWrite.load(std::memory_order_relaxed);
@@ -134,7 +209,11 @@ struct SSSampler {
             if (other > chosen->layerCenter && other < chosen->nextCenter)
                 chosen->nextCenter = other;
         }
-        chosen->attackFrames = kFadeFrames;
+        chosen->adsr = activeADSR;
+        chosen->stage = EnvelopeStage::attack;
+        chosen->envelopeLevel = 0.f;
+        chosen->stageFrames = framesForSeconds(activeADSR.attack, kFadeFrames);
+        chosen->envelopeDelta = 1.f / float(chosen->stageFrames);
         chosen->serial = ++nextSerial;
         chosen->active = true;
     }
@@ -189,8 +268,8 @@ struct SSSampler {
 
     void stop(uint8_t note, uint8_t channel) {
         for (auto& voice : voices) {
-            if (voice.active && voice.note == note && voice.channel == channel &&
-                voice.releaseFrames == 0) voice.releaseFrames = kFadeFrames;
+            if (voice.active && voice.note == note && voice.channel == channel)
+                startRelease(voice);
         }
     }
 
@@ -206,7 +285,7 @@ struct SSSampler {
                 break;
             case CommandKind::off: stop(command.note, command.channel); break;
             case CommandKind::allOff:
-                for (auto& voice : voices) if (voice.active) voice.releaseFrames = kFadeFrames;
+                for (auto& voice : voices) if (voice.active) startRelease(voice);
                 break;
             case CommandKind::controller:
                 if (command.note == 1) targetCC1[command.channel] = command.velocity;
@@ -214,11 +293,14 @@ struct SSSampler {
                 if (command.note == 120 || command.note == 123) {
                     for (auto& voice : voices)
                         if (voice.active && voice.channel == command.channel)
-                            voice.releaseFrames = kFadeFrames;
+                            startRelease(voice);
                 }
                 break;
             case CommandKind::crossfade:
                 cc1Crossfade = command.velocity != 0;
+                break;
+            case CommandKind::envelope:
+                activeADSR = command.adsr;
                 break;
             }
             read = (read + 1) % kCommandCapacity;
@@ -242,7 +324,26 @@ int32_t ss_add_zone(SSSampler *sampler,
                     uint8_t lowest_velocity, uint8_t highest_velocity,
                     double source_sample_rate,
                     const float *left, const float *right, uint32_t frames) {
-    if (!sampler || !left || frames < 2 || frames > kMaxSampleFrames ||
+    return ss_add_zone_with_loop(sampler, root_note, lowest_note, highest_note,
+                                 lowest_velocity, highest_velocity,
+                                 source_sample_rate, left, right, frames, 0, 0, 0);
+}
+
+int32_t ss_add_zone_with_loop(SSSampler *sampler,
+                    uint8_t root_note, uint8_t lowest_note, uint8_t highest_note,
+                    uint8_t lowest_velocity, uint8_t highest_velocity,
+                    double source_sample_rate,
+                    const float *left, const float *right, uint32_t frames,
+                    uint32_t loop_start_frame, uint32_t loop_end_frame,
+                    uint32_t loop_crossfade_frames) {
+    const bool noLoop = loop_start_frame == 0 && loop_end_frame == 0 &&
+                        loop_crossfade_frames == 0;
+    const bool validLoop = loop_end_frame >= 4 && loop_end_frame <= frames &&
+                           loop_start_frame + 4 <= loop_end_frame &&
+                           loop_crossfade_frames <=
+                               (loop_end_frame - loop_start_frame) / 2;
+    if ((!noLoop && !validLoop) ||
+        !sampler || !left || frames < 2 || frames > kMaxSampleFrames ||
         sampler->samples.size() >= kMaxZones || !validRate(source_sample_rate) ||
         root_note > 127 || lowest_note > highest_note || highest_note > 127 ||
         lowest_velocity < 1 || lowest_velocity > highest_velocity || highest_velocity > 127) return 0;
@@ -260,6 +361,9 @@ int32_t ss_add_zone(SSSampler *sampler,
         zone.high = highest_note;
         zone.minVelocity = lowest_velocity;
         zone.maxVelocity = highest_velocity;
+        zone.loopStart = loop_start_frame;
+        zone.loopEnd = loop_end_frame;
+        zone.loopCrossfade = loop_crossfade_frames;
         sampler->samples.emplace_back(std::move(zone));
         return 1;
     } catch (...) { return 0; }
@@ -298,6 +402,23 @@ int32_t ss_set_cc1_crossfade(SSSampler *sampler, int32_t enabled) {
                              uint8_t(enabled ? 1 : 0), 0}) ? 1 : 0;
 }
 
+int32_t ss_set_adsr(SSSampler *sampler, float attack_seconds,
+                    float decay_seconds, float sustain_level,
+                    float release_seconds) {
+    const bool valid = std::isfinite(attack_seconds) &&
+                       std::isfinite(decay_seconds) &&
+                       std::isfinite(sustain_level) &&
+                       std::isfinite(release_seconds) &&
+                       attack_seconds >= 0.f && attack_seconds <= 30.f &&
+                       decay_seconds >= 0.f && decay_seconds <= 30.f &&
+                       sustain_level >= 0.f && sustain_level <= 1.f &&
+                       release_seconds >= 0.f && release_seconds <= 30.f;
+    if (!sampler || !valid) return 0;
+    return sampler->enqueue(Command{CommandKind::envelope, 0, 0, 0,
+                              ADSR{attack_seconds, decay_seconds,
+                                   sustain_level, release_seconds}}) ? 1 : 0;
+}
+
 void ss_render(SSSampler *sampler, float *left, float *right, int32_t frames) {
     if (!sampler || !left || !right || frames <= 0) return;
     sampler->consumeMIDI();
@@ -315,10 +436,25 @@ void ss_render(SSSampler *sampler, float *left, float *right, int32_t frames) {
         for (auto& voice : sampler->voices) {
             if (!voice.active) continue;
             const Sample *sample = voice.sample;
-            if (!sample || voice.position >= static_cast<double>(sample->left.size())) {
+            if (!sample) {
                 voice.active = false;
                 continue;
             }
+            const bool looping = sample->loopEnd != 0 &&
+                voice.stage != EnvelopeStage::release &&
+                voice.stage != EnvelopeStage::done;
+            if (looping && voice.position >= double(sample->loopEnd)) {
+                const double region = double(sample->loopEnd - sample->loopStart -
+                                             sample->loopCrossfade);
+                voice.position = double(sample->loopStart + sample->loopCrossfade) +
+                    std::fmod(voice.position - double(sample->loopEnd), region);
+            }
+            if (voice.position >= static_cast<double>(sample->left.size())) {
+                voice.active = false;
+                continue;
+            }
+            sampler->nextEnvelopeFrame(voice);
+            if (!voice.active) continue;
             const float expression = sampler->smoothCC11[voice.channel] / 127.f;
             const float dynamics = sampler->smoothCC1[voice.channel];
             float amplitude = voice.gain * expression;
@@ -329,17 +465,29 @@ void ss_render(SSSampler *sampler, float *left, float *right, int32_t frames) {
                 // control, but does not switch the sample after note-on.
                 amplitude *= dynamics / 127.f;
             }
-            if (voice.attackFrames > 0) {
-                amplitude *= float(kFadeFrames - voice.attackFrames + 1) / float(kFadeFrames);
-                --voice.attackFrames;
+            amplitude *= std::max(0.f, voice.envelopeLevel);
+            float sampleL = readLinear(sample->left, voice.position);
+            float sampleR = readLinear(sample->right, voice.position);
+            if (looping && sample->loopCrossfade > 0) {
+                const double fadeStart = double(sample->loopEnd -
+                                                sample->loopCrossfade);
+                if (voice.position >= fadeStart) {
+                    const double phase = std::min(1.0,
+                        (voice.position - fadeStart) /
+                        double(sample->loopCrossfade));
+                    const float from = std::cos(float(phase) * kHalfPi);
+                    const float to = std::sin(float(phase) * kHalfPi);
+                    const double incomingPosition =
+                        double(sample->loopStart) +
+                        phase * double(sample->loopCrossfade);
+                    sampleL = sampleL * from +
+                        readLinear(sample->left, incomingPosition) * to;
+                    sampleR = sampleR * from +
+                        readLinear(sample->right, incomingPosition) * to;
+                }
             }
-            if (voice.releaseFrames > 0) {
-                amplitude *= float(voice.releaseFrames) / float(kFadeFrames);
-                --voice.releaseFrames;
-                if (voice.releaseFrames == 0) voice.active = false;
-            }
-            leftSum += readLinear(sample->left, voice.position) * amplitude;
-            rightSum += readLinear(sample->right, voice.position) * amplitude;
+            leftSum += sampleL * amplitude;
+            rightSum += sampleR * amplitude;
             voice.position += voice.increment;
         }
         left[frame] = std::max(-1.f, std::min(1.f, leftSum * kOutputHeadroom));
