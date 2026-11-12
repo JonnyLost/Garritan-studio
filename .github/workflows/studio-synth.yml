@@ -19,6 +19,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Parse shared engine Swift code on Linux
+        run: |
+          swiftc -frontend -parse \
+            DAWCore/Sources/DAWCore/Audio/StudioSynthPatch.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioSynthInstrument.swift \
+            DAWCore/Sources/DAWCore/Models/Track.swift \
+            DAWCore/Sources/DAWCore/Audio/PlaybackEngine.swift \
+            DAWUI/Sources/DAWUI/ViewModels/ProjectViewModel.swift \
+            DAWUI/Sources/DAWUI/Views/StudioSynthPanelView.swift \
+            DAWUI/Sources/DAWUI/Views/Timeline/TrackHeaderView.swift \
+            Tests/DAWCoreTests/StudioSynthTests.swift
       - name: Original analog DSP
         run: |
           clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
