@@ -83,15 +83,23 @@ public final class StudioSamplerInstrument {
             guard buffer.frameLength >= 2, let samples = buffer.floatChannelData else {
                 throw StudioSamplerError.invalidSample(url)
             }
-            if let loopEnd = zone.loopEndFrame, loopEnd > buffer.frameLength {
+            let playbackStart = zone.trimStartFrame ?? 0
+            let playbackEnd = zone.trimEndFrame ?? buffer.frameLength
+            guard playbackStart < playbackEnd,
+                  playbackEnd <= buffer.frameLength,
+                  playbackEnd - playbackStart >= 2 else {
+                throw StudioSamplerError.invalidSample(url)
+            }
+            if let loopEnd = zone.loopEndFrame, loopEnd > playbackEnd {
                 throw StudioSamplerError.invalidLoop(url)
             }
             let right: UnsafePointer<Float>? = sourceFormat.channelCount == 2
                 ? UnsafePointer(samples[1]) : nil
-            guard ss_add_zone_with_loop(
+            guard ss_add_zone_with_region(
                 sampler, zone.rootNote, zone.lowestNote, zone.highestNote,
                 zone.lowestVelocity, zone.highestVelocity, sourceFormat.sampleRate,
                 samples[0], right, buffer.frameLength,
+                playbackStart, playbackEnd,
                 zone.loopStartFrame ?? 0, zone.loopEndFrame ?? 0,
                 zone.loopCrossfadeFrames ?? 0
             ) == 1 else {
