@@ -68,6 +68,31 @@ int main() {
     assert(outL[220] < -0.05f);
     ss_destroy(layers);
 
+    // Two simultaneous sample layers morph smoothly while a note is held.
+    // CC11 expression must also respond continuously on the active voices.
+    SSSampler *morph = ss_create(44100, 8);
+    assert(morph);
+    std::vector<float> soft(24000, .40f);
+    std::vector<float> strong(24000, -.40f);
+    assert(ss_add_zone(morph, 60, 48, 84, 1, 63, 44100,
+                       soft.data(), nullptr, 24000));
+    assert(ss_add_zone(morph, 60, 48, 84, 64, 127, 44100,
+                       strong.data(), nullptr, 24000));
+    assert(ss_set_cc1_crossfade(morph, 1));
+    assert(ss_control_change(morph, 1, 10, 0));
+    assert(ss_note_on(morph, 60, 100, 0));
+    std::vector<float> morphL(6000), morphR(6000);
+    ss_render(morph, morphL.data(), morphR.data(), 6000);
+    assert(morphL[5999] > .04f); // quiet layer at low CC1
+    assert(ss_control_change(morph, 1, 120, 0));
+    ss_render(morph, morphL.data(), morphR.data(), 6000);
+    assert(morphL[5999] < -.04f); // louder layer without retrigger
+    assert(ss_control_change(morph, 11, 0, 0));
+    ss_render(morph, morphL.data(), morphR.data(), 6000);
+    assert(std::abs(morphL[5999]) < .001f); // held note faded by CC11
+    assert(!ss_control_change(morph, 200, 30, 0));
+    ss_destroy(morph);
+
     ss_destroy(sampler);
     std::printf("Studio Sampler DSP smoke test passed (%.1f Hz)\n", frequency);
     return 0;
