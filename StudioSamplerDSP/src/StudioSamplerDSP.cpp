@@ -28,6 +28,8 @@ struct Sample {
     uint8_t high = 127;
     uint8_t minVelocity = 1;
     uint8_t maxVelocity = 127;
+    uint32_t playbackStart = 0;
+    uint32_t playbackEnd = 0; // exclusive
     uint32_t loopStart = 0;
     uint32_t loopEnd = 0; // exclusive; zero disables looping
     uint32_t loopCrossfade = 0;
@@ -194,7 +196,7 @@ struct SSSampler {
         chosen->sample = selected;
         chosen->note = note;
         chosen->channel = channel;
-        chosen->position = 0;
+        chosen->position = double(selected->playbackStart);
         chosen->increment = increment;
         chosen->gain = float(velocity) / 127.f;
         chosen->layerCenter = (float(selected->minVelocity) +
@@ -336,14 +338,31 @@ int32_t ss_add_zone_with_loop(SSSampler *sampler,
                     const float *left, const float *right, uint32_t frames,
                     uint32_t loop_start_frame, uint32_t loop_end_frame,
                     uint32_t loop_crossfade_frames) {
+    return ss_add_zone_with_region(
+        sampler, root_note, lowest_note, highest_note,
+        lowest_velocity, highest_velocity, source_sample_rate,
+        left, right, frames, 0, frames,
+        loop_start_frame, loop_end_frame, loop_crossfade_frames);
+}
+
+int32_t ss_add_zone_with_region(SSSampler *sampler,
+                    uint8_t root_note, uint8_t lowest_note, uint8_t highest_note,
+                    uint8_t lowest_velocity, uint8_t highest_velocity,
+                    double source_sample_rate,
+                    const float *left, const float *right, uint32_t frames,
+                    uint32_t playback_start_frame, uint32_t playback_end_frame,
+                    uint32_t loop_start_frame, uint32_t loop_end_frame,
+                    uint32_t loop_crossfade_frames) {
+    const bool validRegion = playback_start_frame < playback_end_frame &&
+        playback_end_frame <= frames && playback_end_frame - playback_start_frame >= 2;
     const bool noLoop = loop_start_frame == 0 && loop_end_frame == 0 &&
                         loop_crossfade_frames == 0;
-    const bool validLoop = loop_end_frame >= 4 && loop_end_frame <= frames &&
-                           loop_start_frame <= loop_end_frame &&
-                           loop_end_frame - loop_start_frame >= 4 &&
-                           loop_crossfade_frames <=
-                               (loop_end_frame - loop_start_frame) / 2;
-    if ((!noLoop && !validLoop) ||
+    const bool validLoop = loop_start_frame >= playback_start_frame &&
+        loop_end_frame <= playback_end_frame &&
+        loop_start_frame <= loop_end_frame &&
+        loop_end_frame - loop_start_frame >= 4 &&
+        loop_crossfade_frames <= (loop_end_frame - loop_start_frame) / 2;
+    if (!validRegion || (!noLoop && !validLoop) ||
         !sampler || !left || frames < 2 || frames > kMaxSampleFrames ||
         sampler->samples.size() >= kMaxZones || !validRate(source_sample_rate) ||
         root_note > 127 || lowest_note > highest_note || highest_note > 127 ||
@@ -362,6 +381,8 @@ int32_t ss_add_zone_with_loop(SSSampler *sampler,
         zone.high = highest_note;
         zone.minVelocity = lowest_velocity;
         zone.maxVelocity = highest_velocity;
+        zone.playbackStart = playback_start_frame;
+        zone.playbackEnd = playback_end_frame;
         zone.loopStart = loop_start_frame;
         zone.loopEnd = loop_end_frame;
         zone.loopCrossfade = loop_crossfade_frames;
@@ -450,7 +471,7 @@ void ss_render(SSSampler *sampler, float *left, float *right, int32_t frames) {
                 voice.position = double(sample->loopStart + sample->loopCrossfade) +
                     std::fmod(voice.position - double(sample->loopEnd), region);
             }
-            if (voice.position >= static_cast<double>(sample->left.size())) {
+            if (voice.position >= double(sample->playbackEnd)) {
                 voice.active = false;
                 continue;
             }
