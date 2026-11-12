@@ -80,7 +80,7 @@ int32_t ss_note_off(SSSampler *sampler, uint8_t note, uint8_t channel);
 int32_t ss_all_notes_off(SSSampler *sampler);
 
 /* Keyswitch map is immutable configuration, created before first render.
- * Entries map distinct MIDI notes to articulation IDs 1...15.
+ * Entries map distinct MIDI notes to articulation IDs 0...15.
  * The configured notes do not themselves sound. 0 selects default group.
  */
 int32_t ss_configure_keyswitches(SSSampler *sampler,
