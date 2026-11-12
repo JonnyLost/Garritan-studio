@@ -61,7 +61,7 @@ public enum NativeRoomImpulseAnalyzer {
             return NativeRoomCalibrationResult(roomID: roomID, sampleRate: sampleRate,
                                                durationSeconds: 0, bands: [], wetOnlyC80dB: nil)
         }
-        let mono = zip(left, right).map { (Double($0) + Double($1)) * 0.5 }
+        let mono = zip(left, right).map { (Double($0.0) + Double($0.1)) * 0.5 }
         let centers: [Double] = [125, 500, 2_000]
         let bands = centers.map { frequency -> NativeRoomDecayMetrics in
             let filtered = octaveApproximate(mono, sampleRate: sampleRate, centerHz: frequency)
