@@ -25,10 +25,18 @@ private struct KeyboardMouseCapture: NSViewRepresentable {
         var onPress: (() -> Void)?
         var onRelease: (() -> Void)?
         private var isPressed = false
+        private var mouseUpMonitor: Any?
 
         override func mouseDown(with event: NSEvent) {
             guard !isPressed else { return }
             isPressed = true
+
+            // A SwiftUI state update can replace the key view between mouseDown
+            // and mouseUp. Monitor the window event stream, not just this view.
+            mouseUpMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] event in
+                self?.release()
+                return event
+            }
             onPress?()
         }
 
@@ -41,9 +49,19 @@ private struct KeyboardMouseCapture: NSViewRepresentable {
             super.viewWillMove(toWindow: newWindow)
         }
 
+        deinit {
+            if let mouseUpMonitor {
+                NSEvent.removeMonitor(mouseUpMonitor)
+            }
+        }
+
         private func release() {
             guard isPressed else { return }
             isPressed = false
+            if let mouseUpMonitor {
+                NSEvent.removeMonitor(mouseUpMonitor)
+                self.mouseUpMonitor = nil
+            }
             onRelease?()
         }
     }
