@@ -53,6 +53,23 @@ assert(abs(StudioSynthModulationMath.signal(
     .lfo1, seconds: 0.25, settings: synced,
     envelope: 0, wheel: 0, bpm: 60, beats: 0.375)
     - Float(sin(0.75 * Double.pi))) < 0.0001)
+synced.lfo1Phase = 0.25
+synced.lfo2Phase = 0.5
+assert(abs(StudioSynthModulationMath.signal(
+    .lfo1, seconds: 0, settings: synced,
+    envelope: 0, wheel: 0, bpm: 120) - 1) < 0.0001)
+assert(abs(StudioSynthModulationMath.signal(
+    .lfo2, seconds: 0, settings: synced,
+    envelope: 0, wheel: 0, bpm: 120) - 1) < 0.0001)
+synced.lfo1Sync = StudioSynthLFOSync(note: .sixtyFourth)
+synced.routes = [StudioSynthModRoute(
+    source: .lfo1, layerID: ids[0], destination: .analog(.filterCutoff))]
+assert(StudioSynthModulationMath.controlRate(synced, bpm: 120) == 256)
+synced.routes[0].enabled = false
+assert(StudioSynthModulationMath.controlRate(synced, bpm: 120) == 50)
+synced.routes[0].enabled = true
+synced.lfo1Sync = StudioSynthLFOSync(note: .quarter)
+
 let syncedRoundTrip = try JSONDecoder().decode(
     StudioSynthModulationSettings.self,
     from: JSONEncoder().encode(synced))
@@ -61,9 +78,12 @@ var oldSyncJSON = try JSONSerialization.jsonObject(
     with: JSONEncoder().encode(synced)) as! [String: Any]
 oldSyncJSON.removeValue(forKey: "lfo1Sync")
 oldSyncJSON.removeValue(forKey: "lfo2Sync")
+oldSyncJSON.removeValue(forKey: "lfo1Phase")
+oldSyncJSON.removeValue(forKey: "lfo2Phase")
 let legacySync = try JSONDecoder().decode(StudioSynthModulationSettings.self,
     from: JSONSerialization.data(withJSONObject: oldSyncJSON))
 assert(legacySync.lfo1Sync == nil && legacySync.lfo2Sync == nil)
+assert(legacySync.lfo1Phase == nil && legacySync.lfo2Phase == nil)
 assert(abs(StudioSynthModulationMath.signal(
     .lfo1, seconds: 0.25, settings: legacySync,
     envelope: 0, wheel: 0, bpm: 60) - 1) < 0.0001)
