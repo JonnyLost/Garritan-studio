@@ -255,6 +255,62 @@ final class StudioSamplerTrackIntegrationTests: XCTestCase {
         XCTAssertFalse(zone.isValid)
     }
 
+    func testLoopFinderSuggestsMarkersWithoutEditingTheRecording() throws {
+        let url = try makeSample()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let original = try Data(contentsOf: url)
+        let suggestion = try StudioSamplerLoopFinder.suggest(
+            url: url, trimStart: 400, trimEnd: 8000
+        )
+        XCTAssertGreaterThan(suggestion.startFrame, 400)
+        XCTAssertLessThan(suggestion.startFrame, suggestion.endFrame)
+        XCTAssertLessThan(suggestion.endFrame, 8000)
+        XCTAssertLessThanOrEqual(
+            suggestion.crossfadeFrames,
+            (suggestion.endFrame - suggestion.startFrame) / 2
+        )
+        XCTAssertLessThan(suggestion.mismatchScore, 0.50)
+        XCTAssertEqual(original, try Data(contentsOf: url))
+    }
+
+    func testArticulationsAndSourceFadesPersistAndValidate() throws {
+        let url = URL(fileURLWithPath: "/tmp/owned-violin.wav")
+        var patch = StudioSamplerPatch(sampleURL: url, rootNote: 69)
+        var staccato = StudioSamplerZone(
+            sampleURL: url, rootNote: 69, lowestNote: 60, highestNote: 88
+        )
+        staccato.articulationID = 1
+        staccato.trimStartFrame = 100
+        staccato.trimEndFrame = 2000
+        staccato.fadeInFrames = 180
+        staccato.fadeOutFrames = 270
+        patch.zones.append(staccato)
+        patch.articulations = [
+            StudioSamplerArticulation(
+                id: 1, name: "Staccato", keyswitchNote: 24
+            )
+        ]
+        patch.selectedArticulationID = 1
+        XCTAssertTrue(patch.isValid)
+        var track = Track(name: "Expressive Violin", type: .instrument)
+        track.studioSamplerPatch = patch
+        let loaded = try JSONDecoder().decode(
+            Track.self, from: JSONEncoder().encode(track)
+        )
+        XCTAssertEqual(loaded.studioSamplerPatch, patch)
+        patch.zones[1].fadeInFrames = 1800
+        XCTAssertFalse(patch.isValid)
+        patch.zones[1].fadeInFrames = 180
+        patch.articulations?.append(StudioSamplerArticulation(
+            id: 2, name: "Pizzicato", keyswitchNote: 24
+        ))
+        XCTAssertFalse(patch.isValid)
+        patch.articulations?[1].keyswitchNote = 25
+        XCTAssertTrue(patch.isValid)
+        patch.zones[1].articulationID = 5
+        XCTAssertFalse(patch.isValid)
+    }
+
     func testBadMappingDoesNotAttachAnInstrument() throws {
         var patch = StudioSamplerPatch(zones: [])
         XCTAssertFalse(patch.isValid)
