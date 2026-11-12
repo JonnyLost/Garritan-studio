@@ -1003,6 +1003,11 @@ int32_t ss_set_adsr(SSSampler *sampler, float attack_seconds,
 void ss_render(SSSampler *sampler, float *left, float *right, int32_t frames) {
     if (!sampler || !left || !right || frames <= 0) return;
     sampler->consumeMIDI();
+    // One bounded prefetch pass per render block, never a worker wakeup or
+    // synchronous disk read from the audio thread.
+    for (const auto& voice : sampler->voices)
+        if (voice.active && voice.sample && voice.sample->streamed)
+            sampler->prefetch(voice);
     // Approximately 10 ms one-pole smoothing to avoid zipper noise.
     const float smoothing = std::min(1.f, float(1.0 / (sampler->outputRate * 0.01)));
     for (int32_t frame = 0; frame < frames; ++frame) {
@@ -1059,8 +1064,9 @@ void ss_render(SSSampler *sampler, float *left, float *right, int32_t frames) {
                     float((double(sample->playbackEnd) - voice.position) /
                           double(sample->fadeOut))));
             }
-            float sampleL = readLinear(sample->left, voice.position);
-            float sampleR = readLinear(sample->right, voice.position);
+            float sampleL = 0.f, sampleR = 0.f;
+            bool available = sampler->streamLinear(voice, voice.position,
+                                                    sampleL, sampleR);
             if (looping && sample->loopCrossfade > 0) {
                 const double fadeStart = double(sample->loopEnd -
                                                 sample->loopCrossfade);
@@ -1073,11 +1079,32 @@ void ss_render(SSSampler *sampler, float *left, float *right, int32_t frames) {
                     const double incomingPosition =
                         double(sample->loopStart) +
                         phase * double(sample->loopCrossfade);
-                    sampleL = sampleL * from +
-                        readLinear(sample->left, incomingPosition) * to;
-                    sampleR = sampleR * from +
-                        readLinear(sample->right, incomingPosition) * to;
+                    float incomingL = 0.f, incomingR = 0.f;
+                    available = sampler->streamLinear(voice, incomingPosition,
+                                                       incomingL, incomingR) && available;
+                    if (available) {
+                        sampleL = sampleL * from + incomingL * to;
+                        sampleR = sampleR * from + incomingR * to;
+                    }
                 }
+            }
+            if (sample->streamed) {
+                if (available) {
+                    voice.streamGain = std::min(1.f,
+                        voice.streamGain + 1.f / float(kFadeFrames));
+                    voice.lastStreamL = sampleL;
+                    voice.lastStreamR = sampleR;
+                } else {
+                    // Never block the audio callback. Smooth an I/O miss to
+                    // silence and resume when the worker publishes a page.
+                    sampler->underrunFrames.fetch_add(1, std::memory_order_relaxed);
+                    voice.streamGain = std::max(0.f,
+                        voice.streamGain - 1.f / float(kFadeFrames));
+                    sampleL = voice.lastStreamL;
+                    sampleR = voice.lastStreamR;
+                }
+                sampleL *= voice.streamGain;
+                sampleR *= voice.streamGain;
             }
             leftSum += sampleL * amplitude;
             rightSum += sampleR * amplitude;
@@ -1122,9 +1149,11 @@ void ss_render(SSSampler *sampler, float *left, float *right, int32_t frames) {
                     float((double(sample->playbackEnd) - old.position) /
                           double(sample->fadeOut))));
             }
-            float sampleL = readLinear(sample->left, old.position);
-            float sampleR = readLinear(sample->right, old.position);
-            if (loop && sample->loopCrossfade > 0 &&
+            float sampleL = sample->streamed
+                ? old.lastStreamL : readLinear(sample->left, old.position);
+            float sampleR = sample->streamed
+                ? old.lastStreamR : readLinear(sample->right, old.position);
+            if (!sample->streamed && loop && sample->loopCrossfade > 0 &&
                 old.position >= double(sample->loopEnd - sample->loopCrossfade)) {
                 const double phase = std::min(1.0,
                     (old.position - double(sample->loopEnd - sample->loopCrossfade)) /
