@@ -2664,16 +2664,19 @@ public final class ProjectViewModel: ObservableObject {
     
     // MARK: - Note Preview
     
-    /// Play a note for preview (e.g., from piano roll or keyboard)
-    public func playNotePreview(pitch: UInt8, velocity: UInt8 = 100) {
-        guard let trackID = selectedTrackID else { return }
-        playbackEngine.playNotePreview(pitch: pitch, velocity: velocity, on: trackID)
+    /// Audition a note on the explicit source track when known. Piano-roll
+    /// editors must not silently redirect note-ons to another selected track.
+    public func playNotePreview(pitch: UInt8, velocity: UInt8 = 100,
+                                on sourceTrackID: TrackID? = nil) {
+        guard let target = sourceTrackID ?? selectedTrackID else { return }
+        playbackEngine.playNotePreview(pitch: pitch, velocity: velocity, on: target)
     }
-    
-    /// Stop a preview note
-    public func stopNotePreview(pitch: UInt8) {
-        guard let trackID = selectedTrackID else { return }
-        playbackEngine.stopNotePreview(pitch: pitch, on: trackID)
+
+    /// Send note-off to the SAME source track as note-on. When a keyboard
+    /// captures a track on mouse-down, pass it here even if selection changes.
+    public func stopNotePreview(pitch: UInt8, on sourceTrackID: TrackID? = nil) {
+        guard let target = sourceTrackID ?? selectedTrackID else { return }
+        playbackEngine.stopNotePreview(pitch: pitch, on: target)
     }
     
     /// Play a test note to verify audio is working
