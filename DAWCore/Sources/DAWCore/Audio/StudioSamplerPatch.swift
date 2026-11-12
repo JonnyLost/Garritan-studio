@@ -156,6 +156,8 @@ public struct StudioSamplerPatch: Codable, Equatable, Sendable {
     public var envelope: StudioSamplerEnvelope?
     /// Optional user-defined articulation assignments; ID 0 is Default.
     public var articulations: [StudioSamplerArticulation]?
+    /// Optional MIDI note to switch back to ID 0 / Default Sustain.
+    public var defaultKeyswitchNote: UInt8?
     /// Restored selection when opening the saved instrument.
     public var selectedArticulationID: UInt8?
 
@@ -180,6 +182,8 @@ public struct StudioSamplerPatch: Codable, Equatable, Sendable {
     public var validArticulations: Bool {
         let items = articulations ?? []
         guard items.count <= 15 && items.allSatisfy(\.isValid) &&
+              (defaultKeyswitchNote == nil ||
+               !items.contains(where: { $0.keyswitchNote == defaultKeyswitchNote })) &&
               Set(items.map(\.id)).count == items.count &&
               Set(items.map(\.keyswitchNote)).count == items.count else { return false }
         let ids = Set(items.map(\.id)).union([0])
