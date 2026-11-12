@@ -95,6 +95,68 @@ struct StudioSynthModulationView: View {
         }
     }
 
+    /// An independent Free / Sync selector for each LFO. Nil in an old patch
+    /// means Free mode, and its original Hz rate is never overwritten by Sync.
+    private func lfoEditor(
+        _ name: String, symbol: String,
+        rate: WritableKeyPath<StudioSynthModulationSettings, Float>,
+        sync: WritableKeyPath<StudioSynthModulationSettings, StudioSynthLFOSync?>
+    ) -> some View {
+        let currentSync = settings[keyPath: sync]
+        return VStack(alignment: .leading, spacing: 8) {
+            Label(name, systemImage: symbol)
+                .font(.subheadline.weight(.semibold))
+            Picker("LFO Mode", selection: Binding<Bool>(
+                get: { settings[keyPath: sync] != nil },
+                set: { enabled in
+                    var changed = settings
+                    changed[keyPath: sync] = enabled ? (changed[keyPath: sync]
+                        ?? StudioSynthLFOSync()) : nil
+                    save(changed)
+                })) {
+                Text("Free").tag(false)
+                Text("Sync").tag(true)
+            }
+            .pickerStyle(.segmented)
+            if currentSync != nil {
+                HStack(spacing: 8) {
+                    Picker("Division", selection: Binding<StudioSynthLFONote>(
+                        get: { settings[keyPath: sync]?.note ?? .quarter },
+                        set: { note in
+                            var changed = settings
+                            var value = changed[keyPath: sync] ?? StudioSynthLFOSync()
+                            value.note = note
+                            changed[keyPath: sync] = value
+                            save(changed)
+                        })) {
+                        ForEach(StudioSynthLFONote.allCases) { note in
+                            Text(note.title).tag(note)
+                        }
+                    }
+                    Picker("Timing", selection: Binding<StudioSynthLFOTiming>(
+                        get: { settings[keyPath: sync]?.timing ?? .straight },
+                        set: { timing in
+                            var changed = settings
+                            var value = changed[keyPath: sync] ?? StudioSynthLFOSync()
+                            value.timing = timing
+                            changed[keyPath: sync] = value
+                            save(changed)
+                        })) {
+                        ForEach(StudioSynthLFOTiming.allCases) { timing in
+                            Text(timing.title).tag(timing)
+                        }
+                    }
+                }
+                Text("Following project tempo · \\(String(format: "%.1f", viewModel.project.tempo.bpm)) BPM")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else {
+                settingSlider("Rate", keyPath: rate,
+                              range: 0.03...15, logarithmic: true, unit: " Hz")
+            }
+        }
+    }
+
     private func routeEditor(_ route: StudioSynthModRoute) -> some View {
         let layer = synthPatch.layers.first(where: { $0.id == route.layerID })
         let available = StudioSynthModDestination.available(
@@ -206,14 +268,10 @@ struct StudioSynthModulationView: View {
                     GridItem(.flexible(minimum: 270))
                 ], spacing: 11) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Label("LFO 1 · Sine", systemImage: "waveform.path")
-                            .font(.subheadline.weight(.semibold))
-                        settingSlider("Rate", keyPath: \.lfo1Rate,
-                                      range: 0.03...15, logarithmic: true, unit: " Hz")
-                        Label("LFO 2 · Triangle", systemImage: "waveform")
-                            .font(.subheadline.weight(.semibold))
-                        settingSlider("Rate", keyPath: \.lfo2Rate,
-                                      range: 0.03...15, logarithmic: true, unit: " Hz")
+                        lfoEditor("LFO 1 · Sine", symbol: "waveform.path",
+                                  rate: \.lfo1Rate, sync: \.lfo1Sync)
+                        lfoEditor("LFO 2 · Triangle", symbol: "waveform",
+                                  rate: \.lfo2Rate, sync: \.lfo2Sync)
                         Label("Macro / MIDI", systemImage: "pianokeys")
                             .font(.subheadline.weight(.semibold))
                         settingSlider("Macro 1", keyPath: \.macro1, range: 0...1)
