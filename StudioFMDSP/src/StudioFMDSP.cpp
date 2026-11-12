@@ -408,6 +408,17 @@ void sfm_render(SFMSynth* synth,float* left,float* right,int32_t frames) {
         SFM_OP3_BASE + SFM_OP_RATIO, SFM_OP4_BASE + SFM_OP_RATIO,
         SFM_PARAM_MOD_RATE
     };
+    // Patch changes made while silent should not glide the NEXT note from
+    // the previous patch's oscillator ratios or levels. Snap only when no
+    // voice was active at the start of the audio callback.
+    bool wasAudible = false;
+    for (int i = 0; i < synth->voices; ++i) {
+        if (synth->voice[i].active) { wasAudible = true; break; }
+    }
+    if (!wasAudible) {
+        for (int id : kSmoothedIDs)
+            synth->smoothed[static_cast<size_t>(id)] = p[id];
+    }
     Parameters active = p;
     uint32_t cursor=0;
     for (int32_t frame=0;frame<frames;++frame) {

@@ -69,6 +69,21 @@ final class StudioFMDSPTests: XCTestCase {
     }
 
 
+    func testNewPatchStartsAtTargetPitchInsteadOfGlidingFromOldPatch() {
+        let synth = makeSynth()
+        defer { sfm_destroy(synth) }
+        for op in [SFM_OP2_BASE, SFM_OP3_BASE, SFM_OP4_BASE] {
+            XCTAssertEqual(sfm_set_parameter(synth, op + SFM_OP_LEVEL, 0), 1)
+        }
+        XCTAssertEqual(sfm_set_parameter(synth, SFM_OP1_BASE + SFM_OP_RATIO, 2), 1)
+        XCTAssertEqual(sfm_note_on(synth, 69, 127), 1)
+        let first = render(synth, frames: 1_024)
+        let crossings = zip(first, first.dropFirst())
+            .filter { $0.0 <= 0 && $0.1 > 0 }.count
+        XCTAssertEqual(crossings, 20, accuracy: 2,
+                       "An offline patch load before a note must start at A5")
+    }
+
     func testCC1ModulatesHarmonicBrightnessOnlyWhenEnabled() {
         let dry = makeSynth()
         let driven = makeSynth()
