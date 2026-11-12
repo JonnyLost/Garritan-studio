@@ -543,6 +543,23 @@ public final class ProjectViewModel: ObservableObject {
         return true
     }
 
+    /// Change the active sampler articulation through the same bounded
+    /// MIDI queue used by note and controller events. The selection is
+    /// persisted as the next project-load default; already held notes remain.
+    @discardableResult
+    public func setStudioSamplerArticulation(_ id: UInt8,
+                                             for trackID: TrackID) -> Bool {
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              var patch = project.tracks[index].studioSamplerPatch,
+              Set((patch.articulations ?? []).map(\.id)).union([0]).contains(id),
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSampler(let sampler) = instrument,
+              sampler.selectArticulation(id) else { return false }
+        patch.selectedArticulationID = id
+        project.tracks[index].studioSamplerPatch = patch
+        return true
+    }
+
     /// Live ADSR updates are recorded in the project and queued to the
     /// native renderer. Already-playing voices retain their original ADSR.
     @discardableResult
