@@ -151,6 +151,37 @@ int main() {
     assert(loopL[511] == 0.f);
     ss_destroy(loop);
 
+    // Nondestructive trim: playback starts inside the original PCM and ends
+    // at the exclusive bound, without reading unwanted attack or tail frames.
+    SSSampler *trim = ss_create(44100, 4);
+    assert(trim);
+    std::vector<float> source(512, -.6f);
+    for (int i = 128; i < 384; ++i) source[i] = .6f;
+    assert(!ss_add_zone_with_region(trim, 60, 60, 60, 1, 127, 44100,
+               source.data(), nullptr, 512, 384, 128, 0, 0, 0));
+    assert(!ss_add_zone_with_region(trim, 60, 60, 60, 1, 127, 44100,
+               source.data(), nullptr, 512, 0, 600, 0, 0, 0));
+    assert(!ss_add_zone_with_region(trim, 60, 60, 60, 1, 127, 44100,
+               source.data(), nullptr, 512, 128, 384, 60, 300, 0));
+    assert(ss_add_zone_with_region(trim, 60, 60, 60, 1, 127, 44100,
+               source.data(), nullptr, 512, 128, 384, 0, 0, 0));
+    assert(ss_note_on(trim, 60, 127, 0));
+    std::vector<float> trimmedL(400), trimmedR(400);
+    ss_render(trim, trimmedL.data(), trimmedR.data(), 400);
+    assert(trimmedL[150] > .1f);
+    for (int i = 257; i < 400; ++i) assert(trimmedL[i] == 0.f);
+    ss_destroy(trim);
+
+    // Trimmed sustain loop stays inside the audible region while held.
+    SSSampler *trimLoop = ss_create(44100, 4);
+    assert(trimLoop);
+    assert(ss_add_zone_with_region(trimLoop, 60, 60, 60, 1, 127, 44100,
+               source.data(), nullptr, 512, 128, 384, 200, 300, 12));
+    assert(ss_note_on(trimLoop, 60, 127, 0));
+    ss_render(trimLoop, trimmedL.data(), trimmedR.data(), 400);
+    assert(trimmedL[380] > .05f);
+    ss_destroy(trimLoop);
+
     ss_destroy(sampler);
     std::printf("Studio Sampler DSP smoke test passed (%.1f Hz)\n", frequency);
     return 0;
