@@ -6,12 +6,18 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <memory>
+#include <cstring>
 #include <new>
 #include <vector>
 
 namespace {
 constexpr uint32_t kMaxZones = 128;
-constexpr uint32_t kMaxSampleFrames = 10000000; // RAM-only phase 1 safety limit
+constexpr uint32_t kMaxSampleFrames = 10000000; // maximum resident source
+constexpr uint32_t kMaxStreamFrames = 500000000; // bounded source offsets
+constexpr uint32_t kMaxAttackFrames = 32768;
+constexpr uint32_t kPageFrames = SS_STREAM_PAGE_FRAMES;
+constexpr int kStreamPagesPerVoice = 2;
 constexpr uint32_t kCommandCapacity = 1024; // one slot deliberately left empty
 constexpr int kFadeFrames = 64;
 constexpr size_t kHeldDepth = 8; // per-channel, per-pitch repeated note stack
@@ -39,6 +45,9 @@ struct Sample {
     uint8_t articulation = 0;
     uint8_t roundRobin = 0;
     bool releaseTrigger = false;
+    bool streamed = false;
+    uint32_t attackStart = 0; // first decoded source frame in left/right vectors
+    uint32_t fullFrames = 0; // source recording may be much larger than attack
 };
 
 struct ADSR {
@@ -70,6 +79,10 @@ struct Voice {
     int stageFrames = 0;
     bool active = false;
     bool releaseTrigger = false;
+    uint32_t zoneIndex = 0;
+    float lastStreamL = 0.f;
+    float lastStreamR = 0.f;
+    float streamGain = 1.f;
 };
 
 struct HeldNote {
@@ -114,6 +127,19 @@ inline float readLinear(const std::vector<float>& data, double position) {
 }
 } // namespace
 
+/* State 0: unused; 1: requested by audio; 2: claimed by worker;
+ * 3: ready. The audio thread never modifies a claimed page. The worker
+ * never rewrites data already published as ready. */
+struct StreamPage {
+    std::atomic<uint32_t> state{0};
+    uint64_t serial = 0;
+    uint32_t zoneIndex = 0;
+    uint32_t start = 0;
+    uint32_t frames = 0;
+    std::array<float, kPageFrames> left{};
+    std::array<float, kPageFrames> right{};
+};
+
 struct SSSampler {
     explicit SSSampler(double rate, int voices)
         : outputRate(rate), voices(static_cast<size_t>(voices)),
@@ -136,6 +162,10 @@ struct SSSampler {
     // Preallocated de-click tails preserve an evicted voice for 64 frames.
     // They never add to the normal voice allocation/polyphony budget.
     std::vector<RetiringVoice> retiringVoices;
+    // Allocated lazily when the first streamed zone is installed, not for
+    // every ordinary RAM-based sampler instrument.
+    std::unique_ptr<StreamPage[]> streamPages;
+    std::atomic<uint64_t> underrunFrames{0};
     uint64_t nextSerial = 0;
     uint64_t nextNoteSerial = 0;
     std::array<uint8_t, 128> keyswitchArticulations{};
