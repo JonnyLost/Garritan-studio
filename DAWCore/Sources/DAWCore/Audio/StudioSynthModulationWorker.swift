@@ -25,6 +25,9 @@ internal final class StudioSynthModulationWorker {
     private var baselines: [Key: Float] = [:]
     private var clock: DispatchSourceTimer?
     private var elapsed = 0.0
+    /// Integrated beats retain phase across BPM changes, including while held.
+    private var elapsedBeats = 0.0
+    private var tempo: Double
     private var lastUptime: UInt64?
     private var envelope = StudioSynthModulationEnvelope()
     private var wheel: Float = 0
@@ -32,10 +35,11 @@ internal final class StudioSynthModulationWorker {
     private var sustained = [Bool](repeating: false, count: 16 * 128)
     private var pedal = [Bool](repeating: false, count: 16)
 
-    init(settings: StudioSynthModulationSettings,
+    init(settings: StudioSynthModulationSettings, tempo: Double = 120,
          read: @escaping (UUID, StudioSynthModDestination) -> Float?,
          write: @escaping (UUID, StudioSynthModDestination, Float) -> Bool) {
         self.settings = settings
+        self.tempo = tempo.isFinite && tempo > 0 ? tempo : 120
         self.read = read
         self.write = write
         queue.sync {
@@ -51,6 +55,15 @@ internal final class StudioSynthModulationWorker {
 
     func update(_ settings: StudioSynthModulationSettings) {
         queue.sync { self.install(settings, restoringOldRoutes: true) }
+    }
+
+    /// Queue-confined tempo changes preserve integrated beat position instead
+    /// of restarting or rephasing synced LFOs. Not called by audio render code.
+    func setTempo(_ bpm: Double) {
+        guard bpm.isFinite && bpm > 0 else { return }
+        queue.async { [weak self] in
+            self?.tempo = bpm
+        }
     }
 
     /// A user edit changes the unmodulated base, never the temporary swept
@@ -145,6 +158,7 @@ internal final class StudioSynthModulationWorker {
         if let previous = lastUptime, now >= previous {
             let delta = min(0.15, Double(now - previous) / 1_000_000_000)
             elapsed += delta
+            elapsedBeats += delta * tempo / 60
             _ = envelope.advance(seconds: delta, settings: settings)
         }
         lastUptime = now
@@ -162,7 +176,8 @@ internal final class StudioSynthModulationWorker {
             let key = Key(layer: route.layerID, destination: route.destination)
             let signal = StudioSynthModulationMath.signal(
                 route.source, seconds: elapsed, settings: settings,
-                envelope: envelope.value, wheel: wheel)
+                envelope: envelope.value, wheel: wheel,
+                bpm: tempo, beats: elapsedBeats)
             offsets[key, default: 0] += route.depth * signal
         }
         for (key, amount) in offsets {
