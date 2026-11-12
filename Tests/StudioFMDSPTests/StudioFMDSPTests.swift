@@ -90,6 +90,33 @@ final class StudioFMDSPTests: XCTestCase {
                              "CC1 should change the actual rendered FM spectrum")
     }
 
+    func testCC1VibratoChangesPitchMotionWithoutTouchingOtherChannels() {
+        let plain = makeSynth()
+        let vibrato = makeSynth()
+        defer { sfm_destroy(plain); sfm_destroy(vibrato) }
+        for s in [plain, vibrato] {
+            XCTAssertEqual(sfm_set_parameter(s, SFM_PARAM_MOD_TARGET, 0), 1)
+            XCTAssertEqual(sfm_set_parameter(s, SFM_PARAM_MOD_DEPTH, 1), 1)
+            XCTAssertEqual(sfm_set_parameter(s, SFM_PARAM_MOD_RATE, 6), 1)
+            XCTAssertEqual(sfm_set_parameter(s, SFM_OP2_BASE + SFM_OP_LEVEL, 0), 1)
+            XCTAssertEqual(sfm_set_parameter(s, SFM_OP3_BASE + SFM_OP_LEVEL, 0), 1)
+            XCTAssertEqual(sfm_set_parameter(s, SFM_OP4_BASE + SFM_OP_LEVEL, 0), 1)
+            XCTAssertEqual(sfm_midi_event(s, 0x90, 69, 110, 0), 1)
+        }
+        // An active wheel on the wrong MIDI channel must not change a voice.
+        XCTAssertEqual(sfm_midi_event(vibrato, 0xB1, 1, 127, 0), 1)
+        let unaltered = render(vibrato, frames: 2_048)
+        let baseline = render(plain, frames: 2_048)
+        XCTAssertEqual(unaltered, baseline)
+
+        XCTAssertEqual(sfm_midi_event(vibrato, 0xB0, 1, 127, 0), 1)
+        let modulated = render(vibrato, frames: 8_192)
+        let unmodulated = render(plain, frames: 8_192)
+        let difference = zip(modulated, unmodulated)
+            .reduce(0.0) { $0 + Double(abs($1.0 - $1.1)) }
+        XCTAssertGreaterThan(difference, 5)
+    }
+
     func testVelocityBrightensModulatorsWithoutOnlyChangingOutputAmplitude() {
         let soft = makeSynth()
         let neutral = makeSynth()
