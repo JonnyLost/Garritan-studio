@@ -35,6 +35,10 @@ struct Voice {
     double position = 0;
     double increment = 1;
     float gain = 0;
+    // Prepared at note-on: O(1) layer-gain work in each rendered frame.
+    float layerCenter = 64.f;
+    float previousCenter = -1.f;
+    float nextCenter = 129.f;
     uint64_t serial = 0;
     uint8_t note = 0;
     uint8_t channel = 0;
@@ -118,6 +122,18 @@ struct SSSampler {
         chosen->position = 0;
         chosen->increment = increment;
         chosen->gain = float(velocity) / 127.f;
+        chosen->layerCenter = (float(selected->minVelocity) +
+                               float(selected->maxVelocity)) * 0.5f;
+        for (const auto& sample : samples) {
+            if (&sample == selected || sample.root != selected->root ||
+                note < sample.low || note > sample.high) continue;
+            const float other = (float(sample.minVelocity) +
+                                 float(sample.maxVelocity)) * 0.5f;
+            if (other < chosen->layerCenter && other > chosen->previousCenter)
+                chosen->previousCenter = other;
+            if (other > chosen->layerCenter && other < chosen->nextCenter)
+                chosen->nextCenter = other;
+        }
         chosen->attackFrames = kFadeFrames;
         chosen->serial = ++nextSerial;
         chosen->active = true;
@@ -155,27 +171,17 @@ struct SSSampler {
         }
     }
 
-    float dynamicWeight(const Sample& current, uint8_t note, float cc1) const {
-        const float center = (float(current.minVelocity) +
-                              float(current.maxVelocity)) * 0.5f;
-        float below = -1.f;
-        float above = 129.f;
-        for (const auto& zone : samples) {
-            if (&zone == &current || zone.root != current.root ||
-                note < zone.low || note > zone.high) continue;
-            const float other = (float(zone.minVelocity) +
-                                 float(zone.maxVelocity)) * 0.5f;
-            if (other < center && other > below) below = other;
-            if (other > center && other < above) above = other;
-        }
-        if (cc1 < center && below >= 0.f) {
+    float dynamicWeight(const Voice& voice, float cc1) const {
+        if (cc1 < voice.layerCenter && voice.previousCenter >= 0.f) {
             const float t = std::max(0.f, std::min(1.f,
-                                  (cc1 - below) / (center - below)));
+                (cc1 - voice.previousCenter) /
+                (voice.layerCenter - voice.previousCenter)));
             return std::sin(t * kHalfPi);
         }
-        if (cc1 > center && above <= 127.f) {
+        if (cc1 > voice.layerCenter && voice.nextCenter <= 127.f) {
             const float t = std::max(0.f, std::min(1.f,
-                                  (above - cc1) / (above - center)));
+                (voice.nextCenter - cc1) /
+                (voice.nextCenter - voice.layerCenter)));
             return std::sin(t * kHalfPi);
         }
         return 1.f;
@@ -317,7 +323,7 @@ void ss_render(SSSampler *sampler, float *left, float *right, int32_t frames) {
             const float dynamics = sampler->smoothCC1[voice.channel];
             float amplitude = voice.gain * expression;
             if (sampler->cc1Crossfade) {
-                amplitude *= sampler->dynamicWeight(*sample, voice.note, dynamics);
+                amplitude *= sampler->dynamicWeight(voice, dynamics);
             } else {
                 // In discrete-layer mode CC1 is still a continuous volume
                 // control, but does not switch the sample after note-on.
