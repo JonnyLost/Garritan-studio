@@ -30,6 +30,12 @@ public struct StudioSamplerInstrumentView: View {
         return true
     }
 
+    private var usesDiskStreaming: Bool {
+        guard let loaded = viewModel.playbackEngine.instrument(for: trackID),
+              case .studioSampler(let sampler) = loaded else { return false }
+        return sampler.isUsingDiskStreaming
+    }
+
     public var body: some View {
         VStack(spacing: 0) {
             header
@@ -84,6 +90,10 @@ public struct StudioSamplerInstrumentView: View {
             }
             Spacer()
             if isLoaded {
+                Label(usesDiskStreaming ? "Hybrid RAM / Disk" : "RAM Playback",
+                      systemImage: usesDiskStreaming ? "internaldrive" : "memorychip")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Label("Connected", systemImage: "checkmark.circle.fill")
                     .font(.caption)
                     .foregroundStyle(.green)
