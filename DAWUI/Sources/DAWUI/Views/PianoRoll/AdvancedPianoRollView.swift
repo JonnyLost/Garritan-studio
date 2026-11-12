@@ -372,9 +372,17 @@ public struct AdvancedPianoRollView: View {
                 Image(systemName: "xmark")
             }
             .buttonStyle(.plain)
-            
+
+            Button {
+                viewModel.playbackEngine.silenceAllNotes()
+            } label: {
+                Label("Silence Notes", systemImage: "speaker.slash.fill")
+            }
+            .buttonStyle(.bordered)
+            .help("Emergency all-notes-off for hanging MIDI notes")
+
             Divider().frame(height: 20)
-            
+
             // Tool selection with keyboard shortcuts
             ForEach(MIDIEditorTool.allCases, id: \.self) { tool in
                 Button(action: { currentTool = tool }) {
