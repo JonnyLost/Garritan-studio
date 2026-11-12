@@ -352,7 +352,7 @@ float waveAt(double phase, float position, int mip, int maxHarmonics,
     return a+(sample(upper)-a)*mix;
 }
 float voiceSample(Voice& v, const Params& p, double sampleRate,
-                  double bend, float wheel, float lfo,
+                  double bend, double detuneRatio, float wheel, float lfo,
                   float customScale, const TableBank& bank) noexcept {
     const float amplitude=v.envelope.next(
         p[SWS_PARAM_ATTACK],p[SWS_PARAM_DECAY],
@@ -363,7 +363,7 @@ float voiceSample(Voice& v, const Params& p, double sampleRate,
     }
     const double f1=std::min(sampleRate*0.45,v.frequency*bend);
     const double f2=std::min(sampleRate*0.45,
-        v.frequency*bend*std::exp2(double(p[SWS_PARAM_OSC2_DETUNE])/12.0));
+        v.frequency*bend*detuneRatio);
     const int mip1=mipFor(f1,sampleRate), mip2=mipFor(f2,sampleRate);
     const float movement=(v.velocity-0.5f)*2.f*p[SWS_PARAM_VELOCITY_POSITION]+
                          wheel*p[SWS_PARAM_MODWHEEL_POSITION]+lfo;
@@ -482,6 +482,7 @@ void sws_render(SWSynth* s,float* left,float* right,int32_t frames) {
     };
     for(int ch=0;ch<16;++ch)bends[ch]=bendRatio(ch);
 
+    double detuneRatio=std::exp2(double(s->smoothed[SWS_PARAM_OSC2_DETUNE])/12.0);
     for(int32_t frame=0;frame<frames;++frame) {
         while(cursor<s->pendingCount &&
               s->pending[cursor].offset<=uint32_t(frame)) {
@@ -508,6 +509,10 @@ void sws_render(SWSynth* s,float* left,float* right,int32_t frames) {
         s->lfoPhase+=active[SWS_PARAM_LFO_RATE]/s->sampleRate;
         if(s->lfoPhase>=1.0) s->lfoPhase-=1.0;
 
+        // Detuning changes are already smoothed; updating the ratio every
+        // 16 frames avoids expensive exp2 once per voice per audio sample.
+        if((frame & 15)==0)
+            detuneRatio=std::exp2(double(active[SWS_PARAM_OSC2_DETUNE])/12.0);
         std::array<bool,16> ready{};
         float sum=0.f;
         for(int i=0;i<s->voices;++i) {
@@ -520,7 +525,8 @@ void sws_render(SWSynth* s,float* left,float* right,int32_t frames) {
                 s->smoothWheel[ch]+=slew*(desired-s->smoothWheel[ch]);
             }
             sum+=voiceSample(voice,active,s->sampleRate,bends[ch],
-                             s->smoothWheel[ch],lfo,customScale,*s->bank);
+                             detuneRatio,s->smoothWheel[ch],lfo,
+                             customScale,*s->bank);
         }
         const float output=std::tanh(sum*active[SWS_PARAM_OUTPUT_GAIN]);
         left[frame]=output;right[frame]=output;
