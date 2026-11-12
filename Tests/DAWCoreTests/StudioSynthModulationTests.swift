@@ -125,6 +125,71 @@ final class StudioSynthModulationTests: XCTestCase {
         XCTAssertEqual(adsr.value, 0)
     }
 
+    func testTempoSyncedLFOsUseMusicalDivisionsWithoutChangingFreeRates() throws {
+        var settings = StudioSynthModulationSettings(lfo1Rate: 1,
+                                                     lfo2Rate: 1)
+        // Old projects have no sync keys and must retain their Hz behavior.
+        let oldJSON = try JSONEncoder().encode(settings)
+        let old = try JSONDecoder().decode(
+            StudioSynthModulationSettings.self, from: oldJSON)
+        XCTAssertNil(old.lfo1Sync)
+        XCTAssertNil(old.lfo2Sync)
+        XCTAssertEqual(StudioSynthModulationMath.signal(
+            .lfo1, seconds: 0.25, settings: old,
+            envelope: 0, wheel: 0, bpm: 60), 1, accuracy: 0.001)
+
+        settings.lfo1Sync = StudioSynthLFOSync(note: .quarter)
+        XCTAssertEqual(StudioSynthModulationMath.signal(
+            .lfo1, seconds: 0.125, settings: settings,
+            envelope: 0, wheel: 0, bpm: 120), 1, accuracy: 0.001)
+        XCTAssertEqual(StudioSynthModulationMath.signal(
+            .lfo1, seconds: 0.25, settings: settings,
+            envelope: 0, wheel: 0, bpm: 60), 1, accuracy: 0.001)
+
+        // Dotted notes are 3/2 the duration; triplets are 2/3.
+        settings.lfo1Sync = StudioSynthLFOSync(note: .quarter,
+                                               timing: .dotted)
+        XCTAssertEqual(StudioSynthModulationMath.signal(
+            .lfo1, seconds: 0.1875, settings: settings,
+            envelope: 0, wheel: 0, bpm: 120), 1, accuracy: 0.001)
+        settings.lfo1Sync = StudioSynthLFOSync(note: .quarter,
+                                               timing: .triplet)
+        XCTAssertEqual(StudioSynthModulationMath.signal(
+            .lfo1, seconds: 1.0 / 12, settings: settings,
+            envelope: 0, wheel: 0, bpm: 120), 1, accuracy: 0.001)
+
+        // Every note division produces exactly one cycle in its stated beats.
+        for note in StudioSynthLFONote.allCases {
+            for timing in StudioSynthLFOTiming.allCases {
+                settings.lfo1Sync = StudioSynthLFOSync(note: note, timing: timing)
+                let quarterCycleSeconds = note.beats * timing.multiplier / 8
+                XCTAssertEqual(StudioSynthModulationMath.signal(
+                    .lfo1, seconds: quarterCycleSeconds, settings: settings,
+                    envelope: 0, wheel: 0, bpm: 120), 1, accuracy: 0.001)
+            }
+        }
+
+        settings.lfo2Sync = StudioSynthLFOSync(note: .eighth)
+        XCTAssertEqual(StudioSynthModulationMath.signal(
+            .lfo2, seconds: 0.125, settings: settings,
+            envelope: 0, wheel: 0, bpm: 120), 1, accuracy: 0.001)
+
+        // The integrated beat clock survives a BPM change. A naive
+        // elapsedSeconds * newBPM calculation would jump backwards.
+        settings.lfo1Sync = StudioSynthLFOSync(note: .quarter)
+        let afterTempoChange = StudioSynthModulationMath.signal(
+            .lfo1, seconds: 0.25, settings: settings,
+            envelope: 0, wheel: 0, bpm: 60, beats: 0.375)
+        XCTAssertEqual(afterTempoChange, Float(sin(0.75 * Double.pi)),
+                       accuracy: 0.001)
+
+        let roundTrip = try JSONDecoder().decode(
+            StudioSynthModulationSettings.self,
+            from: JSONEncoder().encode(settings))
+        XCTAssertEqual(roundTrip, settings)
+        XCTAssertEqual(roundTrip.lfo1Rate, 1, "Free Hz remains stored in Sync")
+    }
+
     func testMacroRoutesSweepThreeEnginesAndRestoreBasePatches() throws {
         let patch = threeEngines()
         let ids = patch.layers.map(\.id)
