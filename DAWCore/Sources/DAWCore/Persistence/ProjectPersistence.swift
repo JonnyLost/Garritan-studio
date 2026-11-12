@@ -354,6 +354,18 @@ public actor ProjectFileManager {
     }
 
     // MARK: - Loading
+
+    /// Rebase app-owned sampler recordings after JSON decoding. Missing
+    /// recordings deliberately remain in the project so the user can use
+    /// Edit Mapping → Relink Sample without losing musical settings.
+    private func recoverManagedSamplerReferences(in project: inout Project) {
+        for index in project.tracks.indices {
+            guard let patch = project.tracks[index].studioSamplerPatch,
+                  let resolved = try? StudioSamplerSampleLibrary.resolve(patch)
+            else { continue }
+            project.tracks[index].studioSamplerPatch = resolved
+        }
+    }
     
     /// Load project from a URL
     public func load(from url: URL) async throws -> Project {
@@ -422,13 +434,16 @@ public actor ProjectFileManager {
                 }
             }
             
+            recoverManagedSamplerReferences(in: &project)
             print("[ProjectFileManager] Loaded project from: \(url.path)")
             return project
             
         } catch {
             // Try loading as plain Project (legacy format)
             print("[ProjectFileManager] Trying legacy format...")
-            return try decoder.decode(Project.self, from: data)
+            var legacyProject = try decoder.decode(Project.self, from: data)
+            recoverManagedSamplerReferences(in: &legacyProject)
+            return legacyProject
         }
     }
     
