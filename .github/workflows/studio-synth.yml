@@ -39,6 +39,19 @@ jobs:
             DAWCore/Sources/DAWCore/Audio/StudioSynthModulationWorker.swift \
             DAWUI/Sources/DAWUI/Views/StudioSynthModulationView.swift \
             Tests/DAWCoreTests/StudioSynthModulationTests.swift
+      - name: Compile and execute shared modulation core on Linux
+        run: |
+          swiftc -swift-version 5 -O \
+            DAWCore/Sources/DAWCore/Audio/StudioAnalogRouting.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioAnalogPatch.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioFMPatch.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioWavetablePatch.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioSynthModulation.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioSynthPatch.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioSynthModulationWorker.swift \
+            Tests/StudioSynthModulationStandalone/main.swift \
+            -o /tmp/studio-synth-modulation
+          /tmp/studio-synth-modulation
       - name: Original analog DSP
         run: |
           clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
