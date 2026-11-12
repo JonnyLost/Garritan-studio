@@ -56,6 +56,20 @@ int32_t ss_add_zone_with_region(SSSampler *sampler,
                     uint32_t playback_start_frame, uint32_t playback_end_frame,
                     uint32_t loop_start_frame, uint32_t loop_end_frame,
                     uint32_t loop_crossfade_frames);
+/* Extended zone creation: per-sample fade ramps and articulation group.
+ * fade_in + fade_out cannot exceed playback region length. ID 0 is default.
+ * Call only while configuring sampler before the first audio callback.
+ */
+int32_t ss_add_zone_with_options(SSSampler *sampler,
+                    uint8_t root_note, uint8_t lowest_note, uint8_t highest_note,
+                    uint8_t lowest_velocity, uint8_t highest_velocity,
+                    double source_sample_rate,
+                    const float *left, const float *right, uint32_t frames,
+                    uint32_t playback_start_frame, uint32_t playback_end_frame,
+                    uint32_t loop_start_frame, uint32_t loop_end_frame,
+                    uint32_t loop_crossfade_frames,
+                    uint32_t fade_in_frames, uint32_t fade_out_frames,
+                    uint8_t articulation_id);
 int32_t ss_zone_count(const SSSampler *sampler);
 
 /* MIDI events take effect at the next rendering block boundary.
@@ -64,6 +78,17 @@ int32_t ss_zone_count(const SSSampler *sampler);
 int32_t ss_note_on(SSSampler *sampler, uint8_t note, uint8_t velocity, uint8_t channel);
 int32_t ss_note_off(SSSampler *sampler, uint8_t note, uint8_t channel);
 int32_t ss_all_notes_off(SSSampler *sampler);
+
+/* Keyswitch map is immutable configuration, created before first render.
+ * Entries map distinct MIDI notes to articulation IDs 1...15.
+ * The configured notes do not themselves sound. 0 selects default group.
+ */
+int32_t ss_configure_keyswitches(SSSampler *sampler,
+                                const uint8_t *notes,
+                                const uint8_t *articulation_ids,
+                                int32_t count);
+int32_t ss_select_articulation(SSSampler *sampler,
+                              uint8_t articulation_id, uint8_t channel);
 
 /* CC1 drives continuous dynamic-layer crossfading when enabled; CC11 drives
  * expression on held notes. Both are smoothed by the audio renderer.
