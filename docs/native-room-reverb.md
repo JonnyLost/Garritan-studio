@@ -1,6 +1,6 @@
 # Garritan Studio — Native Room Reverb (prototype)
 
-Status: **4 native room profiles available through the Orchestral Stage acoustic-space picker; Apple mediumHall remains the default. A macOS Debug build and regression tests passed for this implementation on 11 November 2026. In-app Audio Unit listening and device-level checks remain pending.**
+Status: **Four native room profiles remain selectable in the Orchestral Stage. A new optional per-track early-reflection sidechain and offline impulse analyzer are committed but macOS CI for these changes is still pending. Apple mediumHall remains the default; in-app listening and device-level checks remain outstanding.**
 
 ## What exists
 
@@ -22,7 +22,53 @@ venue-inspired profiles. The room ID persists as an optional property of
 DAWState, so older projects default to the established Apple reverb. Native
 profile changes reuse the same 16-line network and retain its tail; switching
 between Apple and native graphs is intentionally disabled during transport
-playback/recording. Individual tracks retain existing stage sends/depth.
+playback/recording. Individual tracks retain the existing stage sends/depth; the new early path adds position-dependent acoustics when native processing is selected.
+
+## Position-aware early reflections (experimental)
+
+When a native room is enabled, each instrument receives a lazily created,
+wet-only NativeStageEarlyReflectionAudioUnit. It derives distinct left/right
+reflection timing and gain from the persisted stage pan and L0–L5 zone, then
+feeds a **separate early-reflection return**. The existing 16-delay FDN
+produces one shared late tail. Global early taps are disabled in the late
+Audio Unit to avoid doubling them.
+
+The original dry track output and hall-send paths are preserved. Native
+early-reflection nodes do not get instantiated at all until a native room is
+selected; selecting the Apple reverb mutes the new early return. Track mute,
+solo, volume and wet trim affect both wet branches. Track deletion detaches
+the additional nodes. This is a perceptual spatial model, **not** measured
+ray-traced geometry or an exact replica of a named venue.
+
+Known limitations: stage movements cause discrete rather than smoothed
+delay updates, microphone-position controls are not implemented, and
+switching between Apple and native graphs still stops/restarts AVAudioEngine
+when the transport is idle. Real-world Mac audio-device verification is
+required before shipping this as the default.
+
+## Offline acoustic measurement
+
+Run `swift run -c release RoomAcousticCalibration --seconds 5` on macOS.
+The executable renders each of the four rooms using the same early + late
+architecture, analyzes approximate 125/500/2000 Hz octave bands, and emits
+JSON with EDT, T20, T30 and wet-only C80. It computes proposed retuning
+inputs but does **not automatically rewrite** the curated profiles.
+
+CI runs the same command and uploads `native-room-calibration.json` as a
+workflow artifact after Debug build, regression tests and Release build.
+The current macOS workflow is at
+https://github.com/JonnyLost/Garritan-studio/actions/runs/43201035469.
+
+The analyzer uses backward Schroeder energy integration and linear decay fits
+but its biquad filters are only approximations to octave-band filters; finite
+tail integration is not noise-floor-compensated. This is **not an ISO 3382
+conformance claim**. Room decay targets remain literature-based; real
+room impulse measurements and listener-position data would be needed to
+validate any claim of matching the actual venue.
+
+Useful methodology:
+- https://acousticstoday.org/wp-content/uploads/2019/03/The-Art-of-Concert-Hall-Acoustics-Current-Trends-and-Questions-in-Research-and-Design-Kelsey-A.-Hochgraf.pdf
+- https://docs.jmrp.io/phonometry/buildings/rooms/room-acoustics/
 
 ## Acoustic reference catalog
 
@@ -67,9 +113,8 @@ Selected research references:
   recording. Selecting another *native* profile changes AU parameters and
   precomputed delay gains without creating or resetting the delay lines.
   Room switching is currently available only while the transport is stopped.
-- Individual instrument stage depth **currently controls send amount
-  and dry attenuation only**. This version does not generate position-specific
-  reflections or model microphone placement.
+- Stage pan/depth now also controls dedicated per-track early reflections in
+  native mode; microphone perspective is not yet modeled.
 
 ## Verification and next work
 
@@ -87,10 +132,9 @@ Before making this reverb a default:
    sustained orchestral playback under real-time constraints.
 4. Measure decay curves (RT60 by octave, EDT, C80, interaural correlation)
    and retune against licensed or published references.
-5. Venue-selection UI and optional project-state field are implemented;
-   next implement per-track early reflections, microphone position, smooth
-   transitions between the Apple and native effects, and a proper impulse
-   measurement/calibration harness.
+5. Venue selection, per-track ER and offline impulse analysis are implemented;
+   next review the CI calibration report, retune measured FDN decay, add
+   microphone perspective and smooth transition between Apple/native effects.
 
 No convolution is used at runtime. Published room impulse measurements can
 still inform offline calibration without becoming runtime dependencies.
