@@ -183,11 +183,40 @@ final class StudioSynthModulationTests: XCTestCase {
         XCTAssertEqual(afterTempoChange, Float(sin(0.75 * Double.pi)),
                        accuracy: 0.001)
 
+        settings.lfo1Phase = 0.25
+        settings.lfo2Phase = 0.5
+        XCTAssertEqual(StudioSynthModulationMath.signal(
+            .lfo1, seconds: 0, settings: settings,
+            envelope: 0, wheel: 0, bpm: 120), 1, accuracy: 0.001)
+        XCTAssertEqual(StudioSynthModulationMath.signal(
+            .lfo2, seconds: 0, settings: settings,
+            envelope: 0, wheel: 0, bpm: 120), 1, accuracy: 0.001)
+
+        let firstLayer = threeEngines().layers[0].id
+        settings.lfo1Sync = StudioSynthLFOSync(note: .sixtyFourth)
+        settings.routes = [StudioSynthModRoute(
+            source: .lfo1, layerID: firstLayer,
+            destination: .analog(.filterCutoff))]
+        XCTAssertEqual(StudioSynthModulationMath.controlRate(
+            settings, bpm: 120), 256, accuracy: 0.001)
+        settings.routes[0].enabled = false
+        XCTAssertEqual(StudioSynthModulationMath.controlRate(
+            settings, bpm: 120), 50, accuracy: 0.001)
+        settings.routes[0].enabled = true
+        settings.lfo1Sync = nil
+        XCTAssertEqual(StudioSynthModulationMath.controlRate(
+            settings, bpm: 120), 50, accuracy: 0.001)
+        settings.lfo1Sync = StudioSynthLFOSync(note: .quarter)
+
         let roundTrip = try JSONDecoder().decode(
             StudioSynthModulationSettings.self,
             from: JSONEncoder().encode(settings))
         XCTAssertEqual(roundTrip, settings)
         XCTAssertEqual(roundTrip.lfo1Rate, 1, "Free Hz remains stored in Sync")
+        var invalid = settings
+        invalid.lfo1Phase = .infinity
+        XCTAssertFalse(invalid.validate(layers: threeEngines().layers))
+
     }
 
     func testMacroRoutesSweepThreeEnginesAndRestoreBasePatches() throws {
