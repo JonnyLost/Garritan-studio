@@ -1,4 +1,4 @@
-name: Studio Synth shared native engine
+name: Studio Synth shared native engine and wavetable
 
 on:
   push:
@@ -38,6 +38,14 @@ jobs:
             Tests/StudioAnalogDSPStandalone/main.cpp \
             -o /tmp/studio-analog-synth
           ASAN_OPTIONS=detect_leaks=1 /tmp/studio-analog-synth
+      - name: Original Wavetable DSP
+        run: |
+          clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I StudioWavetableDSP/include \
+            StudioWavetableDSP/src/StudioWavetableDSP.cpp \
+            Tests/StudioWavetableDSPStandalone/main.cpp \
+            -o /tmp/studio-wavetable-synth
+          ASAN_OPTIONS=detect_leaks=1 /tmp/studio-wavetable-synth
       - name: Original FM DSP
         run: |
           clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
