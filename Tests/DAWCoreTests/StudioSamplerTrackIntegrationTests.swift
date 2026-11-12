@@ -80,7 +80,7 @@ final class StudioSamplerTrackIntegrationTests: XCTestCase {
         XCTAssertEqual(StudioSamplerStreamBudget.attackFrames(sampleRate: 44_100),
                        11_025)
         XCTAssertEqual(StudioSamplerStreamBudget.readAheadBytes(voices: 32),
-                       4_194_304)
+                       2_097_152)
 
         let first = try reader.readPage(startFrame: 0, requestedFrames: 512)
         XCTAssertEqual(first.frameCount, 512)
@@ -94,6 +94,14 @@ final class StudioSamplerTrackIntegrationTests: XCTestCase {
                        accuracy: 0.001)
 
         // Random seek and short final page, both decoded off the audio thread.
+        let direct = try reader.withPage(
+            startFrame: 512, requestedFrames: 128
+        ) { left, right, frameCount in
+            (frameCount, left[25], right?[25] ?? 0)
+        }
+        XCTAssertEqual(direct.0, 128)
+        XCTAssertEqual(direct.2, direct.1 * 0.5, accuracy: 0.001)
+
         let nearEnd = try reader.readPage(startFrame: 8_700, requestedFrames: 4_096)
         XCTAssertEqual(nearEnd.frameCount, 120)
         XCTAssertEqual(nearEnd.startFrame, 8_700)
