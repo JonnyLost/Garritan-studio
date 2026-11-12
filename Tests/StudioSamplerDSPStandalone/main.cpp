@@ -375,6 +375,69 @@ int main() {
     assert(stealL[511] == 0.f);
     ss_destroy(burst);
 
+    // Genuine streamed zones keep only a short attack in sampler RAM.
+    // A simulated worker claims/completes requests outside ss_render().
+    SSSampler *streamed = ss_create(44100, 4);
+    assert(streamed);
+    std::vector<float> longL(32768, .40f), longR(32768, -.20f);
+    for (int i = 0; i < 8192; ++i) {
+        longL[i] = .7f;
+        longR[i] = -.35f;
+    }
+    assert(!ss_add_stream_zone(streamed, 60, 60, 60, 1, 127, 44100,
+        longL.data(), longR.data(), 32768, 500, 0, 32768,
+        0, 0, 0, 0, 0, 0, 0, 0));
+    assert(ss_add_stream_zone(streamed, 60, 60, 60, 1, 127, 44100,
+        longL.data(), longR.data(), 32768, 8192, 0, 32768,
+        0, 0, 0, 0, 0, 0, 0, 0));
+    std::vector<float> streamL(512), streamR(512);
+    assert(ss_note_on(streamed, 60, 127, 0));
+    int fulfilled = 0;
+    for (int block = 0; block < 48; ++block) {
+        ss_render(streamed, streamL.data(), streamR.data(), 512);
+        SSStreamRequest req{};
+        while (ss_stream_claim(streamed, &req)) {
+            assert(req.zone_index == 0);
+            assert(req.start_frame + req.frame_count <= longL.size());
+            assert(req.frame_count <= SS_STREAM_PAGE_FRAMES);
+            assert(ss_stream_supply(streamed, &req,
+                longL.data() + req.start_frame,
+                longR.data() + req.start_frame, req.frame_count));
+            ++fulfilled;
+        }
+        if (block == 36) {
+            assert(streamL[100] > .05f);
+            assert(streamR[100] < -.02f);
+        }
+    }
+    assert(fulfilled >= 3);
+    assert(ss_stream_underrun_frames(streamed) == 0);
+    ss_destroy(streamed);
+
+    // Delayed worker completion cannot cause the render callback to wait.
+    // Unavailable PCM fades toward silence and is counted as an underrun.
+    SSSampler *starved = ss_create(44100, 1);
+    assert(starved);
+    assert(ss_add_stream_zone(starved, 60, 60, 60, 1, 127, 44100,
+        longL.data(), nullptr, 32768, 4096, 0, 32768,
+        0, 0, 0, 0, 0, 0, 0, 0));
+    assert(ss_note_on(starved, 60, 127, 0));
+    std::vector<float> starvedL(16384), starvedR(16384);
+    ss_render(starved, starvedL.data(), starvedR.data(), 16384);
+    assert(ss_stream_underrun_frames(starved) > 5000);
+    assert(std::isfinite(starvedL[16383]));
+    // Late claimed pages may still be supplied safely after the audio
+    // position has advanced; the next requests will catch up.
+    SSStreamRequest oldRequest{};
+    while (ss_stream_claim(starved, &oldRequest)) {
+        assert(ss_stream_supply(starved, &oldRequest,
+               longL.data() + oldRequest.start_frame,
+               nullptr, oldRequest.frame_count));
+    }
+    assert(ss_all_notes_off(starved));
+    ss_render(starved, starvedL.data(), starvedR.data(), 512);
+    ss_destroy(starved);
+
     ss_destroy(sampler);
     std::printf("Studio Sampler DSP smoke test passed (%.1f Hz)\n", frequency);
     return 0;
