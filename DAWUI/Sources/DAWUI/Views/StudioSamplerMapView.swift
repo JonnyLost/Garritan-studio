@@ -296,6 +296,42 @@ public struct StudioSamplerMapView: View {
                 Button("Add Articulation") { addArticulation() }
                     .disabled((draft?.articulations?.count ?? 0) >= 15)
             }
+            HStack(spacing: 22) {
+                Toggle("Release sample", isOn: Binding(
+                    get: { selectedZone?.isReleaseTrigger == true },
+                    set: { isRelease in
+                        guard var patch = draft,
+                              patch.zones.indices.contains(selectedIndex) else { return }
+                        patch.zones[selectedIndex].isReleaseTrigger = isRelease
+                        if isRelease {
+                            // Release samples are one-shots, never sustain loops.
+                            patch.zones[selectedIndex].loopStartFrame = nil
+                            patch.zones[selectedIndex].loopEndFrame = nil
+                            patch.zones[selectedIndex].loopCrossfadeFrames = nil
+                        }
+                        draft = patch
+                    }
+                ))
+                .toggleStyle(.switch)
+                Stepper(
+                    "Round-robin take: \(Int(zone.roundRobinIndex ?? 0) + 1)",
+                    value: Binding(
+                        get: { Int(selectedZone?.roundRobinIndex ?? 0) + 1 },
+                        set: { take in
+                            guard var patch = draft,
+                                  patch.zones.indices.contains(selectedIndex) else { return }
+                            patch.zones[selectedIndex].roundRobinIndex =
+                                UInt8(clamping: max(0, take - 1))
+                            draft = patch
+                        }
+                    ), in: 1...8
+                )
+                .frame(minWidth: 190)
+                Spacer()
+            }
+            Text("Round-robin takes share the same articulation, root and velocity band. Release recordings trigger only when a held MIDI note ends.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             articulationEditor
         }
         .padding(12)
@@ -460,6 +496,10 @@ public struct StudioSamplerMapView: View {
                     patch.zones[index].fadeInFrames = oldZone.fadeInFrames
                     patch.zones[index].fadeOutFrames = oldZone.fadeOutFrames
                     patch.zones[index].articulationID = oldZone.articulationID
+                    patch.zones[index].roundRobinIndex =
+                        oldZone.roundRobinIndex ?? patch.zones[index].roundRobinIndex
+                    patch.zones[index].isReleaseTrigger =
+                        oldZone.isReleaseTrigger ?? patch.zones[index].isReleaseTrigger
                 }
             }
             self.draft = patch
