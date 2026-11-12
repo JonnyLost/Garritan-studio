@@ -434,6 +434,13 @@ int main() {
             ++loopSupplied;
         }
         if (block > 35) {
+            if (!(streamLoopL[400] > .01f && streamLoopR[400] < -.005f)) {
+                std::fprintf(stderr,
+                    "streamLoop failed block=%d left=%f right=%f underruns=%llu supplied=%d\\n",
+                    block, streamLoopL[400], streamLoopR[400],
+                    static_cast<unsigned long long>(
+                        ss_stream_underrun_frames(streamLoop)), loopSupplied);
+            }
             assert(streamLoopL[400] > .01f);
             assert(streamLoopR[400] < -.005f);
         }
