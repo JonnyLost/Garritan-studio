@@ -180,6 +180,29 @@ public struct AdvancedPianoRollView: View {
         return .accentColor
     }
     
+    // The editor may remain open while another track becomes selected.
+    // Always direct preview note-ons and note-offs to the clip's owner.
+    private var previewTrackID: TrackID? {
+        viewModel.project.tracks.first { track in
+            track.clips.contains(where: { $0.id == clipID })
+        }?.id
+    }
+
+    private func auditionDragPitch(_ rawPitch: Int) {
+        let pitch = max(0, min(127, rawPitch))
+        guard lastAuditionedPitch != pitch else { return }
+        stopDragAudition()
+        lastAuditionedPitch = pitch
+        viewModel.playNotePreview(pitch: UInt8(pitch), on: previewTrackID)
+    }
+
+    private func stopDragAudition() {
+        if let prior = lastAuditionedPitch {
+            viewModel.stopNotePreview(pitch: UInt8(prior), on: previewTrackID)
+            lastAuditionedPitch = nil
+        }
+    }
+
     private let pianoKeyWidth: CGFloat = 60
     private let velocityLaneHeight: CGFloat = 80
     private let ccLaneHeight: CGFloat = 80
@@ -307,6 +330,9 @@ public struct AdvancedPianoRollView: View {
         .onAppear {
             setupInitialView()
             currentPlayheadBeat = viewModel.transportState.smoothPlayheadBeats
+        }
+        .onDisappear {
+            stopDragAudition()
         }
         .onReceive(viewModel.transportState.$smoothPlayheadBeats) { beats in
             currentPlayheadBeat = beats
@@ -494,8 +520,8 @@ public struct AdvancedPianoRollView: View {
                     AdvancedPianoKeyView(
                         pitch: UInt8(pitch),
                         noteHeight: noteHeight,
-                        onPress: { viewModel.playNotePreview(pitch: UInt8(pitch)) },
-                        onRelease: { viewModel.stopNotePreview(pitch: UInt8(pitch)) }
+                        onPress: { viewModel.playNotePreview(pitch: UInt8(pitch), on: previewTrackID) },
+                        onRelease: { viewModel.stopNotePreview(pitch: UInt8(pitch), on: previewTrackID) }
                     )
                 }
             }
@@ -1035,10 +1061,11 @@ public struct AdvancedPianoRollView: View {
         updateClip(clip)
         selectedNoteIDs = [newEvent.id]
         
-        // Play preview
-        viewModel.playNotePreview(pitch: UInt8(pitch), velocity: velocity)
+        // Keep the delayed note-off on the exact track that received note-on.
+        let owner = previewTrackID
+        viewModel.playNotePreview(pitch: UInt8(pitch), velocity: velocity, on: owner)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            viewModel.stopNotePreview(pitch: UInt8(pitch))
+            viewModel.stopNotePreview(pitch: UInt8(pitch), on: owner)
         }
     }
     
@@ -1168,10 +1195,7 @@ public struct AdvancedPianoRollView: View {
             let newPitch = max(0, min(127, dragStartPitch + pitchDelta))
             
             // Audition note when pitch changes
-            if newPitch != lastAuditionedPitch {
-                viewModel.playNotePreview(pitch: UInt8(newPitch))
-                lastAuditionedPitch = newPitch
-            }
+            auditionDragPitch(newPitch)
             
             // Check if we're moving multiple selected notes
             if !dragStartPositions.isEmpty {
@@ -1298,7 +1322,7 @@ public struct AdvancedPianoRollView: View {
         draggedNoteID = nil
         dragMode = .none
         dragStartPositions.removeAll()
-        lastAuditionedPitch = nil
+        stopDragAudition()
         isCopyingNotes = false
     }
     
@@ -1477,10 +1501,17 @@ struct AdvancedPianoKeyView: View {
                     }
                 }
                 .onEnded { _ in
+                    guard isPressed else { return }
                     isPressed = false
                     onRelease()
                 }
         )
+        .onDisappear {
+            if isPressed {
+                isPressed = false
+                onRelease()
+            }
+        }
     }
 }
 
