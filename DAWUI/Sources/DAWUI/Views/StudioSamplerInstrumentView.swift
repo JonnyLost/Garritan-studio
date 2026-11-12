@@ -52,7 +52,7 @@ public struct StudioSamplerInstrumentView: View {
                         }
                         sampleOverview(patch)
                         keyboard
-                        Text("Sustain-loop markers are editable under Edit Mapping → Loop. Legato transitions, keyswitch articulations and mic groups remain future milestones.")
+                        Text("Sample fades, suggested loops and articulation keyswitches are available in Edit Mapping. Legato transitions, release samples, round robin and mic groups remain future milestones.")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -256,8 +256,15 @@ public struct StudioSamplerInstrumentView: View {
                     .font(.subheadline.weight(.semibold))
                 ScrollView(.horizontal) {
                     HStack(spacing: 8) {
-                        Button("Default / Sustain") {
+                        Button {
                             _ = viewModel.setStudioSamplerArticulation(0, for: trackID)
+                        } label: {
+                            VStack(spacing: 3) {
+                                Text("Default / Sustain")
+                                if let key = patch.defaultKeyswitchNote {
+                                    Text("MIDI \(key)").font(.caption2).opacity(0.8)
+                                }
+                            }
                         }
                         .tint((patch.selectedArticulationID ?? 0) == 0 ? .purple : .gray)
                         ForEach(articulations) { articulation in
