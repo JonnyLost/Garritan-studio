@@ -191,6 +191,70 @@ final class StudioSamplerTrackIntegrationTests: XCTestCase {
         }
     }
 
+    func testTrimAndWaveformPersistAndAnalyzeOriginalFile() throws {
+        let url = try makeSample()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let analyzed = try StudioSamplerWaveformAnalyzer.analyze(url: url, columns: 100)
+        XCTAssertEqual(analyzed.totalFrames, 8_820)
+        XCTAssertEqual(analyzed.peaks.count, 100)
+        XCTAssertEqual(analyzed.sampleRate, 44_100, accuracy: 0.01)
+        XCTAssertGreaterThan(analyzed.peaks.max() ?? 0, 0.9)
+
+        var patch = StudioSamplerPatch(sampleURL: url, rootNote: 69)
+        patch.zones[0].trimStartFrame = 2_000
+        patch.zones[0].trimEndFrame = 4_000
+        XCTAssertTrue(patch.isValid)
+        var track = Track(name: "Edited Sample", type: .instrument)
+        track.studioSamplerPatch = patch
+        let restored = try JSONDecoder().decode(
+            Track.self, from: JSONEncoder().encode(track)
+        )
+        XCTAssertEqual(restored.studioSamplerPatch?.zones[0].trimStartFrame, 2_000)
+        XCTAssertEqual(restored.studioSamplerPatch?.zones[0].trimEndFrame, 4_000)
+        let sampler = try StudioSamplerInstrument(sampleRate: 44_100, patch: patch)
+        let engine = AVAudioEngine()
+        engine.attach(sampler.audioNode)
+        engine.connect(sampler.audioNode, to: engine.mainMixerNode, format: sampler.format)
+        try engine.enableManualRenderingMode(
+            .offline, format: sampler.format, maximumFrameCount: 512
+        )
+        try engine.start()
+        defer { engine.stop(); engine.disableManualRenderingMode() }
+        let buffer = try XCTUnwrap(
+            AVAudioPCMBuffer(pcmFormat: sampler.format, frameCapacity: 512)
+        )
+        XCTAssertTrue(sampler.noteOn(69, velocity: 127, channel: 0))
+        var peak: Float = 0
+        for _ in 0..<5 {
+            XCTAssertEqual(try engine.renderOffline(512, to: buffer), .success)
+            if let data = buffer.floatChannelData {
+                for i in 0..<Int(buffer.frameLength) {
+                    peak = max(peak, abs(data[0][i]))
+                }
+            }
+        }
+        XCTAssertGreaterThan(peak, 0.01)
+        let channel = try XCTUnwrap(buffer.floatChannelData)[0]
+        XCTAssertLessThan(abs(channel[511]), 0.0001)
+    }
+
+    func testInvalidTrimAndLoopConflictAreRejected() throws {
+        var zone = StudioSamplerZone(
+            sampleURL: URL(fileURLWithPath: "/tmp/original.wav")
+        )
+        zone.trimStartFrame = 200
+        zone.trimEndFrame = 100
+        XCTAssertFalse(zone.isValid)
+        zone.trimEndFrame = 600
+        zone.loopStartFrame = 120
+        zone.loopEndFrame = 400
+        XCTAssertFalse(zone.isValid)
+        zone.loopStartFrame = 250
+        XCTAssertTrue(zone.isValid)
+        zone.trimEndFrame = 300
+        XCTAssertFalse(zone.isValid)
+    }
+
     func testBadMappingDoesNotAttachAnInstrument() throws {
         var patch = StudioSamplerPatch(zones: [])
         XCTAssertFalse(patch.isValid)
