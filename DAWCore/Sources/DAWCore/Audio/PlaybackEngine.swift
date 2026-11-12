@@ -209,7 +209,15 @@ public final class PlaybackEngine: ObservableObject {
         transportState.tempoSubject
             .receive(on: DispatchQueue.main)
             .sink { [weak self] tempo in
-                self?.audioEngine.currentTempo = tempo.bpm
+                guard let self else { return }
+                self.audioEngine.currentTempo = tempo.bpm
+                // Studio Synth follows the same authoritative project tempo.
+                // These are control-thread updates, never audio callbacks.
+                for instrument in self.trackInstruments.values {
+                    if case .studioSynth(let synth) = instrument {
+                        synth.setTempo(tempo.bpm)
+                    }
+                }
             }
             .store(in: &cancellables)
     }
@@ -371,7 +379,9 @@ public final class PlaybackEngine: ObservableObject {
             throw PlaybackError.trackNotFound(trackID)
         }
         let synth = try StudioSynthInstrument(sampleRate: audioEngine.sampleRate,
-                                             patch: patch)
+                                             patch: patch,
+                                             tempo: transportState?.tempo.bpm
+                                                 ?? audioEngine.currentTempo)
         let engine = audioEngine.engine
         let wasRunning = engine.isRunning
         if wasRunning { engine.stop() }
