@@ -13,6 +13,8 @@ public struct StudioSamplerLoopEditorView: View {
     @State private var pan = 0.0
     @State private var selectedMarker: Marker = .trimStart
     @State private var draggingMarker: Marker?
+    @State private var isFindingLoop = false
+    @State private var loopSuggestionMessage: String?
 
     public init(zone: Binding<StudioSamplerZone>) { self._zone = zone }
 
@@ -111,11 +113,23 @@ public struct StudioSamplerLoopEditorView: View {
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
+                Button {
+                    findLoop()
+                } label: {
+                    Label(isFindingLoop ? "Analyzing…" : "Find Loop",
+                          systemImage: "waveform.path")
+                }
+                .disabled(isFindingLoop || frames < 512 || trimEnd - trimStart < 512)
                 Toggle("Sustain Loop", isOn: loopEnabled)
                     .toggleStyle(.switch)
                     .disabled(frames < 8 || trimEnd - trimStart < 8)
             }
 
+            if let loopSuggestionMessage {
+                Text(loopSuggestionMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             if let waveform {
                 waveformViewport(waveform)
                 HStack(spacing: 12) {
@@ -155,6 +169,7 @@ public struct StudioSamplerLoopEditorView: View {
                     }
                 }
                 .font(.caption)
+                sampleFades
                 Text("Drag a marker handle (S/E/L/R/X) or choose a marker and drag in the waveform. The shaded section is the audible sample region. Original audio is never changed; Apply Mapping commits edits to playback.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -175,6 +190,7 @@ public struct StudioSamplerLoopEditorView: View {
             readError = nil
             zoom = 1
             pan = 0
+            loopSuggestionMessage = nil
             let url = zone.sampleURL
             do {
                 let result = try await Task.detached(priority: .utility) {
@@ -183,6 +199,76 @@ public struct StudioSamplerLoopEditorView: View {
                 if !Task.isCancelled { waveform = result }
             } catch {
                 if !Task.isCancelled { readError = error.localizedDescription }
+            }
+        }
+    }
+
+    private var sampleFades: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Sample Boundary Fades", systemImage: "waveform.path")
+                .font(.caption.weight(.semibold))
+            Text("These fades are separate from the instrument ADSR envelope.")
+                .font(.caption2).foregroundStyle(.secondary)
+            fadeRow("Fade In", isStart: true)
+            fadeRow("Fade Out", isStart: false)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func fadeRow(_ name: String, isStart: Bool) -> some View {
+        let fade = Int(isStart ? (zone.fadeInFrames ?? 0) : (zone.fadeOutFrames ?? 0))
+        let span = max(2, trimEnd - trimStart)
+        let other = Int(isStart ? (zone.fadeOutFrames ?? 0) : (zone.fadeInFrames ?? 0))
+        let maxFade = max(0, span - other)
+        return HStack(spacing: 12) {
+            Text(name).font(.caption).frame(width: 65, alignment: .leading)
+            Slider(value: Binding(
+                get: { Double(fade) },
+                set: { proposed in
+                    var updated = zone
+                    let frames = UInt32(clamping: max(0, min(maxFade, Int(proposed.rounded()))))
+                    if isStart { updated.fadeInFrames = frames }
+                    else { updated.fadeOutFrames = frames }
+                    if updated.isValid { zone = updated }
+                }
+            ), in: 0...Double(maxFade))
+            .disabled(maxFade == 0)
+            Text(String(format: "%.1f ms", Double(fade) / rate * 1000))
+                .font(.caption.monospacedDigit())
+                .frame(width: 73, alignment: .trailing)
+        }
+    }
+
+    private func findLoop() {
+        guard frames >= 512, !isFindingLoop else { return }
+        isFindingLoop = true
+        loopSuggestionMessage = nil
+        let url = zone.sampleURL
+        let start = zone.trimStartFrame
+        let end = zone.trimEndFrame
+        Task { @MainActor in
+            defer { isFindingLoop = false }
+            do {
+                let suggestion = try await Task.detached(priority: .userInitiated) {
+                    try StudioSamplerLoopFinder.suggest(
+                        url: url, trimStart: start, trimEnd: end
+                    )
+                }.value
+                // Do not apply stale suggestions after the user changes files
+                // or playback trims while analysis is running.
+                guard zone.sampleURL == url,
+                      zone.trimStartFrame == start,
+                      zone.trimEndFrame == end else { return }
+                var updated = zone
+                updated.loopStartFrame = suggestion.startFrame
+                updated.loopEndFrame = suggestion.endFrame
+                updated.loopCrossfadeFrames = suggestion.crossfadeFrames
+                if updated.isValid { zone = updated }
+                loopSuggestionMessage = "Suggested loop added to draft. Review its position before Apply Mapping."
+                zoom = 1
+                pan = 0
+            } catch {
+                loopSuggestionMessage = error.localizedDescription
             }
         }
     }
