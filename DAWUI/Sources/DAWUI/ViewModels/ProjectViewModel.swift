@@ -54,6 +54,7 @@ public final class ProjectViewModel: ObservableObject {
     
     // Playback state
     @Published public private(set) var isEngineReady: Bool = false
+    @Published public private(set) var acousticRoomSelectionError: String?
     
     // MARK: - Subsystems
     
@@ -254,6 +255,20 @@ public final class ProjectViewModel: ObservableObject {
         Task {
             do {
                 print("Starting audio engine...")
+                // Restore the chosen native room before preparing track instruments.
+                // A legacy project with no saved profile keeps the tested Apple hall.
+                if let id = project.dawState.acousticRoomProfileID,
+                   StudioRoomAcousticProfile.index(forID: id) != nil {
+                    do {
+                        try audioEngine.setNativeConcertHallReverbEnabled(true)
+                        _ = audioEngine.selectNativeRoomProfile(id: id)
+                    } catch {
+                        acousticRoomSelectionError = error.localizedDescription
+                        print("[Acoustics] Could not restore native room: \(error)")
+                        // Do not prevent legacy sessions from starting.
+                        try? audioEngine.setNativeConcertHallReverbEnabled(false)
+                    }
+                }
                 try audioEngine.start()
                 print("Audio engine started successfully. Running: \(audioEngine.engine.isRunning)")
                 print("Sample rate: \(audioEngine.sampleRate)")
@@ -916,6 +931,32 @@ public final class ProjectViewModel: ObservableObject {
 
     public func setConcertHallOverallReverb(_ level: Float) {
         audioEngine.setConcertHallOverallReverb(level)
+    }
+
+    /// Legacy Apple hall or one of the modeled spaces. Project persistence uses
+    /// the stable room ID, not the Audio Unit's numeric parameter index.
+    /// Graph rebuilds only occur when changing between Apple and native engines;
+    /// while playback/recording is running this operation is intentionally blocked.
+    public func selectConcertHallRoom(id: String) {
+        guard isEngineReady,
+              !transportState.isPlaying, !transportState.isRecording,
+              !isRecording else { return }
+        let isLegacy = id == "apple-medium-hall"
+        guard isLegacy || StudioRoomAcousticProfile.index(forID: id) != nil else { return }
+        do {
+            if isLegacy {
+                try audioEngine.setNativeConcertHallReverbEnabled(false)
+            } else {
+                if !audioEngine.usesNativeConcertHallReverb {
+                    try audioEngine.setNativeConcertHallReverbEnabled(true)
+                }
+                _ = audioEngine.selectNativeRoomProfile(id: id)
+            }
+            acousticRoomSelectionError = nil
+            project.dawState.acousticRoomProfileID = isLegacy ? nil : id
+        } catch {
+            acousticRoomSelectionError = "Could not change acoustic room: \(error.localizedDescription)"
+        }
     }
 
     public func setTrackStageZone(id: TrackID, zone: Int) {
