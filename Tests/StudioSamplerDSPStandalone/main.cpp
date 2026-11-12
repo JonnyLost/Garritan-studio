@@ -216,7 +216,7 @@ int main() {
         0, 0, 0, 0, 0, 1));
     uint8_t keys[] = {24};
     uint8_t articulationIDs[] = {1};
-    assert(!ss_configure_keyswitches(artic, keys, articulationIDs, 16));
+    assert(!ss_configure_keyswitches(artic, keys, articulationIDs, 17));
     assert(ss_configure_keyswitches(artic, keys, articulationIDs, 1));
     assert(!ss_select_articulation(artic, 16, 0));
     std::vector<float> output(512), other(512);
