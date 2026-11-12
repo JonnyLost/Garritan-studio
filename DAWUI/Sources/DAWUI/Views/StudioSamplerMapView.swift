@@ -273,10 +273,113 @@ public struct StudioSamplerMapView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            HStack {
+                Text("Zone articulation")
+                    .font(.caption).foregroundStyle(.secondary)
+                Picker("Zone articulation", selection: Binding(
+                    get: { selectedZone?.articulationID ?? 0 },
+                    set: { id in
+                        guard var patch = draft,
+                              patch.zones.indices.contains(selectedIndex) else { return }
+                        patch.zones[selectedIndex].articulationID = id
+                        draft = patch
+                    }
+                )) {
+                    Text("Default / Sustain").tag(UInt8(0))
+                    ForEach(draft?.articulations ?? []) { articulation in
+                        Text(articulation.name).tag(articulation.id)
+                    }
+                }
+                .labelsHidden()
+                .frame(maxWidth: 220)
+                Spacer()
+                Button("Add Articulation") { addArticulation() }
+                    .disabled((draft?.articulations?.count ?? 0) >= 15)
+            }
+            articulationEditor
         }
         .padding(12)
         .background(Color.primary.opacity(0.035))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var articulationEditor: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let items = draft?.articulations, !items.isEmpty {
+                Divider()
+                Text("Keyswitch map (note-on changes the articulation for future notes)")
+                    .font(.caption.weight(.semibold))
+                ForEach(items) { articulation in
+                    HStack(spacing: 8) {
+                        TextField("Articulation", text: Binding(
+                            get: { draft?.articulations?.first(where: { $0.id == articulation.id })?.name ?? "" },
+                            set: { name in updateArticulation(articulation.id, name: name) }
+                        ))
+                        .frame(maxWidth: 150)
+                        Stepper(
+                            "Keyswitch: \(SamplerNoteNames.name(articulation.keyswitchNote))",
+                            value: Binding(
+                                get: { Int(draft?.articulations?.first(where: { $0.id == articulation.id })?.keyswitchNote ?? 24) },
+                                set: { updateArticulation(articulation.id, note: UInt8(clamping: $0)) }
+                            ),
+                            in: 0...127
+                        )
+                        .frame(maxWidth: 220)
+                        Button(role: .destructive) {
+                            removeArticulation(articulation.id)
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+                if draft?.isValid != true {
+                    Text("Please fix duplicate keyswitches, empty names, or invalid zone assignments before applying.")
+                        .font(.caption2).foregroundStyle(.orange)
+                }
+                Text("Keyswitch notes take priority over sampled notes on the same MIDI channel.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func addArticulation() {
+        guard var patch = draft else { return }
+        let used = Set((patch.articulations ?? []).map(\.id))
+        guard let id = (1...15).map(UInt8.init).first(where: { !used.contains($0) }) else {
+            return
+        }
+        let usedKeys = Set((patch.articulations ?? []).map(\.keyswitchNote))
+        guard let note = (24...127).map(UInt8.init).first(where: { !usedKeys.contains($0) }) else {
+            return
+        }
+        let names = ["Legato", "Staccato", "Pizzicato", "Spiccato",
+                     "Tremolo", "Harmonics", "Marcato", "Short", "Long"]
+        let index = patch.articulations?.count ?? 0
+        let name = index < names.count ? names[index] : "Articulation \(Int(id))"
+        patch.articulations = (patch.articulations ?? []) +
+            [StudioSamplerArticulation(id: id, name: name, keyswitchNote: note)]
+        draft = patch
+    }
+
+    private func updateArticulation(_ id: UInt8, name: String? = nil,
+                                    note: UInt8? = nil) {
+        guard var patch = draft,
+              let index = patch.articulations?.firstIndex(where: { $0.id == id })
+        else { return }
+        if let name { patch.articulations?[index].name = name }
+        if let note { patch.articulations?[index].keyswitchNote = note }
+        draft = patch
+    }
+
+    private func removeArticulation(_ id: UInt8) {
+        guard var patch = draft else { return }
+        patch.articulations?.removeAll(where: { $0.id == id })
+        for index in patch.zones.indices where patch.zones[index].articulationID == id {
+            patch.zones[index].articulationID = nil
+        }
+        if patch.selectedArticulationID == id { patch.selectedArticulationID = nil }
+        draft = patch
     }
 
     private func restoreSaved() {
@@ -322,6 +425,8 @@ public struct StudioSamplerMapView: View {
             patch.dynamicsCC1 = draft.dynamicsCC1
             patch.expressionCC11 = draft.expressionCC11
             patch.envelope = draft.envelope
+            patch.articulations = draft.articulations
+            patch.selectedArticulationID = draft.selectedArticulationID
             // Re-map key/velocity assignments without throwing away sustain
             // loops on the same imported recordings.
             for index in patch.zones.indices {
@@ -333,6 +438,9 @@ public struct StudioSamplerMapView: View {
                     patch.zones[index].loopCrossfadeFrames = oldZone.loopCrossfadeFrames
                     patch.zones[index].trimStartFrame = oldZone.trimStartFrame
                     patch.zones[index].trimEndFrame = oldZone.trimEndFrame
+                    patch.zones[index].fadeInFrames = oldZone.fadeInFrames
+                    patch.zones[index].fadeOutFrames = oldZone.fadeOutFrames
+                    patch.zones[index].articulationID = oldZone.articulationID
                 }
             }
             self.draft = patch
