@@ -443,7 +443,7 @@ int32_t ss_configure_keyswitches(SSSampler *sampler,
                                 const uint8_t *notes,
                                 const uint8_t *articulation_ids,
                                 int32_t count) {
-    if (!sampler || count < 0 || count > 15 ||
+    if (!sampler || count < 0 || count > 16 ||
         (count > 0 && (!notes || !articulation_ids))) return 0;
     std::array<uint8_t, 128> prepared{};
     std::array<bool, 16> usedIDs{};
