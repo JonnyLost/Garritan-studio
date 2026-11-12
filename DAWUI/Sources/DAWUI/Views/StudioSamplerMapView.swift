@@ -15,7 +15,7 @@ public struct StudioSamplerMapView: View {
 
     private enum EditorPage: String, CaseIterable {
         case mapping = "Key & Velocity"
-        case loop = "Sustain Loop"
+        case loop = "Waveform & Loops"
     }
     @State private var showImporter = false
     @State private var isImporting = false
@@ -327,6 +327,8 @@ public struct StudioSamplerMapView: View {
                     patch.zones[index].loopStartFrame = oldZone.loopStartFrame
                     patch.zones[index].loopEndFrame = oldZone.loopEndFrame
                     patch.zones[index].loopCrossfadeFrames = oldZone.loopCrossfadeFrames
+                    patch.zones[index].trimStartFrame = oldZone.trimStartFrame
+                    patch.zones[index].trimEndFrame = oldZone.trimEndFrame
                 }
             }
             self.draft = patch
