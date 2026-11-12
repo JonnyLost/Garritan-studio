@@ -69,6 +69,45 @@ final class StudioSamplerTrackIntegrationTests: XCTestCase {
         XCTAssertTrue(sampler.allNotesOff())
     }
 
+    func testBoundedDiskSamplePagesAreAccurateAndDoNotPreloadEntireFile() throws {
+        let url = try makeSample()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let reader = try StudioSamplerDiskChunkReader(url: url)
+        XCTAssertEqual(reader.frameCount, 8_820)
+        XCTAssertEqual(reader.channels, 2)
+        XCTAssertEqual(reader.sampleRate, 44_100, accuracy: 0.01)
+        XCTAssertEqual(StudioSamplerStreamBudget.attackFrames(sampleRate: 44_100),
+                       11_025)
+        XCTAssertEqual(StudioSamplerStreamBudget.readAheadBytes(voices: 32),
+                       4_194_304)
+
+        let first = try reader.readPage(startFrame: 0, requestedFrames: 512)
+        XCTAssertEqual(first.frameCount, 512)
+        XCTAssertEqual(first.left.count, 512)
+        XCTAssertEqual(first.right.count, 512)
+        XCTAssertEqual(first.startFrame, 0)
+        XCTAssertEqual(first.left[100],
+                       Float(sin(Double(100) * 2 * .pi * 440 / 44_100)),
+                       accuracy: 0.001)
+        XCTAssertEqual(first.right[100], first.left[100] * 0.5,
+                       accuracy: 0.001)
+
+        // Random seek and short final page, both decoded off the audio thread.
+        let nearEnd = try reader.readPage(startFrame: 8_700, requestedFrames: 4_096)
+        XCTAssertEqual(nearEnd.frameCount, 120)
+        XCTAssertEqual(nearEnd.startFrame, 8_700)
+        let middle = try reader.readPage(startFrame: 2_000, requestedFrames: 128)
+        XCTAssertEqual(middle.frameCount, 128)
+        XCTAssertEqual(middle.left[0],
+                       Float(sin(Double(2_000) * 2 * .pi * 440 / 44_100)),
+                       accuracy: 0.001)
+        XCTAssertThrowsError(try reader.readPage(startFrame: 8_820))
+        XCTAssertThrowsError(try reader.readPage(startFrame: -1))
+        XCTAssertThrowsError(try reader.readPage(startFrame: 10, requestedFrames: 20_000))
+        XCTAssertThrowsError(try reader.readPage(startFrame: 10, requestedFrames: 0))
+    }
+
     func testSamplerPatchSurvivesSavingAndOldTrackDecodes() throws {
         var track = Track(name: "Sampled instrument", type: .instrument)
         let url = URL(fileURLWithPath: "/tmp/studio-sample.wav")
