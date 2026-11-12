@@ -242,6 +242,70 @@ int main() {
     assert(output[400] > .10f);
     ss_destroy(artic);
 
+    // Round-robin takes alternate; note-off releases are matched to the
+    // note-on variation, not stacked or retriggered by duplicate note-offs.
+    SSSampler *alternates = ss_create(44100, 8);
+    assert(alternates);
+    std::vector<float> attackA(2048, .6f), attackB(2048, -.6f);
+    std::vector<float> releaseA(2048, .2f), releaseB(2048, -.2f);
+    auto addTake = [&](const std::vector<float>& pcm, uint8_t rr, uint8_t release) {
+        return ss_add_zone_with_variation(alternates, 60, 60, 60, 1, 127,
+            44100, pcm.data(), nullptr, 2048, 0, 2048, 0, 0, 0,
+            0, 0, 0, rr, release);
+    };
+    assert(!addTake(attackA, 8, 0)); // no out-of-range RR index
+    assert(!addTake(attackA, 0, 2)); // release flag must be boolean
+    assert(!ss_add_zone_with_variation(alternates, 60, 60, 60, 1, 127,
+        44100, attackA.data(), nullptr, 2048, 0, 2048, 64, 1024, 0,
+        0, 0, 0, 0, 1)); // release recordings cannot loop
+    assert(addTake(attackA, 0, 0));
+    assert(addTake(attackB, 1, 0));
+    assert(addTake(releaseA, 0, 1));
+    assert(addTake(releaseB, 1, 1));
+    std::vector<float> alternatedL(4096), alternatedR(4096);
+    assert(ss_note_off(alternates, 60, 0));
+    ss_render(alternates, alternatedL.data(), alternatedR.data(), 512);
+    for (int i = 0; i < 512; ++i) assert(alternatedL[i] == 0.f);
+    for (int round = 0; round < 4; ++round) {
+        assert(ss_note_on(alternates, 60, 120, 0));
+        ss_render(alternates, alternatedL.data(), alternatedR.data(), 512);
+        assert((round % 2 == 0) ? alternatedL[300] > .09f
+                                : alternatedL[300] < -.09f);
+        assert(ss_note_off(alternates, 60, 0));
+        ss_render(alternates, alternatedL.data(), alternatedR.data(), 512);
+        assert((round % 2 == 0) ? alternatedL[300] > .03f
+                                : alternatedL[300] < -.03f);
+        // No second note-off event may retrigger the release recording.
+        assert(ss_note_off(alternates, 60, 0));
+        ss_render(alternates, alternatedL.data(), alternatedR.data(), 3000);
+        assert(alternatedL[2999] == 0.f);
+    }
+    assert(ss_all_notes_off(alternates));
+    ss_render(alternates, alternatedL.data(), alternatedR.data(), 512);
+    ss_destroy(alternates);
+
+    // Panic/all-notes-off must never create a release-trigger voice.
+    SSSampler *panic = ss_create(44100, 4);
+    assert(panic);
+    std::vector<float> tinyAttack(128, .4f);
+    std::vector<float> longRelease(2048, .4f);
+    assert(ss_add_zone_with_variation(panic, 60, 60, 60, 1, 127,
+        44100, tinyAttack.data(), nullptr, 128, 0, 128, 0, 0, 0,
+        0, 0, 0, 0, 0));
+    assert(ss_add_zone_with_variation(panic, 60, 60, 60, 1, 127,
+        44100, longRelease.data(), nullptr, 2048, 0, 2048, 0, 0, 0,
+        0, 0, 0, 0, 1));
+    assert(ss_note_on(panic, 60, 127, 2));
+    ss_render(panic, alternatedL.data(), alternatedR.data(), 256);
+    assert(ss_control_change(panic, 123, 0, 2));
+    ss_render(panic, alternatedL.data(), alternatedR.data(), 512);
+    assert(alternatedL[300] == 0.f);
+    // A late note-off after channel panic cannot play its release sample.
+    assert(ss_note_off(panic, 60, 2));
+    ss_render(panic, alternatedL.data(), alternatedR.data(), 512);
+    assert(alternatedL[300] == 0.f);
+    ss_destroy(panic);
+
     ss_destroy(sampler);
     std::printf("Studio Sampler DSP smoke test passed (%.1f Hz)\n", frequency);
     return 0;
