@@ -105,6 +105,42 @@ final class NativeRoomReverbProcessorTests: XCTestCase {
         XCTAssertLessThan(dryEnergy, livelyEnergy * 0.25)
     }
 
+    func testBandDependentDecayProducesLongerBassThanTrebleTail() {
+        // This is a spectral behavior test, not a claim of measured venue RT60.
+        var room = StudioRoomAcousticProfile.abbeyRoadStudioOne
+        room.bassRT60 = 4
+        room.midRT60 = 1.2
+        room.trebleRT60 = 0.35
+        let sampleRate = 44_100
+        let (left, right) = impulse(
+            NativeRoomReverbProcessor(sampleRate: Double(sampleRate), profile: room),
+            frames: sampleRate * 3, chunkSize: 256
+        )
+        let lowCoefficient = Float(1 - exp(-2 * Double.pi * 250 / Double(sampleRate)))
+        let highCoefficient = Float(1 - exp(-2 * Double.pi * 2500 / Double(sampleRate)))
+        var lowState: Float = 0
+        var highState: Float = 0
+        var lowEnergy = [Double](repeating: 0, count: 3)
+        var highEnergy = [Double](repeating: 0, count: 3)
+
+        for i in left.indices {
+            let sample = (left[i] + right[i]) * 0.5
+            lowState += lowCoefficient * (sample - lowState)
+            highState += highCoefficient * (sample - highState)
+            let low = Double(lowState)
+            let high = Double(sample - highState)
+            let segment = i / sampleRate
+            lowEnergy[segment] += low * low
+            highEnergy[segment] += high * high
+        }
+
+        XCTAssertGreaterThan(lowEnergy[0], 0)
+        XCTAssertGreaterThan(highEnergy[0], 0)
+        let lowRetention = lowEnergy[2] / lowEnergy[0]
+        let highRetention = highEnergy[2] / highEnergy[0]
+        XCTAssertGreaterThan(lowRetention, highRetention * 100)
+    }
+
     func testWetOnlyImpulseHasNoImmediateDryLeak() {
         let frames = 12_000
         let (left, right) = impulse(NativeRoomReverbProcessor(sampleRate: 48_000),
