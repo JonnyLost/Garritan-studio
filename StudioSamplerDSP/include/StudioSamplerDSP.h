@@ -86,6 +86,51 @@ int32_t ss_add_zone_with_variation(SSSampler *sampler,
                     uint32_t fade_in_frames, uint32_t fade_out_frames,
                     uint8_t articulation_id,
                     uint8_t round_robin_index, uint8_t release_trigger);
+/* Streaming zones retain only a source-frame attack prefix. The background
+ * reader owns file decoding; the render thread accesses immutable attack PCM
+ * and two preallocated 4096-frame pages per active voice.
+ * attack PCM starts at playback_start_frame; full_frames is total source
+ * length (it may be far larger than the RAM-only zone limit).
+ * All other mapping/loop/fade/articulation arguments have the same meaning
+ * as ss_add_zone_with_variation. Called only before rendering starts.
+ */
+int32_t ss_add_stream_zone(SSSampler *sampler,
+                    uint8_t root_note, uint8_t lowest_note, uint8_t highest_note,
+                    uint8_t lowest_velocity, uint8_t highest_velocity,
+                    double source_sample_rate,
+                    const float *attack_left, const float *attack_right,
+                    uint32_t full_frames, uint32_t attack_frames,
+                    uint32_t playback_start_frame, uint32_t playback_end_frame,
+                    uint32_t loop_start_frame, uint32_t loop_end_frame,
+                    uint32_t loop_crossfade_frames,
+                    uint32_t fade_in_frames, uint32_t fade_out_frames,
+                    uint8_t articulation_id,
+                    uint8_t round_robin_index, uint8_t release_trigger);
+
+enum { SS_STREAM_PAGE_FRAMES = 4096 };
+typedef struct SSStreamRequest {
+    int32_t voice_index;
+    int32_t slot_index;
+    int32_t zone_index;
+    uint32_t start_frame;
+    uint32_t frame_count;
+    uint64_t voice_serial;
+} SSStreamRequest;
+
+/* Dedicated NON-AUDIO worker ONLY. One serialized background consumer.
+ * claim: atomically reserves a requested page for decoding. Returns 1 on
+ * success, 0 when idle. Reading a claimed request does no file I/O.
+ * supply: copies decoded planar PCM into a fixed buffer and publishes via
+ * release/acquire ownership. right may be NULL for mono. Short EOF pages
+ * are allowed. abandon: discard a failed request so playback cannot stall.
+ * Shutdown must join the worker BEFORE ss_destroy() is called.
+ */
+int32_t ss_stream_claim(SSSampler *sampler, SSStreamRequest *request);
+int32_t ss_stream_supply(SSSampler *sampler, const SSStreamRequest *request,
+                         const float *left, const float *right, uint32_t frames);
+void ss_stream_abandon(SSSampler *sampler, const SSStreamRequest *request);
+uint64_t ss_stream_underrun_frames(const SSSampler *sampler);
+
 int32_t ss_zone_count(const SSSampler *sampler);
 
 /* MIDI events take effect at the next rendering block boundary.
