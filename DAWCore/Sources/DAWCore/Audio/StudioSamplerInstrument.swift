@@ -57,6 +57,20 @@ public final class StudioSamplerInstrument {
 
         // Swift owns the C++ sampler immediately, even if decoding throws.
         let state = StudioSamplerRenderState(sampler)
+        // Configuration occurs before the AVAudioSourceNode is constructed;
+        // keyswitch mappings remain immutable during rendering.
+        let articulations = patch.articulations ?? []
+        let keys = articulations.map(\.keyswitchNote)
+        let identifiers = articulations.map(\.id)
+        let configurationSucceeded = keys.withUnsafeBufferPointer { keysBuffer in
+            identifiers.withUnsafeBufferPointer { idsBuffer in
+                ss_configure_keyswitches(
+                    sampler, keysBuffer.baseAddress, idsBuffer.baseAddress,
+                    Int32(keys.count)
+                ) == 1
+            }
+        }
+        guard configurationSucceeded else { throw StudioSamplerError.invalidPatch }
         var cumulativeFrames: Int64 = 0
         for zone in patch.zones {
             let url = zone.sampleURL
@@ -93,15 +107,21 @@ public final class StudioSamplerInstrument {
             if let loopEnd = zone.loopEndFrame, loopEnd > playbackEnd {
                 throw StudioSamplerError.invalidLoop(url)
             }
+            guard UInt64(zone.fadeInFrames ?? 0) + UInt64(zone.fadeOutFrames ?? 0)
+                    <= UInt64(playbackEnd - playbackStart) else {
+                throw StudioSamplerError.invalidSample(url)
+            }
             let right: UnsafePointer<Float>? = sourceFormat.channelCount == 2
                 ? UnsafePointer(samples[1]) : nil
-            guard ss_add_zone_with_region(
+            guard ss_add_zone_with_options(
                 sampler, zone.rootNote, zone.lowestNote, zone.highestNote,
                 zone.lowestVelocity, zone.highestVelocity, sourceFormat.sampleRate,
                 samples[0], right, buffer.frameLength,
                 playbackStart, playbackEnd,
                 zone.loopStartFrame ?? 0, zone.loopEndFrame ?? 0,
-                zone.loopCrossfadeFrames ?? 0
+                zone.loopCrossfadeFrames ?? 0,
+                zone.fadeInFrames ?? 0, zone.fadeOutFrames ?? 0,
+                zone.articulationID ?? 0
             ) == 1 else {
                 throw StudioSamplerError.couldNotLoadZone(url)
             }
@@ -109,7 +129,8 @@ public final class StudioSamplerInstrument {
         // Prepare the controller state and crossfade mode before the
         // AVAudioSourceNode is attached or can start rendering.
         let env = patch.envelope ?? StudioSamplerEnvelope()
-        guard ss_set_adsr(sampler, env.attackSeconds, env.decaySeconds,
+        guard ss_select_articulation(sampler, patch.selectedArticulationID ?? 0, 0) == 1,
+              ss_set_adsr(sampler, env.attackSeconds, env.decaySeconds,
                           env.sustainLevel, env.releaseSeconds) == 1,
               ss_set_cc1_crossfade(sampler, patch.cc1Crossfade == true ? 1 : 0) == 1,
               ss_control_change(sampler, 1, patch.dynamicsCC1 ?? 127, 0) == 1,
@@ -131,6 +152,15 @@ public final class StudioSamplerInstrument {
             ss_render(state.sampler, left, right, Int32(frameCount))
             return noErr
         }
+    }
+
+    /// Switch the recorded articulation for subsequent notes. Currently
+    /// sounding notes keep playing; no sample data is rebuilt or copied.
+    @discardableResult
+    public func selectArticulation(_ id: UInt8, channel: UInt8 = 0) -> Bool {
+        midiProducerLock.lock()
+        defer { midiProducerLock.unlock() }
+        return ss_select_articulation(renderState.sampler, id, channel) == 1
     }
 
     /// MIDI producers may arrive from both live playthrough and timeline
