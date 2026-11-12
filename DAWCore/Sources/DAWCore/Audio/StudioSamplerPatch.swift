@@ -5,6 +5,9 @@ import Foundation
 /// and security-scoped file bookmarks will replace the absolute file path.
 public struct StudioSamplerZone: Codable, Equatable, Sendable {
     public var filePath: String
+    /// Stable app-owned recording filename; optional for older projects and
+    /// samples intentionally stored outside the managed library.
+    public var managedFileName: String?
     public var rootNote: UInt8
     public var lowestNote: UInt8
     public var highestNote: UInt8
@@ -35,6 +38,7 @@ public struct StudioSamplerZone: Codable, Equatable, Sendable {
                 lowestNote: UInt8 = 0, highestNote: UInt8 = 127,
                 lowestVelocity: UInt8 = 1, highestVelocity: UInt8 = 127) {
         self.filePath = sampleURL.path
+        self.managedFileName = StudioSamplerSampleLibrary.managedName(for: sampleURL)
         self.rootNote = rootNote
         self.lowestNote = lowestNote
         self.highestNote = highestNote
@@ -45,7 +49,10 @@ public struct StudioSamplerZone: Codable, Equatable, Sendable {
     public var isValid: Bool {
         rootNote <= 127 && lowestNote <= highestNote && highestNote <= 127 &&
         lowestVelocity >= 1 && lowestVelocity <= highestVelocity &&
-        highestVelocity <= 127 && !filePath.isEmpty && validLoop && validTrim &&
+        highestVelocity <= 127 && !filePath.isEmpty &&
+        (managedFileName == nil ||
+         StudioSamplerSampleLibrary.validManagedFileName(managedFileName!)) &&
+        validLoop && validTrim &&
         (articulationID ?? 0) <= 15 && (roundRobinIndex ?? 0) < 8 &&
         (isReleaseTrigger != true || !hasSustainLoop) && validFades
     }
@@ -79,7 +86,13 @@ public struct StudioSamplerZone: Codable, Equatable, Sendable {
             (loopCrossfadeFrames ?? 0) <= (end - start) / 2
     }
 
-    public var sampleURL: URL { URL(fileURLWithPath: filePath) }
+    public var sampleURL: URL {
+        if let name = managedFileName,
+           let url = try? StudioSamplerSampleLibrary.managedURL(forFileName: name) {
+            return url
+        }
+        return URL(fileURLWithPath: filePath)
+    }
 }
 
 /// A keyswitch is consumed by the sampler on note-on and chooses which
