@@ -507,6 +507,24 @@ int32_t ss_add_zone_with_options(SSSampler *sampler,
                     uint32_t loop_crossfade_frames,
                     uint32_t fade_in_frames, uint32_t fade_out_frames,
                     uint8_t articulation_id) {
+    return ss_add_zone_with_variation(sampler, root_note, lowest_note, highest_note,
+        lowest_velocity, highest_velocity, source_sample_rate, left, right, frames,
+        playback_start_frame, playback_end_frame, loop_start_frame,
+        loop_end_frame, loop_crossfade_frames, fade_in_frames,
+        fade_out_frames, articulation_id, 0, 0);
+}
+
+int32_t ss_add_zone_with_variation(SSSampler *sampler,
+                    uint8_t root_note, uint8_t lowest_note, uint8_t highest_note,
+                    uint8_t lowest_velocity, uint8_t highest_velocity,
+                    double source_sample_rate,
+                    const float *left, const float *right, uint32_t frames,
+                    uint32_t playback_start_frame, uint32_t playback_end_frame,
+                    uint32_t loop_start_frame, uint32_t loop_end_frame,
+                    uint32_t loop_crossfade_frames,
+                    uint32_t fade_in_frames, uint32_t fade_out_frames,
+                    uint8_t articulation_id,
+                    uint8_t round_robin_index, uint8_t release_trigger) {
     const bool validRegion = playback_start_frame < playback_end_frame &&
         playback_end_frame <= frames && playback_end_frame - playback_start_frame >= 2;
     const bool noLoop = loop_start_frame == 0 && loop_end_frame == 0 &&
@@ -520,7 +538,8 @@ int32_t ss_add_zone_with_options(SSSampler *sampler,
         uint64_t(fade_in_frames) + uint64_t(fade_out_frames) <=
             uint64_t(playback_end_frame - playback_start_frame);
     if (!validRegion || !validFade || articulation_id > 15 ||
-        (!noLoop && !validLoop) ||
+        round_robin_index > 7 || release_trigger > 1 ||
+        (release_trigger == 1 && !noLoop) || (!noLoop && !validLoop) ||
         !sampler || !left || frames < 2 || frames > kMaxSampleFrames ||
         sampler->samples.size() >= kMaxZones || !validRate(source_sample_rate) ||
         root_note > 127 || lowest_note > highest_note || highest_note > 127 ||
@@ -547,6 +566,8 @@ int32_t ss_add_zone_with_options(SSSampler *sampler,
         zone.fadeIn = fade_in_frames;
         zone.fadeOut = fade_out_frames;
         zone.articulation = articulation_id;
+        zone.roundRobin = round_robin_index;
+        zone.releaseTrigger = release_trigger == 1;
         sampler->samples.emplace_back(std::move(zone));
         return 1;
     } catch (...) { return 0; }
