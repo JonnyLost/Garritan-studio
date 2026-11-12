@@ -100,7 +100,8 @@ struct StudioSynthModulationView: View {
     private func lfoEditor(
         _ name: String, symbol: String,
         rate: WritableKeyPath<StudioSynthModulationSettings, Float>,
-        sync: WritableKeyPath<StudioSynthModulationSettings, StudioSynthLFOSync?>
+        sync: WritableKeyPath<StudioSynthModulationSettings, StudioSynthLFOSync?>,
+        phase: WritableKeyPath<StudioSynthModulationSettings, Float?>
     ) -> some View {
         let currentSync = settings[keyPath: sync]
         return VStack(alignment: .leading, spacing: 8) {
@@ -153,6 +154,22 @@ struct StudioSynthModulationView: View {
             } else {
                 settingSlider("Rate", keyPath: rate,
                               range: 0.03...15, logarithmic: true, unit: " Hz")
+            }
+            HStack(spacing: 8) {
+                Text("Phase")
+                    .font(.caption)
+                    .frame(width: 104, alignment: .leading)
+                Slider(value: Binding<Double>(
+                    get: { Double(settings[keyPath: phase] ?? 0) },
+                    set: { position in
+                        var changed = settings
+                        changed[keyPath: phase] = Float(position)
+                        save(changed)
+                    }), in: 0...1)
+                    .tint(.cyan)
+                Text("\(Int((Double(settings[keyPath: phase] ?? 0) * 360).rounded()))°")
+                    .font(.caption.monospacedDigit())
+                    .frame(width: 78, alignment: .trailing)
             }
         }
     }
@@ -269,9 +286,11 @@ struct StudioSynthModulationView: View {
                 ], spacing: 11) {
                     VStack(alignment: .leading, spacing: 8) {
                         lfoEditor("LFO 1 · Sine", symbol: "waveform.path",
-                                  rate: \.lfo1Rate, sync: \.lfo1Sync)
+                                  rate: \.lfo1Rate, sync: \.lfo1Sync,
+                                  phase: \.lfo1Phase)
                         lfoEditor("LFO 2 · Triangle", symbol: "waveform",
-                                  rate: \.lfo2Rate, sync: \.lfo2Sync)
+                                  rate: \.lfo2Rate, sync: \.lfo2Sync,
+                                  phase: \.lfo2Phase)
                         Label("Macro / MIDI", systemImage: "pianokeys")
                             .font(.subheadline.weight(.semibold))
                         settingSlider("Macro 1", keyPath: \.macro1, range: 0...1)
@@ -337,7 +356,7 @@ struct StudioSynthModulationView: View {
                     }
                 }
 
-                Text("Control-rate modulation: 50 updates/sec while routes are active. Source and destination values are clamped to safe parameter ranges; the audio callback remains allocation- and lock-free.")
+                Text("Control-rate modulation: 50 updates/sec normally, automatically rising for fast synced LFOs (up to 400/sec). The audio render callback remains unaffected.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
