@@ -25,7 +25,7 @@ internal final class StudioSynthModulationWorker {
     private var settings: StudioSynthModulationSettings
     private var baselines: [Key: Float] = [:]
     private var clock: DispatchSourceTimer?
-    private var clockIntervalMs: Int?
+    private var clockIntervalUs: Int?
     private var elapsed = 0.0
     /// Integrated beats retain phase across BPM changes, including while held.
     private var elapsedBeats = 0.0
@@ -146,7 +146,7 @@ internal final class StudioSynthModulationWorker {
         } else {
             clock?.cancel()
             clock = nil
-            clockIntervalMs = nil
+            clockIntervalUs = nil
             lastUptime = nil
         }
         applyCurrentValues()
@@ -155,25 +155,26 @@ internal final class StudioSynthModulationWorker {
     private func scheduleClockIfNeeded() {
         guard settings.hasEnabledRoutes else { return }
         let hz = StudioSynthModulationMath.controlRate(settings, bpm: tempo)
-        // Dispatch milliseconds keep scheduling predictable and affordable.
-        let interval = max(2, Int((1000 / hz).rounded(.down)))
-        guard clock == nil || clockIntervalMs != interval else { return }
-        let leeway = max(1, min(5, interval / 4))
+        // Microsecond scheduling avoids rounding a 400Hz target up to 500Hz
+        // and permits accurate intermediate note-division rates.
+        let interval = max(2_500, Int((1_000_000 / hz).rounded(.up)))
+        guard clock == nil || clockIntervalUs != interval else { return }
+        let leeway = max(500, min(5_000, interval / 4))
         if let clock {
-            clock.schedule(deadline: .now(), repeating: .milliseconds(interval),
-                           leeway: .milliseconds(leeway))
+            clock.schedule(deadline: .now(), repeating: .microseconds(interval),
+                           leeway: .microseconds(leeway))
         } else {
             lastUptime = nil
             let source = DispatchSource.makeTimerSource(queue: queue)
-            source.schedule(deadline: .now(), repeating: .milliseconds(interval),
-                            leeway: .milliseconds(leeway))
+            source.schedule(deadline: .now(), repeating: .microseconds(interval),
+                            leeway: .microseconds(leeway))
             source.setEventHandler { [weak self] in
                 self?.tick()
             }
             clock = source
             source.resume()
         }
-        clockIntervalMs = interval
+        clockIntervalUs = interval
     }
 
     private func advanceClock() {
