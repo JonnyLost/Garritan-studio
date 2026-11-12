@@ -18,6 +18,10 @@ public struct StudioSamplerMapView: View {
         case loop = "Waveform & Loops"
     }
     @State private var showImporter = false
+    @State private var showRelinkImporter = false
+    @State private var relinkOriginalPath: String?
+    @State private var relinkOriginalManagedName: String?
+    @State private var relinkMessage: String?
     @State private var isImporting = false
     @State private var errorMessage: String?
 
@@ -92,6 +96,25 @@ public struct StudioSamplerMapView: View {
 
                 if let zone = selectedZone {
                     VStack(alignment: .leading, spacing: 8) {
+                        if !FileManager.default.fileExists(atPath: zone.sampleURL.path) {
+                            HStack(spacing: 10) {
+                                Label("Recording missing: \(zone.sampleURL.lastPathComponent)",
+                                      systemImage: "exclamationmark.triangle")
+                                    .foregroundStyle(.orange)
+                                Spacer()
+                                Button("Relink Sample…") { beginRelink(zone) }
+                                    .disabled(isImporting)
+                            }
+                            .font(.caption)
+                            .padding(9)
+                            .background(Color.orange.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 7))
+                        }
+                        if let relinkMessage {
+                            Text(relinkMessage)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                         Picker("Zone editor", selection: $editorPage) {
                             ForEach(EditorPage.allCases, id: \.self) { page in
                                 Text(page.rawValue).tag(page)
@@ -159,6 +182,17 @@ public struct StudioSamplerMapView: View {
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear { if draft == nil { restoreSaved() } }
+        .fileImporter(
+            isPresented: $showRelinkImporter,
+            allowedContentTypes: [.audio],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                if let url = urls.first { relinkSample(url) }
+            case .failure(let error): errorMessage = error.localizedDescription
+            }
+        }
         .fileImporter(
             isPresented: $showImporter,
             allowedContentTypes: [.audio],
@@ -434,6 +468,7 @@ public struct StudioSamplerMapView: View {
     }
 
     private func restoreSaved() {
+        relinkMessage = nil
         draft = saved
         selectedIndex = 0
         errorMessage = nil
@@ -507,6 +542,49 @@ public struct StudioSamplerMapView: View {
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func beginRelink(_ zone: StudioSamplerZone) {
+        relinkOriginalPath = zone.filePath
+        relinkOriginalManagedName = zone.managedFileName
+        showRelinkImporter = true
+    }
+
+    private func relinkSample(_ url: URL) {
+        guard let originalPath = relinkOriginalPath else { return }
+        let originalManagedName = relinkOriginalManagedName
+        isImporting = true
+        errorMessage = nil
+        Task { @MainActor in
+            defer {
+                isImporting = false
+                relinkOriginalPath = nil
+                relinkOriginalManagedName = nil
+            }
+            do {
+                let files = try await Task.detached(priority: .userInitiated) {
+                    try StudioSamplerSampleLibrary.importFiles([url])
+                }.value
+                guard let newFile = files.first, var patch = draft else { return }
+                let managedName = StudioSamplerSampleLibrary.managedName(for: newFile)
+                var repaired = 0
+                for index in patch.zones.indices {
+                    if patch.zones[index].filePath == originalPath ||
+                       (originalManagedName != nil &&
+                        patch.zones[index].managedFileName == originalManagedName) {
+                        patch.zones[index].filePath = newFile.path
+                        patch.zones[index].managedFileName = managedName
+                        repaired += 1
+                    }
+                }
+                if repaired > 0 {
+                    draft = patch
+                    relinkMessage = "Relinked \(repaired) zone(s) in the draft. Apply Mapping to activate."
+                }
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 
