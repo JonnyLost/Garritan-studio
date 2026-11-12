@@ -27,8 +27,82 @@ final class NativeRoomReverbProcessorTests: XCTestCase {
         let profiles = StudioRoomAcousticProfile.starterProfiles
         let data = try JSONEncoder().encode(profiles)
         XCTAssertEqual(try JSONDecoder().decode([StudioRoomAcousticProfile].self, from: data), profiles)
-        XCTAssertEqual(profiles.count, 3)
+        XCTAssertEqual(profiles.count, 4)
         XCTAssertEqual(profiles[0].midRT60, 2.2, accuracy: 0.001)
+    }
+
+    func testRoomSelectionMapsStableIDsToParameters() {
+        let profiles = StudioRoomAcousticProfile.starterProfiles
+        XCTAssertEqual(StudioRoomAcousticProfile.index(forID: profiles[0].id), 0)
+        XCTAssertEqual(StudioRoomAcousticProfile.index(forID: profiles[1].id), 1)
+        XCTAssertEqual(StudioRoomAcousticProfile.index(forID: profiles[2].id), 2)
+        XCTAssertNil(StudioRoomAcousticProfile.index(forID: "unknown"))
+        XCTAssertGreaterThan(profiles[0].midRT60, profiles[1].midRT60)
+        XCTAssertGreaterThan(profiles[2].midRT60, profiles[1].midRT60)
+    }
+
+    func testNativeRoomChoicePersistsInDAWStateAndOldProjectsLoad() throws {
+        var state = DAWState()
+        state.acousticRoomProfileID = StudioRoomAcousticProfile.mgmSonyScoringInspired.id
+        let encoded = try JSONEncoder().encode(state)
+        let restored = try JSONDecoder().decode(DAWState.self, from: encoded)
+        XCTAssertEqual(restored.acousticRoomProfileID, state.acousticRoomProfileID)
+
+        var legacy = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        legacy.removeValue(forKey: "acousticRoomProfileID")
+        let oldData = try JSONSerialization.data(withJSONObject: legacy)
+        let decodedOld = try JSONDecoder().decode(DAWState.self, from: oldData)
+        XCTAssertNil(decodedOld.acousticRoomProfileID)
+    }
+
+    func testPresetSwitchKeepsExistingTailAndIgnoresInvalidSelection() {
+        let processor = NativeRoomReverbProcessor(
+            sampleRate: 48_000, profiles: StudioRoomAcousticProfile.starterProfiles
+        )
+        var left = [Float](repeating: 0, count: 48_000)
+        var right = left
+        left[0] = 1
+        right[0] = 1
+        left.withUnsafeMutableBufferPointer { lb in
+            right.withUnsafeMutableBufferPointer { rb in
+                processor.process(left: lb.baseAddress!, right: rb.baseAddress!, frameCount: 48_000)
+            }
+        }
+        processor.selectProfile(at: 1)
+        XCTAssertEqual(processor.selectedProfileIndex, 1)
+        processor.selectProfile(at: 999)
+        XCTAssertEqual(processor.selectedProfileIndex, 1)
+
+        var tailL = [Float](repeating: 0, count: 4_096)
+        var tailR = tailL
+        tailL.withUnsafeMutableBufferPointer { lb in
+            tailR.withUnsafeMutableBufferPointer { rb in
+                processor.process(left: lb.baseAddress!, right: rb.baseAddress!, frameCount: lb.count)
+            }
+        }
+        XCTAssertGreaterThan(tailL.reduce(0) { $0 + abs($1) }, 0)
+        XCTAssertTrue(tailL.allSatisfy(\.isFinite))
+        XCTAssertTrue(tailR.allSatisfy(\.isFinite))
+    }
+
+    func testDryScoringStageHasFasterLateEnergyDecayThanLivelyStage() {
+        let rate = 44_100
+        let frames = rate * 3
+        let lively = impulse(NativeRoomReverbProcessor(sampleRate: Double(rate),
+                              profile: .abbeyRoadStudioOne), frames: frames, chunkSize: 512)
+        let dry = impulse(NativeRoomReverbProcessor(sampleRate: Double(rate),
+                            profile: .mgmSonyScoringInspired), frames: frames, chunkSize: 512)
+        func lateEnergy(_ channels: ([Float], [Float])) -> Double {
+            (rate * 2..<frames).reduce(0) { accumulator, sample in
+                let l = Double(channels.0[sample])
+                let r = Double(channels.1[sample])
+                return accumulator + l * l + r * r
+            }
+        }
+        let livelyEnergy = lateEnergy(lively)
+        let dryEnergy = lateEnergy(dry)
+        XCTAssertGreaterThan(livelyEnergy, 0)
+        XCTAssertLessThan(dryEnergy, livelyEnergy * 0.25)
     }
 
     func testWetOnlyImpulseHasNoImmediateDryLeak() {
