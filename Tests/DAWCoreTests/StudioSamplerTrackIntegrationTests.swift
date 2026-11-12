@@ -72,7 +72,12 @@ final class StudioSamplerTrackIntegrationTests: XCTestCase {
     func testSamplerPatchSurvivesSavingAndOldTrackDecodes() throws {
         var track = Track(name: "Sampled instrument", type: .instrument)
         let url = URL(fileURLWithPath: "/tmp/studio-sample.wav")
-        track.studioSamplerPatch = StudioSamplerPatch(sampleURL: url)
+        var patch = StudioSamplerPatch(sampleURL: url)
+        patch.instrumentKind = .soloViolin
+        patch.cc1Crossfade = true
+        patch.dynamicsCC1 = 68
+        patch.expressionCC11 = 92
+        track.studioSamplerPatch = patch
         let data = try JSONEncoder().encode(track)
         let decoded = try JSONDecoder().decode(Track.self, from: data)
         XCTAssertEqual(decoded.studioSamplerPatch, track.studioSamplerPatch)
@@ -81,6 +86,18 @@ final class StudioSamplerTrackIntegrationTests: XCTestCase {
         oldJSON.removeValue(forKey: "studioSamplerPatch")
         let oldData = try JSONSerialization.data(withJSONObject: oldJSON)
         XCTAssertNil(try JSONDecoder().decode(Track.self, from: oldData).studioSamplerPatch)
+    }
+
+    func testLegacySamplerPatchDefaultsToGeneralFaceAndDiscreteLayers() throws {
+        let oldPatch = StudioSamplerPatch(
+            sampleURL: URL(fileURLWithPath: "/tmp/original-piano.wav")
+        )
+        let encoded = try JSONEncoder().encode(oldPatch)
+        let decoded = try JSONDecoder().decode(StudioSamplerPatch.self, from: encoded)
+        XCTAssertEqual(decoded.presentation, .general)
+        XCTAssertNil(decoded.cc1Crossfade)
+        XCTAssertNil(decoded.dynamicsCC1)
+        XCTAssertNil(decoded.expressionCC11)
     }
 
     func testBadMappingDoesNotAttachAnInstrument() throws {
