@@ -339,7 +339,8 @@ int32_t ss_add_zone_with_loop(SSSampler *sampler,
     const bool noLoop = loop_start_frame == 0 && loop_end_frame == 0 &&
                         loop_crossfade_frames == 0;
     const bool validLoop = loop_end_frame >= 4 && loop_end_frame <= frames &&
-                           loop_start_frame + 4 <= loop_end_frame &&
+                           loop_start_frame <= loop_end_frame &&
+                           loop_end_frame - loop_start_frame >= 4 &&
                            loop_crossfade_frames <=
                                (loop_end_frame - loop_start_frame) / 2;
     if ((!noLoop && !validLoop) ||
