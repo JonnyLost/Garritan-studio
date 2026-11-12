@@ -250,7 +250,7 @@ struct SSSampler {
     // Variation counters advance per channel / pitch / articulation.
     // Only recorded takes for the same nearest root and velocity band
     // participate. CC1 layering shares one variation across all its layers.
-    uint8_t chooseRoundRobin(uint8_t note, uint8_t velocity, uint8_t channel,
+    uint8_t chooseRoundRobin(uint8_t note, uint8_t channel,
                              uint8_t articulation, const Sample& selected) {
         std::array<bool, 8> available{};
         for (const auto& zone : samples) {
@@ -297,7 +297,7 @@ struct SSSampler {
         }
         if (!selected) return;
         const uint8_t variation =
-            chooseRoundRobin(note, velocity, channel, articulation, *selected);
+            chooseRoundRobin(note, channel, articulation, *selected);
         heldNotes[channel][note] = HeldNote{true, velocity, articulation, variation};
 
         if (!cc1Crossfade) {
