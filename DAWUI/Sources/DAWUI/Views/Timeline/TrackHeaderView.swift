@@ -376,7 +376,7 @@ struct InstrumentSlotButton: View {
         .contextMenu {
             if track.studioSamplerPatch != nil {
                 Button("Browse / Change Instrument...") { showBrowser = true }
-                Button("Edit Studio Sampler Mapping...") { showStudioSamplerMap = true }
+                Button("Open Studio Sampler Instrument...") { showStudioSamplerMap = true }
                 Divider()
                 Button("Remove Studio Sampler", role: .destructive) { removeInstrument() }
             } else if track.studioAnalogEnabled == true {
@@ -398,7 +398,7 @@ struct InstrumentSlotButton: View {
                 .frame(minWidth: 900, minHeight: 600)
         }
         .sheet(isPresented: $showStudioSamplerMap) {
-            StudioSamplerMapView(viewModel: viewModel, trackID: track.id)
+            StudioSamplerInstrumentView(viewModel: viewModel, trackID: track.id)
                 .frame(minWidth: 930, minHeight: 600)
         }
     }
