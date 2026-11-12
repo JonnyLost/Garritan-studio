@@ -51,6 +51,21 @@ public struct StudioRoomAcousticProfile: Codable, Equatable, Sendable, Identifia
         ]
     )
 
+    /// Inspired by the historically measured 1.0–1.3s mid-frequency decay
+    /// of the MGM/Sony scoring stage. Reflection timings are artistic estimates.
+    /// Not a measured replica or an endorsed Sony Pictures product.
+    public static let mgmSonyScoringInspired = StudioRoomAcousticProfile(
+        id: "mgm-sony-scoring-inspired", name: "MGM / Sony Scoring · Inspired",
+        bassRT60: 1.35, midRT60: 1.15, trebleRT60: 1.05,
+        earlyReflections: [
+            .init(delayMilliseconds: 11, leftGain: 0.28, rightGain: 0.16),
+            .init(delayMilliseconds: 17, leftGain: 0.14, rightGain: 0.27),
+            .init(delayMilliseconds: 24, leftGain: -0.10, rightGain: 0.12),
+            .init(delayMilliseconds: 32, leftGain: 0.13, rightGain: -0.10),
+            .init(delayMilliseconds: 43, leftGain: 0.08, rightGain: 0.09)
+        ]
+    )
+
     /// Early settings only; no claim of an acoustically exact venue model.
     public static let synchronViennaInspired = StudioRoomAcousticProfile(
         id: "synchron-vienna-inspired", name: "Vienna Scoring Stage · Inspired",
@@ -77,7 +92,14 @@ public struct StudioRoomAcousticProfile: Codable, Equatable, Sendable, Identifia
         ]
     )
 
+    /// Order is stable: this index is the Audio Unit's room parameter value.
+    /// Persist profile IDs, never numeric indices, in Studio project files.
     public static let starterProfiles: [StudioRoomAcousticProfile] = [
-        .abbeyRoadStudioOne, .synchronViennaInspired, .bostonSymphonyInspired
+        .abbeyRoadStudioOne, .mgmSonyScoringInspired,
+        .synchronViennaInspired, .bostonSymphonyInspired
     ]
+
+    public static func index(forID id: String) -> Int? {
+        starterProfiles.firstIndex(where: { $0.id == id })
+    }
 }
