@@ -593,6 +593,27 @@ public final class ProjectViewModel: ObservableObject {
         project.tracks[index].studioSynthPatch = patch
     }
 
+    /// A live wavetable edit updates only the requested layer's atomic DSP
+    /// parameter and embeds the exact value in the native project patch.
+    public func setStudioSynthWavetableParameter(
+        _ parameter: StudioWavetableParameter, value: Float,
+        for trackID: TrackID, layerID: UUID
+    ) {
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioSynthEnabled == true,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSynth(let synth) = instrument,
+              synth.setWavetableParameter(id: layerID, parameter: parameter, value: value),
+              var patch = project.tracks[index].studioSynthPatch,
+              let layerIndex = patch.layers.firstIndex(where: { $0.id == layerID }) else {
+            return
+        }
+        var sound = patch.layers[layerIndex].wavetablePatch ?? StudioWavetablePatch()
+        sound.set(value, for: parameter)
+        patch.layers[layerIndex].wavetablePatch = sound
+        project.tracks[index].studioSynthPatch = patch
+    }
+
     /// Live FM control updates are atomic in the DSP and persist on the track.
     /// Do not add an undo transaction for every slider substep.
     public func studioFMValue(_ parameter: StudioFMParameter, for trackID: TrackID) -> Float {

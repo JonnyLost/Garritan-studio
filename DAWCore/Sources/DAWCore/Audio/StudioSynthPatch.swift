@@ -6,12 +6,14 @@ import Foundation
 public enum StudioSynthEngine: String, Codable, CaseIterable, Sendable, Identifiable {
     case analog
     case fm
+    case wavetable
 
     public var id: String { rawValue }
     public var title: String {
         switch self {
         case .analog: return "Analog"
         case .fm: return "FM"
+        case .wavetable: return "Wavetable"
         }
     }
 }
@@ -27,12 +29,14 @@ public struct StudioSynthLayer: Codable, Equatable, Identifiable, Sendable {
     public var pan: Float
     public var analogPatch: StudioAnalogPatch?
     public var fmPatch: StudioFMPatch?
+    public var wavetablePatch: StudioWavetablePatch?
 
     public init(id: UUID = UUID(), engine: StudioSynthEngine,
                 name: String? = nil, enabled: Bool = true,
                 gain: Float = 0.5, pan: Float = 0,
                 analogPatch: StudioAnalogPatch? = nil,
-                fmPatch: StudioFMPatch? = nil) {
+                fmPatch: StudioFMPatch? = nil,
+                wavetablePatch: StudioWavetablePatch? = nil) {
         self.id = id
         self.engine = engine
         self.name = name ?? engine.title
@@ -41,6 +45,7 @@ public struct StudioSynthLayer: Codable, Equatable, Identifiable, Sendable {
         self.pan = pan
         self.analogPatch = analogPatch
         self.fmPatch = fmPatch
+        self.wavetablePatch = wavetablePatch
     }
 
     public func validate() -> Bool {
@@ -63,6 +68,8 @@ public struct StudioSynthLayer: Codable, Equatable, Identifiable, Sendable {
                  StudioAnalogConnection.preliminarilyValid(patch.connections!))
         case .fm:
             return fmPatch?.validate() ?? true
+        case .wavetable:
+            return wavetablePatch?.validate() ?? true
         }
     }
 }

@@ -25,14 +25,17 @@ private final class StudioSynthRuntimeLayer {
     let mixer = AVAudioMixerNode()
     let analog: StudioAnalogInstrument?
     let fm: StudioFMInstrument?
+    let wavetable: StudioWavetableInstrument?
 
     var source: AVAudioNode {
         if let analog { return analog.audioNode }
-        return fm!.audioNode
+        if let fm { return fm.audioNode }
+        return wavetable!.audioNode
     }
     var format: AVAudioFormat {
         if let analog { return analog.format }
-        return fm!.format
+        if let fm { return fm.format }
+        return wavetable!.format
     }
 
     init(_ layer: StudioSynthLayer, sampleRate: Double) throws {
@@ -47,11 +50,19 @@ private final class StudioSynthRuntimeLayer {
             }
             analog = synth
             fm = nil
+            wavetable = nil
         case .fm:
             let synth = try StudioFMInstrument(sampleRate: sampleRate)
             try synth.apply(layer.fmPatch ?? StudioFMPatch())
             analog = nil
             fm = synth
+            wavetable = nil
+        case .wavetable:
+            let synth = try StudioWavetableInstrument(sampleRate: sampleRate)
+            try synth.apply(layer.wavetablePatch ?? StudioWavetablePatch())
+            analog = nil
+            fm = nil
+            wavetable = synth
         }
         mixer.outputVolume = layer.gain
         mixer.pan = layer.pan
@@ -63,13 +74,18 @@ private final class StudioSynthRuntimeLayer {
             return analog.midiMessage(status: status, data1: data1,
                                       data2: data2, frameOffset: frameOffset)
         }
-        return fm!.midiMessage(status: status, data1: data1,
-                               data2: data2, frameOffset: frameOffset)
+        if let fm {
+            return fm.midiMessage(status: status, data1: data1,
+                                  data2: data2, frameOffset: frameOffset)
+        }
+        return wavetable!.midiMessage(status: status, data1: data1,
+                                      data2: data2, frameOffset: frameOffset)
     }
 
     func allNotesOff() -> Bool {
         if let analog { return analog.allNotesOff() }
-        return fm!.allNotesOff()
+        if let fm { return fm.allNotesOff() }
+        return wavetable!.allNotesOff()
     }
 }
 
@@ -188,6 +204,14 @@ public final class StudioSynthInstrument {
             return false
         }
         return synth.setParameter(parameter.rawValue, value: value)
+    }
+
+    public func setWavetableParameter(id: UUID, parameter: StudioWavetableParameter,
+                                      value: Float) -> Bool {
+        guard let synth = runtime.first(where: { $0.id == id })?.wavetable else {
+            return false
+        }
+        return synth.setParameter(parameter, value: value)
     }
 
     public func setFMParameter(id: UUID, parameter: StudioFMParameter,
