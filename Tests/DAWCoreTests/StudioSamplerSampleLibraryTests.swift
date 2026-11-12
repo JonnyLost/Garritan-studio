@@ -120,6 +120,34 @@ final class StudioSamplerSampleLibraryTests: XCTestCase {
                        nil)
     }
 
+    func testManagedSymlinkCannotEscapeThePrivateSampleFolder() throws {
+        let root = try temporaryFolder()
+        let outside = try temporaryFolder()
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: outside)
+        }
+        let name = "\(UUID().uuidString)-linked.wav"
+        let actual = outside.appendingPathComponent("outside.wav")
+        try Data([3, 2, 1]).write(to: actual)
+        let linked = root.appendingPathComponent(name)
+        try FileManager.default.createSymbolicLink(at: linked, withDestinationURL: actual)
+
+        var zone = StudioSamplerZone(
+            sampleURL: URL(fileURLWithPath: "/Users/old/GarritanStudio/SamplerSamples/\(name)")
+        )
+        zone.managedFileName = name
+        XCTAssertThrowsError(
+            try StudioSamplerSampleLibrary.resolve(
+                StudioSamplerPatch(zones: [zone]), in: root
+            )
+        )
+        XCTAssertThrowsError(
+            try StudioSamplerSampleLibrary.importFiles([linked], into: root)
+        )
+        XCTAssertEqual(try Data(contentsOf: actual), Data([3, 2, 1]))
+    }
+
     func testOrdinaryExternalReferenceRemainsSupported() throws {
         let root = try temporaryFolder()
         defer { try? FileManager.default.removeItem(at: root) }
