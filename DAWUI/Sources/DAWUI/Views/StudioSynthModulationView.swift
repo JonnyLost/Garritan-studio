@@ -147,7 +147,7 @@ struct StudioSynthModulationView: View {
                         }
                     }
                 }
-                Text("Following project tempo · \\(String(format: "%.1f", viewModel.project.tempo.bpm)) BPM")
+                Text("Following project tempo · \(String(format: "%.1f", viewModel.project.tempo.bpm)) BPM")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             } else {
