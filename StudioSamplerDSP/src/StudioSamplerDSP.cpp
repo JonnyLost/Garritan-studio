@@ -787,6 +787,143 @@ int32_t ss_add_zone_with_variation(SSSampler *sampler,
     } catch (...) { return 0; }
 }
 
+int32_t ss_add_stream_zone(SSSampler *sampler,
+                    uint8_t root_note, uint8_t lowest_note, uint8_t highest_note,
+                    uint8_t lowest_velocity, uint8_t highest_velocity,
+                    double source_sample_rate,
+                    const float *attack_left, const float *attack_right,
+                    uint32_t full_frames, uint32_t attack_frames,
+                    uint32_t playback_start_frame, uint32_t playback_end_frame,
+                    uint32_t loop_start_frame, uint32_t loop_end_frame,
+                    uint32_t loop_crossfade_frames,
+                    uint32_t fade_in_frames, uint32_t fade_out_frames,
+                    uint8_t articulation_id,
+                    uint8_t round_robin_index, uint8_t release_trigger) {
+    const bool validRegion = playback_start_frame < playback_end_frame &&
+        playback_end_frame <= full_frames &&
+        playback_end_frame - playback_start_frame >= 2;
+    const bool noLoop = loop_start_frame == 0 && loop_end_frame == 0 &&
+                        loop_crossfade_frames == 0;
+    const bool validLoop = loop_start_frame >= playback_start_frame &&
+        loop_end_frame <= playback_end_frame &&
+        loop_start_frame <= loop_end_frame &&
+        loop_end_frame - loop_start_frame >= 4 &&
+        loop_crossfade_frames <= (loop_end_frame - loop_start_frame) / 2;
+    const bool validFade = validRegion &&
+        uint64_t(fade_in_frames) + uint64_t(fade_out_frames) <=
+            uint64_t(playback_end_frame - playback_start_frame);
+    if (!sampler || !attack_left || full_frames < 2 ||
+        full_frames > kMaxStreamFrames || !validRegion || !validFade ||
+        (!noLoop && !validLoop) || (release_trigger == 1 && !noLoop) ||
+        attack_frames < kPageFrames || attack_frames > kMaxAttackFrames ||
+        uint64_t(attack_frames) > uint64_t(full_frames) - playback_start_frame ||
+        sampler->samples.size() >= kMaxZones || !validRate(source_sample_rate) ||
+        root_note > 127 || lowest_note > highest_note || highest_note > 127 ||
+        lowest_velocity < 1 || lowest_velocity > highest_velocity ||
+        highest_velocity > 127 || round_robin_index > 7 ||
+        articulation_id > 15 || release_trigger > 1) return 0;
+    try {
+        Sample zone;
+        zone.left.assign(attack_left, attack_left + attack_frames);
+        if (attack_right) zone.right.assign(attack_right, attack_right + attack_frames);
+        else zone.right = zone.left;
+        for (uint32_t index = 0; index < attack_frames; ++index)
+            if (!std::isfinite(zone.left[index]) || !std::isfinite(zone.right[index]))
+                return 0;
+        zone.rate = source_sample_rate;
+        zone.root = root_note;
+        zone.low = lowest_note;
+        zone.high = highest_note;
+        zone.minVelocity = lowest_velocity;
+        zone.maxVelocity = highest_velocity;
+        zone.playbackStart = playback_start_frame;
+        zone.playbackEnd = playback_end_frame;
+        zone.loopStart = loop_start_frame;
+        zone.loopEnd = loop_end_frame;
+        zone.loopCrossfade = loop_crossfade_frames;
+        zone.fadeIn = fade_in_frames;
+        zone.fadeOut = fade_out_frames;
+        zone.articulation = articulation_id;
+        zone.roundRobin = round_robin_index;
+        zone.releaseTrigger = release_trigger == 1;
+        zone.streamed = true;
+        zone.attackStart = playback_start_frame;
+        zone.fullFrames = full_frames;
+
+        // All streaming page memory is allocated while configuring the first
+        // zone. The audio callback NEVER allocates these buffers.
+        if (!sampler->streamPages)
+            sampler->streamPages.reset(new StreamPage[
+                sampler->voices.size() * kStreamPagesPerVoice]);
+        sampler->samples.emplace_back(std::move(zone));
+        return 1;
+    } catch (...) { return 0; }
+}
+
+int32_t ss_stream_claim(SSSampler *sampler, SSStreamRequest *request) {
+    if (!sampler || !request || !sampler->streamPages) return 0;
+    const size_t count = sampler->voices.size() * kStreamPagesPerVoice;
+    for (size_t i = 0; i < count; ++i) {
+        StreamPage& page = sampler->streamPages[i];
+        uint32_t expected = 1;
+        if (!page.state.compare_exchange_strong(expected, 2,
+                std::memory_order_acq_rel)) continue;
+        request->voice_index = int32_t(i / kStreamPagesPerVoice);
+        request->slot_index = int32_t(i % kStreamPagesPerVoice);
+        request->zone_index = int32_t(page.zoneIndex);
+        request->start_frame = page.start;
+        request->frame_count = page.frames;
+        request->voice_serial = page.serial;
+        return 1;
+    }
+    return 0;
+}
+
+static StreamPage *claimedPage(SSSampler *sampler,
+                              const SSStreamRequest *request) {
+    if (!sampler || !request || !sampler->streamPages ||
+        request->voice_index < 0 ||
+        size_t(request->voice_index) >= sampler->voices.size() ||
+        request->slot_index < 0 ||
+        request->slot_index >= kStreamPagesPerVoice) return nullptr;
+    StreamPage *page = &sampler->streamPages[
+        size_t(request->voice_index) * kStreamPagesPerVoice +
+        size_t(request->slot_index)];
+    if (page->state.load(std::memory_order_acquire) != 2 ||
+        page->serial != request->voice_serial ||
+        page->zoneIndex != uint32_t(request->zone_index) ||
+        page->start != request->start_frame ||
+        page->frames != request->frame_count) return nullptr;
+    return page;
+}
+
+int32_t ss_stream_supply(SSSampler *sampler, const SSStreamRequest *request,
+                         const float *left, const float *right, uint32_t frames) {
+    StreamPage *page = claimedPage(sampler, request);
+    if (!page || !left || !frames || frames > request->frame_count ||
+        frames > kPageFrames) return 0;
+    // Exclusive write ownership is held by the background worker.
+    for (uint32_t frame = 0; frame < frames; ++frame) {
+        const float a = left[frame];
+        const float b = right ? right[frame] : a;
+        if (!std::isfinite(a) || !std::isfinite(b)) return 0;
+        page->left[frame] = a;
+        page->right[frame] = b;
+    }
+    page->frames = frames;
+    page->state.store(3, std::memory_order_release);
+    return 1;
+}
+
+void ss_stream_abandon(SSSampler *sampler, const SSStreamRequest *request) {
+    StreamPage *page = claimedPage(sampler, request);
+    if (page) page->state.store(0, std::memory_order_release);
+}
+
+uint64_t ss_stream_underrun_frames(const SSSampler *sampler) {
+    return sampler ? sampler->underrunFrames.load(std::memory_order_relaxed) : 0;
+}
+
 int32_t ss_zone_count(const SSSampler *sampler) {
     return sampler ? static_cast<int32_t>(sampler->samples.size()) : 0;
 }
