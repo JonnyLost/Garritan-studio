@@ -76,7 +76,7 @@ public enum NativeRoomImpulseAnalyzer {
         let cutoff = min(mono.count, Int((0.080 * sampleRate).rounded()))
         let early = mono.prefix(cutoff).reduce(0.0) { $0 + $1 * $1 }
         let late = mono.dropFirst(cutoff).reduce(0.0) { $0 + $1 * $1 }
-        let c80 = early > 0 && late > 0 ? 10 * log10(early / late) : nil
+        let c80: Double? = early > 0 && late > 0 ? 10 * log10(early / late) : nil
         return NativeRoomCalibrationResult(
             roomID: roomID, sampleRate: sampleRate,
             durationSeconds: Double(mono.count) / sampleRate,
