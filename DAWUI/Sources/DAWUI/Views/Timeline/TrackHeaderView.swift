@@ -338,6 +338,7 @@ struct InstrumentSlotButton: View {
     @ObservedObject var viewModel: ProjectViewModel
     @Binding var showBrowser: Bool
     @State private var showStudioAnalogPanel = false
+    @State private var showStudioFMPanel = false
     
     var body: some View {
         Button(action: {
@@ -347,7 +348,11 @@ struct InstrumentSlotButton: View {
                 Image(systemName: "pianokeys")
                     .font(.system(size: 9))
                 
-                if track.studioAnalogEnabled == true {
+                if track.studioFMEnabled == true {
+                    Text("Studio FM")
+                        .font(.system(size: 10, weight: .semibold))
+                        .lineLimit(1)
+                } else if track.studioAnalogEnabled == true {
                     Text("Studio Analog")
                         .font(.system(size: 10, weight: .semibold))
                         .lineLimit(1)
@@ -363,12 +368,17 @@ struct InstrumentSlotButton: View {
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background((track.instrumentSlot?.pluginID != nil || track.studioAnalogEnabled == true) ? Color.purple.opacity(0.3) : Color.gray.opacity(0.2))
+            .background((track.instrumentSlot?.pluginID != nil || track.studioAnalogEnabled == true || track.studioFMEnabled == true) ? Color.purple.opacity(0.3) : Color.gray.opacity(0.2))
             .cornerRadius(4)
         }
         .buttonStyle(.plain)
         .contextMenu {
-            if track.studioAnalogEnabled == true {
+            if track.studioFMEnabled == true {
+                Button("Browse / Change Instrument...") { showBrowser = true }
+                Button("Open Studio FM Controls...") { showStudioFMPanel = true }
+                Divider()
+                Button("Remove Studio FM", role: .destructive) { removeInstrument() }
+            } else if track.studioAnalogEnabled == true {
                 Button("Browse / Change Instrument...") { showBrowser = true }
                 Button("Open Studio Analog Controls...") { showStudioAnalogPanel = true }
                 Divider()
@@ -386,6 +396,10 @@ struct InstrumentSlotButton: View {
             StudioAnalogPanelView(viewModel: viewModel, trackID: track.id)
                 .frame(minWidth: 900, minHeight: 600)
         }
+        .sheet(isPresented: $showStudioFMPanel) {
+            StudioFMPanelView(viewModel: viewModel, trackID: track.id)
+                .frame(minWidth: 830, minHeight: 630)
+        }
     }
     
     private func openInstrumentUI() {
@@ -402,6 +416,7 @@ struct InstrumentSlotButton: View {
         var updatedTrack = track
         updatedTrack.instrumentSlot = nil
         updatedTrack.studioAnalogEnabled = false
+        updatedTrack.studioFMEnabled = false
         viewModel.updateTrack(updatedTrack, description: "Remove Instrument")
         viewModel.unloadTrackInstrument(for: track.id)
     }
@@ -585,6 +600,28 @@ struct InstrumentBrowserSheet: View {
                     Label("Load Studio Analog", systemImage: "waveform")
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(isLoading)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            Divider()
+            HStack(spacing: 12) {
+                Image(systemName: "waveform.path.ecg.rectangle")
+                    .font(.title3)
+                    .foregroundStyle(.cyan)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Studio FM").font(.subheadline.weight(.semibold))
+                    Text("Four-operator frequency modulation · original built-in synth")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    loadNativeStudioFM()
+                } label: {
+                    Label("Load Studio FM", systemImage: "waveform.path")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.cyan)
                 .disabled(isLoading)
             }
             .padding(.horizontal, 16)
@@ -987,6 +1024,17 @@ struct InstrumentBrowserSheet: View {
         print(message)  // Also print for good measure
     }
     
+    /// Choose the built-in FM renderer without loading an external AU.
+    private func loadNativeStudioFM() {
+        loadError = nil
+        do {
+            try viewModel.loadStudioFM(for: trackID)
+            isPresented = false
+        } catch {
+            loadError = error.localizedDescription
+        }
+    }
+
     /// Native instrument selection bypasses third-party AU discovery and hosting.
     private func loadNativeStudioAnalog() {
         loadError = nil
@@ -1051,6 +1099,7 @@ struct InstrumentBrowserSheet: View {
 
                     track.instrumentSlot = PluginSlot(pluginID: description.identifier, isEnabled: true)
                     track.studioAnalogEnabled = false
+                    track.studioFMEnabled = false
                     await MainActor.run {
                         viewModel.updateTrack(track, description: "Load Instrument")
                     }
