@@ -282,9 +282,13 @@ public struct StudioSamplerMapView: View {
     private func autoMap() {
         guard let draft else { return }
         do {
-            let patch = try StudioSamplerMappingBuilder.makePatch(
+            var patch = try StudioSamplerMappingBuilder.makePatch(
                 urls: draft.zones.map(\.sampleURL)
             )
+            patch.instrumentKind = draft.instrumentKind
+            patch.cc1Crossfade = draft.cc1Crossfade
+            patch.dynamicsCC1 = draft.dynamicsCC1
+            patch.expressionCC11 = draft.expressionCC11
             self.draft = patch
             selectedIndex = 0
             errorMessage = nil
