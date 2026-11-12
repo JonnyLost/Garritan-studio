@@ -59,8 +59,10 @@ public struct StudioSamplerMapView: View {
                 .buttonStyle(.borderedProminent)
             }
 
-            if let patch = draft {
-                HStack(spacing: 8) {
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 10) {
+                    if let patch = draft {
+                        HStack(spacing: 8) {
                     Text("Velocity 127")
                     Picker("Selected zone", selection: $selectedIndex) {
                         ForEach(patch.zones.indices, id: \.self) { index in
@@ -124,6 +126,8 @@ public struct StudioSamplerMapView: View {
                         .buttonStyle(.borderedProminent)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                }
             }
 
             if let errorMessage {
