@@ -14,6 +14,9 @@ public struct StudioSamplerZone: Codable, Equatable, Sendable {
     public var loopStartFrame: UInt32?
     public var loopEndFrame: UInt32?
     public var loopCrossfadeFrames: UInt32?
+    /// Source-frame playback bounds; nil means full source recording.
+    public var trimStartFrame: UInt32?
+    public var trimEndFrame: UInt32?
 
     public var hasSustainLoop: Bool {
         loopStartFrame != nil && loopEndFrame != nil
@@ -33,7 +36,15 @@ public struct StudioSamplerZone: Codable, Equatable, Sendable {
     public var isValid: Bool {
         rootNote <= 127 && lowestNote <= highestNote && highestNote <= 127 &&
         lowestVelocity >= 1 && lowestVelocity <= highestVelocity &&
-        highestVelocity <= 127 && !filePath.isEmpty && validLoop
+        highestVelocity <= 127 && !filePath.isEmpty && validLoop && validTrim
+    }
+
+    public var validTrim: Bool {
+        guard let end = trimEndFrame else {
+            return trimStartFrame == nil || trimStartFrame! <= UInt32.max - 2
+        }
+        let start = trimStartFrame ?? 0
+        return end >= 2 && start < end && end - start >= 2
     }
 
     public var validLoop: Bool {
@@ -42,6 +53,8 @@ public struct StudioSamplerZone: Codable, Equatable, Sendable {
                 (loopCrossfadeFrames == nil || loopCrossfadeFrames == 0)
         }
         return start <= end && end - start >= 4 &&
+            start >= (trimStartFrame ?? 0) &&
+            (trimEndFrame == nil || end <= trimEndFrame!) &&
             (loopCrossfadeFrames ?? 0) <= (end - start) / 2
     }
 
