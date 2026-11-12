@@ -214,10 +214,10 @@ int main() {
     assert(ss_add_zone_with_options(artic, 60, 60, 60, 1, 127,
         44100, shortHit.data(), nullptr, 4096, 0, 4096,
         0, 0, 0, 0, 0, 1));
-    uint8_t keys[] = {24};
-    uint8_t articulationIDs[] = {1};
+    uint8_t keys[] = {23, 24};
+    uint8_t articulationIDs[] = {0, 1};
     assert(!ss_configure_keyswitches(artic, keys, articulationIDs, 17));
-    assert(ss_configure_keyswitches(artic, keys, articulationIDs, 1));
+    assert(ss_configure_keyswitches(artic, keys, articulationIDs, 2));
     assert(!ss_select_articulation(artic, 16, 0));
     std::vector<float> output(512), other(512);
     assert(ss_note_on(artic, 24, 127, 0));
@@ -228,7 +228,8 @@ int main() {
     assert(output[400] < -.10f);
     assert(ss_note_off(artic, 60, 0));
     ss_render(artic, output.data(), other.data(), 512);
-    assert(ss_select_articulation(artic, 0, 0));
+    // Return to sustain using its MIDI keyswitch, without mouse/UI calls.
+    assert(ss_note_on(artic, 23, 127, 0));
     assert(ss_note_on(artic, 60, 127, 0));
     ss_render(artic, output.data(), other.data(), 512);
     assert(output[400] > .10f);
