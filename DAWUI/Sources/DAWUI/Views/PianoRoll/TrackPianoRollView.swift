@@ -280,6 +280,13 @@ public struct TrackPianoRollView: View {
                         .foregroundStyle(palette.secondaryText)
                         .lineLimit(1)
                 }
+                Button {
+                    viewModel.playbackEngine.silenceAllNotes()
+                } label: {
+                    Label("Silence Notes", systemImage: "speaker.slash.fill")
+                }
+                .buttonStyle(.bordered)
+                .help("Emergency all-notes-off for hanging MIDI notes")
             }
             editorToolbar
             
