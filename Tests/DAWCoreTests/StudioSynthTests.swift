@@ -62,6 +62,109 @@ final class StudioSynthTests: XCTestCase {
         XCTAssertNil(legacy.studioSynthPatch)
     }
 
+    func testWavetableFactorySoundsAreOriginalValidAndDistinct() throws {
+        let presets = StudioWavetableFactoryLibrary.presets
+        XCTAssertEqual(presets.count, 20)
+        XCTAssertEqual(Set(presets.map(\.id)).count, 20)
+        XCTAssertEqual(Set(presets.map(\.family)),
+                       Set(["Keys", "Lead", "Pad", "Bass", "Texture"]))
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.sortedKeys]
+        let signatures = try presets.map { try enc.encode($0.patch) }
+        XCTAssertEqual(Set(signatures).count, 20)
+        for preset in presets {
+            XCTAssertTrue(preset.patch.validate(), preset.name)
+        }
+    }
+
+    func testWavetableCustomHarmonicsRemainPortableWithProjects() throws {
+        var sound = StudioWavetablePatch()
+        sound.set(5, for: .osc1Position)
+        sound.set(0.7, for: .partial5)
+        sound.set(0.9, for: .modWheelPosition)
+        let layer = StudioSynthLayer(engine: .wavetable, wavetablePatch: sound)
+        let patch = StudioSynthPatch(layers: [layer])
+        XCTAssertTrue(patch.validate())
+        let data = try JSONEncoder().encode(patch)
+        let decoded = try JSONDecoder().decode(StudioSynthPatch.self, from: data)
+        XCTAssertEqual(decoded.layers.first?.wavetablePatch, sound)
+        XCTAssertEqual(decoded.layers.first?.engine, .wavetable)
+        XCTAssertFalse(decoded.isHybrid)
+        XCTAssertNil(decoded.layers.first?.fmPatch)
+        XCTAssertNil(decoded.layers.first?.analogPatch)
+
+        let broken = StudioWavetablePatch()
+        var invalid = StudioSynthPatch(layers: [
+            StudioSynthLayer(engine: .wavetable, wavetablePatch: broken)
+        ])
+        invalid.layers[0].wavetablePatch?.values["15"] = 4
+        XCTAssertFalse(invalid.validate())
+    }
+
+    func testWavetableAndThreeEngineHybridRouteMIDIToEveryLayer() throws {
+        let onlyWave = StudioSynthPatch.individual(.wavetable)
+        let single = try StudioSynthInstrument(sampleRate: 44_100, patch: onlyWave)
+        XCTAssertEqual(single.auxiliaryNodes.count, 2)
+        let waveID = try XCTUnwrap(onlyWave.layers.first?.id)
+        XCTAssertTrue(single.setWavetableParameter(id: waveID,
+                                                  parameter: .osc1Position,
+                                                  value: 5))
+        XCTAssertTrue(single.setWavetableParameter(id: waveID,
+                                                  parameter: .partial5,
+                                                  value: 0.75))
+        XCTAssertFalse(single.setWavetableParameter(id: waveID,
+                                                   parameter: .partial5,
+                                                   value: 2))
+        XCTAssertTrue(single.noteOn(69, velocity: 110))
+        XCTAssertTrue(single.controller(1, value: 127))
+        XCTAssertTrue(single.pitchBend(16_383))
+        XCTAssertTrue(single.noteOff(69))
+        XCTAssertTrue(single.allNotesOff())
+
+        var all = StudioSynthPatch()
+        all.layers.append(StudioSynthLayer(engine: .wavetable))
+        XCTAssertTrue(all.validate())
+        let hybrid = try StudioSynthInstrument(sampleRate: 44_100, patch: all)
+        XCTAssertEqual(hybrid.auxiliaryNodes.count, 6)
+        XCTAssertTrue(hybrid.noteOn(60, velocity: 100, channel: 2))
+        XCTAssertTrue(hybrid.controller(64, value: 127, channel: 2))
+        XCTAssertTrue(hybrid.controller(64, value: 0, channel: 2))
+        XCTAssertTrue(hybrid.noteOff(60, channel: 2))
+        XCTAssertTrue(hybrid.allNotesOff())
+    }
+
+    func testWavetableLayerRendersAudibleAudioOffline() throws {
+        let rate = 44_100.0
+        let synth = try StudioSynthInstrument(
+            sampleRate: rate, patch: StudioSynthPatch.individual(.wavetable))
+        let engine = AVAudioEngine()
+        try synth.attach(to: engine, destination: engine.mainMixerNode,
+                         sampleRate: rate)
+        let format = try XCTUnwrap(
+            AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2))
+        try engine.enableManualRenderingMode(.offline, format: format,
+                                             maximumFrameCount: 512)
+        try engine.start()
+        defer {
+            engine.stop()
+            engine.disableManualRenderingMode()
+        }
+        XCTAssertTrue(synth.noteOn(69, velocity: 127))
+        let buffer = try XCTUnwrap(
+            AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 512))
+        var peak: Float = 0
+        for _ in 0..<12 {
+            XCTAssertEqual(try engine.renderOffline(512, to: buffer), .success)
+            let data = try XCTUnwrap(buffer.floatChannelData)
+            for sample in 0..<Int(buffer.frameLength) {
+                XCTAssertTrue(data[0][sample].isFinite)
+                XCTAssertTrue(data[1][sample].isFinite)
+                peak = max(peak, abs(data[0][sample]), abs(data[1][sample]))
+            }
+        }
+        XCTAssertGreaterThan(peak, 0.005)
+    }
+
     func testHybridMIDIAndPerLayerControls() throws {
         let patch = StudioSynthPatch()
         let hybrid = try StudioSynthInstrument(sampleRate: 44_100, patch: patch)
