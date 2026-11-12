@@ -45,10 +45,10 @@ jobs:
           ASAN_OPTIONS=detect_leaks=1 /tmp/studio-sampler-smoke
       - name: Stress 72 streamed zones and concurrent delayed disk reader
         run: |
-          clang++ -std=c++17 -O1 -g -pthread -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \\
-            -I StudioSamplerDSP/include \\
-            StudioSamplerDSP/src/StudioSamplerDSP.cpp \\
-            Tests/StudioSamplerDSPStandalone/stream_stress.cpp \\
+          clang++ -std=c++17 -O1 -g -pthread -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I StudioSamplerDSP/include \
+            StudioSamplerDSP/src/StudioSamplerDSP.cpp \
+            Tests/StudioSamplerDSPStandalone/stream_stress.cpp \
             -o /tmp/studio-sampler-stress
           ASAN_OPTIONS=detect_leaks=1 /tmp/studio-sampler-stress
 
