@@ -824,7 +824,19 @@ void ss_render(SSSampler *sampler, float *left, float *right, int32_t frames) {
             const float layer = (sampler->cc1Crossfade && !old.releaseTrigger)
                 ? sampler->dynamicWeight(old, cc1) : cc1 / 127.f;
             const float expression = sampler->smoothCC11[old.channel] / 127.f;
-            const float gain = tail.gain * fade * layer * expression;
+            float gain = tail.gain * fade * layer * expression;
+            // Match the source-relative fades used by normal voices so
+            // stealing a voice near a trim edge cannot reintroduce a click.
+            if (sample->fadeIn > 0) {
+                gain *= std::min(1.f, std::max(0.f,
+                    float((old.position - double(sample->playbackStart) + 1.0) /
+                          double(sample->fadeIn))));
+            }
+            if (sample->fadeOut > 0) {
+                gain *= std::min(1.f, std::max(0.f,
+                    float((double(sample->playbackEnd) - old.position) /
+                          double(sample->fadeOut))));
+            }
             float sampleL = readLinear(sample->left, old.position);
             float sampleR = readLinear(sample->right, old.position);
             if (loop && sample->loopCrossfade > 0 &&
