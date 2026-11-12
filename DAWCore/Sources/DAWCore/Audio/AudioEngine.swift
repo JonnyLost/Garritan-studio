@@ -60,6 +60,9 @@ public final class AudioEngine: ObservableObject {
     // Keeping the established dry signal path untouched makes startup
     // behavior independently testable before introducing audio routing.
     private let concertHallReverb = AVAudioUnitReverb()
+    /// Created only when explicitly enabled; the tested Apple path stays default.
+    private var nativeConcertHallReverb: AVAudioUnitEffect?
+    @Published public private(set) var usesNativeConcertHallReverb = false
     private let concertHallSendMixer = AVAudioMixerNode()
     private let concertHallReturnMixer = AVAudioMixerNode()
     /// Shared hall return level, independent of individual instrument sends.
@@ -406,6 +409,59 @@ public final class AudioEngine: ObservableObject {
     public func setConcertHallOverallReverb(_ level: Float) {
         concertHallOverallReverb = level.isFinite ? min(2, max(0, level)) : 1
         concertHallReturnMixer.outputVolume = concertHallOverallReverb
+    }
+
+    /// Switch the single shared hall return to Studio's original algorithmic DSP.
+    ///
+    /// This is an opt-in prototype. It leaves track sends, the dry signal chain,
+    /// stage-depth behavior and the master return unchanged. Graph edits happen
+    /// only with the engine stopped; failed restarts restore the previous route.
+    /// Call from UI/control code, never from an audio render callback.
+    public func setNativeConcertHallReverbEnabled(_ enabled: Bool) throws {
+        guard enabled != usesNativeConcertHallReverb else { return }
+        let wasRunning = engine.isRunning
+        if wasRunning { engine.stop() }
+
+        if enabled && nativeConcertHallReverb == nil {
+            NativeRoomReverbAudioUnit.registerIfNeeded()
+            let effect = AVAudioUnitEffect(
+                audioComponentDescription: NativeRoomReverbAudioUnit.componentDescription
+            )
+            engine.attach(effect)
+            nativeConcertHallReverb = effect
+        }
+
+        let previous: AVAudioNode = usesNativeConcertHallReverb
+            ? (nativeConcertHallReverb ?? concertHallReverb) : concertHallReverb
+        let target: AVAudioNode = enabled
+            ? (nativeConcertHallReverb ?? concertHallReverb) : concertHallReverb
+        let format = AVAudioFormat(
+            standardFormatWithSampleRate: sampleRate, channels: 2
+        )!
+
+        func route(_ effect: AVAudioNode) {
+            engine.disconnectNodeOutput(concertHallSendMixer)
+            engine.disconnectNodeOutput(concertHallReverb)
+            if let nativeConcertHallReverb {
+                engine.disconnectNodeOutput(nativeConcertHallReverb)
+            }
+            engine.connect(concertHallSendMixer, to: effect, format: format)
+            engine.connect(effect, to: concertHallReturnMixer, format: format)
+        }
+
+        route(target)
+        do {
+            if wasRunning { try engine.start() }
+            usesNativeConcertHallReverb = enabled
+            isRunning = engine.isRunning
+        } catch {
+            // The original Concert Hall routing is the rollback boundary.
+            engine.stop()
+            route(previous)
+            if wasRunning { try? engine.start() }
+            isRunning = engine.isRunning
+            throw AudioEngineError.failedToStart(underlying: error)
+        }
     }
 
     /// Get track node for external access
