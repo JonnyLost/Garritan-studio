@@ -42,6 +42,20 @@ int32_t ss_add_zone_with_loop(SSSampler *sampler,
                     const float *left, const float *right, uint32_t frames,
                     uint32_t loop_start_frame, uint32_t loop_end_frame,
                     uint32_t loop_crossfade_frames);
+/* Nondestructive playback trim and sustain loop. All offsets are absolute
+ * source sample frames, end positions exclusive. 0 <= start < end <= frames.
+ * Sustain loop is disabled when loop_start == loop_end == loop_fade == 0.
+ * Bounds and samples are immutable once audio rendering starts.
+ * Existing ss_add_zone and ss_add_zone_with_loop remain ABI-compatible.
+ */
+int32_t ss_add_zone_with_region(SSSampler *sampler,
+                    uint8_t root_note, uint8_t lowest_note, uint8_t highest_note,
+                    uint8_t lowest_velocity, uint8_t highest_velocity,
+                    double source_sample_rate,
+                    const float *left, const float *right, uint32_t frames,
+                    uint32_t playback_start_frame, uint32_t playback_end_frame,
+                    uint32_t loop_start_frame, uint32_t loop_end_frame,
+                    uint32_t loop_crossfade_frames);
 int32_t ss_zone_count(const SSSampler *sampler);
 
 /* MIDI events take effect at the next rendering block boundary.
