@@ -41,7 +41,8 @@ jobs:
             Tests/DAWCoreTests/StudioSynthModulationTests.swift
       - name: Compile and execute shared modulation core on Linux
         run: |
-          swiftc -swift-version 5 -O \
+          # Debug assertions must stay active for these executable checks.
+          swiftc -swift-version 5 \
             DAWCore/Sources/DAWCore/Audio/StudioAnalogRouting.swift \
             DAWCore/Sources/DAWCore/Audio/StudioAnalogPatch.swift \
             DAWCore/Sources/DAWCore/Audio/StudioFMPatch.swift \
