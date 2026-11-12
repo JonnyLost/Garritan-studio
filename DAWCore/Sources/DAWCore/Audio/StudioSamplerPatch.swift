@@ -31,12 +31,39 @@ public struct StudioSamplerZone: Codable, Equatable, Sendable {
     public var sampleURL: URL { URL(fileURLWithPath: filePath) }
 }
 
+/// The front-panel layout is a presentation choice: all variants use the
+/// same native sampler, sample zones, MIDI dispatch and output routing.
+public enum StudioSamplerInstrumentKind: String, CaseIterable, Codable, Sendable {
+    case general
+    case soloViolin
+    case cinematicPercussion
+    case choirAndTextures
+
+    public var title: String {
+        switch self {
+        case .general: return "Studio Sampler"
+        case .soloViolin: return "Solo Violin"
+        case .cinematicPercussion: return "Cinematic Percussion"
+        case .choirAndTextures: return "Choir & Textures"
+        }
+    }
+}
+
 /// Versioned, editable mapping of source audio to MIDI note/velocity ranges.
 /// Milestone 1 selects one matching zone per note, favoring the nearest root.
 /// Layer blending and streamed sample references will extend this format.
 public struct StudioSamplerPatch: Codable, Equatable, Sendable {
     public var version: Int = 1
     public var zones: [StudioSamplerZone]
+    /// Optional for compatibility with all previously saved version-1 patches.
+    public var instrumentKind: StudioSamplerInstrumentKind?
+    /// When true, CC1 morphs between sample layers with the same root key.
+    public var cc1Crossfade: Bool?
+    /// Initial MIDI control states, 0...127. Playback CC can override them.
+    public var dynamicsCC1: UInt8?
+    public var expressionCC11: UInt8?
+
+    public var presentation: StudioSamplerInstrumentKind { instrumentKind ?? .general }
 
     public init(zones: [StudioSamplerZone]) {
         self.zones = zones
@@ -48,6 +75,8 @@ public struct StudioSamplerPatch: Codable, Equatable, Sendable {
 
     public var isValid: Bool {
         version == 1 && !zones.isEmpty && zones.count <= 128 &&
-        zones.allSatisfy(\.isValid)
+        zones.allSatisfy(\.isValid) &&
+        (dynamicsCC1 == nil || dynamicsCC1! <= 127) &&
+        (expressionCC11 == nil || expressionCC11! <= 127)
     }
 }
