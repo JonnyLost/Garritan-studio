@@ -80,7 +80,7 @@ final class StudioSamplerTrackIntegrationTests: XCTestCase {
         XCTAssertEqual(StudioSamplerStreamBudget.attackFrames(sampleRate: 44_100),
                        11_025)
         XCTAssertEqual(StudioSamplerStreamBudget.readAheadBytes(voices: 32),
-                       2_097_152)
+                       4_194_304)
 
         let first = try reader.readPage(startFrame: 0, requestedFrames: 512)
         XCTAssertEqual(first.frameCount, 512)
