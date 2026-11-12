@@ -474,6 +474,7 @@ public final class ProjectViewModel: ObservableObject {
         track.garritanProgramID = nil
         track.studioAnalogEnabled = true
         track.studioFMEnabled = false
+        track.studioSynthEnabled = false
         updateTrack(track, description: "Load Studio Analog")
     }
 
@@ -497,7 +498,99 @@ public final class ProjectViewModel: ObservableObject {
         track.garritanProgramID = nil
         track.studioAnalogEnabled = false
         track.studioFMEnabled = true
+        track.studioSynthEnabled = false
         updateTrack(track, description: "Load Studio FM")
+    }
+
+    /// Loads the unified native instrument. Legacy native instruments are
+    /// preserved as independent compatible project formats.
+    public func loadStudioSynth(for trackID: TrackID,
+                                patch: StudioSynthPatch = StudioSynthPatch()) throws {
+        guard var track = project.track(withID: trackID),
+              track.type == .midi || track.type == .instrument else {
+            throw PlaybackError.trackNotFound(trackID)
+        }
+        let previousPluginID: UUID?
+        if let instrument = playbackEngine.instrument(for: trackID),
+           case .auInstrument(_, let id) = instrument {
+            previousPluginID = id
+        } else {
+            previousPluginID = nil
+        }
+        try playbackEngine.loadStudioSynth(for: trackID, patch: patch)
+        if let previousPluginID { pluginHost.unloadPlugin(id: previousPluginID) }
+        track.instrumentSlot = nil
+        track.garritanProgramID = nil
+        track.studioAnalogEnabled = false
+        track.studioFMEnabled = false
+        track.studioSynthEnabled = true
+        track.studioSynthPatch = patch
+        updateTrack(track, description: "Load Studio Synth")
+    }
+
+    /// Topology changes happen on the main/control thread while the graph is
+    /// stopped. This is not called from a MIDI callback or slider drag.
+    public func updateStudioSynthPatch(_ patch: StudioSynthPatch,
+                                       for trackID: TrackID) throws {
+        guard patch.validate(),
+              let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioSynthEnabled == true else {
+            throw StudioSynthError.invalidPatch
+        }
+        try playbackEngine.loadStudioSynth(for: trackID, patch: patch)
+        project.tracks[index].studioSynthPatch = patch
+    }
+
+    public func setStudioSynthLayerMix(for trackID: TrackID, layerID: UUID,
+                                       gain: Float, pan: Float) {
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioSynthEnabled == true,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSynth(let synth) = instrument,
+              synth.setMix(id: layerID, gain: gain, pan: pan),
+              var patch = project.tracks[index].studioSynthPatch,
+              let layerIndex = patch.layers.firstIndex(where: { $0.id == layerID }) else {
+            return
+        }
+        patch.layers[layerIndex].gain = gain
+        patch.layers[layerIndex].pan = pan
+        project.tracks[index].studioSynthPatch = patch
+    }
+
+    public func setStudioSynthAnalogParameter(_ parameter: StudioAnalogParameter,
+                                              value: Float, for trackID: TrackID,
+                                              layerID: UUID) {
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioSynthEnabled == true,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSynth(let synth) = instrument,
+              synth.setAnalogParameter(id: layerID, parameter: parameter, value: value),
+              var patch = project.tracks[index].studioSynthPatch,
+              let layerIndex = patch.layers.firstIndex(where: { $0.id == layerID }) else {
+            return
+        }
+        var analog = patch.layers[layerIndex].analogPatch ?? StudioAnalogPatch()
+        analog.set(value, for: parameter)
+        patch.layers[layerIndex].analogPatch = analog
+        project.tracks[index].studioSynthPatch = patch
+    }
+
+    public func setStudioSynthFMParameter(_ parameter: StudioFMParameter,
+                                          value: Float, for trackID: TrackID,
+                                          layerID: UUID) {
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioSynthEnabled == true,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSynth(let synth) = instrument,
+              synth.setFMParameter(id: layerID, parameter: parameter, value: value),
+              var patch = project.tracks[index].studioSynthPatch,
+              let layerIndex = patch.layers.firstIndex(where: { $0.id == layerID }) else {
+            return
+        }
+        var fm = patch.layers[layerIndex].fmPatch ?? StudioFMPatch()
+        fm.set(value, for: parameter)
+        patch.layers[layerIndex].fmPatch = fm
+        project.tracks[index].studioSynthPatch = patch
     }
 
     /// Live FM control updates are atomic in the DSP and persist on the track.
