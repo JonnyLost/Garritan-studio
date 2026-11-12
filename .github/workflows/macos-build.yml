@@ -43,3 +43,15 @@ jobs:
       # a successful debug build does not verify this production build path.
       - name: Build optimized application
         run: swift build -c release --product DAWApp
+
+      # Offline impulse-analysis only. Does not route audio through Studio.
+      - name: Measure four native room responses
+        run: swift run -c release RoomAcousticCalibration --seconds 5 > native-room-calibration.json
+
+      - name: Archive room calibration report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-room-calibration
+          path: native-room-calibration.json
+          if-no-files-found: ignore
