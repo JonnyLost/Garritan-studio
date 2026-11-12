@@ -270,6 +270,30 @@ public struct StudioSynthModulationSettings: Codable, Equatable, Sendable {
 /// A small deterministic evaluator, shared by runtime and regression tests.
 /// LFOs are bipolar -1...+1; envelope, CC1 and macro are unipolar 0...1.
 public enum StudioSynthModulationMath {
+    /// Keep the usual inexpensive 50Hz worker for ordinary modulations.
+    /// Only high-frequency synced LFOs actually routed to a destination
+    /// request more samples/cycle (up to a conservative 400Hz maximum).
+    /// No additional thread or DSP render work is created.
+    public static func controlRate(
+        _ settings: StudioSynthModulationSettings, bpm: Double
+    ) -> Double {
+        guard bpm.isFinite && bpm > 0 else { return 50 }
+        var rate = 50.0
+        for route in settings.routes where route.enabled {
+            let sync: StudioSynthLFOSync?
+            switch route.source {
+            case .lfo1: sync = settings.lfo1Sync
+            case .lfo2: sync = settings.lfo2Sync
+            default: sync = nil
+            }
+            if let sync {
+                let cyclesPerSecond = (bpm / 60) / sync.beatsPerCycle
+                rate = max(rate, min(400, cyclesPerSecond * 8))
+            }
+        }
+        return rate
+    }
+
     public static func signal(
         _ source: StudioSynthModSource, seconds: Double,
         settings: StudioSynthModulationSettings,
