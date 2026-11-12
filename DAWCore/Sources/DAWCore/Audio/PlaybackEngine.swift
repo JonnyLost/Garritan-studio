@@ -619,6 +619,10 @@ public final class PlaybackEngine: ObservableObject {
                 audioEngine.engine.detach(node)
             }
         }
+        // Stop queued native sampler voices before detaching its render node.
+        if case .studioSampler(let sampler) = instrument {
+            _ = sampler.allNotesOff()
+        }
         // Disconnect and detach the audio node
         audioEngine.engine.disconnectNodeOutput(instrument.audioNode)
         audioEngine.engine.detach(instrument.audioNode)
@@ -2356,6 +2360,7 @@ public final class PlaybackEngine: ObservableObject {
                 case .studioAnalog(let synth): synth.allNotesOff()
                 case .studioFM(let synth): synth.allNotesOff()
                 case .studioSynth(let synth): synth.allNotesOff()
+                case .studioSampler(let sampler): _ = sampler.allNotesOff()
                 default: break
                 }
             }
@@ -2364,6 +2369,7 @@ public final class PlaybackEngine: ObservableObject {
                 case .studioAnalog(let synth): synth.allNotesOff()
                 case .studioFM(let synth): synth.allNotesOff()
                 case .studioSynth(let synth): synth.allNotesOff()
+                case .studioSampler(let sampler): _ = sampler.allNotesOff()
                 default: break
                 }
             }
