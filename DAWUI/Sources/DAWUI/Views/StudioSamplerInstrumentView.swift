@@ -45,6 +45,7 @@ public struct StudioSamplerInstrumentView: View {
                         case .choirAndTextures: choirAndTextures(patch)
                         case .general: generalInstrument(patch)
                         }
+                        articulationControls(patch)
                         HStack(alignment: .top, spacing: 14) {
                             controllerPanel
                             envelopePanel
@@ -134,7 +135,8 @@ public struct StudioSamplerInstrumentView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Label("Recorded articulations", systemImage: "music.note.list")
                     .font(.subheadline.weight(.semibold))
-                Text("Sustain mapping is available now. Other articulations require separately recorded samples and the upcoming keyswitch engine.")
+                Text("Use the keyswitch map to select recorded articulations. Import separate recordings for each technique; Studio does not synthesize missing articulations.")
+
                     .font(.caption).foregroundStyle(.secondary)
                 mappedSamples(patch, title: "Available Recordings", limit: 6)
             }
@@ -243,6 +245,46 @@ public struct StudioSamplerInstrumentView: View {
                 .disabled(!isLoaded)
             }
             .frame(maxWidth: 310)
+        }
+    }
+
+    @ViewBuilder
+    private func articulationControls(_ patch: StudioSamplerPatch) -> some View {
+        if let articulations = patch.articulations, !articulations.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Articulations", systemImage: "music.note.list")
+                    .font(.subheadline.weight(.semibold))
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        Button("Default / Sustain") {
+                            _ = viewModel.setStudioSamplerArticulation(0, for: trackID)
+                        }
+                        .tint((patch.selectedArticulationID ?? 0) == 0 ? .purple : .gray)
+                        ForEach(articulations) { articulation in
+                            Button {
+                                _ = viewModel.setStudioSamplerArticulation(
+                                    articulation.id, for: trackID
+                                )
+                            } label: {
+                                VStack(spacing: 3) {
+                                    Text(articulation.name)
+                                    Text("MIDI \(articulation.keyswitchNote)")
+                                        .font(.caption2)
+                                        .opacity(0.8)
+                                }
+                            }
+                            .tint(patch.selectedArticulationID == articulation.id ? .purple : .gray)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!isLoaded)
+                }
+                Text("Keyswitch MIDI notes also select articulations for subsequent notes. Existing held notes continue uninterrupted.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            .padding(12)
+            .background(Color.secondary.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 9))
         }
     }
 
