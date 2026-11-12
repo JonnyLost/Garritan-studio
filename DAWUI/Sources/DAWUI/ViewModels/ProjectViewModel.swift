@@ -541,6 +541,23 @@ public final class ProjectViewModel: ObservableObject {
         project.tracks[index].studioSynthPatch = patch
     }
 
+    /// Apply routing/settings in place, without stopping the audio graph or
+    /// silencing notes. The pure settings model must validate against the
+    /// specific layer engine and its continuously variable parameters.
+    @discardableResult
+    public func setStudioSynthModulation(_ settings: StudioSynthModulationSettings,
+                                         for trackID: TrackID) -> Bool {
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioSynthEnabled == true,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSynth(let synth) = instrument,
+              var patch = project.tracks[index].studioSynthPatch else { return false }
+        patch.modulation = settings
+        guard patch.validate(), synth.setModulation(settings) else { return false }
+        project.tracks[index].studioSynthPatch = patch
+        return true
+    }
+
     public func setStudioSynthLayerMix(for trackID: TrackID, layerID: UUID,
                                        gain: Float, pan: Float) {
         guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
