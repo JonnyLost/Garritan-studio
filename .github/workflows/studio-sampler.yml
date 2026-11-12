@@ -9,6 +9,7 @@ on:
       - "StudioSamplerDSP/**"
       - "DAWCore/Sources/DAWCore/Audio/StudioSampler*"
       - "DAWUI/Sources/DAWUI/Views/StudioSamplerMapView.swift"
+      - "DAWUI/Sources/DAWUI/Views/StudioSamplerInstrumentView.swift"
       - "DAWUI/Sources/DAWUI/Views/Timeline/TrackHeaderView.swift"
       - "DAWUI/Sources/DAWUI/Views/MainWindowView.swift"
       - "DAWCore/Sources/DAWCore/Audio/PlaybackEngine.swift"
