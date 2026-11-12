@@ -192,7 +192,8 @@ final class StudioSynthModulationTests: XCTestCase {
             .lfo2, seconds: 0, settings: settings,
             envelope: 0, wheel: 0, bpm: 120), 1, accuracy: 0.001)
 
-        let firstLayer = threeEngines().layers[0].id
+        let enginePatch = threeEngines()
+        let firstLayer = enginePatch.layers[0].id
         settings.lfo1Sync = StudioSynthLFOSync(note: .sixtyFourth)
         settings.routes = [StudioSynthModRoute(
             source: .lfo1, layerID: firstLayer,
@@ -215,7 +216,7 @@ final class StudioSynthModulationTests: XCTestCase {
         XCTAssertEqual(roundTrip.lfo1Rate, 1, "Free Hz remains stored in Sync")
         var invalid = settings
         invalid.lfo1Phase = .infinity
-        XCTAssertFalse(invalid.validate(layers: threeEngines().layers))
+        XCTAssertFalse(invalid.validate(layers: enginePatch.layers))
 
     }
 
