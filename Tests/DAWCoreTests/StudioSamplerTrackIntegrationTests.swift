@@ -100,6 +100,97 @@ final class StudioSamplerTrackIntegrationTests: XCTestCase {
         XCTAssertNil(decoded.expressionCC11)
     }
 
+    func testADSRAndLoopMarkersPersistThroughTrackRoundTrip() throws {
+        var patch = StudioSamplerPatch(
+            sampleURL: URL(fileURLWithPath: "/tmp/test-sustain.wav"),
+            rootNote: 60
+        )
+        patch.zones[0].loopStartFrame = 256
+        patch.zones[0].loopEndFrame = 2048
+        patch.zones[0].loopCrossfadeFrames = 128
+        patch.envelope = StudioSamplerEnvelope(
+            attackSeconds: 0.12, decaySeconds: 0.18,
+            sustainLevel: 0.72, releaseSeconds: 0.63
+        )
+        XCTAssertTrue(patch.isValid)
+        var track = Track(name: "Sustain Loop", type: .instrument)
+        track.studioSamplerPatch = patch
+        let restored = try JSONDecoder().decode(
+            Track.self, from: JSONEncoder().encode(track)
+        )
+        XCTAssertEqual(restored.studioSamplerPatch, patch)
+        XCTAssertTrue(restored.studioSamplerPatch?.zones[0].hasSustainLoop == true)
+
+        patch.zones[0].loopCrossfadeFrames = 1000
+        XCTAssertFalse(patch.isValid)
+        patch.zones[0].loopCrossfadeFrames = 128
+        patch.envelope?.sustainLevel = 2
+        XCTAssertFalse(patch.isValid)
+    }
+
+    func testLoopContinuesAfterRecordingEndsUntilNoteOff() throws {
+        let url = try makeSample()
+        defer { try? FileManager.default.removeItem(at: url) }
+        var patch = StudioSamplerPatch(sampleURL: url, rootNote: 69)
+        patch.zones[0].loopStartFrame = 1_500
+        patch.zones[0].loopEndFrame = 6_000
+        patch.zones[0].loopCrossfadeFrames = 128
+        patch.envelope = StudioSamplerEnvelope(
+            attackSeconds: 0.005, decaySeconds: 0.01,
+            sustainLevel: 1, releaseSeconds: 0.02
+        )
+        let sampler = try StudioSamplerInstrument(sampleRate: 44_100, patch: patch)
+        let engine = AVAudioEngine()
+        engine.attach(sampler.audioNode)
+        engine.connect(sampler.audioNode, to: engine.mainMixerNode, format: sampler.format)
+        try engine.enableManualRenderingMode(
+            .offline, format: sampler.format, maximumFrameCount: 512
+        )
+        try engine.start()
+        defer { engine.stop(); engine.disableManualRenderingMode() }
+        let buffer = try XCTUnwrap(
+            AVAudioPCMBuffer(pcmFormat: sampler.format, frameCapacity: 512)
+        )
+        XCTAssertTrue(sampler.noteOn(69, velocity: 110, channel: 0))
+        // 60 buffers = 0.70s, well beyond the original 0.20s recording.
+        var latePeak: Float = 0
+        for index in 0..<60 {
+            XCTAssertEqual(try engine.renderOffline(512, to: buffer), .success)
+            if index >= 55, let data = buffer.floatChannelData {
+                for sample in 0..<Int(buffer.frameLength) {
+                    latePeak = max(latePeak, abs(data[0][sample]))
+                }
+            }
+        }
+        XCTAssertGreaterThan(latePeak, 0.01)
+        XCTAssertTrue(sampler.noteOff(69, channel: 0))
+        for _ in 0..<12 {
+            XCTAssertEqual(try engine.renderOffline(512, to: buffer), .success)
+        }
+        let data = try XCTUnwrap(buffer.floatChannelData)
+        for i in 0..<Int(buffer.frameLength) {
+            XCTAssertLessThan(abs(data[0][i]), 0.0001)
+        }
+    }
+
+    func testLoopCannotExtendBeyondSourceRecording() throws {
+        let url = try makeSample()
+        defer { try? FileManager.default.removeItem(at: url) }
+        var patch = StudioSamplerPatch(sampleURL: url, rootNote: 69)
+        patch.zones[0].loopStartFrame = 2_000
+        patch.zones[0].loopEndFrame = 12_000
+        patch.zones[0].loopCrossfadeFrames = 128
+        XCTAssertTrue(patch.isValid) // Structural validation only
+        XCTAssertThrowsError(
+            try StudioSamplerInstrument(sampleRate: 44_100, patch: patch)
+        ) { error in
+            guard case StudioSamplerError.invalidLoop = error else {
+                XCTFail("Expected invalid source loop position, got \(error)")
+                return
+            }
+        }
+    }
+
     func testBadMappingDoesNotAttachAnInstrument() throws {
         var patch = StudioSamplerPatch(zones: [])
         XCTAssertFalse(patch.isValid)
