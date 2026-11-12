@@ -14,6 +14,7 @@ constexpr uint32_t kMaxZones = 128;
 constexpr uint32_t kMaxSampleFrames = 10000000; // RAM-only phase 1 safety limit
 constexpr uint32_t kCommandCapacity = 1024; // one slot deliberately left empty
 constexpr int kFadeFrames = 64;
+constexpr size_t kHeldDepth = 8; // per-channel, per-pitch repeated note stack
 constexpr float kOutputHeadroom = 0.25f;
 constexpr float kHalfPi = 1.57079632679489661923f;
 constexpr double kMinimumRate = 8000.0;
@@ -59,6 +60,7 @@ struct Voice {
     float previousCenter = -1.f;
     float nextCenter = 129.f;
     uint64_t serial = 0;
+    uint64_t noteSerial = 0;
     uint8_t note = 0;
     uint8_t channel = 0;
     ADSR adsr{};
@@ -75,6 +77,13 @@ struct HeldNote {
     uint8_t velocity = 0;
     uint8_t articulation = 0;
     uint8_t roundRobin = 0;
+    uint64_t serial = 0;
+};
+
+struct RetiringVoice {
+    Voice voice{};
+    int framesLeft = 0;
+    float gain = 0.f;
 };
 
 enum class CommandKind : uint8_t { on, off, allOff, controller, crossfade, envelope, articulation };
@@ -107,7 +116,8 @@ inline float readLinear(const std::vector<float>& data, double position) {
 
 struct SSSampler {
     explicit SSSampler(double rate, int voices)
-        : outputRate(rate), voices(static_cast<size_t>(voices)) {
+        : outputRate(rate), voices(static_cast<size_t>(voices)),
+          retiringVoices(static_cast<size_t>(voices)) {
         samples.reserve(kMaxZones); // stable Sample* pointers throughout render
         smoothCC1.fill(127.f);
         smoothCC11.fill(127.f);
@@ -123,12 +133,16 @@ struct SSSampler {
     double outputRate;
     std::vector<Sample> samples;
     std::vector<Voice> voices;
+    // Preallocated de-click tails preserve an evicted voice for 64 frames.
+    // They never add to the normal voice allocation/polyphony budget.
+    std::vector<RetiringVoice> retiringVoices;
     uint64_t nextSerial = 0;
+    uint64_t nextNoteSerial = 0;
     std::array<uint8_t, 128> keyswitchArticulations{};
     std::array<uint8_t, 16> selectedArticulations{};
     // Fixed-size, real-time-owned note state and variation counters.
     // No allocation, lock, or mutation on the Swift/MIDI producer thread.
-    std::array<std::array<HeldNote, 128>, 16> heldNotes{};
+    std::array<std::array<std::array<HeldNote, kHeldDepth>, 128>, 16> heldNotes{};
     std::array<std::array<std::array<uint8_t, 128>, 16>, 16> roundRobinTurns{};
     ADSR activeADSR{};
     bool cc1Crossfade = false; // mutated only while consuming RT commands
@@ -198,8 +212,46 @@ struct SSSampler {
         return true;
     }
 
+    // FIFO matching: a second note-on of the same pitch can remain held
+    // after the first note-off. Bounded per-pitch stack; on overflow retire
+    // the oldest group before storing a new one.
+    uint64_t rememberNote(uint8_t note, uint8_t velocity, uint8_t channel,
+                          uint8_t articulation, uint8_t variation) {
+        auto& held = heldNotes[channel][note];
+        HeldNote *slot = nullptr;
+        for (auto& item : held) if (!item.down) { slot = &item; break; }
+        if (!slot) {
+            slot = &held[0];
+            for (auto& item : held)
+                if (item.serial < slot->serial) slot = &item;
+            for (auto& voice : voices)
+                if (voice.active && !voice.releaseTrigger &&
+                    voice.noteSerial == slot->serial)
+                    startRelease(voice);
+        }
+        *slot = HeldNote{true, velocity, articulation, variation, ++nextNoteSerial};
+        return slot->serial;
+    }
+
+    void retireVoice(const Voice& voice) {
+        if (!voice.active || !voice.sample) return;
+        RetiringVoice *slot = nullptr;
+        for (auto& tail : retiringVoices) {
+            if (tail.framesLeft <= 0) { slot = &tail; break; }
+        }
+        if (!slot) {
+            slot = &*std::min_element(retiringVoices.begin(), retiringVoices.end(),
+                [](const RetiringVoice& a, const RetiringVoice& b) {
+                    return a.framesLeft < b.framesLeft;
+                });
+        }
+        slot->voice = voice;
+        slot->framesLeft = kFadeFrames;
+        slot->gain = std::max(0.f, voice.envelopeLevel) * voice.gain;
+    }
+
     void startVoice(const Sample *selected, uint8_t note,
-                    uint8_t velocity, uint8_t channel,
+                    uint8_t velocity, uint8_t channel, uint64_t noteSerial,
                     bool releaseSample = false) {
         Voice *chosen = nullptr;
         for (auto& voice : voices) {
@@ -207,7 +259,13 @@ struct SSSampler {
         }
         if (!chosen) {
             chosen = &*std::min_element(voices.begin(), voices.end(),
-                [](const Voice& a, const Voice& b) { return a.serial < b.serial; });
+                [](const Voice& a, const Voice& b) {
+                    const bool aReleasing = a.stage == EnvelopeStage::release;
+                    const bool bReleasing = b.stage == EnvelopeStage::release;
+                    if (aReleasing != bReleasing) return aReleasing;
+                    return a.serial < b.serial;
+                });
+            retireVoice(*chosen);
         }
 
         // Equal-temperament pitch shift relative to recorded root key.
@@ -218,6 +276,7 @@ struct SSSampler {
         chosen->sample = selected;
         chosen->note = note;
         chosen->channel = channel;
+        chosen->noteSerial = noteSerial;
         chosen->position = double(selected->playbackStart);
         chosen->increment = increment;
         chosen->gain = float(velocity) / 127.f;
@@ -298,7 +357,8 @@ struct SSSampler {
         if (!selected) return;
         const uint8_t variation =
             chooseRoundRobin(note, channel, articulation, *selected);
-        heldNotes[channel][note] = HeldNote{true, velocity, articulation, variation};
+        const uint64_t noteSerial = rememberNote(
+            note, velocity, channel, articulation, variation);
 
         if (!cc1Crossfade) {
             const Sample *take = selected;
@@ -312,7 +372,7 @@ struct SSSampler {
                     break;
                 }
             }
-            startVoice(take, note, velocity, channel);
+            startVoice(take, note, velocity, channel, noteSerial);
             return;
         }
 
@@ -346,7 +406,7 @@ struct SSSampler {
                     break;
                 }
             }
-            startVoice(take, note, velocity, channel);
+            startVoice(take, note, velocity, channel, noteSerial);
         }
     }
 
@@ -368,15 +428,21 @@ struct SSSampler {
 
     void stop(uint8_t note, uint8_t channel) {
         if (keyswitchArticulations[note] != 255) return;
-        const HeldNote held = heldNotes[channel][note];
-        heldNotes[channel][note].down = false;
+        auto& heldGroup = heldNotes[channel][note];
+        HeldNote *matched = nullptr;
+        for (auto& entry : heldGroup) {
+            if (entry.down && (!matched || entry.serial < matched->serial))
+                matched = &entry;
+        }
+        // Unmatched/duplicate note-offs do not release voices or fire tails.
+        if (!matched) return;
+        const HeldNote held = *matched;
+        matched->down = false;
         for (auto& voice : voices) {
             if (voice.active && !voice.releaseTrigger &&
-                voice.note == note && voice.channel == channel)
+                voice.noteSerial == held.serial)
                 startRelease(voice);
         }
-        // Ignore unmatched/duplicate note-offs and keyswitches.
-        if (!held.down) return;
 
         const Sample *release = nullptr;
         int nearest = std::numeric_limits<int>::max();
@@ -392,8 +458,6 @@ struct SSSampler {
             }
         }
         if (!release) return;
-        // Prefer a matching release variation when one was recorded;
-        // otherwise use the nearest mapped release take.
         for (const auto& zone : samples) {
             if (zone.releaseTrigger && zone.articulation == held.articulation &&
                 zone.root == release->root &&
@@ -404,7 +468,7 @@ struct SSSampler {
                 break;
             }
         }
-        startVoice(release, note, held.velocity, channel, true);
+        startVoice(release, note, held.velocity, channel, held.serial, true);
     }
 
     void consumeMIDI() {
@@ -420,14 +484,16 @@ struct SSSampler {
             case CommandKind::off: stop(command.note, command.channel); break;
             case CommandKind::allOff:
                 for (auto& row : heldNotes)
-                    for (auto& held : row) held.down = false;
+                    for (auto& group : row)
+                        for (auto& held : group) held.down = false;
                 for (auto& voice : voices) if (voice.active) startRelease(voice);
                 break;
             case CommandKind::controller:
                 if (command.note == 1) targetCC1[command.channel] = command.velocity;
                 if (command.note == 11) targetCC11[command.channel] = command.velocity;
                 if (command.note == 120 || command.note == 123) {
-                    for (auto& held : heldNotes[command.channel]) held.down = false;
+                    for (auto& group : heldNotes[command.channel])
+                        for (auto& held : group) held.down = false;
                     for (auto& voice : voices)
                         if (voice.active && voice.channel == command.channel)
                             startRelease(voice);
