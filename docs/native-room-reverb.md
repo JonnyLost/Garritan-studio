@@ -1,6 +1,6 @@
 # Garritan Studio — Native Room Reverb (prototype)
 
-Status: **implemented in DAWCore, opt-in; macOS Audio Unit build and listening validation pending**.
+Status: **implemented in DAWCore, opt-in. The macOS GitHub Actions workflow (debug build, tests, optimized app) succeeded for the initial implementation on 11 November 2026; actual in-app listening and device-level Audio Unit validation remain pending.**
 
 ## What exists
 
@@ -19,6 +19,10 @@ Status: **implemented in DAWCore, opt-in; macOS Audio Unit build and listening v
 The opt-in API is currently a developer-facing integration point, **not a
 user-facing UI setting**. No existing projects or their stage-depth values
 are modified. The new profile does not get enabled on startup.
+
+## Acoustic reference catalog
+
+A separate [127-room research index](./acoustic-room-reference-index.md) and [machine-readable source catalog](./acoustic-room-reference-catalog.json) record worldwide scoring stages, live rooms, concert halls, opera houses, echo chambers and cathedrals. Of these, 55 have published/reported reverberation values; most are **not playable presets** and still require acoustic calibration. Room names are research inspirations, not official licensed emulations.
 
 ## Preliminary profile targets
 
@@ -70,7 +74,7 @@ dry sound. This does **not** establish sound-quality equivalence, macOS
 build health, or macOS Audio Unit instantiation safety.
 
 Before making this reverb a default:
-1. Build the complete DAW on macOS and run DAWCoreTests.
+1. CI debug build, regression tests and release build: **passed** on macOS (see https://github.com/JonnyLost/Garritan-studio/actions/runs/43142554778); re-run after audio-engine changes.
 2. Test that the in-process Audio Unit instantiates at 44.1/48/96 kHz,
    and that switching during engine idle preserves existing dry audio.
 3. Evaluate CPU, memory, mono compatibility, denormal/NaN handling, and
