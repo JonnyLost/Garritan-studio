@@ -321,10 +321,10 @@ public final class PlaybackEngine: ObservableObject {
         print("[Studio Analog] Native synthesizer connected to track \(trackID.rawValue)")
     }
 
-    /// Decode sample zones completely before touching the audio graph. The
-    /// renderer owns immutable PCM storage and never reads files on the audio
-    /// callback. This RAM-only milestone supports WAV/AIFF and other formats
-    /// handled by AVAudioFile; disk streaming is a later milestone.
+    /// Resolve saved samples and build a native hybrid RAM/disk sampler
+    /// before touching the track graph. Audio rendering never reads files,
+    /// allocates or waits for the background worker. This also restores old
+    /// projects whose managed recordings were saved under another user home.
     public func loadStudioSampler(for trackID: TrackID, patch: StudioSamplerPatch) throws {
         guard coreAudioBackend == nil else {
             throw StudioSamplerError.unsupportedAudioBackend
@@ -332,7 +332,10 @@ public final class PlaybackEngine: ObservableObject {
         guard let trackNode = audioEngine.trackNode(for: trackID) else {
             throw PlaybackError.trackNotFound(trackID)
         }
-        let sampler = try StudioSamplerInstrument(sampleRate: audioEngine.sampleRate, patch: patch)
+        let resolvedPatch = try StudioSamplerSampleLibrary.resolve(patch)
+        let sampler = try StudioSamplerInstrument(
+            sampleRate: audioEngine.sampleRate, patch: resolvedPatch
+        )
         let engine = audioEngine.engine
         let wasRunning = engine.isRunning
         if wasRunning { engine.stop() }
