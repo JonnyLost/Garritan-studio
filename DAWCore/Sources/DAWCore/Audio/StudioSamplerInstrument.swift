@@ -60,8 +60,12 @@ public final class StudioSamplerInstrument {
         // Configuration occurs before the AVAudioSourceNode is constructed;
         // keyswitch mappings remain immutable during rendering.
         let articulations = patch.articulations ?? []
-        let keys = articulations.map(\.keyswitchNote)
-        let identifiers = articulations.map(\.id)
+        var keys = articulations.map(\.keyswitchNote)
+        var identifiers = articulations.map(\.id)
+        if let defaultKey = patch.defaultKeyswitchNote {
+            keys.insert(defaultKey, at: 0)
+            identifiers.insert(0, at: 0)
+        }
         let configurationSucceeded = keys.withUnsafeBufferPointer { keysBuffer in
             identifiers.withUnsafeBufferPointer { idsBuffer in
                 ss_configure_keyswitches(
