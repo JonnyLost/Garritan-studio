@@ -1,5 +1,12 @@
 # Studio Sampler — Polyphonic Voice Stability & Streaming Foundation
 
+> **Update:** The subsequent hybrid streaming integration is implemented.
+> See [STUDIO_SAMPLER_DISK_STREAMING_MILESTONE.md](STUDIO_SAMPLER_DISK_STREAMING_MILESTONE.md)
+> for the current C++/Swift worker behavior and validation. The original
+> section titled "Critical pending streaming integration" below is retained
+> only as historical context for the foundation phase.
+
+
 Development branch: `feature/studio-sampler-native`. This milestone
 preserves ARIA, Studio Analog, the existing AVAudioEngine graph, all saved
 sampler patches, and the original native C++ DSP. It adds no commercial
