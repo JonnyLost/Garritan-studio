@@ -68,7 +68,7 @@ public struct StudioFMPresetBrowserView: View {
                     .foregroundStyle(.cyan)
                     .font(.title2)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("STUDIO ANALOG · PRESET LIBRARY")
+                    Text("STUDIO FM · PRESET LIBRARY")
                         .font(.headline)
                     Text("32 original factory sounds · save and recall your own patches")
                         .font(.caption).foregroundStyle(.secondary)
