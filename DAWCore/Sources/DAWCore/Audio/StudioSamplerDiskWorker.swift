@@ -42,51 +42,64 @@ final class StudioSamplerDiskWorker: @unchecked Sendable {
     }
 
     private func run() {
-        // Open AVAudioFile and preserve its thread confinement. No reader is
-        // created on the audio thread. Nil means a resident RAM-backed zone.
-        let readers: [StudioSamplerDiskChunkReader?] = sourceURLs.map { url in
-            guard let url else { return nil }
-            return try? StudioSamplerDiskChunkReader(url: url)
-        }
+        // Lazy, bounded file handles: large libraries can contain hundreds
+        // of sampled zones. Do not open every source recording at startup.
+        // Readers stay confined to this one serial background queue.
+        var readers: [Int: StudioSamplerDiskChunkReader] = [:]
+        var recentlyUsed: [Int] = []
+        let maxOpenReaders = 16
+
         while !stopped {
             var processed = 0
-            // Limit the work per iteration to prevent a single instrument
-            // from monopolizing an I/O worker at high polyphony.
             while processed < 64 && !stopped {
                 var request = SSStreamRequest()
                 guard ss_stream_claim(sampler, &request) == 1 else { break }
                 processed += 1
 
-                guard request.zone_index >= 0,
-                      Int(request.zone_index) < readers.count,
-                      let reader = readers[Int(request.zone_index)] else {
+                let index = Int(request.zone_index)
+                guard index >= 0, index < sourceURLs.count,
+                      let url = sourceURLs[index] else {
                     ss_stream_abandon(sampler, &request)
                     continue
                 }
                 do {
-                    let page = try reader.readPage(
+                    let reader: StudioSamplerDiskChunkReader
+                    if let existing = readers[index] {
+                        reader = existing
+                    } else {
+                        reader = try StudioSamplerDiskChunkReader(url: url)
+                        readers[index] = reader
+                    }
+                    recentlyUsed.removeAll(where: { $0 == index })
+                    recentlyUsed.append(index)
+                    if readers.count > maxOpenReaders {
+                        let oldest = recentlyUsed.removeFirst()
+                        readers.removeValue(forKey: oldest)
+                    }
+
+                    // Zero intermediate Swift Float arrays: the worker's
+                    // reusable AVAudioPCMBuffer is copied directly into the
+                    // fixed C++ buffer before the callback returns.
+                    let supplied = try reader.withPage(
                         startFrame: Int64(request.start_frame),
                         requestedFrames: Int(request.frame_count)
-                    )
-                    let supplied = page.left.withUnsafeBufferPointer { left in
-                        page.right.withUnsafeBufferPointer { right in
-                            ss_stream_supply(
-                                sampler, &request, left.baseAddress,
-                                right.baseAddress, UInt32(page.frameCount)
-                            ) == 1
-                        }
+                    ) { left, right, count in
+                        ss_stream_supply(
+                            sampler, &request, left, right, UInt32(count)
+                        ) == 1
                     }
                     if !supplied { ss_stream_abandon(sampler, &request) }
                 } catch {
-                    // I/O and decoding failures never block audio rendering.
-                    // Another prefetch request can retry on a subsequent pass.
+                    // Errors affect this requested page, never the audio
+                    // callback. The next prefetch can retry after an I/O
+                    // failure; underrun fading handles the missing PCM.
                     ss_stream_abandon(sampler, &request)
                 }
             }
             if processed == 0 {
-                // Idle sleep occurs only in the background worker. With
-                // >250 ms of attack preload there is ample prefetch time.
-                Thread.sleep(forTimeInterval: 0.012)
+                // The only sleep/polling is on this background worker.
+                // 250 ms of preloaded attacks covers normal wake delays.
+                Thread.sleep(forTimeInterval: 0.020)
             }
         }
     }
