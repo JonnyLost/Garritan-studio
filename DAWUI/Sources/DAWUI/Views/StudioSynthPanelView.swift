@@ -5,6 +5,7 @@ import DAWCore
 /// and focused engine editors are deliberately separate: switching tabs
 /// never destroys a sound or silently disables another layer.
 public struct StudioSynthPanelView: View {
+    @Environment(\.dismiss) private var dismiss
     @ObservedObject private var viewModel: ProjectViewModel
     public let trackID: TrackID
     @State private var focusedEngine: StudioSynthEngine?
@@ -57,6 +58,14 @@ public struct StudioSynthPanelView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!connected)
+                Button {
+                    dismiss()
+                } label: {
+                    Label("Close", systemImage: "xmark")
+                }
+                .buttonStyle(.bordered)
+                .keyboardShortcut(.cancelAction)
+                .accessibilityHint("Close the synth editor without unloading the instrument")
             }
             .padding(14)
 
