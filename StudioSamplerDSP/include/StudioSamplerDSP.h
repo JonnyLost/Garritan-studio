@@ -38,6 +38,15 @@ int32_t ss_note_on(SSSampler *sampler, uint8_t note, uint8_t velocity, uint8_t c
 int32_t ss_note_off(SSSampler *sampler, uint8_t note, uint8_t channel);
 int32_t ss_all_notes_off(SSSampler *sampler);
 
+/* CC1 drives continuous dynamic-layer crossfading when enabled; CC11 drives
+ * expression on held notes. Both are smoothed by the audio renderer.
+ * The mode is queued and applies to notes started after it is processed.
+ * A single serialized MIDI producer is required, as for note events.
+ */
+int32_t ss_control_change(SSSampler *sampler, uint8_t controller,
+                          uint8_t value, uint8_t channel);
+int32_t ss_set_cc1_crossfade(SSSampler *sampler, int32_t enabled);
+
 /* Two non-overlapping planar output buffers, frames > 0.
  * No malloc/free, locks, file I/O, Objective-C, Swift, or logging.
  */
