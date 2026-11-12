@@ -385,7 +385,7 @@ int main() {
         longR[i] = -.35f;
     }
     assert(!ss_add_stream_zone(streamed, 60, 60, 60, 1, 127, 44100,
-        longL.data(), longR.data(), 32768, 500, 0, 32768,
+        longL.data(), longR.data(), 32768, 1, 0, 32768,
         0, 0, 0, 0, 0, 0, 0, 0));
     assert(ss_add_stream_zone(streamed, 60, 60, 60, 1, 127, 44100,
         longL.data(), longR.data(), 32768, 8192, 0, 32768,
