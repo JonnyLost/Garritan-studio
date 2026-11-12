@@ -543,6 +543,22 @@ public final class ProjectViewModel: ObservableObject {
         return true
     }
 
+    /// Live ADSR updates are recorded in the project and queued to the
+    /// native renderer. Already-playing voices retain their original ADSR.
+    @discardableResult
+    public func setStudioSamplerEnvelope(_ envelope: StudioSamplerEnvelope,
+                                          for trackID: TrackID) -> Bool {
+        guard envelope.isValid,
+              let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              var patch = project.tracks[index].studioSamplerPatch,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSampler(let sampler) = instrument,
+              sampler.setEnvelope(envelope) else { return false }
+        patch.envelope = envelope
+        project.tracks[index].studioSamplerPatch = patch
+        return true
+    }
+
     /// Read a parameter from project state, or the native engine default.
     public func studioAnalogValue(_ parameter: StudioAnalogParameter, for trackID: TrackID) -> Float {
         project.track(withID: trackID)?.studioAnalogPatch?.value(for: parameter)
