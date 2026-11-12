@@ -101,6 +101,7 @@ public final class StudioSynthInstrument {
     public let audioNode = AVAudioMixerNode()
     public let patch: StudioSynthPatch
     private let runtime: [StudioSynthRuntimeLayer]
+    private var modulationWorker: StudioSynthModulationWorker?
 
     public init(sampleRate: Double, patch: StudioSynthPatch) throws {
         guard patch.validate() else { throw StudioSynthError.invalidPatch }
@@ -108,6 +109,69 @@ public final class StudioSynthInstrument {
         runtime = try patch.layers.filter(\.enabled).map {
             try StudioSynthRuntimeLayer($0, sampleRate: sampleRate)
         }
+        if let settings = patch.modulation, settings.hasEnabledRoutes {
+            createModulationWorker(settings)
+        }
+    }
+
+    private func createModulationWorker(_ settings: StudioSynthModulationSettings) {
+        modulationWorker = StudioSynthModulationWorker(
+            settings: settings,
+            read: { [weak self] id, destination in
+                self?.directParameter(id: id, destination: destination)
+            },
+            write: { [weak self] id, destination, value in
+                self?.writeParameter(id: id, destination: destination, value: value)
+                    ?? false
+            })
+    }
+
+    private func directParameter(id: UUID,
+                                 destination: StudioSynthModDestination) -> Float? {
+        guard let layer = runtime.first(where: { $0.id == id }) else { return nil }
+        switch destination {
+        case .analog(let param):
+            return layer.analog?.parameter(param.rawValue)
+        case .fm(let param):
+            return layer.fm?.parameter(param)
+        case .wavetable(let param):
+            return layer.wavetable?.parameter(param)
+        }
+    }
+
+    private func writeParameter(id: UUID, destination: StudioSynthModDestination,
+                                value: Float) -> Bool {
+        guard let layer = runtime.first(where: { $0.id == id }),
+              destination.valid(value) else { return false }
+        switch destination {
+        case .analog(let param):
+            return layer.analog?.setParameter(param.rawValue, value: value) ?? false
+        case .fm(let param):
+            return layer.fm?.setParameter(param, value: value) ?? false
+        case .wavetable(let param):
+            return layer.wavetable?.setParameter(param, value: value) ?? false
+        }
+    }
+
+    /// Live cross-layer routing does not rebuild the audio graph, stop playback
+    /// or reset voices. A 50Hz worker is active only while routes are enabled.
+    @discardableResult
+    public func setModulation(_ settings: StudioSynthModulationSettings) -> Bool {
+        guard settings.validate(layers: patch.layers) else { return false }
+        if let worker = modulationWorker {
+            worker.update(settings)
+            if !settings.hasEnabledRoutes { modulationWorker = nil }
+        } else if settings.hasEnabledRoutes {
+            createModulationWorker(settings)
+        }
+        return true
+    }
+
+    /// Useful for both UI meters and regression tests: reads the engine's
+    /// *current effective* parameter, including any matrix modulation.
+    public func effectiveParameter(id: UUID,
+                                   destination: StudioSynthModDestination) -> Float? {
+        directParameter(id: id, destination: destination)
     }
 
     /// Called only from PlaybackEngine while the AVAudioEngine is stopped.
@@ -145,6 +209,9 @@ public final class StudioSynthInstrument {
                 accepted = false
             }
         }
+        // The matrix receives a copy on its own low-priority control worker.
+        // No modulation calculations or locks are added to render callbacks.
+        modulationWorker?.receiveMIDI(status: status, data1: data1, data2: data2)
         return accepted
     }
 
@@ -185,6 +252,7 @@ public final class StudioSynthInstrument {
         for layer in runtime {
             if !layer.allNotesOff() { accepted = false }
         }
+        modulationWorker?.panic()
         return accepted
     }
 
@@ -200,25 +268,36 @@ public final class StudioSynthInstrument {
     public func setAnalogParameter(id: UUID, parameter: StudioAnalogParameter,
                                    value: Float) -> Bool {
         guard parameter.valid(value),
-              let synth = runtime.first(where: { $0.id == id })?.analog else {
+              runtime.first(where: { $0.id == id })?.analog != nil else {
             return false
         }
-        return synth.setParameter(parameter.rawValue, value: value)
+        let destination = StudioSynthModDestination.analog(parameter)
+        return modulationWorker?.setBase(layer: id, destination: destination,
+                                          value: value) ??
+            writeParameter(id: id, destination: destination, value: value)
     }
 
     public func setWavetableParameter(id: UUID, parameter: StudioWavetableParameter,
                                       value: Float) -> Bool {
-        guard let synth = runtime.first(where: { $0.id == id })?.wavetable else {
+        guard parameter.valid(value),
+              runtime.first(where: { $0.id == id })?.wavetable != nil else {
             return false
         }
-        return synth.setParameter(parameter, value: value)
+        let destination = StudioSynthModDestination.wavetable(parameter)
+        return modulationWorker?.setBase(layer: id, destination: destination,
+                                          value: value) ??
+            writeParameter(id: id, destination: destination, value: value)
     }
 
     public func setFMParameter(id: UUID, parameter: StudioFMParameter,
                                value: Float) -> Bool {
-        guard let synth = runtime.first(where: { $0.id == id })?.fm else {
+        guard parameter.valid(value),
+              runtime.first(where: { $0.id == id })?.fm != nil else {
             return false
         }
-        return synth.setParameter(parameter, value: value)
+        let destination = StudioSynthModDestination.fm(parameter)
+        return modulationWorker?.setBase(layer: id, destination: destination,
+                                          value: value) ??
+            writeParameter(id: id, destination: destination, value: value)
     }
 }

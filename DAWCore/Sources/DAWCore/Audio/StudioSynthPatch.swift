@@ -79,13 +79,16 @@ public struct StudioSynthLayer: Codable, Equatable, Identifiable, Sendable {
 public struct StudioSynthPatch: Codable, Equatable, Sendable {
     public var version: Int
     public var layers: [StudioSynthLayer]
+    /// Optional to preserve every original Studio Synth project file.
+    public var modulation: StudioSynthModulationSettings?
 
     public init(version: Int = 1, layers: [StudioSynthLayer] = [
         StudioSynthLayer(engine: .analog, name: "Analog Foundation"),
         StudioSynthLayer(engine: .fm, name: "FM Attack")
-    ]) {
+    ], modulation: StudioSynthModulationSettings? = nil) {
         self.version = version
         self.layers = layers
+        self.modulation = modulation
     }
 
     public static func individual(_ engine: StudioSynthEngine) -> StudioSynthPatch {
@@ -98,6 +101,7 @@ public struct StudioSynthPatch: Codable, Equatable, Sendable {
         guard version == 1, (1...4).contains(layers.count),
               layers.contains(where: \.enabled),
               Set(layers.map(\.id)).count == layers.count else { return false }
-        return layers.allSatisfy { $0.validate() }
+        return layers.allSatisfy { $0.validate() } &&
+            (modulation?.validate(layers: layers) ?? true)
     }
 }

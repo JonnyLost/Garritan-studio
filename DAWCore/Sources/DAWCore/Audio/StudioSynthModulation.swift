@@ -203,7 +203,7 @@ public enum StudioSynthModulationMath {
         case .lfo2:
             let cycle = seconds * Double(settings.lfo2Rate)
             let fraction = cycle - floor(cycle)
-            return Float(1 - 4 * abs(fraction - 0.25))
+            return Float(1 - 4 * abs(fraction - 0.5))
         case .envelope: return min(1, max(0, envelope))
         case .modWheel: return min(1, max(0, wheel))
         case .macro1: return settings.macro1
