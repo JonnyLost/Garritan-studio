@@ -36,6 +36,8 @@ struct Sample {
     uint32_t fadeIn = 0;
     uint32_t fadeOut = 0;
     uint8_t articulation = 0;
+    uint8_t roundRobin = 0;
+    bool releaseTrigger = false;
 };
 
 struct ADSR {
@@ -65,6 +67,14 @@ struct Voice {
     float envelopeDelta = 0.f;
     int stageFrames = 0;
     bool active = false;
+    bool releaseTrigger = false;
+};
+
+struct HeldNote {
+    bool down = false;
+    uint8_t velocity = 0;
+    uint8_t articulation = 0;
+    uint8_t roundRobin = 0;
 };
 
 enum class CommandKind : uint8_t { on, off, allOff, controller, crossfade, envelope, articulation };
@@ -116,6 +126,10 @@ struct SSSampler {
     uint64_t nextSerial = 0;
     std::array<uint8_t, 128> keyswitchArticulations{};
     std::array<uint8_t, 16> selectedArticulations{};
+    // Fixed-size, real-time-owned note state and variation counters.
+    // No allocation, lock, or mutation on the Swift/MIDI producer thread.
+    std::array<std::array<HeldNote, 128>, 16> heldNotes{};
+    std::array<std::array<std::array<uint8_t, 128>, 16>, 16> roundRobinTurns{};
     ADSR activeADSR{};
     bool cc1Crossfade = false; // mutated only while consuming RT commands
     std::array<float, 16> smoothCC1{};
@@ -185,7 +199,8 @@ struct SSSampler {
     }
 
     void startVoice(const Sample *selected, uint8_t note,
-                    uint8_t velocity, uint8_t channel) {
+                    uint8_t velocity, uint8_t channel,
+                    bool releaseSample = false) {
         Voice *chosen = nullptr;
         for (auto& voice : voices) {
             if (!voice.active) { chosen = &voice; break; }
@@ -211,6 +226,7 @@ struct SSSampler {
         for (const auto& sample : samples) {
             if (&sample == selected || sample.root != selected->root ||
                 sample.articulation != selected->articulation ||
+                sample.releaseTrigger != selected->releaseTrigger ||
                 note < sample.low || note > sample.high) continue;
             const float other = (float(sample.minVelocity) +
                                  float(sample.maxVelocity)) * 0.5f;
@@ -219,32 +235,60 @@ struct SSSampler {
             if (other > chosen->layerCenter && other < chosen->nextCenter)
                 chosen->nextCenter = other;
         }
-        chosen->adsr = activeADSR;
+        chosen->adsr = releaseSample
+            ? ADSR{float(kFadeFrames / outputRate), 0.f, 1.f, 0.f}
+            : activeADSR;
+        chosen->releaseTrigger = releaseSample;
         chosen->stage = EnvelopeStage::attack;
         chosen->envelopeLevel = 0.f;
-        chosen->stageFrames = framesForSeconds(activeADSR.attack, kFadeFrames);
+        chosen->stageFrames = framesForSeconds(chosen->adsr.attack, kFadeFrames);
         chosen->envelopeDelta = 1.f / float(chosen->stageFrames);
         chosen->serial = ++nextSerial;
         chosen->active = true;
     }
 
-    // A note can activate multiple matching dynamic layers. Layers run in
-    // sync from their beginnings; the smoothed CC1 controls their gains.
+    // Variation counters advance per channel / pitch / articulation.
+    // Only recorded takes for the same nearest root and velocity band
+    // participate. CC1 layering shares one variation across all its layers.
+    uint8_t chooseRoundRobin(uint8_t note, uint8_t velocity, uint8_t channel,
+                             uint8_t articulation, const Sample& selected) {
+        std::array<bool, 8> available{};
+        for (const auto& zone : samples) {
+            if (zone.releaseTrigger || zone.articulation != articulation ||
+                zone.root != selected.root || note < zone.low || note > zone.high)
+                continue;
+            if (!cc1Crossfade &&
+                (zone.minVelocity != selected.minVelocity ||
+                 zone.maxVelocity != selected.maxVelocity))
+                continue;
+            available[zone.roundRobin] = true;
+        }
+        int count = 0;
+        for (bool present : available) if (present) ++count;
+        if (count == 0) return selected.roundRobin;
+        const uint8_t turn = roundRobinTurns[channel][articulation][note]++;
+        int slot = turn % count;
+        for (uint8_t index = 0; index < 8; ++index) {
+            if (available[index] && slot-- == 0) return index;
+        }
+        return selected.roundRobin;
+    }
+
     void start(uint8_t note, uint8_t velocity, uint8_t channel) {
-        // Keyswitches are MIDI-only events; they do not sound themselves.
         const uint8_t keyswitch = keyswitchArticulations[note];
         if (keyswitch != 255) {
             selectedArticulations[channel] = keyswitch;
             return;
         }
-        const uint8_t activeArticulation = selectedArticulations[channel];
+        const uint8_t articulation = selectedArticulations[channel];
         const Sample *selected = nullptr;
         int bestDistance = std::numeric_limits<int>::max();
         for (const auto& sample : samples) {
-            if (sample.articulation != activeArticulation ||
+            if (sample.releaseTrigger || sample.articulation != articulation ||
                 note < sample.low || note > sample.high ||
                 (!cc1Crossfade &&
-                 (velocity < sample.minVelocity || velocity > sample.maxVelocity))) continue;
+                 (velocity < sample.minVelocity || velocity > sample.maxVelocity)))
+                continue;
             const int distance = std::abs(int(note) - int(sample.root));
             if (distance < bestDistance) {
                 selected = &sample;
@@ -252,20 +296,57 @@ struct SSSampler {
             }
         }
         if (!selected) return;
+        const uint8_t variation =
+            chooseRoundRobin(note, velocity, channel, articulation, *selected);
+        heldNotes[channel][note] = HeldNote{true, velocity, articulation, variation};
+
         if (!cc1Crossfade) {
-            startVoice(selected, note, velocity, channel);
+            const Sample *take = selected;
+            for (const auto& sample : samples) {
+                if (!sample.releaseTrigger && sample.articulation == articulation &&
+                    sample.root == selected->root && sample.roundRobin == variation &&
+                    sample.minVelocity == selected->minVelocity &&
+                    sample.maxVelocity == selected->maxVelocity &&
+                    note >= sample.low && note <= sample.high) {
+                    take = &sample;
+                    break;
+                }
+            }
+            startVoice(take, note, velocity, channel);
             return;
         }
-        // Pick a single root-note group, not zones belonging to neighboring
-        // recorded notes. Limit layer count to avoid voice exhaustion.
-        int started = 0;
+
+        // Each dynamic band contributes ONE recorded variation (maximum 8
+        // bands), never a sum of all round-robin takes. Missing variations
+        // fall back to the first sample for that band.
+        std::array<uint16_t, 8> playedBands{};
+        int bands = 0;
         for (const auto& sample : samples) {
-            if (sample.root != selected->root ||
-                sample.articulation != activeArticulation ||
-                note < sample.low || note > sample.high) continue;
-            if (started >= 8) break;
-            startVoice(&sample, note, velocity, channel);
-            ++started;
+            if (sample.releaseTrigger || sample.articulation != articulation ||
+                sample.root != selected->root || note < sample.low || note > sample.high)
+                continue;
+            const uint16_t band = uint16_t(sample.minVelocity) << 8 |
+                                  uint16_t(sample.maxVelocity);
+            bool alreadyPlayed = false;
+            for (int i = 0; i < bands; ++i) {
+                if (playedBands[i] == band) { alreadyPlayed = true; break; }
+            }
+            if (alreadyPlayed) continue;
+            if (bands >= 8) break;
+            playedBands[bands++] = band;
+            const Sample *take = &sample;
+            for (const auto& possible : samples) {
+                if (!possible.releaseTrigger && possible.root == sample.root &&
+                    possible.articulation == articulation &&
+                    possible.minVelocity == sample.minVelocity &&
+                    possible.maxVelocity == sample.maxVelocity &&
+                    possible.roundRobin == variation &&
+                    note >= possible.low && note <= possible.high) {
+                    take = &possible;
+                    break;
+                }
+            }
+            startVoice(take, note, velocity, channel);
         }
     }
 
@@ -287,10 +368,43 @@ struct SSSampler {
 
     void stop(uint8_t note, uint8_t channel) {
         if (keyswitchArticulations[note] != 255) return;
+        const HeldNote held = heldNotes[channel][note];
+        heldNotes[channel][note].down = false;
         for (auto& voice : voices) {
-            if (voice.active && voice.note == note && voice.channel == channel)
+            if (voice.active && !voice.releaseTrigger &&
+                voice.note == note && voice.channel == channel)
                 startRelease(voice);
         }
+        // Ignore unmatched/duplicate note-offs and keyswitches.
+        if (!held.down) return;
+
+        const Sample *release = nullptr;
+        int nearest = std::numeric_limits<int>::max();
+        for (const auto& zone : samples) {
+            if (!zone.releaseTrigger || zone.articulation != held.articulation ||
+                note < zone.low || note > zone.high ||
+                held.velocity < zone.minVelocity || held.velocity > zone.maxVelocity)
+                continue;
+            const int distance = std::abs(int(note) - int(zone.root));
+            if (distance < nearest) {
+                release = &zone;
+                nearest = distance;
+            }
+        }
+        if (!release) return;
+        // Prefer a matching release variation when one was recorded;
+        // otherwise use the nearest mapped release take.
+        for (const auto& zone : samples) {
+            if (zone.releaseTrigger && zone.articulation == held.articulation &&
+                zone.root == release->root &&
+                zone.roundRobin == held.roundRobin &&
+                note >= zone.low && note <= zone.high &&
+                held.velocity >= zone.minVelocity && held.velocity <= zone.maxVelocity) {
+                release = &zone;
+                break;
+            }
+        }
+        startVoice(release, note, held.velocity, channel, true);
     }
 
     void consumeMIDI() {
@@ -305,12 +419,15 @@ struct SSSampler {
                 break;
             case CommandKind::off: stop(command.note, command.channel); break;
             case CommandKind::allOff:
+                for (auto& row : heldNotes)
+                    for (auto& held : row) held.down = false;
                 for (auto& voice : voices) if (voice.active) startRelease(voice);
                 break;
             case CommandKind::controller:
                 if (command.note == 1) targetCC1[command.channel] = command.velocity;
                 if (command.note == 11) targetCC11[command.channel] = command.velocity;
                 if (command.note == 120 || command.note == 123) {
+                    for (auto& held : heldNotes[command.channel]) held.down = false;
                     for (auto& voice : voices)
                         if (voice.active && voice.channel == command.channel)
                             startRelease(voice);
@@ -550,7 +667,7 @@ void ss_render(SSSampler *sampler, float *left, float *right, int32_t frames) {
             const float expression = sampler->smoothCC11[voice.channel] / 127.f;
             const float dynamics = sampler->smoothCC1[voice.channel];
             float amplitude = voice.gain * expression;
-            if (sampler->cc1Crossfade) {
+            if (sampler->cc1Crossfade && !voice.releaseTrigger) {
                 amplitude *= sampler->dynamicWeight(voice, dynamics);
             } else {
                 // In discrete-layer mode CC1 is still a continuous volume
