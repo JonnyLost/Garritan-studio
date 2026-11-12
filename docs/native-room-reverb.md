@@ -1,6 +1,6 @@
 # Garritan Studio — Native Room Reverb (prototype)
 
-Status: **implemented in DAWCore, opt-in. The macOS GitHub Actions workflow (debug build, tests, optimized app) succeeded for the initial implementation on 11 November 2026; actual in-app listening and device-level Audio Unit validation remain pending.**
+Status: **4 native room profiles available through the Orchestral Stage acoustic-space picker; Apple mediumHall remains the default. A macOS Debug build and regression tests passed for this implementation on 11 November 2026. In-app Audio Unit listening and device-level checks remain pending.**
 
 ## What exists
 
@@ -16,9 +16,13 @@ Status: **implemented in DAWCore, opt-in. The macOS GitHub Actions workflow (deb
 - NativeRoomReverbProcessorTests.swift: profile JSON, wet-only impulse,
   cross-buffer determinism, invalid values, decay and stereo checks.
 
-The opt-in API is currently a developer-facing integration point, **not a
-user-facing UI setting**. No existing projects or their stage-depth values
-are modified. The new profile does not get enabled on startup.
+The acoustic-space picker is present in compact and expanded Orchestral Stage
+views. Select **Apple Medium Hall (Legacy)** or one of four original native
+venue-inspired profiles. The room ID persists as an optional property of
+DAWState, so older projects default to the established Apple reverb. Native
+profile changes reuse the same 16-line network and retain its tail; switching
+between Apple and native graphs is intentionally disabled during transport
+playback/recording. Individual tracks retain existing stage sends/depth.
 
 ## Acoustic reference catalog
 
@@ -29,12 +33,12 @@ A separate [127-room research index](./acoustic-room-reference-index.md) and [ma
 | Profile | Bass RT60 | Mid RT60 | High RT60 | Status |
 |---|---:|---:|---:|---|
 | Abbey Road Studio One inspired | 2.4 s | 2.2 s | 2.1 s | Initial artistic estimates |
+| MGM/Sony Scoring Stage inspired | 1.35 s | 1.15 s | 1.05 s | Initial artistic estimates |
 | Synchron Stage Vienna inspired | 1.8 s | 1.7 s | 1.55 s | Initial artistic estimates |
 | Boston Symphony Hall inspired | 2.2 s | 1.9 s | 1.7 s | Initial artistic estimates |
 
-Only the **Abbey Road One-inspired** profile is loaded by the first Audio
-Unit. The other two are serialized profiles for follow-up integration; they
-are not yet selectable in the app.
+All four profiles are selectable using the new parameterized in-process Audio
+Unit. The shared legacy Apple hall remains the default.
 
 Published room values inform general decay targets; we **did not measure**
 the rooms' impulse responses or calibrate these presets against recordings.
@@ -59,8 +63,10 @@ Selected research references:
   The native Audio Unit constructs its processor during
   allocateRenderResources, not inside internalRenderBlock.
 - Only stereo, noninterleaved Float32 is supported at this stage.
-- Swapping the reverb while playback is ongoing stops and restarts the audio
-  engine; production UI should forbid this until a glitch-free switch exists.
+- The UI forbids Apple-to-native engine switching during playback or
+  recording. Selecting another *native* profile changes AU parameters and
+  precomputed delay gains without creating or resetting the delay lines.
+  Room switching is currently available only while the transport is stopped.
 - Individual instrument stage depth **currently controls send amount
   and dry attenuation only**. This version does not generate position-specific
   reflections or model microphone placement.
@@ -74,16 +80,17 @@ dry sound. This does **not** establish sound-quality equivalence, macOS
 build health, or macOS Audio Unit instantiation safety.
 
 Before making this reverb a default:
-1. CI debug build, regression tests and release build: **passed** on macOS (see https://github.com/JonnyLost/Garritan-studio/actions/runs/43142554778); re-run after audio-engine changes.
+1. Initial macOS CI (prior prototype) succeeded: https://github.com/JonnyLost/Garritan-studio/actions/runs/43142554778. Updated scoring-room selection: macOS Debug build and regression tests passed on https://github.com/JonnyLost/Garritan-studio/actions/runs/43147911064; optimized Release build status should be checked separately.
 2. Test that the in-process Audio Unit instantiates at 44.1/48/96 kHz,
    and that switching during engine idle preserves existing dry audio.
 3. Evaluate CPU, memory, mono compatibility, denormal/NaN handling, and
    sustained orchestral playback under real-time constraints.
 4. Measure decay curves (RT60 by octave, EDT, C80, interaural correlation)
    and retune against licensed or published references.
-5. Add venue selection UI and project state after safe engine integration;
-   then implement per-track early reflections, microphone position, and
-   smooth room-profile transitions.
+5. Venue-selection UI and optional project-state field are implemented;
+   next implement per-track early reflections, microphone position, smooth
+   transitions between the Apple and native effects, and a proper impulse
+   measurement/calibration harness.
 
 No convolution is used at runtime. Published room impulse measurements can
 still inform offline calibration without becoming runtime dependencies.
