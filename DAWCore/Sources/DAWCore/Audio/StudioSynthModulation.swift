@@ -210,6 +210,9 @@ public struct StudioSynthModulationSettings: Codable, Equatable, Sendable {
     /// Nil = free-running Hz. Optional keys decode as nil from old project JSON.
     public var lfo1Sync: StudioSynthLFOSync?
     public var lfo2Sync: StudioSynthLFOSync?
+    /// Optional 0...1 cycle offsets, absent from old patches (phase zero).
+    public var lfo1Phase: Float?
+    public var lfo2Phase: Float?
     public var envelopeAttack: Float
     public var envelopeDecay: Float
     public var envelopeSustain: Float
@@ -220,6 +223,7 @@ public struct StudioSynthModulationSettings: Codable, Equatable, Sendable {
     public init(version: Int = 1, lfo1Rate: Float = 0.45, lfo2Rate: Float = 0.18,
                 lfo1Sync: StudioSynthLFOSync? = nil,
                 lfo2Sync: StudioSynthLFOSync? = nil,
+                lfo1Phase: Float? = nil, lfo2Phase: Float? = nil,
                 envelopeAttack: Float = 0.08, envelopeDecay: Float = 0.3,
                 envelopeSustain: Float = 0.7, envelopeRelease: Float = 0.5,
                 macro1: Float = 0, routes: [StudioSynthModRoute] = []) {
@@ -228,6 +232,8 @@ public struct StudioSynthModulationSettings: Codable, Equatable, Sendable {
         self.lfo2Rate = lfo2Rate
         self.lfo1Sync = lfo1Sync
         self.lfo2Sync = lfo2Sync
+        self.lfo1Phase = lfo1Phase
+        self.lfo2Phase = lfo2Phase
         self.envelopeAttack = envelopeAttack
         self.envelopeDecay = envelopeDecay
         self.envelopeSustain = envelopeSustain
@@ -241,6 +247,8 @@ public struct StudioSynthModulationSettings: Codable, Equatable, Sendable {
               Set(routes.map(\.id)).count == routes.count,
               lfo1Rate.isFinite, (0.03...15).contains(lfo1Rate),
               lfo2Rate.isFinite, (0.03...15).contains(lfo2Rate),
+              (lfo1Phase.map { $0.isFinite && (0...1).contains($0) } ?? true),
+              (lfo2Phase.map { $0.isFinite && (0...1).contains($0) } ?? true),
               envelopeAttack.isFinite, (0.01...20).contains(envelopeAttack),
               envelopeDecay.isFinite, (0.01...20).contains(envelopeDecay),
               envelopeSustain.isFinite, (0...1).contains(envelopeSustain),
@@ -274,12 +282,14 @@ public enum StudioSynthModulationMath {
         let beatPosition = beats ?? seconds * (bpm / 60)
         switch source {
         case .lfo1:
-            let cycle = settings.lfo1Sync.map { beatPosition / $0.beatsPerCycle }
-                ?? (seconds * Double(settings.lfo1Rate))
+            let cycle = (settings.lfo1Sync.map { beatPosition / $0.beatsPerCycle }
+                ?? (seconds * Double(settings.lfo1Rate))) +
+                Double(settings.lfo1Phase ?? 0)
             return Float(sin(2 * Double.pi * cycle))
         case .lfo2:
-            let cycle = settings.lfo2Sync.map { beatPosition / $0.beatsPerCycle }
-                ?? (seconds * Double(settings.lfo2Rate))
+            let cycle = (settings.lfo2Sync.map { beatPosition / $0.beatsPerCycle }
+                ?? (seconds * Double(settings.lfo2Rate))) +
+                Double(settings.lfo2Phase ?? 0)
             let fraction = cycle - floor(cycle)
             return Float(1 - 4 * abs(fraction - 0.5))
         case .envelope: return min(1, max(0, envelope))
