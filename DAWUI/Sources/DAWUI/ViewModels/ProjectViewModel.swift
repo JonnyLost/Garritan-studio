@@ -491,12 +491,16 @@ public final class ProjectViewModel: ObservableObject {
         } else {
             previousPluginID = nil
         }
-        try playbackEngine.loadStudioSampler(for: trackID, patch: patch)
+        // Repair old user-home paths to app-managed recordings before any
+        // instrument or plug-in is replaced. Missing files leave the
+        // existing graph and project state unchanged for manual relinking.
+        let resolvedPatch = try StudioSamplerSampleLibrary.resolve(patch)
+        try playbackEngine.loadStudioSampler(for: trackID, patch: resolvedPatch)
         if let previousPluginID { pluginHost.unloadPlugin(id: previousPluginID) }
         track.instrumentSlot = nil
         track.garritanProgramID = nil
         track.studioAnalogEnabled = false
-        track.studioSamplerPatch = patch
+        track.studioSamplerPatch = resolvedPatch
         updateTrack(track, description: "Load Studio Sampler")
     }
 
