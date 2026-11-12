@@ -165,6 +165,61 @@ final class StudioSynthTests: XCTestCase {
         XCTAssertGreaterThan(peak, 0.005)
     }
 
+    /// Regression: a preview note must become silent after a real Note Off,
+    /// independent of SwiftUI mouse gestures, track selection or reverb tails.
+    func testPreviewNoteOffReleasesAnalogFMAndWavetableVoices() throws {
+        let patches: [(String, StudioSynthPatch)] = [
+            ("Analog", .individual(.analog)),
+            ("FM", .individual(.fm)),
+            ("Wavetable", .individual(.wavetable)),
+            ("Hybrid", StudioSynthPatch())
+        ]
+        for (name, patch) in patches {
+            let rate = 44_100.0
+            let synth = try StudioSynthInstrument(sampleRate: rate, patch: patch)
+            let engine = AVAudioEngine()
+            try synth.attach(to: engine, destination: engine.mainMixerNode,
+                             sampleRate: rate)
+            let format = try XCTUnwrap(
+                AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2))
+            try engine.enableManualRenderingMode(.offline, format: format,
+                                                 maximumFrameCount: 512)
+            try engine.start()
+            let buffer = try XCTUnwrap(
+                AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 512))
+            defer {
+                engine.stop()
+                engine.disableManualRenderingMode()
+            }
+            XCTAssertTrue(synth.noteOn(69, velocity: 110), name)
+            var onPeak: Float = 0
+            for _ in 0..<12 {
+                XCTAssertEqual(try engine.renderOffline(512, to: buffer), .success, name)
+                let samples = try XCTUnwrap(buffer.floatChannelData)
+                for i in 0..<Int(buffer.frameLength) {
+                    onPeak = max(onPeak, abs(samples[0][i]), abs(samples[1][i]))
+                }
+            }
+            XCTAssertGreaterThan(onPeak, 0.005, "\(name) produced no audible note")
+            XCTAssertTrue(synth.noteOff(69), name)
+
+            // Default voice-release times are below 0.3 seconds. Allow
+            // over 2 seconds to detect voices that never leave sustain.
+            var tailPeak: Float = 0
+            for index in 0..<200 {
+                XCTAssertEqual(try engine.renderOffline(512, to: buffer), .success, name)
+                if index >= 196 {
+                    let samples = try XCTUnwrap(buffer.floatChannelData)
+                    for i in 0..<Int(buffer.frameLength) {
+                        tailPeak = max(tailPeak, abs(samples[0][i]), abs(samples[1][i]))
+                    }
+                }
+            }
+            XCTAssertLessThan(tailPeak, 0.001,
+                              "\(name) is still audible after Note Off")
+        }
+    }
+
     func testHybridMIDIAndPerLayerControls() throws {
         let patch = StudioSynthPatch()
         let hybrid = try StudioSynthInstrument(sampleRate: 44_100, patch: patch)
