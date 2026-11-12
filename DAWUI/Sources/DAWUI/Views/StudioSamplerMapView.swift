@@ -309,6 +309,19 @@ public struct StudioSamplerMapView: View {
                 Divider()
                 Text("Keyswitch map (note-on changes the articulation for future notes)")
                     .font(.caption.weight(.semibold))
+                Stepper(
+                    "Default / Sustain keyswitch: \(SamplerNoteNames.name(draft?.defaultKeyswitchNote ?? 23))",
+                    value: Binding(
+                        get: { Int(draft?.defaultKeyswitchNote ?? 23) },
+                        set: { value in
+                            guard var patch = draft else { return }
+                            patch.defaultKeyswitchNote = UInt8(clamping: value)
+                            draft = patch
+                        }
+                    ),
+                    in: 0...127
+                )
+                .font(.caption)
                 ForEach(items) { articulation in
                     HStack(spacing: 8) {
                         TextField("Articulation", text: Binding(
@@ -359,6 +372,7 @@ public struct StudioSamplerMapView: View {
         let name = index < names.count ? names[index] : "Articulation \(Int(id))"
         patch.articulations = (patch.articulations ?? []) +
             [StudioSamplerArticulation(id: id, name: name, keyswitchNote: note)]
+        if patch.defaultKeyswitchNote == nil { patch.defaultKeyswitchNote = 23 }
         draft = patch
     }
 
@@ -375,6 +389,7 @@ public struct StudioSamplerMapView: View {
     private func removeArticulation(_ id: UInt8) {
         guard var patch = draft else { return }
         patch.articulations?.removeAll(where: { $0.id == id })
+        if patch.articulations?.isEmpty == true { patch.defaultKeyswitchNote = nil }
         for index in patch.zones.indices where patch.zones[index].articulationID == id {
             patch.zones[index].articulationID = nil
         }
@@ -426,6 +441,7 @@ public struct StudioSamplerMapView: View {
             patch.expressionCC11 = draft.expressionCC11
             patch.envelope = draft.envelope
             patch.articulations = draft.articulations
+            patch.defaultKeyswitchNote = draft.defaultKeyswitchNote
             patch.selectedArticulationID = draft.selectedArticulationID
             // Preserve distinct edits when the same imported recording
             // appears in multiple articulations or velocity zones. Consume
