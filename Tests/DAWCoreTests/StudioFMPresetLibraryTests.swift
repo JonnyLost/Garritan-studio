@@ -10,7 +10,12 @@ final class StudioFMPresetLibraryTests: XCTestCase {
         XCTAssertEqual(presets.count, 32)
         XCTAssertEqual(Set(presets.map(\.id)).count, 32)
         XCTAssertEqual(Set(presets.map(\.name)).count, 32)
-        XCTAssertEqual(Set(presets.map(\.patch)).count, 32)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let signatures = try presets.map { preset in
+            String(decoding: try encoder.encode(preset.patch), as: UTF8.self)
+        }
+        XCTAssertEqual(Set(signatures).count, 32)
         XCTAssertEqual(Set(presets.map(\.category)),
                        Set(StudioFMPresetCategory.allCases))
         for category in StudioFMPresetCategory.allCases {
