@@ -11,6 +11,12 @@ public struct StudioSamplerMapView: View {
 
     @State private var draft: StudioSamplerPatch?
     @State private var selectedIndex = 0
+    @State private var editorPage: EditorPage = .mapping
+
+    private enum EditorPage: String, CaseIterable {
+        case mapping = "Key & Velocity"
+        case loop = "Sustain Loop"
+    }
     @State private var showImporter = false
     @State private var isImporting = false
     @State private var errorMessage: String?
@@ -83,7 +89,29 @@ public struct StudioSamplerMapView: View {
                     .stroke(Color.primary.opacity(0.12), lineWidth: 1))
 
                 if let zone = selectedZone {
-                    zoneEditor(zone)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Picker("Zone editor", selection: $editorPage) {
+                            ForEach(EditorPage.allCases, id: \.self) { page in
+                                Text(page.rawValue).tag(page)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 300)
+                        if editorPage == .mapping {
+                            zoneEditor(zone)
+                        } else {
+                            StudioSamplerLoopEditorView(zone: Binding(
+                                get: { selectedZone ?? zone },
+                                set: { edited in
+                                    guard var patch = draft,
+                                          patch.zones.indices.contains(selectedIndex) else { return }
+                                    patch.zones[selectedIndex] = edited
+                                    draft = patch
+                                }
+                            ))
+                            .id(selectedIndex)
+                        }
+                    }
                 }
             } else {
                 VStack(spacing: 12) {
@@ -289,6 +317,18 @@ public struct StudioSamplerMapView: View {
             patch.cc1Crossfade = draft.cc1Crossfade
             patch.dynamicsCC1 = draft.dynamicsCC1
             patch.expressionCC11 = draft.expressionCC11
+            patch.envelope = draft.envelope
+            // Re-map key/velocity assignments without throwing away sustain
+            // loops on the same imported recordings.
+            for index in patch.zones.indices {
+                if let oldZone = draft.zones.first(where: {
+                    $0.filePath == patch.zones[index].filePath
+                }) {
+                    patch.zones[index].loopStartFrame = oldZone.loopStartFrame
+                    patch.zones[index].loopEndFrame = oldZone.loopEndFrame
+                    patch.zones[index].loopCrossfadeFrames = oldZone.loopCrossfadeFrames
+                }
+            }
             self.draft = patch
             selectedIndex = 0
             errorMessage = nil
