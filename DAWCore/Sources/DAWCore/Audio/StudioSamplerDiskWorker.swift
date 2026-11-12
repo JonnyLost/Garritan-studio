@@ -5,7 +5,7 @@ import StudioSamplerDSP
 /// AVAudioFile reader on one serial DispatchQueue. This worker never runs
 /// inside AVAudioSourceNode's real-time callback.
 ///
-/// The C++ sampler owns fixed two-page buffers per voice; this class supplies
+/// The C++ sampler owns fixed four-page buffers per voice; this class supplies
 /// those pages through a release/acquire handoff. There are no asynchronous
 /// writes into buffers that the renderer is currently reading.
 final class StudioSamplerDiskWorker: @unchecked Sendable {
