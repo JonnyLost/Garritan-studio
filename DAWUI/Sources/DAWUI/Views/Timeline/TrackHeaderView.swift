@@ -394,8 +394,7 @@ struct InstrumentSlotButton: View {
                 Button("Open Studio FM Controls...") { showStudioFMPanel = true }
                 Divider()
                 Button("Remove Studio FM", role: .destructive) { removeInstrument() }
-            } else if track.studioAnalogEnabled == true {
-            if track.studioSamplerPatch != nil {
+            } else if track.studioSamplerPatch != nil {
                 Button("Browse / Change Instrument...") { showBrowser = true }
                 Button("Open Studio Sampler Instrument...") { showStudioSamplerMap = true }
                 Divider()
