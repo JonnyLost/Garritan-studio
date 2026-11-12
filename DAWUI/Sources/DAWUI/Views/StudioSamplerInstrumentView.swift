@@ -52,7 +52,7 @@ public struct StudioSamplerInstrumentView: View {
                         }
                         sampleOverview(patch)
                         keyboard
-                        Text("Sample fades, suggested loops and articulation keyswitches are available in Edit Mapping. Legato transitions, release samples, round robin and mic groups remain future milestones.")
+                        Text("Round-robin takes and release-trigger samples are now configured in Edit Mapping. Legato transition modeling and microphone groups remain future milestones.")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -399,6 +399,8 @@ public struct StudioSamplerInstrumentView: View {
     private func sampleOverview(_ patch: StudioSamplerPatch) -> some View {
         let groups = Dictionary(grouping: patch.zones, by: { $0.rootNote })
         let maxLayers = groups.values.map { $0.count }.max() ?? 0
+        let releaseCount = patch.zones.filter { $0.isReleaseTrigger == true }.count
+        let variations = Set(patch.zones.compactMap { $0.roundRobinIndex }).count
         return VStack(alignment: .leading, spacing: 12) {
             Label("Instrument Summary", systemImage: "square.stack.3d.up")
                 .font(.subheadline.weight(.semibold))
@@ -406,6 +408,8 @@ public struct StudioSamplerInstrumentView: View {
                 summary("Recorded samples", value: "\(patch.zones.count)")
                 summary("Mapped roots", value: "\(groups.count)")
                 summary("Max layers/root", value: "\(maxLayers)")
+                summary("Release samples", value: "\(releaseCount)")
+                summary("RR takes", value: "\(max(1, variations))")
             }
             Text("Samples are loaded from your imported recordings. This panel does not substitute synthetic sounds or bundled Garritan content.")
                 .font(.caption2).foregroundStyle(.secondary)
@@ -434,7 +438,7 @@ public struct StudioSamplerInstrumentView: View {
                     Text(zone.sampleURL.lastPathComponent)
                         .lineLimit(1)
                     Spacer(minLength: 4)
-                    Text("\(noteName(zone.rootNote)) · V\(zone.lowestVelocity)–\(zone.highestVelocity)")
+                    Text("\(noteName(zone.rootNote)) · V\(zone.lowestVelocity)–\(zone.highestVelocity) · RR\(Int(zone.roundRobinIndex ?? 0) + 1)\(zone.isReleaseTrigger == true ? " · Release" : "")")
                         .foregroundStyle(.secondary)
                 }
                 .font(.caption)
