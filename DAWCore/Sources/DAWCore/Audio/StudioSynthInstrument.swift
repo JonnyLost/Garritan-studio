@@ -102,10 +102,13 @@ public final class StudioSynthInstrument {
     public let patch: StudioSynthPatch
     private let runtime: [StudioSynthRuntimeLayer]
     private var modulationWorker: StudioSynthModulationWorker?
+    private var tempo: Double
 
-    public init(sampleRate: Double, patch: StudioSynthPatch) throws {
+    public init(sampleRate: Double, patch: StudioSynthPatch,
+                tempo: Double = 120) throws {
         guard patch.validate() else { throw StudioSynthError.invalidPatch }
         self.patch = patch
+        self.tempo = tempo.isFinite && tempo > 0 ? tempo : 120
         runtime = try patch.layers.filter(\.enabled).map {
             try StudioSynthRuntimeLayer($0, sampleRate: sampleRate)
         }
@@ -116,7 +119,7 @@ public final class StudioSynthInstrument {
 
     private func createModulationWorker(_ settings: StudioSynthModulationSettings) {
         modulationWorker = StudioSynthModulationWorker(
-            settings: settings,
+            settings: settings, tempo: tempo,
             read: { [weak self] id, destination in
                 self?.directParameter(id: id, destination: destination)
             },
@@ -165,6 +168,14 @@ public final class StudioSynthInstrument {
             createModulationWorker(settings)
         }
         return true
+    }
+
+    /// A live host tempo edit affects both synced LFOs without resetting phase
+    /// or rebuilding the AVAudioEngine graph. Free-running Hz stays unchanged.
+    public func setTempo(_ bpm: Double) {
+        guard bpm.isFinite && bpm > 0 else { return }
+        tempo = bpm
+        modulationWorker?.setTempo(bpm)
     }
 
     /// Useful for both UI meters and regression tests: reads the engine's
