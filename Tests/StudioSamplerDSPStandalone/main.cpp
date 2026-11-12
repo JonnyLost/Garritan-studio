@@ -333,7 +333,9 @@ int main() {
     assert(overlapL[400] < -.02f); // second attack still held
     assert(ss_note_off(overlap, 60, 0)); // release negative RR1
     ss_render(overlap, overlapL.data(), overlapR.data(), 512);
-    assert(overlapL[400] < -.02f);
+    // Both individual release recordings are now sounding, with their
+    // original velocities and signs; neither attack is still held.
+    assert(overlapL[400] > 0.005f);
     assert(ss_note_off(overlap, 60, 0)); // stray off, no third tail
     ss_render(overlap, overlapL.data(), overlapR.data(), 512);
     ss_destroy(overlap);
