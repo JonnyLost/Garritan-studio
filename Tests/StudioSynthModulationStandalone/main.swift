@@ -30,6 +30,44 @@ assert(abs(StudioSynthModulationMath.signal(
     .lfo2, seconds: 0, settings: settings, envelope: 0, wheel: 0) + 1) < 0.0001)
 assert(abs(StudioSynthModulationMath.signal(
     .lfo2, seconds: 0.5, settings: settings, envelope: 0, wheel: 0) - 1) < 0.0001)
+// Standalone sync checks run on Linux even without a macOS CI runner.
+var synced = StudioSynthModulationSettings(lfo1Rate: 1, lfo2Rate: 1)
+synced.lfo1Sync = StudioSynthLFOSync(note: .quarter)
+synced.lfo2Sync = StudioSynthLFOSync(note: .eighth)
+assert(abs(StudioSynthModulationMath.signal(
+    .lfo1, seconds: 0.125, settings: synced,
+    envelope: 0, wheel: 0, bpm: 120) - 1) < 0.0001)
+assert(abs(StudioSynthModulationMath.signal(
+    .lfo2, seconds: 0.125, settings: synced,
+    envelope: 0, wheel: 0, bpm: 120) - 1) < 0.0001)
+synced.lfo1Sync = StudioSynthLFOSync(note: .quarter, timing: .dotted)
+assert(abs(StudioSynthModulationMath.signal(
+    .lfo1, seconds: 0.1875, settings: synced,
+    envelope: 0, wheel: 0, bpm: 120) - 1) < 0.0001)
+synced.lfo1Sync = StudioSynthLFOSync(note: .quarter, timing: .triplet)
+assert(abs(StudioSynthModulationMath.signal(
+    .lfo1, seconds: 1.0 / 12, settings: synced,
+    envelope: 0, wheel: 0, bpm: 120) - 1) < 0.0001)
+synced.lfo1Sync = StudioSynthLFOSync(note: .quarter)
+assert(abs(StudioSynthModulationMath.signal(
+    .lfo1, seconds: 0.25, settings: synced,
+    envelope: 0, wheel: 0, bpm: 60, beats: 0.375)
+    - Float(sin(0.75 * Double.pi))) < 0.0001)
+let syncedRoundTrip = try JSONDecoder().decode(
+    StudioSynthModulationSettings.self,
+    from: JSONEncoder().encode(synced))
+assert(syncedRoundTrip == synced)
+var oldSyncJSON = try JSONSerialization.jsonObject(
+    with: JSONEncoder().encode(synced)) as! [String: Any]
+oldSyncJSON.removeValue(forKey: "lfo1Sync")
+oldSyncJSON.removeValue(forKey: "lfo2Sync")
+let legacySync = try JSONDecoder().decode(StudioSynthModulationSettings.self,
+    from: JSONSerialization.data(withJSONObject: oldSyncJSON))
+assert(legacySync.lfo1Sync == nil && legacySync.lfo2Sync == nil)
+assert(abs(StudioSynthModulationMath.signal(
+    .lfo1, seconds: 0.25, settings: legacySync,
+    envelope: 0, wheel: 0, bpm: 60) - 1) < 0.0001)
+
 var adsr = StudioSynthModulationEnvelope()
 adsr.trigger()
 assert(abs(adsr.advance(seconds: 0.08, settings: settings) - 1) < 0.0001)
