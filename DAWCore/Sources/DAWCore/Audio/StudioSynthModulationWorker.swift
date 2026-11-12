@@ -2,7 +2,8 @@ import Foundation
 import Dispatch
 
 /// Cross-layer matrix driver. The worker runs only when at least one route is
-/// enabled, at 50 Hz with generous scheduler leeway for MacBook battery life.
+/// enabled, normally at 50 Hz. Short sync divisions dynamically raise the
+/// control rate for fidelity; idle or slow patches keep low battery cost.
 /// All DSP destinations are existing C++ atomic parameter setters. This class
 /// is NEVER called from an AVAudioSourceNode render callback.
 ///
@@ -24,6 +25,7 @@ internal final class StudioSynthModulationWorker {
     private var settings: StudioSynthModulationSettings
     private var baselines: [Key: Float] = [:]
     private var clock: DispatchSourceTimer?
+    private var clockIntervalMs: Int?
     private var elapsed = 0.0
     /// Integrated beats retain phase across BPM changes, including while held.
     private var elapsedBeats = 0.0
@@ -62,7 +64,13 @@ internal final class StudioSynthModulationWorker {
     func setTempo(_ bpm: Double) {
         guard bpm.isFinite && bpm > 0 else { return }
         queue.async { [weak self] in
-            self?.tempo = bpm
+            guard let self else { return }
+            // Account for time at the OLD tempo first; never retroactively
+            // rephase the beat clock when the user changes BPM.
+            self.advanceClock()
+            self.tempo = bpm
+            self.scheduleClockIfNeeded()
+            self.applyCurrentValues()
         }
     }
 
@@ -134,34 +142,56 @@ internal final class StudioSynthModulationWorker {
         }
 
         if newer.hasEnabledRoutes {
-            if clock == nil {
-                lastUptime = nil
-                let source = DispatchSource.makeTimerSource(queue: queue)
-                source.schedule(deadline: .now(), repeating: .milliseconds(20),
-                                leeway: .milliseconds(5))
-                source.setEventHandler { [weak self] in
-                    self?.tick()
-                }
-                clock = source
-                source.resume()
-            }
+            scheduleClockIfNeeded()
         } else {
             clock?.cancel()
             clock = nil
+            clockIntervalMs = nil
             lastUptime = nil
         }
         applyCurrentValues()
     }
 
-    private func tick() {
+    private func scheduleClockIfNeeded() {
+        guard settings.hasEnabledRoutes else { return }
+        let hz = StudioSynthModulationMath.controlRate(settings, bpm: tempo)
+        // Dispatch milliseconds keep scheduling predictable and affordable.
+        let interval = max(2, Int((1000 / hz).rounded(.down)))
+        guard clock == nil || clockIntervalMs != interval else { return }
+        let leeway = max(1, min(5, interval / 4))
+        if let clock {
+            clock.schedule(deadline: .now(), repeating: .milliseconds(interval),
+                           leeway: .milliseconds(leeway))
+        } else {
+            lastUptime = nil
+            let source = DispatchSource.makeTimerSource(queue: queue)
+            source.schedule(deadline: .now(), repeating: .milliseconds(interval),
+                            leeway: .milliseconds(leeway))
+            source.setEventHandler { [weak self] in
+                self?.tick()
+            }
+            clock = source
+            source.resume()
+        }
+        clockIntervalMs = interval
+    }
+
+    private func advanceClock() {
         let now = DispatchTime.now().uptimeNanoseconds
         if let previous = lastUptime, now >= previous {
-            let delta = min(0.15, Double(now - previous) / 1_000_000_000)
-            elapsed += delta
-            elapsedBeats += delta * tempo / 60
-            _ = envelope.advance(seconds: delta, settings: settings)
+            let elapsedSeconds = Double(now - previous) / 1_000_000_000
+            // Preserve LFO phase across a stalled timer, but continue
+            // capping envelope steps to avoid skipping its entire attack.
+            elapsed += elapsedSeconds
+            elapsedBeats += elapsedSeconds * tempo / 60
+            _ = envelope.advance(seconds: min(0.15, elapsedSeconds),
+                                 settings: settings)
         }
         lastUptime = now
+    }
+
+    private func tick() {
+        advanceClock()
         applyCurrentValues()
     }
 
