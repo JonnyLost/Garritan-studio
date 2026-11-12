@@ -184,6 +184,123 @@ struct SSSampler {
     std::atomic<uint32_t> commandWrite{0};
     std::atomic<uint32_t> commandRead{0};
 
+    // Called only by audio callback. Acquire prevents concurrent reads
+    // of a slot until the worker fully publishes its Float32 page.
+    bool streamFrame(const Voice& voice, uint32_t frame,
+                     float& leftOut, float& rightOut) const {
+        const Sample& sample = *voice.sample;
+        if (frame >= sample.playbackEnd) return false;
+        if (!sample.streamed) {
+            if (frame >= sample.left.size()) return false;
+            leftOut = sample.left[frame];
+            rightOut = sample.right[frame];
+            return true;
+        }
+        if (frame >= sample.attackStart &&
+            uint64_t(frame) < uint64_t(sample.attackStart) + sample.left.size()) {
+            const size_t offset = size_t(frame - sample.attackStart);
+            leftOut = sample.left[offset];
+            rightOut = sample.right[offset];
+            return true;
+        }
+        if (!streamPages) return false;
+        const size_t voiceIndex = size_t(&voice - voices.data());
+        if (voiceIndex >= voices.size()) return false;
+        for (int slot = 0; slot < kStreamPagesPerVoice; ++slot) {
+            const StreamPage& page = streamPages[voiceIndex * kStreamPagesPerVoice + slot];
+            if (page.state.load(std::memory_order_acquire) == 3 &&
+                page.serial == voice.serial && page.zoneIndex == voice.zoneIndex &&
+                frame >= page.start && uint64_t(frame) < uint64_t(page.start) + page.frames) {
+                const size_t offset = size_t(frame - page.start);
+                leftOut = page.left[offset];
+                rightOut = page.right[offset];
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool streamLinear(const Voice& voice, double position, float& leftOut,
+                      float& rightOut) const {
+        if (!voice.sample->streamed) {
+            leftOut = readLinear(voice.sample->left, position);
+            rightOut = readLinear(voice.sample->right, position);
+            return true;
+        }
+        if (position < 0 || position >= double(voice.sample->playbackEnd)) return false;
+        const uint32_t frame = uint32_t(position);
+        const uint32_t next = frame + 1 < voice.sample->playbackEnd ? frame + 1 : frame;
+        float aL = 0.f, aR = 0.f, bL = 0.f, bR = 0.f;
+        if (!streamFrame(voice, frame, aL, aR) ||
+            !streamFrame(voice, next, bL, bR)) return false;
+        const float ratio = float(position - double(frame));
+        leftOut = aL + (bL - aL) * ratio;
+        rightOut = aR + (bR - aR) * ratio;
+        return true;
+    }
+
+    // Publish one page request from the audio callback with a release store.
+    // It NEVER waits for a worker claim, I/O operation or completed page.
+    void requestPage(const Voice& voice, uint32_t desiredStart,
+                     uint32_t keepStart) {
+        if (!streamPages || desiredStart >= voice.sample->playbackEnd) return;
+        const size_t voiceIndex = size_t(&voice - voices.data());
+        StreamPage *base = &streamPages[voiceIndex * kStreamPagesPerVoice];
+        for (int i = 0; i < kStreamPagesPerVoice; ++i) {
+            const auto state = base[i].state.load(std::memory_order_acquire);
+            if (state != 0 && base[i].serial == voice.serial &&
+                base[i].zoneIndex == voice.zoneIndex &&
+                base[i].start == desiredStart) return;
+        }
+        StreamPage *slot = nullptr;
+        for (int i = 0; i < kStreamPagesPerVoice; ++i) {
+            const auto state = base[i].state.load(std::memory_order_acquire);
+            if (state == 0) { slot = &base[i]; break; }
+            if (state == 3 && (base[i].serial != voice.serial ||
+                              base[i].zoneIndex != voice.zoneIndex)) {
+                slot = &base[i]; break;
+            }
+        }
+        if (!slot) {
+            for (int i = 0; i < kStreamPagesPerVoice; ++i) {
+                if (base[i].state.load(std::memory_order_acquire) == 3 &&
+                    base[i].start != keepStart) {
+                    slot = &base[i];
+                    break;
+                }
+            }
+        }
+        if (!slot) return;
+        slot->state.store(0, std::memory_order_release);
+        slot->serial = voice.serial;
+        slot->zoneIndex = voice.zoneIndex;
+        slot->start = desiredStart;
+        slot->frames = std::min(kPageFrames, voice.sample->fullFrames - desiredStart);
+        slot->state.store(1, std::memory_order_release);
+    }
+
+    void prefetch(const Voice& voice) {
+        const Sample& sample = *voice.sample;
+        if (!sample.streamed || !streamPages) return;
+        // Keep the next page available before the preloaded attack ends.
+        const uint32_t attackEnd = sample.attackStart +
+                                   uint32_t(sample.left.size());
+        const uint32_t position = uint32_t(std::max(
+            0.0, std::min(voice.position, double(sample.playbackEnd - 1))));
+        const uint32_t target = std::max(position, attackEnd - 1);
+        const uint32_t currentPage = (target / kPageFrames) * kPageFrames;
+        requestPage(voice, currentPage, currentPage);
+        uint32_t following = currentPage + kPageFrames;
+        if (sample.loopEnd != 0 && voice.stage != EnvelopeStage::release &&
+            sample.loopEnd > position && sample.loopEnd - position <= kPageFrames * 2 &&
+            sample.loopStart < currentPage) {
+            // Loop wrap will seek backwards; start fetching the loop entrance.
+            following = (sample.loopStart / kPageFrames) * kPageFrames;
+        }
+        if (following < sample.playbackEnd && following != currentPage)
+            requestPage(voice, following, currentPage);
+    }
+
     int framesForSeconds(float seconds, int minimumFrames) const {
         const double requested = std::ceil(double(seconds) * outputRate);
         return std::max(minimumFrames, static_cast<int>(requested));
@@ -304,6 +421,7 @@ struct SSSampler {
         if (!std::isfinite(increment) || increment <= 0) return;
         *chosen = Voice{};
         chosen->sample = selected;
+        chosen->zoneIndex = uint32_t(selected - samples.data());
         chosen->note = note;
         chosen->channel = channel;
         chosen->noteSerial = noteSerial;
