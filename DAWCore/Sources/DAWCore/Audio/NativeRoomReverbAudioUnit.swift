@@ -75,7 +75,8 @@ public final class NativeRoomReverbAudioUnit: AUAudioUnit {
         }
         processor = NativeRoomReverbProcessor(
             sampleRate: format.sampleRate,
-            profiles: StudioRoomAcousticProfile.starterProfiles
+            profiles: StudioRoomAcousticProfile.starterProfiles,
+            includeEarlyReflections: false  // Dedicated per-track ER sidechain
         )
     }
 
