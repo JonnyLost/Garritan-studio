@@ -291,6 +291,7 @@ final class StudioSamplerTrackIntegrationTests: XCTestCase {
             )
         ]
         patch.selectedArticulationID = 1
+        patch.defaultKeyswitchNote = 23
         XCTAssertTrue(patch.isValid)
         var track = Track(name: "Expressive Violin", type: .instrument)
         track.studioSamplerPatch = patch
@@ -306,6 +307,10 @@ final class StudioSamplerTrackIntegrationTests: XCTestCase {
         ))
         XCTAssertFalse(patch.isValid)
         patch.articulations?[1].keyswitchNote = 25
+        XCTAssertTrue(patch.isValid)
+        patch.defaultKeyswitchNote = 24
+        XCTAssertFalse(patch.isValid)
+        patch.defaultKeyswitchNote = 23
         XCTAssertTrue(patch.isValid)
         patch.zones[1].articulationID = 5
         XCTAssertFalse(patch.isValid)
