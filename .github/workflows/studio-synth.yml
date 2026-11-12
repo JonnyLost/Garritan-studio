@@ -34,7 +34,11 @@ jobs:
             DAWCore/Sources/DAWCore/Audio/StudioWavetableInstrument.swift \
             DAWCore/Sources/DAWCore/Audio/StudioWavetablePresets.swift \
             DAWUI/Sources/DAWUI/Views/StudioWavetableWaveformPreview.swift \
-            Tests/StudioWavetableDSPTests/StudioWavetableDSPTests.swift
+            Tests/StudioWavetableDSPTests/StudioWavetableDSPTests.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioSynthModulation.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioSynthModulationWorker.swift \
+            DAWUI/Sources/DAWUI/Views/StudioSynthModulationView.swift \
+            Tests/DAWCoreTests/StudioSynthModulationTests.swift
       - name: Original analog DSP
         run: |
           clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
