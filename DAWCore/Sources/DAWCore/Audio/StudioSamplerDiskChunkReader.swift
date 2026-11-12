@@ -15,8 +15,8 @@ public struct StudioSamplerPCMPage: Sendable {
 /// prevent a large orchestral session from multiplying unbounded PCM caches.
 public enum StudioSamplerStreamBudget {
     public static let pageFrames = 4_096
-    public static let readAheadPages = 4
-    public static let maxReadFrames = pageFrames * readAheadPages
+    public static let readAheadPages = 2 // matches the native two-page-per-voice cache
+    public static let maxReadFrames = pageFrames * 4 // per-worker I/O request bound
     public static let attackSeconds = 0.25
 
     public static func attackFrames(sampleRate: Double) -> Int {
@@ -25,18 +25,19 @@ public enum StudioSamplerStreamBudget {
     }
 
     public static func readAheadBytes(voices: Int, channels: Int = 2) -> Int {
-        max(0, min(voices, 64)) * maxReadFrames * max(1, min(channels, 2)) *
+        max(0, min(voices, 64)) * pageFrames * readAheadPages *
+            max(1, min(channels, 2)) *
             MemoryLayout<Float>.stride
     }
 }
 
-/// A worker-owned native AVAudioFile page reader. Only initializes format
-/// metadata; does not preload sample PCM. Every read has a fixed memory cap.
+/// A worker-owned AVAudioFile page reader. One reusable scratch buffer is
+/// allocated when the reader opens; pages do not allocate decode buffers.
 /// 
 /// IMPORTANT: instance is not Sendable and is deliberately thread-confined.
 /// Call exclusively on a dedicated background worker, NEVER from AVAudioSourceNode
-/// render callback or main-actor UI. The DSP read-ahead bridge is a separate
-/// integration milestone and not claimed here.
+/// render callback or main-actor UI. The audio engine consumes copied pages
+/// via the C++ streaming-slot ownership protocol.
 public final class StudioSamplerDiskChunkReader {
     public enum ReaderError: Error, LocalizedError {
         case unsupportedChannels
@@ -59,6 +60,7 @@ public final class StudioSamplerDiskChunkReader {
     }
 
     private let file: AVAudioFile
+    private let scratch: AVAudioPCMBuffer
     public let frameCount: Int64
     public let sampleRate: Double
     public let channels: Int
@@ -73,42 +75,59 @@ public final class StudioSamplerDiskChunkReader {
             throw ReaderError.unsupportedChannels
         }
         guard file.length >= 2 else { throw ReaderError.emptyRecording }
+        guard let scratch = AVAudioPCMBuffer(
+            pcmFormat: format,
+            frameCapacity: AVAudioFrameCount(StudioSamplerStreamBudget.maxReadFrames)
+        ) else { throw ReaderError.readFailed }
         self.file = file
+        self.scratch = scratch
         self.frameCount = file.length
         self.sampleRate = format.sampleRate
         self.channels = Int(format.channelCount)
     }
 
-    /// Seek and decode only the requested 1...16384 source frames. A short
-    /// final page is valid and returned with its actual decoded frame count.
-    /// The caller controls prefetch priority and can retry after I/O errors.
-    public func readPage(startFrame: Int64,
-                         requestedFrames: Int = StudioSamplerStreamBudget.pageFrames)
-        throws -> StudioSamplerPCMPage
-    {
+    /// A direct, no-copy view into the reader-owned scratch buffer, valid
+    /// only for the duration of the synchronous worker callback. The worker
+    /// copies the page into C++ memory before returning. Never retain the
+    /// pointers or use this reader on multiple threads.
+    public func withPage<Result>(
+        startFrame: Int64,
+        requestedFrames: Int = StudioSamplerStreamBudget.pageFrames,
+        _ consumer: (UnsafePointer<Float>, UnsafePointer<Float>?, Int) -> Result
+    ) throws -> Result {
         guard startFrame >= 0, startFrame < frameCount,
               requestedFrames > 0,
               requestedFrames <= StudioSamplerStreamBudget.maxReadFrames else {
             throw ReaderError.invalidRange
         }
         let count = Int(min(Int64(requestedFrames), frameCount - startFrame))
-        guard let buffer = AVAudioPCMBuffer(
-            pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(count)
-        ) else { throw ReaderError.readFailed }
         file.framePosition = AVAudioFramePosition(startFrame)
-        try file.read(into: buffer, frameCount: AVAudioFrameCount(count))
-        let actual = Int(buffer.frameLength)
-        guard actual > 0, actual <= count, let data = buffer.floatChannelData else {
+        try file.read(into: scratch, frameCount: AVAudioFrameCount(count))
+        let actual = Int(scratch.frameLength)
+        guard actual > 0, actual <= count, let data = scratch.floatChannelData else {
             throw ReaderError.readFailed
         }
-        let left = Array(UnsafeBufferPointer(start: data[0], count: actual))
-        let right: [Float]
-        if channels == 2 {
-            right = Array(UnsafeBufferPointer(start: data[1], count: actual))
-        } else {
-            right = left
+        let right: UnsafePointer<Float>? = channels == 2
+            ? UnsafePointer(data[1]) : nil
+        return consumer(UnsafePointer(data[0]), right, actual)
+    }
+
+    /// Public immutable page copy for analysis, tests and non-realtime code.
+    /// Streaming playback uses withPage to avoid these intermediate arrays.
+    public func readPage(
+        startFrame: Int64,
+        requestedFrames: Int = StudioSamplerStreamBudget.pageFrames
+    ) throws -> StudioSamplerPCMPage {
+        let copied = try withPage(
+            startFrame: startFrame, requestedFrames: requestedFrames
+        ) { left, right, count in
+            let l = Array(UnsafeBufferPointer(start: left, count: count))
+            let r = right.map { Array(UnsafeBufferPointer(start: $0, count: count)) } ?? l
+            return (count, l, r)
         }
-        return StudioSamplerPCMPage(startFrame: startFrame, frameCount: actual,
-                                    sampleRate: sampleRate, left: left, right: right)
+        return StudioSamplerPCMPage(
+            startFrame: startFrame, frameCount: copied.0,
+            sampleRate: sampleRate, left: copied.1, right: copied.2
+        )
     }
 }
