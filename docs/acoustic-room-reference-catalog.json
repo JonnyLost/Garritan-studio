@@ -628,10 +628,10 @@
       "evidence": "published",
       "publishedRTSeconds": 1.85,
       "rtContext": "occupied midband, Beranek survey",
-      "note": "Surround/audience-around-stage architecture.",
+      "note": "Beranek occupied midband 1.85 s; Nagata Acoustics additionally reports approximately 2.0 s at occupied 500 Hz.",
       "sourceUrls": [
         "https://www.researchgate.net/publication/228346559_Concert_Hall_Acoustics-2008",
-        "https://aes.org/publications/elibrary/elibrary-page/?id=14398"
+        "https://www.nagata.co.jp/projects/3353"
       ]
     },
     {
@@ -644,7 +644,7 @@
       "rtContext": "estimated occupied 500 Hz; original acoustics study",
       "note": "Unoccupied measured 2.5 s at 500 Hz; settings change with curtains.",
       "sourceUrls": [
-        "https://www.ioa.org.uk/system/files/proceedings/k_oguchi_m_quiquerez_y_toyota_acoustical_design_of_elbphilharmonie.pdf"
+        "https://www.nagata.co.jp/projects/3606"
       ]
     },
     {
@@ -876,9 +876,9 @@
       "location": "Sydney, Australia",
       "category": "concert_hall",
       "evidence": "geometry_or_character_documented",
-      "note": "Renovations significantly change reference measurements; seek post-renovation authoritative data.",
+      "note": "2022 major refurbishment installed 18 acoustic reflectors and diffusers; historic numeric figures should not be applied without checking updated measurements.",
       "sourceUrls": [
-        "https://www.researchgate.net/publication/228346559_Concert_Hall_Acoustics-2008"
+        "https://stories.sydneyoperahouse.com/renewing-an-icon/index.html"
       ]
     },
     {
@@ -886,11 +886,14 @@
       "name": "Philharmonie de Paris — Grande Salle",
       "location": "Paris, France",
       "category": "concert_hall",
-      "evidence": "geometry_or_character_documented",
-      "note": "Targeted long decay with extensive early reflectors; architectural/design reference.",
+      "evidence": "acoustic_consultant_estimate",
+      "note": "37,700 m³ surround hall with suspended reflection clouds. More reverberant than earlier design goal.",
       "sourceUrls": [
-        "https://www.researchgate.net/publication/228346559_Concert_Hall_Acoustics-2008"
-      ]
+        "https://www.nagata.co.jp/projects/3577",
+        "https://philharmoniedeparis.fr/en/discover/philharmonie"
+      ],
+      "publishedRTSeconds": 2.6,
+      "rtContext": "estimated occupied at 500 Hz; Nagata Acoustics; measured unoccupied 3.1 s"
     },
     {
       "id": "kkl-luzern-concert-hall-lucerne-switzerland",
@@ -898,9 +901,10 @@
       "location": "Lucerne, Switzerland",
       "category": "concert_hall",
       "evidence": "geometry_or_character_documented",
-      "note": "Adjustable reverberation and isolation; needs primary measurement verification.",
+      "note": "Variable coupled acoustic chambers, 50 opening doors, up to 6,000 m³ additional coupled volume; excellent multisloped-decay research candidate.",
       "sourceUrls": [
-        "https://www.researchgate.net/publication/228346559_Concert_Hall_Acoustics-2008"
+        "https://www.kkl-luzern.ch/en/about-us/architecture-acoustics",
+        "https://www.kahleacoustics.com/en/ref/kklLuzern--.html"
       ]
     },
     {
@@ -938,13 +942,13 @@
     },
     {
       "id": "sage-gateshead-hall-one-gateshead-united-kingdom",
-      "name": "Sage Gateshead — Hall One",
+      "name": "The Glasshouse (formerly Sage Gateshead) — Sage One",
       "location": "Gateshead, United Kingdom",
       "category": "concert_hall",
       "evidence": "geometry_or_character_documented",
-      "note": "Contemporary hall for comparison; RT not independently verified here.",
+      "note": "Three-tiered wood-paneled concert space; no verified room RT here.",
       "sourceUrls": [
-        "https://www.researchgate.net/publication/228346559_Concert_Hall_Acoustics-2008"
+        "https://theglasshouseicm.org/conference-events/spaces/"
       ]
     },
     {
@@ -952,11 +956,14 @@
       "name": "Bridgewater Hall",
       "location": "Manchester, United Kingdom",
       "category": "concert_hall",
-      "evidence": "geometry_or_character_documented",
-      "note": "Modern concert hall reference; acoustical benchmarks need primary-source validation.",
+      "evidence": "published",
+      "note": "Acoustic engineer's empty-hall survey; venue describes ~2.2 s orchestral sound. Occupied values not inferred.",
       "sourceUrls": [
-        "https://www.researchgate.net/publication/228346559_Concert_Hall_Acoustics-2008"
-      ]
+        "https://acousticengineering.wordpress.com/2013/10/10/measuring-the-acoustics-of-the-bridgewater-hall/",
+        "https://www.bridgewater-hall.co.uk/get-involved/community/a-guided-tour-of-the-hall/"
+      ],
+      "publishedRTSeconds": 2.3,
+      "rtContext": "empty hall; field measurement, most mid/high frequencies; bass up to about 3 s"
     },
     {
       "id": "teatro-colon-buenos-aires-argentina",
@@ -1444,6 +1451,97 @@
       "note": "Historic baseline, not the acoustics of the restored cathedral.",
       "sourceUrls": [
         "https://doi.org/10.1016/j.culher.2022.09.006"
+      ]
+    },
+    {
+      "id": "new-world-center-concert-hall-miami-beach-florida-usa",
+      "name": "New World Center — Concert Hall",
+      "location": "Miami Beach, Florida, USA",
+      "category": "concert_hall",
+      "evidence": "acoustic_consultant_estimate",
+      "publishedRTSeconds": 2.1,
+      "rtContext": "occupied design-consultant figure",
+      "note": "748 seats, 14,200 m³; orchestral training and performance.",
+      "sourceUrls": [
+        "https://www.nagata.co.jp/projects/3485"
+      ]
+    },
+    {
+      "id": "kyoto-concert-hall-main-hall-kyoto-japan",
+      "name": "Kyoto Concert Hall — Main Hall",
+      "location": "Kyoto, Japan",
+      "category": "concert_hall",
+      "evidence": "acoustic_consultant_estimate",
+      "publishedRTSeconds": 2,
+      "rtContext": "occupied design-consultant figure",
+      "note": "1,839 seats and 20,000 m³.",
+      "sourceUrls": [
+        "https://www.nagata.co.jp/projects/3129"
+      ]
+    },
+    {
+      "id": "sumida-triphony-hall-main-hall-tokyo-japan",
+      "name": "Sumida Triphony Hall — Main Hall",
+      "location": "Tokyo, Japan",
+      "category": "concert_hall",
+      "evidence": "acoustic_consultant_estimate",
+      "publishedRTSeconds": 2,
+      "rtContext": "occupied design-consultant figure",
+      "note": "1,801 seats and 18,500 m³.",
+      "sourceUrls": [
+        "https://www.nagata.co.jp/projects/3177"
+      ]
+    },
+    {
+      "id": "tokyo-metropolitan-art-space-concert-hall-2012-renovated-tokyo-japan",
+      "name": "Tokyo Metropolitan Art Space — Concert Hall (2012 renovated)",
+      "location": "Tokyo, Japan",
+      "category": "concert_hall",
+      "evidence": "acoustic_consultant_estimate",
+      "publishedRTSeconds": 2.2,
+      "rtContext": "occupied design-consultant figure, post-2012 renovations",
+      "note": "Later measurement supersedes circa-1990 2.1 s benchmark.",
+      "sourceUrls": [
+        "https://www.nagata.co.jp/projects/3507"
+      ]
+    },
+    {
+      "id": "lotte-concert-hall-seoul-south-korea",
+      "name": "Lotte Concert Hall",
+      "location": "Seoul, South Korea",
+      "category": "concert_hall",
+      "evidence": "acoustic_consultant_estimate",
+      "publishedRTSeconds": 2.7,
+      "rtContext": "2016 occupied estimate at 500 Hz; measured empty about 2.9 s",
+      "note": "Large modern vineyard-type auditorium; notable longer-than-average decay.",
+      "sourceUrls": [
+        "https://www.nagata.co.jp/news/news1609.html"
+      ]
+    },
+    {
+      "id": "isarphilharmonie-munich-germany",
+      "name": "Isarphilharmonie",
+      "location": "Munich, Germany",
+      "category": "concert_hall",
+      "evidence": "acoustic_consultant_estimate",
+      "publishedRTSeconds": 1.8,
+      "rtContext": "estimated occupied 500 Hz; empty measured 2.1 s",
+      "note": "2021 contemporary auditorium with shaped timber surfaces.",
+      "sourceUrls": [
+        "https://www.nagata-i.com/wp-content/uploads/Isarphilharmonie_NAGATA.pdf"
+      ]
+    },
+    {
+      "id": "katsushika-symphony-hills-mozart-hall-tokyo-japan",
+      "name": "Katsushika Symphony Hills — Mozart Hall",
+      "location": "Tokyo, Japan",
+      "category": "concert_hall",
+      "evidence": "acoustic_consultant_estimate",
+      "publishedRTSeconds": 1.8,
+      "rtContext": "occupied design-consultant figure",
+      "note": "1,318 seats and 12,500 m³.",
+      "sourceUrls": [
+        "https://www.nagata.co.jp/projects/3049"
       ]
     }
   ]
