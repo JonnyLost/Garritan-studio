@@ -26,8 +26,9 @@ No changes are merged into the original Analog, FM, or Sampler branches.
   modulated value, and removal of routes restores the base patch.
 - Both LFOs now support independent **Free** (0.03–15 Hz) or **Sync**
   modes. Sync offers 1/1, 1/2, 1/4, 1/8, 1/16, 1/32 and 1/64 durations,
-  each with straight, dotted or triplet timing. Project tempo supplies BPM;
-  saved Free mode frequencies remain intact when Sync is selected.
+  each with straight, dotted or triplet timing. Independent phase offsets
+  (0–360°) apply in either mode. Project tempo supplies BPM; saved Free mode
+  frequencies remain intact when Sync is selected.
 - Integrated beat phase runs continuously on the existing worker and never
   resets when project BPM changes. Live changes update every loaded shared
   synth instrument via PlaybackEngine's existing tempo subscription; newly
@@ -36,8 +37,12 @@ No changes are merged into the original Analog, FM, or Sampler branches.
 - Sync is optional in the existing version-1 patch schema: absent sync
   keys decode to Free mode, so older factory patches and saved projects
   remain readable without migration.
-- The 50Hz control worker runs only if routes are enabled. It uses a
-  private serial dispatch queue (QoS utility), 5-ms scheduler leeway,
+- The control worker runs only if routes are enabled, normally at 50Hz.
+  When a routed LFO uses a short synced division, it automatically increases
+  its update rate to target eight samples per LFO cycle, capped at 400Hz.
+  This avoids undersampling fast 1/32–1/64-note modulations at common BPMs,
+  while idle, unmodulated and ordinary-rate patches keep the cheap 50Hz path.
+  It uses one private serial dispatch queue (QoS utility), scheduler leeway,
   and the same atomic C++ parameter setters already used by the synths.
   No locks, file I/O, Swift object creation, or modulation math has been
   introduced into any DSP render callback.
@@ -47,16 +52,19 @@ No changes are merged into the original Analog, FM, or Sampler branches.
 ## Honest limitations
 
 - This phase is **control-rate modulation**, not audio-rate or sample-accurate.
-  Cross-layer modulation is globally timed by a 50Hz worker, so envelope
-  retriggers and CC1 changes may have up to a control-tick of latency/jitter.
+  Envelope retriggers and CC1 changes have control-tick latency/jitter.
+  Even 400Hz is not sample-accurate: very short divisions at unusually high
+  project tempos can still sound stepped or aliased. Audio-rate modulation
+  would be a separate, carefully engineered DSP feature.
 - The shared ADSR is monophonic and retriggers on note-on. Independent
   per-voice ADSRs remain inside the underlying synthesis engines.
 - CC1 is the last received wheel value across MIDI channels, intended for
   global cross-layer macro behavior. Per-channel/per-note expression matrix
   routing, MIDI learn and step sequencers are later steps.
 - Worker is active for the life of an instrument with enabled routes, even
-  while silent. This is low-cost at 50Hz, but true idle-voice suspension and
-  battery profiling remain follow-up work.
+  while silent. This is low-cost at ordinary rates, but fast synced LFOs
+  consume more control CPU. True idle-voice suspension and MacBook battery
+  profiling remain follow-up work.
 
 ## Verification
 
@@ -65,8 +73,9 @@ No changes are merged into the original Analog, FM, or Sampler branches.
   decoding, deterministic LFO/ADSR samples, cross-engine Macro 1 modulation,
   additive multi-route behavior, preserving edited base controls and restoring
   baselines after route deletion. Sync checks cover all 21 note-duration
-  variants, straight/dotted/triplet math, old-JSON decoding, patch round trips
-  and beat-phase continuity at live BPM changes. The Linux standalone test
+  variants, straight/dotted/triplet math, phase offsets, adaptive control
+  rate selection, old-JSON decoding, patch round trips and beat-phase
+  continuity at live BPM changes. The Linux standalone test
   additionally exercises sync math without a macOS SDK.
 - CI: Swift syntax parse on Linux, the original Analog/FM/Wavetable C++
   sanitizer tests, macOS \`swift build\`, \`swift test --parallel\` and
