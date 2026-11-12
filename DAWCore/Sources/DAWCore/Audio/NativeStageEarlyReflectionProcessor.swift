@@ -30,7 +30,7 @@ public final class NativeStageEarlyReflectionProcessor {
 
     private let roomTaps: [[SourceTap]]
     private var renderTaps = [RenderTap](repeating: RenderTap(), count: 32)
-    private var tapCount = 0
+    private var tapCount = -1
 
     public private(set) var roomIndex = 0
     public private(set) var pan: Float = 0
@@ -75,7 +75,7 @@ public final class NativeStageEarlyReflectionProcessor {
         let resolvedZone = min(5, max(0, zone))
         guard self.roomIndex != resolvedIndex ||
               self.pan != resolvedPan ||
-              self.zone != resolvedZone else { return }
+              self.zone != resolvedZone || tapCount < 0 else { return }
 
         self.roomIndex = resolvedIndex
         self.pan = resolvedPan
