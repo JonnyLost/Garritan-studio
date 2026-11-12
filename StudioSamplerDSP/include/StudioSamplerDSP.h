@@ -70,6 +70,22 @@ int32_t ss_add_zone_with_options(SSSampler *sampler,
                     uint32_t loop_crossfade_frames,
                     uint32_t fade_in_frames, uint32_t fade_out_frames,
                     uint8_t articulation_id);
+/* Extended mapped-zone configuration for multisampled instruments.
+ * round_robin_index: 0...7 (alternate takes, selected per MIDI note).
+ * release_trigger: 0 for note-on recording; 1 for note-off one-shot tail.
+ * All zones are configured before rendering; legacy APIs default to 0/0.
+ */
+int32_t ss_add_zone_with_variation(SSSampler *sampler,
+                    uint8_t root_note, uint8_t lowest_note, uint8_t highest_note,
+                    uint8_t lowest_velocity, uint8_t highest_velocity,
+                    double source_sample_rate,
+                    const float *left, const float *right, uint32_t frames,
+                    uint32_t playback_start_frame, uint32_t playback_end_frame,
+                    uint32_t loop_start_frame, uint32_t loop_end_frame,
+                    uint32_t loop_crossfade_frames,
+                    uint32_t fade_in_frames, uint32_t fade_out_frames,
+                    uint8_t articulation_id,
+                    uint8_t round_robin_index, uint8_t release_trigger);
 int32_t ss_zone_count(const SSSampler *sampler);
 
 /* MIDI events take effect at the next rendering block boundary.
