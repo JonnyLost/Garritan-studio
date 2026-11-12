@@ -15,7 +15,7 @@ public struct StudioSamplerPCMPage: Sendable {
 /// prevent a large orchestral session from multiplying unbounded PCM caches.
 public enum StudioSamplerStreamBudget {
     public static let pageFrames = 4_096
-    public static let readAheadPages = 2 // matches the native two-page-per-voice cache
+    public static let readAheadPages = 4 // native loop-safe four-page voice cache
     public static let maxReadFrames = pageFrames * 4 // per-worker I/O request bound
     public static let attackSeconds = 0.25
 
