@@ -17,7 +17,7 @@ constexpr uint32_t kMaxSampleFrames = 10000000; // maximum resident source
 constexpr uint32_t kMaxStreamFrames = 500000000; // bounded source offsets
 constexpr uint32_t kMaxAttackFrames = 32768;
 constexpr uint32_t kPageFrames = SS_STREAM_PAGE_FRAMES;
-constexpr int kStreamPagesPerVoice = 2;
+constexpr int kStreamPagesPerVoice = 4; // current, next, loop entrance and following
 constexpr uint32_t kCommandCapacity = 1024; // one slot deliberately left empty
 constexpr int kFadeFrames = 64;
 constexpr size_t kHeldDepth = 8; // per-channel, per-pitch repeated note stack
@@ -282,7 +282,6 @@ struct SSSampler {
     void prefetch(const Voice& voice) {
         const Sample& sample = *voice.sample;
         if (!sample.streamed || !streamPages) return;
-        // Keep the next page available before the preloaded attack ends.
         const uint32_t attackEnd = sample.attackStart +
                                    uint32_t(sample.left.size());
         const uint32_t position = uint32_t(std::max(
@@ -290,19 +289,32 @@ struct SSSampler {
         const uint32_t target = std::max(position, attackEnd - 1);
         const uint32_t currentPage = (target / kPageFrames) * kPageFrames;
         requestPage(voice, currentPage, currentPage);
-        uint32_t following = currentPage + kPageFrames;
-        // Do not evict the sequential next page merely because a loop
-        // entrance exists. Prefetch the entrance once the playhead reaches
-        // the page containing the loop's actual ending/crossfade.
-        const uint32_t loopExitPage = sample.loopEnd > 0
+
+        const uint32_t nextPage = currentPage + kPageFrames;
+        const bool sustaining = sample.loopEnd != 0 &&
+            voice.stage != EnvelopeStage::release &&
+            voice.stage != EnvelopeStage::done;
+        const uint32_t exitPage = sustaining
             ? ((sample.loopEnd - 1) / kPageFrames) * kPageFrames : 0;
-        if (sample.loopEnd != 0 && voice.stage != EnvelopeStage::release &&
-            currentPage >= loopExitPage && sample.loopStart < currentPage) {
-            // Loop wrap will seek backwards; start fetching the loop entrance.
-            following = (sample.loopStart / kPageFrames) * kPageFrames;
+        // The current page and the sequential next page must stay resident
+        // until the loop is actually approached; skipping the next page can
+        // cause an underrun on high transpositions.
+        if (nextPage < sample.playbackEnd &&
+            (!sustaining || currentPage < exitPage))
+            requestPage(voice, nextPage, currentPage);
+
+        if (sustaining && currentPage + kPageFrames >= exitPage) {
+            // A loop can jump backward from its exit page into two distinct
+            // entrance pages within one output block at high transposition.
+            // Reserve both ahead of time, alongside current/next pages.
+            const uint32_t loopPage =
+                (sample.loopStart / kPageFrames) * kPageFrames;
+            if (loopPage != currentPage)
+                requestPage(voice, loopPage, currentPage);
+            const uint32_t loopNext = loopPage + kPageFrames;
+            if (loopNext < sample.loopEnd && loopNext != currentPage)
+                requestPage(voice, loopNext, currentPage);
         }
-        if (following < sample.playbackEnd && following != currentPage)
-            requestPage(voice, following, currentPage);
     }
 
     int framesForSeconds(float seconds, int minimumFrames) const {
