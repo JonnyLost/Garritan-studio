@@ -18,7 +18,8 @@ constexpr std::array<float, SFM_PARAMETER_COUNT> kDefaults{
     1.f, 0.8f, 0.005f, 0.25f, 0.75f, 0.22f,
     2.f, 0.30f, 0.005f, 0.28f, 0.64f, 0.18f,
     3.f, 0.14f, 0.005f, 0.20f, 0.55f, 0.17f,
-    4.f, 0.00f, 0.005f, 0.18f, 0.55f, 0.13f
+    4.f, 0.00f, 0.005f, 0.18f, 0.55f, 0.13f,
+    0.f, 0.f, 0.5f, 5.f
 };
 bool validParameter(int32_t id, float value) noexcept {
     if (id < 0 || id >= SFM_PARAMETER_COUNT || !std::isfinite(value)) return false;
@@ -26,7 +27,12 @@ bool validParameter(int32_t id, float value) noexcept {
         case SFM_PARAM_ALGORITHM:
             return value >= 0.f && value <= 3.f && std::floor(value) == value;
         case SFM_PARAM_FEEDBACK: case SFM_PARAM_OUTPUT_GAIN:
+        case SFM_PARAM_VELOCITY_BRIGHTNESS: case SFM_PARAM_MOD_DEPTH:
             return value >= 0.f && value <= 1.f;
+        case SFM_PARAM_MOD_TARGET:
+            return value == 0.f || value == 1.f;
+        case SFM_PARAM_MOD_RATE:
+            return value >= 0.1f && value <= 20.f;
         case SFM_PARAM_BEND_RANGE:
             return value >= 0.f && value <= 24.f;
         default: {
@@ -127,7 +133,8 @@ struct Voice {
         for (Envelope& env : envelopes) env.reset();
     }
 
-    float sample(const Parameters& p, double sampleRate, double bendRatio) noexcept {
+    float sample(const Parameters& p, double sampleRate, double bendRatio,
+                 float modWheel) noexcept {
         std::array<float, SFM_OPERATOR_COUNT> output{};
         const int algorithm = static_cast<int>(p[SFM_PARAM_ALGORITHM]);
         for (int op = SFM_OPERATOR_COUNT - 1; op >= 0; --op) {
@@ -147,7 +154,17 @@ struct Voice {
             }
             const double rate = std::min(sampleRate * 0.45,
                 frequency * bendRatio * double(p.op(op, SFM_OP_RATIO)));
-            const float level = p.op(op, SFM_OP_LEVEL);
+            float level = p.op(op, SFM_OP_LEVEL);
+            const bool isModulator = op > 0 && algorithm != 3 &&
+                                     (algorithm != 1 || op == 1 || op == 3);
+            if (isModulator) {
+                // Less-energetic playing produces a softer FM index.
+                const float velocityResponse =
+                    1.f - p[SFM_PARAM_VELOCITY_BRIGHTNESS] * (1.f - velocity);
+                const float wheelResponse = p[SFM_PARAM_MOD_TARGET] == 1.f
+                    ? 1.f + 2.f*p[SFM_PARAM_MOD_DEPTH]*modWheel : 1.f;
+                level *= velocityResponse*wheelResponse;
+            }
             // A zero-level operator still advances its phase/envelope, but
             // avoids expensive trig. This matters for laptop battery life.
             if (level != 0.f && envelope != 0.f) {
@@ -214,23 +231,34 @@ struct SFMSynth {
     std::atomic<bool> panic{false};
     std::array<bool, 16> sustain{};
     std::array<uint16_t,16> bend{};
+    std::array<uint8_t,16> wheel{};
+    std::array<float,16> smoothWheel{};
+    std::array<double,16> wheelPhase{};
+    std::array<float,SFM_PARAMETER_COUNT> smoothed{};
     uint64_t counter = 0;
 
     SFMSynth(double sr, int n) : sampleRate(sr), voices(n) {
         for (size_t i=0; i < kDefaults.size(); ++i)
             parameters[i].store(kDefaults[i], std::memory_order_relaxed);
         bend.fill(8192);
+        smoothed = kDefaults;
     }
     void reset() noexcept {
         pendingCount = 0;
         sustain.fill(false);
         bend.fill(8192);
+        wheel.fill(0);
+        smoothWheel.fill(0.f);
+        wheelPhase.fill(0.0);
         for (Voice& v : voice) v.hardStop();
     }
     void event(const Event& e) noexcept {
         const uint8_t ch = e.channel;
         if (e.type == EventType::control) {
             switch(e.data1) {
+                case 1:
+                    wheel[ch] = e.data2;
+                    break;
                 case 64: {
                     const bool wasPressed = sustain[ch];
                     sustain[ch] = e.data2 >= 64;
@@ -312,7 +340,7 @@ int32_t sfm_midi_event(SFMSynth* synth,uint8_t status,uint8_t d1,uint8_t d2,uint
         case 0x80: type=EventType::noteOff; break;
         case 0x90: type=d2==0 ? EventType::noteOff : EventType::noteOn; break;
         case 0xB0:
-            if (d1 != 64 && d1 != 120 && d1 != 123) return 0;
+            if (d1 != 1 && d1 != 64 && d1 != 120 && d1 != 123) return 0;
             type=EventType::control; break;
         case 0xE0: type=EventType::bend; break;
         default: return 0;
@@ -367,6 +395,20 @@ void sfm_render(SFMSynth* synth,float* left,float* right,int32_t frames) {
     };
     for (int ch=0;ch<16;++ch) bendRatios[ch]=bendRatio(ch);
 
+    // Smooth only controls which would otherwise create zipper noise.
+    // No allocation or locks; parameter storage remains render-thread owned.
+    const float slew = static_cast<float>(1.0 -
+        std::exp(-1.0 / (0.012 * synth->sampleRate)));
+    constexpr std::array<int, 13> kSmoothedIDs{
+        SFM_PARAM_FEEDBACK, SFM_PARAM_OUTPUT_GAIN,
+        SFM_PARAM_VELOCITY_BRIGHTNESS, SFM_PARAM_MOD_DEPTH,
+        SFM_OP1_BASE + SFM_OP_LEVEL, SFM_OP2_BASE + SFM_OP_LEVEL,
+        SFM_OP3_BASE + SFM_OP_LEVEL, SFM_OP4_BASE + SFM_OP_LEVEL,
+        SFM_OP1_BASE + SFM_OP_RATIO, SFM_OP2_BASE + SFM_OP_RATIO,
+        SFM_OP3_BASE + SFM_OP_RATIO, SFM_OP4_BASE + SFM_OP_RATIO,
+        SFM_PARAM_MOD_RATE
+    };
+    Parameters active = p;
     uint32_t cursor=0;
     for (int32_t frame=0;frame<frames;++frame) {
         while (cursor < synth->pendingCount &&
@@ -375,12 +417,41 @@ void sfm_render(SFMSynth* synth,float* left,float* right,int32_t frames) {
             synth->event(e);
             if (e.type==EventType::bend) bendRatios[e.channel]=bendRatio(e.channel);
         }
+        for (int id : kSmoothedIDs) {
+            float &current = synth->smoothed[static_cast<size_t>(id)];
+            current += slew*(p[id] - current);
+            active.p[static_cast<size_t>(id)] = current;
+        }
+        // Compute at most one vibrato LFO per active MIDI channel, even
+        // during polyphonic chords. CC1 is smoothed to prevent abrupt steps.
+        std::array<double,16> channelRatio{};
+        std::array<bool,16> channelReady{};
         float mix=0.f;
         for (int i=0;i<synth->voices;++i) {
             Voice& v=synth->voice[i];
-            if (v.active) mix+=v.sample(p,synth->sampleRate,bendRatios[v.channel]);
+            if (!v.active) continue;
+            const uint8_t ch = v.channel;
+            if (!channelReady[ch]) {
+                channelReady[ch] = true;
+                const float target = synth->wheel[ch] / 127.f;
+                float &amount = synth->smoothWheel[ch];
+                amount += slew * (target - amount);
+                double vibrato = 1.0;
+                if (p[SFM_PARAM_MOD_TARGET] == 0.f && amount > 0.00001f) {
+                    const double semitones = 2.0 *
+                        active[SFM_PARAM_MOD_DEPTH] * amount *
+                        std::sin(kPi2*synth->wheelPhase[ch]);
+                    vibrato = std::exp2(semitones/12.0);
+                }
+                synth->wheelPhase[ch] += active[SFM_PARAM_MOD_RATE]/synth->sampleRate;
+                if (synth->wheelPhase[ch] >= 1.0)
+                    synth->wheelPhase[ch] -= 1.0;
+                channelRatio[ch] = bendRatios[ch]*vibrato;
+            }
+            mix += v.sample(active,synth->sampleRate,channelRatio[ch],
+                            synth->smoothWheel[ch]);
         }
-        const float out=std::tanh(mix*p[SFM_PARAM_OUTPUT_GAIN]);
+        const float out=std::tanh(mix*active[SFM_PARAM_OUTPUT_GAIN]);
         left[frame]=out;
         right[frame]=out;
     }

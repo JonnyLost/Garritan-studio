@@ -32,7 +32,16 @@ typedef struct SFMSynth SFMSynth;
 #define SFM_OP_DECAY 3
 #define SFM_OP_SUSTAIN 4
 #define SFM_OP_RELEASE 5
-#define SFM_PARAMETER_COUNT 28
+/* Appended IDs preserve every existing FM project and factory preset.
+ * VelocityBrightness: 0..1 (modulator scaling by note velocity)
+ * ModTarget: 0 vibrato / 1 harmonic brightness
+ * ModDepth: 0..1, ModRate: 0.1..20 Hz
+ */
+#define SFM_PARAM_VELOCITY_BRIGHTNESS 28
+#define SFM_PARAM_MOD_TARGET 29
+#define SFM_PARAM_MOD_DEPTH 30
+#define SFM_PARAM_MOD_RATE 31
+#define SFM_PARAMETER_COUNT 32
 
 /* Algorithm 0: OP4 -> OP3 -> OP2 -> OP1 (OP1 audible).
  * Algorithm 1: OP4 -> OP3 + OP2 -> OP1 (OP1 and OP3 audible).
@@ -48,7 +57,7 @@ void sfm_destroy(SFMSynth *synth);
 int32_t sfm_set_parameter(SFMSynth *synth, int32_t parameter, float value);
 float sfm_get_parameter(const SFMSynth *synth, int32_t parameter);
 
-/* Bounded single-producer MIDI queue. Note On/Off, CC64 (sustain),
+/* Bounded single-producer MIDI queue. Note On/Off, CC1 (mod wheel), CC64 (sustain),
  * CC120/123 and 14-bit pitch wheel are supported, with MIDI channels.
  * frameOffset refers to the next sfm_render() call; offsets through
  * successive render buffers are retained, up to 65535 frames.
@@ -63,7 +72,10 @@ int32_t sfm_all_notes_off(SFMSynth *synth);
 /* Only call with render stopped; this method clears voices and all queues. */
 void sfm_reset_stopped(SFMSynth *synth);
 
-/* Render writes planar Float32 stereo. It allocates no memory, acquires
+/* Operator gain/ratio, global level/feedback and modulation-depth changes
+ * are smoothed within the renderer (approximately 12 ms). Envelope times and
+ * discrete algorithms are updated at buffer boundaries.
+ * Render writes planar Float32 stereo. It allocates no memory, acquires
  * no locks, invokes no OS APIs and performs no file I/O. */
 void sfm_render(SFMSynth *synth, float *left, float *right, int32_t frames);
 

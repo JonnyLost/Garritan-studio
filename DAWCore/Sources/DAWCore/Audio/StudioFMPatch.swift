@@ -31,6 +31,11 @@ public enum StudioFMParameter: Int32, CaseIterable, Codable, Sendable {
     case op4Decay = 25
     case op4Sustain = 26
     case op4Release = 27
+    // Appended parameter identifiers preserve old Studio FM projects.
+    case velocityBrightness = 28
+    case modTarget = 29
+    case modDepth = 30
+    case modRate = 31
 
     public static func op(_ index: Int, _ control: StudioFMOperatorControl) -> StudioFMParameter? {
         guard (0..<4).contains(index) else { return nil }
@@ -38,16 +43,24 @@ public enum StudioFMParameter: Int32, CaseIterable, Codable, Sendable {
     }
 
     public var operatorIndex: Int? {
-        rawValue >= 4 ? Int((rawValue - 4) / 6) : nil
+        (4...27).contains(rawValue) ? Int((rawValue - 4) / 6) : nil
     }
 
     public var operatorControl: StudioFMOperatorControl? {
-        rawValue >= 4 ? StudioFMOperatorControl(rawValue: (rawValue - 4) % 6) : nil
+        (4...27).contains(rawValue)
+            ? StudioFMOperatorControl(rawValue: (rawValue - 4) % 6) : nil
     }
 
     public var defaultValue: Float {
         let global: [Float] = [0, 0, 0.65, 2]
         if rawValue < 4 { return global[Int(rawValue)] }
+        switch self {
+        case .velocityBrightness: return 0
+        case .modTarget: return 0
+        case .modDepth: return 0.5
+        case .modRate: return 5
+        default: break
+        }
         let defaults: [[Float]] = [
             [1, 0.8, 0.005, 0.25, 0.75, 0.22],
             [2, 0.30, 0.005, 0.28, 0.64, 0.18],
@@ -60,7 +73,9 @@ public enum StudioFMParameter: Int32, CaseIterable, Codable, Sendable {
     public var range: ClosedRange<Float> {
         switch self {
         case .algorithm: return 0...3
-        case .feedback, .outputGain: return 0...1
+        case .feedback, .outputGain, .velocityBrightness, .modDepth: return 0...1
+        case .modTarget: return 0...1
+        case .modRate: return 0.1...20
         case .bendRange: return 0...24
         default:
             switch operatorControl! {
@@ -72,6 +87,7 @@ public enum StudioFMParameter: Int32, CaseIterable, Codable, Sendable {
     }
 
     public var logarithmic: Bool {
+        if self == .modRate { return true }
         switch operatorControl {
         case .ratio, .attack, .decay, .release: return true
         default: return false
@@ -84,13 +100,18 @@ public enum StudioFMParameter: Int32, CaseIterable, Codable, Sendable {
         case .feedback: return "Feedback"
         case .outputGain: return "Output"
         case .bendRange: return "Bend Range"
+        case .velocityBrightness: return "Velocity Brightness"
+        case .modTarget: return "Wheel Target"
+        case .modDepth: return "Wheel Depth"
+        case .modRate: return "Vibrato Rate"
         default: return operatorControl!.title
         }
     }
 
     public func valid(_ value: Float) -> Bool {
         value.isFinite && range.contains(value) &&
-        (self != .algorithm || value.rounded(.towardZero) == value)
+        ((self != .algorithm && self != .modTarget) ||
+         value.rounded(.towardZero) == value)
     }
 
     public func value(at position: Double) -> Float {
@@ -110,6 +131,8 @@ public enum StudioFMParameter: Int32, CaseIterable, Codable, Sendable {
         switch self {
         case .algorithm: return StudioFMAlgorithm(rawValue: Int(value))?.name ?? "Unknown"
         case .bendRange: return String(format: "±%.1f st", value)
+        case .modTarget: return value == 0 ? "Vibrato" : "Brightness"
+        case .modRate: return String(format: "%.2f Hz", value)
         default:
             if operatorControl == .ratio { return String(format: "%.3f ×", value) }
             if operatorControl == .attack || operatorControl == .decay ||
