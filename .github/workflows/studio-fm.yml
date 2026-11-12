@@ -1,0 +1,44 @@
+name: Studio FM original native synthesis
+
+on:
+  push:
+    branches:
+      - feature/studio-fm
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-fm-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  fm-sanitizers:
+    name: Original FM DSP / AddressSanitizer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile FM and run standalone regression tests
+        run: |
+          clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I StudioFMDSP/include \
+            StudioFMDSP/src/StudioFMDSP.cpp \
+            Tests/StudioFMDSPStandalone/main.cpp \
+            -o /tmp/studio-fm-smoke
+          ASAN_OPTIONS=detect_leaks=1 /tmp/studio-fm-smoke
+
+  macos-regression:
+    name: macOS Swift package and regression tests
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve packages
+        run: swift package resolve
+      - name: Build all targets including FM
+        run: swift build
+      - name: Run original synth and DAW tests
+        run: swift test --parallel
+      - name: Optimized DAWApp build
+        run: swift build -c release --product DAWApp

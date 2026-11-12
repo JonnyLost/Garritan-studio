@@ -13,9 +13,6 @@ constexpr int kMaxVoices = 16;
 constexpr uint32_t kQueueCapacity = 256;
 constexpr int kOpStride = 6;
 
-float clampf(float x, float lo, float hi) noexcept {
-    return std::max(lo, std::min(x, hi));
-}
 constexpr std::array<float, SFM_PARAMETER_COUNT> kDefaults{
     0.f, 0.f, 0.65f, 2.f,
     1.f, 0.8f, 0.005f, 0.25f, 0.75f, 0.22f,
