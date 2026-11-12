@@ -10,6 +10,14 @@ public struct StudioSamplerZone: Codable, Equatable, Sendable {
     public var highestNote: UInt8
     public var lowestVelocity: UInt8
     public var highestVelocity: UInt8
+    /// Offsets in source sample frames, end exclusive. Nil means one-shot.
+    public var loopStartFrame: UInt32?
+    public var loopEndFrame: UInt32?
+    public var loopCrossfadeFrames: UInt32?
+
+    public var hasSustainLoop: Bool {
+        loopStartFrame != nil && loopEndFrame != nil
+    }
 
     public init(sampleURL: URL, rootNote: UInt8 = 60,
                 lowestNote: UInt8 = 0, highestNote: UInt8 = 127,
@@ -25,10 +33,44 @@ public struct StudioSamplerZone: Codable, Equatable, Sendable {
     public var isValid: Bool {
         rootNote <= 127 && lowestNote <= highestNote && highestNote <= 127 &&
         lowestVelocity >= 1 && lowestVelocity <= highestVelocity &&
-        highestVelocity <= 127 && !filePath.isEmpty
+        highestVelocity <= 127 && !filePath.isEmpty && validLoop
+    }
+
+    public var validLoop: Bool {
+        guard let start = loopStartFrame, let end = loopEndFrame else {
+            return loopStartFrame == nil && loopEndFrame == nil &&
+                (loopCrossfadeFrames == nil || loopCrossfadeFrames == 0)
+        }
+        return start <= end && end - start >= 4 &&
+            (loopCrossfadeFrames ?? 0) <= (end - start) / 2
     }
 
     public var sampleURL: URL { URL(fileURLWithPath: filePath) }
+}
+
+/// ADSR in seconds and linear sustain gain; optional on old projects.
+public struct StudioSamplerEnvelope: Codable, Equatable, Sendable {
+    public var attackSeconds: Float
+    public var decaySeconds: Float
+    public var sustainLevel: Float
+    public var releaseSeconds: Float
+
+    public init(attackSeconds: Float = 0.0015,
+                decaySeconds: Float = 0,
+                sustainLevel: Float = 1,
+                releaseSeconds: Float = 0.0015) {
+        self.attackSeconds = attackSeconds
+        self.decaySeconds = decaySeconds
+        self.sustainLevel = sustainLevel
+        self.releaseSeconds = releaseSeconds
+    }
+
+    public var isValid: Bool {
+        attackSeconds.isFinite && (0...30).contains(attackSeconds) &&
+        decaySeconds.isFinite && (0...30).contains(decaySeconds) &&
+        sustainLevel.isFinite && (0...1).contains(sustainLevel) &&
+        releaseSeconds.isFinite && (0...30).contains(releaseSeconds)
+    }
 }
 
 /// The front-panel layout is a presentation choice: all variants use the
@@ -62,6 +104,8 @@ public struct StudioSamplerPatch: Codable, Equatable, Sendable {
     /// Initial MIDI control states, 0...127. Playback CC can override them.
     public var dynamicsCC1: UInt8?
     public var expressionCC11: UInt8?
+    /// Applied to new notes without sample data reload or graph rewiring.
+    public var envelope: StudioSamplerEnvelope?
 
     public var presentation: StudioSamplerInstrumentKind { instrumentKind ?? .general }
 
@@ -77,6 +121,7 @@ public struct StudioSamplerPatch: Codable, Equatable, Sendable {
         version == 1 && !zones.isEmpty && zones.count <= 128 &&
         zones.allSatisfy(\.isValid) &&
         (dynamicsCC1 == nil || dynamicsCC1! <= 127) &&
-        (expressionCC11 == nil || expressionCC11! <= 127)
+        (expressionCC11 == nil || expressionCC11! <= 127) &&
+        (envelope?.isValid ?? true)
     }
 }
