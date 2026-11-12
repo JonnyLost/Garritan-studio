@@ -664,6 +664,27 @@ struct InstrumentBrowserSheet: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
             Divider()
+            HStack(spacing: 12) {
+                Image(systemName: "waveform.path.ecg.rectangle")
+                    .font(.title3).foregroundStyle(.cyan)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Studio Wavetable").font(.subheadline.weight(.semibold))
+                    Text("Original bandlimited wavetable · 16-harmonic editor · 20 sounds")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    loadNativeStudioWavetable()
+                } label: {
+                    Label("Load Wavetable", systemImage: "waveform.path")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.cyan)
+                .disabled(isLoading)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            Divider()
             HStack(spacing: 8) {
                 Button {
                     workspacePage = 0
@@ -1061,6 +1082,18 @@ struct InstrumentBrowserSheet: View {
         print(message)  // Also print for good measure
     }
     
+    /// Quick-load a single native wavetable layer within Studio Synth.
+    private func loadNativeStudioWavetable() {
+        loadError = nil
+        do {
+            try viewModel.loadStudioSynth(
+                for: trackID, patch: StudioSynthPatch.individual(.wavetable))
+            isPresented = false
+        } catch {
+            loadError = error.localizedDescription
+        }
+    }
+
     /// Select the unified original native instrument; one Analog and one
     /// FM layer are active by default and both receive the track's MIDI.
     private func loadNativeStudioSynth() {

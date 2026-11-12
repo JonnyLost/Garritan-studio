@@ -564,11 +564,15 @@ public final class ProjectViewModel: ObservableObject {
               project.tracks[index].studioSynthEnabled == true,
               let instrument = playbackEngine.instrument(for: trackID),
               case .studioSynth(let synth) = instrument,
-              synth.setAnalogParameter(id: layerID, parameter: parameter, value: value),
               var patch = project.tracks[index].studioSynthPatch,
-              let layerIndex = patch.layers.firstIndex(where: { $0.id == layerID }) else {
+              let layerIndex = patch.layers.firstIndex(where: { $0.id == layerID }),
+              parameter.valid(value) else {
             return
         }
+        // Muted layers have no DSP instance. Still save their edits so they
+        // are ready when the layer is enabled again.
+        if patch.layers[layerIndex].enabled &&
+           !synth.setAnalogParameter(id: layerID, parameter: parameter, value: value) { return }
         var analog = patch.layers[layerIndex].analogPatch ?? StudioAnalogPatch()
         analog.set(value, for: parameter)
         patch.layers[layerIndex].analogPatch = analog
@@ -582,11 +586,15 @@ public final class ProjectViewModel: ObservableObject {
               project.tracks[index].studioSynthEnabled == true,
               let instrument = playbackEngine.instrument(for: trackID),
               case .studioSynth(let synth) = instrument,
-              synth.setFMParameter(id: layerID, parameter: parameter, value: value),
               var patch = project.tracks[index].studioSynthPatch,
-              let layerIndex = patch.layers.firstIndex(where: { $0.id == layerID }) else {
+              let layerIndex = patch.layers.firstIndex(where: { $0.id == layerID }),
+              parameter.valid(value) else {
             return
         }
+        // Muted layers have no DSP instance. Still save their edits so they
+        // are ready when the layer is enabled again.
+        if patch.layers[layerIndex].enabled &&
+           !synth.setFMParameter(id: layerID, parameter: parameter, value: value) { return }
         var fm = patch.layers[layerIndex].fmPatch ?? StudioFMPatch()
         fm.set(value, for: parameter)
         patch.layers[layerIndex].fmPatch = fm
@@ -603,11 +611,15 @@ public final class ProjectViewModel: ObservableObject {
               project.tracks[index].studioSynthEnabled == true,
               let instrument = playbackEngine.instrument(for: trackID),
               case .studioSynth(let synth) = instrument,
-              synth.setWavetableParameter(id: layerID, parameter: parameter, value: value),
               var patch = project.tracks[index].studioSynthPatch,
-              let layerIndex = patch.layers.firstIndex(where: { $0.id == layerID }) else {
+              let layerIndex = patch.layers.firstIndex(where: { $0.id == layerID }),
+              parameter.valid(value) else {
             return
         }
+        // Muted layers have no DSP instance. Still save their edits so they
+        // are ready when the layer is enabled again.
+        if patch.layers[layerIndex].enabled &&
+           !synth.setWavetableParameter(id: layerID, parameter: parameter, value: value) { return }
         var sound = patch.layers[layerIndex].wavetablePatch ?? StudioWavetablePatch()
         sound.set(value, for: parameter)
         patch.layers[layerIndex].wavetablePatch = sound
