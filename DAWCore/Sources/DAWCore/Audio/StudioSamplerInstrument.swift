@@ -43,7 +43,7 @@ public final class StudioSamplerInstrument {
     private let renderState: StudioSamplerRenderState
     private let midiProducerLock = NSLock()
 
-    public init(sampleRate: Double, patch: StudioSamplerPatch, voices: Int32 = 16) throws {
+    public init(sampleRate: Double, patch: StudioSamplerPatch, voices: Int32 = 32) throws {
         guard patch.isValid else { throw StudioSamplerError.invalidPatch }
         guard let format = AVAudioFormat(
             standardFormatWithSampleRate: sampleRate, channels: 2
@@ -91,6 +91,13 @@ public final class StudioSamplerInstrument {
                 throw StudioSamplerError.couldNotLoadZone(url)
             }
         }
+        // Prepare the controller state and crossfade mode before the
+        // AVAudioSourceNode is attached or can start rendering.
+        guard ss_set_cc1_crossfade(sampler, patch.cc1Crossfade == true ? 1 : 0) == 1,
+              ss_control_change(sampler, 1, patch.dynamicsCC1 ?? 127, 0) == 1,
+              ss_control_change(sampler, 11, patch.expressionCC11 ?? 127, 0) == 1 else {
+            throw StudioSamplerError.invalidConfiguration
+        }
         self.format = format
         self.patch = patch
         self.renderState = state
@@ -122,6 +129,23 @@ public final class StudioSamplerInstrument {
         midiProducerLock.lock()
         defer { midiProducerLock.unlock() }
         return ss_note_off(renderState.sampler, note, channel) == 1
+    }
+
+    /// MIDI producer serialization is outside of the render callback.
+    @discardableResult
+    public func controller(_ controller: UInt8, value: UInt8, channel: UInt8) -> Bool {
+        midiProducerLock.lock()
+        defer { midiProducerLock.unlock() }
+        return ss_control_change(renderState.sampler, controller, value, channel) == 1
+    }
+
+    /// Changes the mode for newly triggered notes without rebuilding a
+    /// multimegabyte sample set on the main thread.
+    @discardableResult
+    public func setCC1Crossfade(_ enabled: Bool) -> Bool {
+        midiProducerLock.lock()
+        defer { midiProducerLock.unlock() }
+        return ss_set_cc1_crossfade(renderState.sampler, enabled ? 1 : 0) == 1
     }
 
     @discardableResult
