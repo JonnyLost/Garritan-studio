@@ -103,7 +103,13 @@ public enum StudioSamplerSampleLibrary {
             let recoveredName = savedName ?? formerManagedName(for: oldURL)
             if let name = recoveredName {
                 let target = try managedURL(forFileName: name, in: directory)
-                guard isRegularFile(target) else {
+                let expectedParent = (try directory ?? libraryDirectory())
+                    .resolvingSymlinksInPath().standardizedFileURL
+                // An app-owned filename may not be a symlink escaping the
+                // managed library, even when a saved project is untrusted.
+                let resolvedFile = target.resolvingSymlinksInPath().standardizedFileURL
+                guard isRegularFile(target),
+                      resolvedFile.deletingLastPathComponent() == expectedParent else {
                     throw LibraryError.missingSample(name)
                 }
                 restored.zones[index].filePath = target.path
@@ -137,6 +143,11 @@ public enum StudioSamplerSampleLibrary {
                 guard isRegularFile(url) else { throw LibraryError.invalidSource(url) }
                 if url.deletingLastPathComponent().standardizedFileURL ==
                     folder.standardizedFileURL {
+                    guard url.resolvingSymlinksInPath()
+                        .deletingLastPathComponent().standardizedFileURL ==
+                        folder.resolvingSymlinksInPath().standardizedFileURL else {
+                        throw LibraryError.invalidSource(url)
+                    }
                     copied.append(url)
                     continue
                 }
