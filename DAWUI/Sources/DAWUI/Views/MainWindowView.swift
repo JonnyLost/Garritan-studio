@@ -565,7 +565,7 @@ public struct MainWindowView: View {
             if let track = viewModel.selectedTrack, track.studioAnalogEnabled == true {
                 StudioAnalogPanelView(viewModel: viewModel, trackID: track.id)
             } else if let track = viewModel.selectedTrack, track.studioSamplerPatch != nil {
-                StudioSamplerMapView(viewModel: viewModel, trackID: track.id)
+                StudioSamplerInstrumentView(viewModel: viewModel, trackID: track.id)
             } else {
                 VRackView(viewModel: viewModel, expandedOnly: true)
             }
@@ -2283,7 +2283,7 @@ struct TrackInspectorSection: View {
                         Button {
                             showStudioSamplerMap = true
                         } label: {
-                            Label("Edit Sample Mapping…", systemImage: "square.stack.3d.up")
+                            Label("Open Sampler Instrument…", systemImage: "slider.horizontal.3")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
@@ -2487,7 +2487,7 @@ struct TrackInspectorSection: View {
                 .frame(minWidth: 900, minHeight: 600)
         }
         .sheet(isPresented: $showStudioSamplerMap) {
-            StudioSamplerMapView(viewModel: viewModel, trackID: track.id)
+            StudioSamplerInstrumentView(viewModel: viewModel, trackID: track.id)
                 .frame(minWidth: 930, minHeight: 600)
         }
     }
