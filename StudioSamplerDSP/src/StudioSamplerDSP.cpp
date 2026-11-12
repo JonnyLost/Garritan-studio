@@ -798,6 +798,52 @@ void ss_render(SSSampler *sampler, float *left, float *right, int32_t frames) {
             rightSum += sampleR * amplitude;
             voice.position += voice.increment;
         }
+        // De-click stolen voices using a pool allocated at ss_create().
+        // The old sample survives for exactly 64 more output frames,
+        // allowing the replacement voice's attack to ramp in normally.
+        for (auto& tail : sampler->retiringVoices) {
+            if (tail.framesLeft <= 0) continue;
+            Voice& old = tail.voice;
+            const Sample *sample = old.sample;
+            if (!sample) { tail.framesLeft = 0; continue; }
+            const bool loop = sample->loopEnd > 0 &&
+                old.stage != EnvelopeStage::release &&
+                old.stage != EnvelopeStage::done;
+            if (loop && old.position >= double(sample->loopEnd)) {
+                const double region = double(sample->loopEnd -
+                    sample->loopStart - sample->loopCrossfade);
+                old.position = double(sample->loopStart + sample->loopCrossfade) +
+                    std::fmod(old.position - double(sample->loopEnd), region);
+            }
+            if (old.position >= double(sample->playbackEnd)) {
+                tail.framesLeft = 0;
+                continue;
+            }
+            const float fade = float(tail.framesLeft) / float(kFadeFrames);
+            const float cc1 = sampler->smoothCC1[old.channel];
+            const float layer = (sampler->cc1Crossfade && !old.releaseTrigger)
+                ? sampler->dynamicWeight(old, cc1) : cc1 / 127.f;
+            const float expression = sampler->smoothCC11[old.channel] / 127.f;
+            const float gain = tail.gain * fade * layer * expression;
+            float sampleL = readLinear(sample->left, old.position);
+            float sampleR = readLinear(sample->right, old.position);
+            if (loop && sample->loopCrossfade > 0 &&
+                old.position >= double(sample->loopEnd - sample->loopCrossfade)) {
+                const double phase = std::min(1.0,
+                    (old.position - double(sample->loopEnd - sample->loopCrossfade)) /
+                    double(sample->loopCrossfade));
+                const float from = std::cos(float(phase) * kHalfPi);
+                const float to = std::sin(float(phase) * kHalfPi);
+                const double incoming = double(sample->loopStart) +
+                    phase * double(sample->loopCrossfade);
+                sampleL = sampleL * from + readLinear(sample->left, incoming) * to;
+                sampleR = sampleR * from + readLinear(sample->right, incoming) * to;
+            }
+            leftSum += sampleL * gain;
+            rightSum += sampleR * gain;
+            old.position += old.increment;
+            --tail.framesLeft;
+        }
         left[frame] = std::max(-1.f, std::min(1.f, leftSum * kOutputHeadroom));
         right[frame] = std::max(-1.f, std::min(1.f, rightSum * kOutputHeadroom));
     }
