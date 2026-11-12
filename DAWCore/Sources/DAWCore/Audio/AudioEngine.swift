@@ -63,6 +63,8 @@ public final class AudioEngine: ObservableObject {
     /// Created only when explicitly enabled; the tested Apple path stays default.
     private var nativeConcertHallReverb: AVAudioUnitEffect?
     @Published public private(set) var usesNativeConcertHallReverb = false
+    @Published public private(set) var selectedNativeRoomProfileID =
+        StudioRoomAcousticProfile.abbeyRoadStudioOne.id
     private let concertHallSendMixer = AVAudioMixerNode()
     private let concertHallReturnMixer = AVAudioMixerNode()
     /// Shared hall return level, independent of individual instrument sends.
@@ -462,6 +464,22 @@ public final class AudioEngine: ObservableObject {
             isRunning = engine.isRunning
             throw AudioEngineError.failedToStart(underlying: error)
         }
+    }
+
+    /// Select a prepared native room by stable identifier. Audio Unit parameters
+    /// are applied without rebuilding the graph or allocating on the render thread.
+    /// Returns false if the room is unknown; does not modify the saved choice.
+    @discardableResult
+    public func selectNativeRoomProfile(id: String) -> Bool {
+        guard let index = StudioRoomAcousticProfile.index(forID: id) else {
+            return false
+        }
+        selectedNativeRoomProfileID = id
+        if let roomParameter = nativeConcertHallReverb?.auAudioUnit.parameterTree?
+            .parameter(withAddress: NativeRoomReverbAudioUnit.roomParameterAddress) {
+            roomParameter.value = AUValue(index)
+        }
+        return true
     }
 
     /// Get track node for external access
