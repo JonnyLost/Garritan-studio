@@ -263,8 +263,18 @@ public final class CoreAudioBackend: AudioBackend {
     }
     
     public func sendImmediateMIDI(status: UInt8, data1: UInt8, data2: UInt8, to trackID: TrackID) {
-        guard let unit = renderGraph.getInstrumentUnit(for: trackID) else { return }
-        MusicDeviceMIDIEvent(unit, UInt32(status), UInt32(data1), UInt32(data2), 0)
+        guard let unit = renderGraph.getInstrumentUnit(for: trackID) else {
+            #if DEBUG
+            print("[Preview MIDI] CoreAudio routing FAILED: no instrument unit for track=\(trackID.rawValue) status=\(status) pitch=\(data1)")
+            #endif
+            return
+        }
+        let result = MusicDeviceMIDIEvent(unit, UInt32(status), UInt32(data1), UInt32(data2), 0)
+        #if DEBUG
+        if result != noErr {
+            print("[Preview MIDI] CoreAudio delivery FAILED: OSStatus=\(result) track=\(trackID.rawValue) status=\(status) pitch=\(data1)")
+        }
+        #endif
     }
     
     public func clearScheduledMIDIEvents() {
