@@ -76,6 +76,9 @@ public struct Track: Identifiable, Codable, Sendable {
     /// Unified native synth state; optional to decode every older project.
     public var studioSynthEnabled: Bool?
     public var studioSynthPatch: StudioSynthPatch?
+    /// Native Studio Sampler mappings, nil unless this track uses that instrument.
+    /// Optional to preserve compatibility with older saved projects.
+    public var studioSamplerPatch: StudioSamplerPatch?
     /// Selected Garritan catalog entry (library:path), persisted per track.
     public var garritanProgramID: String?
     
@@ -130,6 +133,7 @@ public struct Track: Identifiable, Codable, Sendable {
         self.studioFMPresetID = nil
         self.studioSynthEnabled = nil
         self.studioSynthPatch = nil
+        self.studioSamplerPatch = nil
         self.garritanProgramID = nil
         self.midiOutput = nil  // Default: use track instrument
         self.midiOutputChannel = nil  // All channels

@@ -11,6 +11,7 @@ let package = Package(
     products: [
         .library(name: "DAWCore", targets: ["DAWCore"]),
         .library(name: "StudioAnalogDSP", targets: ["StudioAnalogDSP"]),
+        .library(name: "StudioSamplerDSP", targets: ["StudioSamplerDSP"]),
         .library(name: "StudioFMDSP", targets: ["StudioFMDSP"]),
         .library(name: "StudioWavetableDSP", targets: ["StudioWavetableDSP"]),
         .library(name: "DAWUI", targets: ["DAWUI"]),
@@ -49,6 +50,15 @@ let package = Package(
             cxxSettings: [.unsafeFlags(["-std=c++17"])]
         ),
 
+        // MARK: - Original native sample playback DSP
+        .target(
+            name: "StudioSamplerDSP",
+            path: "StudioSamplerDSP",
+            sources: ["src/StudioSamplerDSP.cpp"],
+            publicHeadersPath: "include",
+            cxxSettings: [.unsafeFlags(["-std=c++17"])]
+        ),
+
         // MARK: - Real-time callback primitives (C11 atomics)
         .target(
             name: "DAWRealtime",
@@ -65,6 +75,7 @@ let package = Package(
                 "StudioAnalogDSP",
                 "StudioFMDSP",
                 "StudioWavetableDSP",
+                "StudioSamplerDSP",
                 .product(name: "Supabase", package: "supabase-swift")
             ],
             path: "DAWCore/Sources/DAWCore",

@@ -537,9 +537,9 @@ public struct MainWindowView: View {
             if let track = viewModel.selectedTrack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(track.name).font(.subheadline.weight(.semibold))
-                    Text(track.studioFMEnabled == true ? "Studio FM" :
+                    Text(track.studioSamplerPatch != nil ? "Studio Sampler" : (track.studioFMEnabled == true ? "Studio FM" :
                          (track.studioAnalogEnabled == true ? "Studio Analog" :
-                          (track.instrumentSlot?.pluginID?.name ?? "No instrument loaded")))
+                          (track.instrumentSlot?.pluginID?.name ?? "No instrument loaded"))))
                         .font(.caption).foregroundColor(.secondary)
                 }
                 Spacer()
@@ -568,6 +568,8 @@ public struct MainWindowView: View {
                 StudioFMPanelView(viewModel: viewModel, trackID: track.id)
             } else if let track = viewModel.selectedTrack, track.studioAnalogEnabled == true {
                 StudioAnalogPanelView(viewModel: viewModel, trackID: track.id)
+            } else if let track = viewModel.selectedTrack, track.studioSamplerPatch != nil {
+                StudioSamplerInstrumentView(viewModel: viewModel, trackID: track.id)
             } else {
                 VRackView(viewModel: viewModel, expandedOnly: true)
             }
@@ -2190,6 +2192,7 @@ struct TrackInspectorSection: View {
     @State private var showGarritanBrowser = false
     @State private var showStudioAnalogPanel = false
     @State private var showStudioFMPanel = false
+    @State private var showStudioSamplerMap = false
     @State private var availableInputs: [AudioInputDevice] = []
     @State private var selectedInputID: AudioDeviceID = 0
     @State private var selectedChannelID: String = "default-stereo"
@@ -2258,12 +2261,14 @@ struct TrackInspectorSection: View {
                               ? "pianokeys" : "waveform")
                             .foregroundColor(.accentColor)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(track.studioFMEnabled == true ? "Studio FM" :
+                            Text(track.studioSamplerPatch != nil ? "Studio Sampler" : (track.studioFMEnabled == true ? "Studio FM" :
                                  (track.studioAnalogEnabled == true ? "Studio Analog" :
-                                  (track.instrumentSlot?.pluginID?.name ?? "No instrument loaded")))
+                                  (track.instrumentSlot?.pluginID?.name ?? "No instrument loaded"))))
                                 .font(.subheadline.weight(.medium))
                                 .lineLimit(2)
-                            Text(track.studioFMEnabled == true
+                            Text(track.studioSamplerPatch != nil
+                                 ? "Built-in native sample playback"
+                                 : track.studioFMEnabled == true
                                  ? "Built-in native four-operator FM synthesizer"
                                  : (track.studioAnalogEnabled == true
                                     ? "Built-in modular virtual-analog synthesizer"
@@ -2283,7 +2288,15 @@ struct TrackInspectorSection: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    if track.studioFMEnabled == true {
+                    if track.studioSamplerPatch != nil {
+                        Button {
+                            showStudioSamplerMap = true
+                        } label: {
+                            Label("Open Sampler Instrument…", systemImage: "slider.horizontal.3")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    } else if track.studioFMEnabled == true {
                         Button {
                             showStudioFMPanel = true
                         } label: {
@@ -2493,6 +2506,10 @@ struct TrackInspectorSection: View {
         .sheet(isPresented: $showStudioFMPanel) {
             StudioFMPanelView(viewModel: viewModel, trackID: track.id)
                 .frame(minWidth: 830, minHeight: 630)
+        }
+        .sheet(isPresented: $showStudioSamplerMap) {
+            StudioSamplerInstrumentView(viewModel: viewModel, trackID: track.id)
+                .frame(minWidth: 930, minHeight: 600)
         }
     }
     

@@ -244,6 +244,12 @@ public final class PlaybackEngine: ObservableObject {
         // Skip if already set up
         if trackInstruments[track.id] != nil { return }
 
+        // Reopen saved native sampler mappings before the fallback sound bank.
+        if let patch = track.studioSamplerPatch, coreAudioBackend == nil {
+            try loadStudioSampler(for: track.id, patch: patch)
+            return
+        }
+
         // Reopen saved native synthesizers through the same track mixer and
         // stage acoustics as external instruments (no AU host required).
         if track.studioSynthEnabled == true && coreAudioBackend == nil {
@@ -401,6 +407,43 @@ public final class PlaybackEngine: ObservableObject {
         }
         if wasRunning { try engine.start() }
         print("[Studio Synth] Native layered instrument connected to \(trackID.rawValue)")
+    }
+
+    /// Resolve saved samples and build a native hybrid RAM/disk sampler
+    /// before touching the track graph. Audio rendering never reads files,
+    /// allocates or waits for the background worker. This also restores old
+    /// projects whose managed recordings were saved under another user home.
+    public func loadStudioSampler(for trackID: TrackID, patch: StudioSamplerPatch) throws {
+        guard coreAudioBackend == nil else {
+            throw StudioSamplerError.unsupportedAudioBackend
+        }
+        guard let trackNode = audioEngine.trackNode(for: trackID) else {
+            throw PlaybackError.trackNotFound(trackID)
+        }
+        let resolvedPatch = try StudioSamplerSampleLibrary.resolve(patch)
+        let sampler = try StudioSamplerInstrument(
+            sampleRate: audioEngine.sampleRate, patch: resolvedPatch
+        )
+        let engine = audioEngine.engine
+        let wasRunning = engine.isRunning
+        if wasRunning { engine.stop() }
+        defer {
+            if wasRunning && !engine.isRunning {
+                do { try engine.start() }
+                catch { print("[Studio Sampler] Failed to restore audio engine: \(error)") }
+            }
+        }
+
+        removeInstrument(for: trackID)
+        engine.attach(sampler.audioNode)
+        engine.connect(sampler.audioNode, to: trackNode.inputMixer, format: sampler.format)
+        let loaded = TrackInstrument.studioSampler(sampler)
+        trackInstruments[trackID] = loaded
+        midiProcessingQueue.sync {
+            midiQueueTrackInstruments[trackID] = loaded
+        }
+        if wasRunning { try engine.start() }
+        print("[Studio Sampler] Native sampler connected to track \(trackID.rawValue)")
     }
 
     // Mixer nodes used for sample rate conversion when loading AU instruments
@@ -2577,6 +2620,7 @@ public enum TrackInstrument {
     case studioAnalog(StudioAnalogInstrument)
     case studioFM(StudioFMInstrument)
     case studioSynth(StudioSynthInstrument)
+    case studioSampler(StudioSamplerInstrument)
     
     /// The underlying audio unit node
     public var audioNode: AVAudioNode {
@@ -2586,6 +2630,7 @@ public enum TrackInstrument {
         case .studioAnalog(let synth): return synth.audioNode
         case .studioFM(let synth): return synth.audioNode
         case .studioSynth(let synth): return synth.audioNode
+        case .studioSampler(let sampler): return sampler.audioNode
         }
     }
     
@@ -2630,6 +2675,8 @@ public enum TrackInstrument {
             let offset: UInt32 = sampleOffset >= 0 && sampleOffset <= 65_535
                 ? UInt32(sampleOffset) : 0
             synth.noteOn(note, velocity: velocity, channel: channel, frameOffset: offset)
+        case .studioSampler(let sampler):
+            sampler.noteOn(note, velocity: velocity, channel: channel)
         }
     }
     
@@ -2672,6 +2719,8 @@ public enum TrackInstrument {
             let offset: UInt32 = sampleOffset >= 0 && sampleOffset <= 65_535
                 ? UInt32(sampleOffset) : 0
             synth.noteOff(note, channel: channel, frameOffset: offset)
+        case .studioSampler(let sampler):
+            sampler.noteOff(note, channel: channel)
         }
     }
     
@@ -2707,6 +2756,8 @@ public enum TrackInstrument {
                 ? UInt32(sampleOffset) : 0
             synth.controller(controller, value: value, channel: channel,
                              frameOffset: offset)
+        case .studioSampler(let sampler):
+            _ = sampler.controller(controller, value: value, channel: channel)
         }
     }
     
@@ -2726,7 +2777,7 @@ public enum TrackInstrument {
             }
         case .sampler(let sampler):
             sampler.sendProgramChange(program, onChannel: channel)
-        case .studioAnalog, .studioFM, .studioSynth:
+        case .studioAnalog, .studioFM, .studioSynth, .studioSampler:
             break // Native patches use Studio's own controls and preset browsers.
         }
     }
@@ -2762,6 +2813,8 @@ public enum TrackInstrument {
             let offset: UInt32 = sampleOffset >= 0 && sampleOffset <= 65_535
                 ? UInt32(sampleOffset) : 0
             synth.pitchBend(value, channel: channel, frameOffset: offset)
+        case .studioSampler:
+            break // Native sampler does not implement pitch bend yet.
         }
     }
 }

@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/stage-acoustics-sync
+      - integration/studio-complete-mac-test
   pull_request:
     branches:
       - garritan-integration

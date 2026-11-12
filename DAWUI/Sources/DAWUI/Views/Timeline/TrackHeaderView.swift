@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import DAWCore
 import AVFoundation
 import Compression
@@ -340,6 +341,7 @@ struct InstrumentSlotButton: View {
     @State private var showStudioAnalogPanel = false
     @State private var showStudioFMPanel = false
     @State private var showStudioSynthPanel = false
+    @State private var showStudioSamplerMap = false
     
     var body: some View {
         Button(action: {
@@ -349,7 +351,11 @@ struct InstrumentSlotButton: View {
                 Image(systemName: "pianokeys")
                     .font(.system(size: 9))
                 
-                if track.studioSynthEnabled == true {
+                if track.studioSamplerPatch != nil {
+                    Text("Studio Sampler")
+                        .font(.system(size: 10, weight: .semibold))
+                        .lineLimit(1)
+                } else if track.studioSynthEnabled == true {
                     Text("Studio Synth")
                         .font(.system(size: 10, weight: .semibold))
                         .lineLimit(1)
@@ -373,7 +379,7 @@ struct InstrumentSlotButton: View {
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background((track.instrumentSlot?.pluginID != nil || track.studioAnalogEnabled == true || track.studioFMEnabled == true || track.studioSynthEnabled == true) ? Color.purple.opacity(0.3) : Color.gray.opacity(0.2))
+            .background((track.instrumentSlot?.pluginID != nil || track.studioAnalogEnabled == true || track.studioFMEnabled == true || track.studioSynthEnabled == true || track.studioSamplerPatch != nil) ? Color.purple.opacity(0.3) : Color.gray.opacity(0.2))
             .cornerRadius(4)
         }
         .buttonStyle(.plain)
@@ -388,6 +394,12 @@ struct InstrumentSlotButton: View {
                 Button("Open Studio FM Controls...") { showStudioFMPanel = true }
                 Divider()
                 Button("Remove Studio FM", role: .destructive) { removeInstrument() }
+            } else if track.studioAnalogEnabled == true {
+            if track.studioSamplerPatch != nil {
+                Button("Browse / Change Instrument...") { showBrowser = true }
+                Button("Open Studio Sampler Instrument...") { showStudioSamplerMap = true }
+                Divider()
+                Button("Remove Studio Sampler", role: .destructive) { removeInstrument() }
             } else if track.studioAnalogEnabled == true {
                 Button("Browse / Change Instrument...") { showBrowser = true }
                 Button("Open Studio Analog Controls...") { showStudioAnalogPanel = true }
@@ -414,6 +426,10 @@ struct InstrumentSlotButton: View {
             StudioSynthPanelView(viewModel: viewModel, trackID: track.id)
                 .frame(minWidth: 920, minHeight: 650)
         }
+        .sheet(isPresented: $showStudioSamplerMap) {
+            StudioSamplerInstrumentView(viewModel: viewModel, trackID: track.id)
+                .frame(minWidth: 930, minHeight: 600)
+        }
     }
     
     private func openInstrumentUI() {
@@ -432,6 +448,7 @@ struct InstrumentSlotButton: View {
         updatedTrack.studioAnalogEnabled = false
         updatedTrack.studioFMEnabled = false
         updatedTrack.studioSynthEnabled = false
+        updatedTrack.studioSamplerPatch = nil
         viewModel.updateTrack(updatedTrack, description: "Remove Instrument")
         viewModel.unloadTrackInstrument(for: track.id)
     }
@@ -529,6 +546,7 @@ struct InstrumentBrowserSheet: View {
     @State private var inspectedRackSlots: [ARIARackSlot] = []
     @State private var rackInspectionSucceeded = false
     @State private var rackLoadTarget: Int? = nil
+    @State private var showSampleImporter = false
     // Visual rack only: ARIA's individual slot state is not exposed here yet.
     // Do not infer a slot assignment from the track's AU instrument identity.
 
@@ -613,6 +631,26 @@ struct InstrumentBrowserSheet: View {
                     loadNativeStudioAnalog()
                 } label: {
                     Label("Load Studio Analog", systemImage: "waveform")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isLoading)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            HStack(spacing: 12) {
+                Image(systemName: "waveform")
+                    .font(.title3)
+                    .foregroundColor(.teal)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Studio Sampler").font(.subheadline.weight(.semibold))
+                    Text("Native sampling · import multiple files · automatic key and velocity mapping")
+                        .font(.caption).foregroundColor(.secondary)
+                }
+                Spacer()
+                Button {
+                    showSampleImporter = true
+                } label: {
+                    Label("Load Samples…", systemImage: "waveform")
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(isLoading)
@@ -893,6 +931,33 @@ struct InstrumentBrowserSheet: View {
             }
         }
         .frame(width: 920, height: 610)
+        .fileImporter(
+            isPresented: $showSampleImporter,
+            allowedContentTypes: [.audio],
+            allowsMultipleSelection: true
+        ) { result in
+            switch result {
+            case .success(let urls):
+                guard !urls.isEmpty else { return }
+                isLoading = true
+                loadError = nil
+                Task { @MainActor in
+                    defer { isLoading = false }
+                    do {
+                        let files = try await Task.detached(priority: .userInitiated) {
+                            try StudioSamplerSampleLibrary.importFiles(urls)
+                        }.value
+                        let patch = try StudioSamplerMappingBuilder.makePatch(urls: files)
+                        try viewModel.loadStudioSampler(for: trackID, patch: patch)
+                        isPresented = false
+                    } catch {
+                        loadError = error.localizedDescription
+                    }
+                }
+            case .failure(let error):
+                loadError = error.localizedDescription
+            }
+        }
         .onAppear {
             if trackARIA != nil { discoverPrograms() }
             else { scanForPlugins() }
@@ -1185,6 +1250,7 @@ struct InstrumentBrowserSheet: View {
                     track.studioAnalogEnabled = false
                     track.studioFMEnabled = false
                     track.studioSynthEnabled = false
+                    track.studioSamplerPatch = nil
                     await MainActor.run {
                         viewModel.updateTrack(track, description: "Load Instrument")
                     }

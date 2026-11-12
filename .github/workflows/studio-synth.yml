@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/studio-synth
+      - integration/studio-complete-mac-test
   workflow_dispatch:
 
 permissions:
