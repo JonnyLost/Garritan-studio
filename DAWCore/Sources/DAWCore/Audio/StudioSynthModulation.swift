@@ -138,12 +138,78 @@ public struct StudioSynthModRoute: Identifiable, Codable, Equatable, Sendable {
     }
 }
 
+/// Musical duration for one LFO cycle, measured in quarter-note beats.
+/// Raw strings are stable values in saved project files and factory patches.
+public enum StudioSynthLFONote: String, Codable, CaseIterable, Identifiable, Sendable {
+    case whole, half, quarter, eighth, sixteenth, thirtySecond, sixtyFourth
+
+    public var id: String { rawValue }
+    public var title: String {
+        switch self {
+        case .whole: return "1/1"
+        case .half: return "1/2"
+        case .quarter: return "1/4"
+        case .eighth: return "1/8"
+        case .sixteenth: return "1/16"
+        case .thirtySecond: return "1/32"
+        case .sixtyFourth: return "1/64"
+        }
+    }
+    public var beats: Double {
+        switch self {
+        case .whole: return 4
+        case .half: return 2
+        case .quarter: return 1
+        case .eighth: return 0.5
+        case .sixteenth: return 0.25
+        case .thirtySecond: return 0.125
+        case .sixtyFourth: return 0.0625
+        }
+    }
+}
+
+public enum StudioSynthLFOTiming: String, Codable, CaseIterable, Identifiable, Sendable {
+    case straight, dotted, triplet
+    public var id: String { rawValue }
+    public var title: String {
+        switch self {
+        case .straight: return "Straight"
+        case .dotted: return "Dotted"
+        case .triplet: return "Triplet"
+        }
+    }
+    public var multiplier: Double {
+        switch self {
+        case .straight: return 1
+        case .dotted: return 1.5
+        case .triplet: return 2.0 / 3.0
+        }
+    }
+}
+
+/// A nil sync setting means free-running Hz, preserving every pre-sync patch.
+public struct StudioSynthLFOSync: Codable, Equatable, Sendable {
+    public var note: StudioSynthLFONote
+    public var timing: StudioSynthLFOTiming
+
+    public init(note: StudioSynthLFONote = .quarter,
+                timing: StudioSynthLFOTiming = .straight) {
+        self.note = note
+        self.timing = timing
+    }
+
+    public var beatsPerCycle: Double { note.beats * timing.multiplier }
+}
+
 /// Settings belong to the *Studio Synth* patch, never a single engine. Old
 /// project files decode with modulation=nil and remain exactly unmodulated.
 public struct StudioSynthModulationSettings: Codable, Equatable, Sendable {
     public var version: Int
     public var lfo1Rate: Float
     public var lfo2Rate: Float
+    /// Nil = free-running Hz. Optional keys decode as nil from old project JSON.
+    public var lfo1Sync: StudioSynthLFOSync?
+    public var lfo2Sync: StudioSynthLFOSync?
     public var envelopeAttack: Float
     public var envelopeDecay: Float
     public var envelopeSustain: Float
@@ -152,12 +218,16 @@ public struct StudioSynthModulationSettings: Codable, Equatable, Sendable {
     public var routes: [StudioSynthModRoute]
 
     public init(version: Int = 1, lfo1Rate: Float = 0.45, lfo2Rate: Float = 0.18,
+                lfo1Sync: StudioSynthLFOSync? = nil,
+                lfo2Sync: StudioSynthLFOSync? = nil,
                 envelopeAttack: Float = 0.08, envelopeDecay: Float = 0.3,
                 envelopeSustain: Float = 0.7, envelopeRelease: Float = 0.5,
                 macro1: Float = 0, routes: [StudioSynthModRoute] = []) {
         self.version = version
         self.lfo1Rate = lfo1Rate
         self.lfo2Rate = lfo2Rate
+        self.lfo1Sync = lfo1Sync
+        self.lfo2Sync = lfo2Sync
         self.envelopeAttack = envelopeAttack
         self.envelopeDecay = envelopeDecay
         self.envelopeSustain = envelopeSustain
@@ -195,13 +265,21 @@ public enum StudioSynthModulationMath {
     public static func signal(
         _ source: StudioSynthModSource, seconds: Double,
         settings: StudioSynthModulationSettings,
-        envelope: Float, wheel: Float
+        envelope: Float, wheel: Float,
+        bpm: Double = 120, beats: Double? = nil
     ) -> Float {
+        // The worker integrates beat position continuously as BPM changes.
+        // Passing beats prevents LFO phase jumps on live tempo edits; the
+        // default also makes this pure evaluator easy to test in isolation.
+        let beatPosition = beats ?? seconds * (bpm / 60)
         switch source {
         case .lfo1:
-            return Float(sin(2 * Double.pi * seconds * Double(settings.lfo1Rate)))
+            let cycle = settings.lfo1Sync.map { beatPosition / $0.beatsPerCycle }
+                ?? (seconds * Double(settings.lfo1Rate))
+            return Float(sin(2 * Double.pi * cycle))
         case .lfo2:
-            let cycle = seconds * Double(settings.lfo2Rate)
+            let cycle = settings.lfo2Sync.map { beatPosition / $0.beatsPerCycle }
+                ?? (seconds * Double(settings.lfo2Rate))
             let fraction = cycle - floor(cycle)
             return Float(1 - 4 * abs(fraction - 0.5))
         case .envelope: return min(1, max(0, envelope))
