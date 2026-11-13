@@ -274,6 +274,9 @@ public struct DAWState: Codable, Sendable {
     /// Nil or "apple-medium-hall" means the legacy Apple hall.
     /// Optional to load projects created before native room selection.
     public var acousticRoomProfileID: String?
+    /// Optional for backwards compatibility with projects created before the
+    /// native Acoustic Room Designer existed.
+    public var acousticRoomDesign: StudioAcousticRoomDesign?
     
     // Zoom and scroll
     public var zoomLevel: Double
@@ -303,6 +306,7 @@ public struct DAWState: Codable, Sendable {
         self.showInspector = showInspector
         self.stageLayoutID = nil
         self.acousticRoomProfileID = nil
+        self.acousticRoomDesign = nil
         self.zoomLevel = zoomLevel
         self.horizontalScrollOffset = horizontalScrollOffset
         self.verticalScrollOffset = verticalScrollOffset
