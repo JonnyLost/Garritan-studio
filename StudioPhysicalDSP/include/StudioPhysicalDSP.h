@@ -10,7 +10,7 @@ extern "C" {
  * One serialized MIDI producer; the audio callback is the only consumer.
  */
 typedef struct SPMSynth SPMSynth;
-#define SPM_PARAM_MODEL 0          /* 0 plucked, 1 struck, 2 bowed string, 3 reed, 4 brass */
+#define SPM_PARAM_MODEL 0          /* 0 plucked, 1 struck, 2 bowed, 3 reed, 4 brass,\n                                    5 mallet, 6 bell, 7 membrane */
 #define SPM_PARAM_BRIGHTNESS 1     /* 0..1 excitation / loop-filter brightness */
 #define SPM_PARAM_DAMPING 2        /* 0..1 higher = longer decay */
 #define SPM_PARAM_POSITION 3       /* 0.05..0.95 string contact position */
@@ -28,7 +28,12 @@ typedef struct SPMSynth SPMSynth;
 #define SPM_PARAM_REED_STIFFNESS 14 /* 0..1 reed/lip response */
 #define SPM_PARAM_AIR_NOISE 15    /* 0..1 breath turbulence */
 #define SPM_PARAM_BORE 16         /* 0..1 bore shape / spectral tilt */
-#define SPM_PARAMETER_COUNT 17
+/* Tuned modal percussion: strike excites six decaying resonances. */
+#define SPM_PARAM_PERC_HARDNESS 17      /* 0..1 soft to hard mallet/striker */
+#define SPM_PARAM_PERC_DECAY 18         /* 0..1 short to long ringing */
+#define SPM_PARAM_PERC_INHARMONICITY 19 /* 0..1 harmonic to material modes */
+#define SPM_PARAM_PERC_ATTACK_NOISE 20  /* 0..1 strike transient noise */
+#define SPM_PARAMETER_COUNT 21
 
 SPMSynth* spm_create(double sampleRate, int32_t polyphony);
 void spm_destroy(SPMSynth* synth);
