@@ -62,8 +62,14 @@ final class StudioSynthSamplerBridgeTests: XCTestCase {
         XCTAssertEqual(restored.0.zones.count, 1)
         XCTAssertEqual(restored.0.zones[0].rootNote, 60)
         XCTAssertTrue(restored.0.isValid)
+        // The test reopens into an isolated temporary directory, not the
+        // user's default Sampler library. Keep that explicit file path.
+        var testPatch = restored.0
+        for index in testPatch.zones.indices {
+            testPatch.zones[index].managedFileName = nil
+        }
         _ = try StudioSamplerInstrument(sampleRate: 44_100,
-                                         patch: restored.0)
+                                         patch: testPatch)
     }
 
     func testGranularCanFindSamplersWithoutModifyingTheirZones() throws {
