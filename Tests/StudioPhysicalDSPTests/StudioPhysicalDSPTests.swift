@@ -185,6 +185,38 @@ final class StudioPhysicalDSPTests: XCTestCase {
         XCTAssertEqual(spm_set_parameter(synth, SPM_PARAM_MODEL, 3), 0)
     }
 
+    func testWindAndBrassModelsRenderAndRespondToBreath() {
+        for model: Float in [3, 4] {
+            let synth = makeSynth()
+            defer { spm_destroy(synth) }
+            XCTAssertEqual(spm_set_parameter(synth, SPM_PARAM_MODEL, model), 1)
+            XCTAssertEqual(spm_set_parameter(synth, SPM_PARAM_BREATH, 1), 1)
+            XCTAssertEqual(spm_set_parameter(synth, SPM_PARAM_AIR_NOISE, 0.3), 1)
+            XCTAssertEqual(spm_note_on(synth, 69, 120), 1)
+            let sounding = render(synth, count: 8_192)
+            XCTAssertGreaterThan(sounding.map { abs($0) }.max() ?? 0, 0.000001)
+            XCTAssertEqual(spm_midi_event(synth, 0xB0, 2, 0, 0), 1)
+            XCTAssertEqual(spm_midi_event(synth, 0xB0, 11, 0, 0), 1)
+            XCTAssertTrue(render(synth, count: 512).allSatisfy { $0 == 0 })
+            XCTAssertEqual(spm_all_notes_off(synth), 1)
+            XCTAssertTrue(render(synth, count: 128).allSatisfy { $0 == 0 })
+        }
+    }
+
+    func testWindControlsValidateRangesAndModelValues() {
+        let synth = makeSynth()
+        defer { spm_destroy(synth) }
+        for id in [SPM_PARAM_BREATH, SPM_PARAM_REED_STIFFNESS,
+                   SPM_PARAM_AIR_NOISE, SPM_PARAM_BORE] {
+            XCTAssertEqual(spm_set_parameter(synth, id, 0), 1)
+            XCTAssertEqual(spm_set_parameter(synth, id, 1), 1)
+            XCTAssertEqual(spm_set_parameter(synth, id, -0.01), 0)
+            XCTAssertEqual(spm_set_parameter(synth, id, .nan), 0)
+        }
+        XCTAssertEqual(spm_set_parameter(synth, SPM_PARAM_MODEL, 4), 1)
+        XCTAssertEqual(spm_set_parameter(synth, SPM_PARAM_MODEL, 5), 0)
+    }
+
     func testNoteReleaseSustainAndMultipleSampleRates() {
         let synth = makeSynth()
         defer { spm_destroy(synth) }
