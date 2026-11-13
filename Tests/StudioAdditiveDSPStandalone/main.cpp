@@ -117,6 +117,72 @@ int main() {
     assert(sadd_all_notes_off(synth));
     assert(peak(render(synth,512))==0.f);
 
+    // Backward compatibility: a legacy patch has zero partial-envelope mix
+    // and zero spectral-motion depth. Individual settings must NOT change it.
+    auto* legacy=sadd_create(44100,8);
+    auto* shaped=sadd_create(44100,8);
+    assert(legacy&&shaped);
+    for(auto* instance:{legacy,shaped}) {
+        assert(sadd_set_parameter(instance,SADD_PARAM_ATTACK,0.001f));
+        assert(sadd_set_parameter(instance,SADD_PARAM_SUSTAIN,0.92f));
+        assert(sadd_set_parameter(instance,SADD_PARAM_EVOLVE,0.f));
+        for(int h=0;h<SADD_PARTIAL_COUNT;++h)
+            assert(sadd_set_parameter(instance,SADD_PARAM_PARTIAL_BASE+h,
+                                      h==0?0.75f:(h==4?0.85f:0.f)));
+        assert(sadd_midi_event(instance,0x90,69,127,0));
+    }
+    assert(sadd_get_parameter(shaped,SADD_PARAM_PARTIAL_ENVELOPE_MIX)==0.f);
+    assert(sadd_get_parameter(shaped,SADD_PARAM_MOTION_DEPTH)==0.f);
+    assert(sadd_set_parameter(shaped,SADD_PARAM_PARTIAL_ATTACK_BASE+4,0.18f));
+    assert(sadd_set_parameter(shaped,SADD_PARAM_PARTIAL_DECAY_BASE+4,0.055f));
+    assert(sadd_set_parameter(shaped,SADD_PARAM_PARTIAL_SUSTAIN_BASE+4,0.04f));
+    assert(sadd_set_parameter(shaped,SADD_PARAM_PARTIAL_RELEASE_BASE+4,0.11f));
+    assert(sadd_set_parameter(shaped,SADD_PARAM_PARTIAL_MOTION_BASE+4,0.9f));
+    assert(!sadd_set_parameter(shaped,SADD_PARAM_PARTIAL_ATTACK_BASE,-0.1f));
+    assert(!sadd_set_parameter(shaped,SADD_PARAM_PARTIAL_SUSTAIN_BASE,1.1f));
+    assert(!sadd_set_parameter(shaped,SADD_PARAM_PARTIAL_MOTION_BASE,-0.1f));
+    assert(!sadd_set_parameter(shaped,SADD_PARAM_MOTION_RATE,13.f));
+    assert(!sadd_set_parameter(shaped,SADD_PARAM_MOTION_SHAPE,2.f));
+    assert(!sadd_set_parameter(shaped,SADD_PARAMETER_COUNT,0.f));
+
+    const auto unchangedLegacy=render(legacy,4096);
+    const auto unchangedNew=render(shaped,4096);
+    assert(difference(unchangedLegacy,unchangedNew)<0.001);
+    assert(sadd_set_parameter(shaped,SADD_PARAM_PARTIAL_ENVELOPE_MIX,1.f));
+    const auto constantEnvelope=render(legacy,8192);
+    const auto separateEnvelopes=render(shaped,8192);
+    assert(difference(constantEnvelope,separateEnvelopes)>5.0);
+    assert(sadd_midi_event(shaped,0x80,69,0,0));
+    assert(sadd_midi_event(legacy,0x80,69,0,0));
+    render(legacy,22050);
+    render(shaped,22050);
+    assert(peak(render(shaped,1024))<0.0001f);
+
+    // Time-varying spectral animation targets only selected harmonics.
+    // Different per-partial phase and wave shape must modify audio but
+    // remain stable over long runs with all 16 voices active.
+    sadd_reset_stopped(legacy);
+    sadd_reset_stopped(shaped);
+    assert(sadd_set_parameter(shaped,SADD_PARAM_PARTIAL_ENVELOPE_MIX,0.f));
+    assert(sadd_set_parameter(shaped,SADD_PARAM_MOTION_RATE,2.2f));
+    assert(sadd_set_parameter(shaped,SADD_PARAM_MOTION_DEPTH,0.82f));
+    assert(sadd_set_parameter(shaped,SADD_PARAM_MOTION_SPREAD,0.7f));
+    assert(sadd_set_parameter(shaped,SADD_PARAM_MOTION_SHAPE,0.5f));
+    assert(sadd_set_parameter(shaped,SADD_PARAM_PARTIAL_MOTION_BASE,0.f));
+    assert(sadd_set_parameter(shaped,SADD_PARAM_PARTIAL_MOTION_BASE+4,1.f));
+    assert(sadd_midi_event(legacy,0x90,69,127,0));
+    assert(sadd_midi_event(shaped,0x90,69,127,0));
+    const auto fixedSpectrum=render(legacy,8192);
+    const auto movingSpectrum=render(shaped,8192);
+    assert(difference(fixedSpectrum,movingSpectrum)>5.0);
+    assert(sadd_midi_event(shaped,0x80,69,0,0));
+    render(shaped,22050);
+    assert(peak(render(shaped,1024))<0.0001f);
+    assert(sadd_all_notes_off(shaped));
+    assert(peak(render(shaped,256))==0.f);
+    sadd_destroy(legacy);
+    sadd_destroy(shaped);
+
     sadd_destroy(a);sadd_destroy(b);sadd_destroy(synth);
     std::puts("Studio Additive DSP standalone checks passed");
 }
