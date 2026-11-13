@@ -160,7 +160,7 @@ final class StudioSamplerInstrumentFactoryTests: XCTestCase {
         XCTAssertTrue(patch.isValid)
         XCTAssertEqual(patch.zones.count, 4)
         XCTAssertTrue(metadata.tags.contains("Synthetic"))
-        let sampleFile = try AVAudioFile(forReading: patch.zones[0].sampleURL)
+        let sampleFile = try AVAudioFile(forReading: URL(fileURLWithPath: patch.zones[0].filePath))
         XCTAssertGreaterThan(sampleFile.length, 44_100)
     }
 }
