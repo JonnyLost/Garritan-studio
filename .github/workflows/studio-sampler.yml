@@ -1,0 +1,68 @@
+name: Studio Sampler native checks
+
+on:
+  push:
+    branches:
+      - feature/studio-sampler-native
+  pull_request:
+    paths:
+      - "StudioSamplerDSP/**"
+      - "DAWCore/Sources/DAWCore/Audio/StudioSampler*"
+      - "DAWUI/Sources/DAWUI/Views/StudioSamplerMapView.swift"
+      - "DAWUI/Sources/DAWUI/Views/StudioSamplerInstrumentView.swift"
+      - "DAWUI/Sources/DAWUI/Views/StudioSamplerLoopEditorView.swift"
+      - "DAWUI/Sources/DAWUI/Views/Timeline/TrackHeaderView.swift"
+      - "DAWUI/Sources/DAWUI/Views/MainWindowView.swift"
+      - "DAWCore/Sources/DAWCore/Audio/PlaybackEngine.swift"
+      - "DAWCore/Sources/DAWCore/Models/Track.swift"
+      - "Tests/DAWCoreTests/StudioSamplerTrackIntegrationTests.swift"
+      - "Tests/DAWCoreTests/StudioSamplerMappingBuilderTests.swift"
+      - "Tests/DAWCoreTests/StudioSamplerSampleLibraryTests.swift"
+      - "Tests/StudioSamplerDSPStandalone/**"
+      - "Package.swift"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-sampler-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  sampler-dsp:
+    name: Native DSP with sanitizers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run sampler standalone checks
+        run: |
+          clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I StudioSamplerDSP/include \
+            StudioSamplerDSP/src/StudioSamplerDSP.cpp \
+            Tests/StudioSamplerDSPStandalone/main.cpp \
+            -o /tmp/studio-sampler-smoke
+          ASAN_OPTIONS=detect_leaks=1 /tmp/studio-sampler-smoke
+      - name: Stress 72 streamed zones and concurrent delayed disk reader
+        run: |
+          clang++ -std=c++17 -O1 -g -pthread -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I StudioSamplerDSP/include \
+            StudioSamplerDSP/src/StudioSamplerDSP.cpp \
+            Tests/StudioSamplerDSPStandalone/stream_stress.cpp \
+            -o /tmp/studio-sampler-stress
+          ASAN_OPTIONS=detect_leaks=1 /tmp/studio-sampler-stress
+
+  macos:
+    name: macOS build and DAW regressions
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve Swift packages
+        run: swift package resolve
+      - name: Build all Swift targets
+        run: swift build
+      - name: Test sampler and existing DAWCore
+        run: swift test --parallel
+      - name: Build the app in Release
+        run: swift build -c release --product DAWApp
