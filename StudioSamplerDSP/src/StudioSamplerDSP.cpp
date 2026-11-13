@@ -727,31 +727,39 @@ struct SSSampler {
                 startRelease(voice);
         }
 
-        const Sample *release = nullptr;
-        int nearest = std::numeric_limits<int>::max();
-        for (const auto& zone : samples) {
-            if (!zone.releaseTrigger || zone.articulation != held.articulation ||
-                note < zone.low || note > zone.high ||
-                held.velocity < zone.minVelocity || held.velocity > zone.maxVelocity)
-                continue;
-            const int distance = std::abs(int(note) - int(zone.root));
-            if (distance < nearest) {
-                release = &zone;
-                nearest = distance;
+        // One note-off recording per captured microphone. Suppress the
+        // outgoing note's release tail after a legato handoff.
+        if (held.transitionedAway) return;
+        for (int mic = 0; mic < 4; ++mic) {
+            const Sample *release = nullptr;
+            int nearest = std::numeric_limits<int>::max();
+            for (const auto& zone : samples) {
+                if (!zone.releaseTrigger || zone.microphone != mic ||
+                    zone.articulation != held.articulation ||
+                    note < zone.low || note > zone.high ||
+                    held.velocity < zone.minVelocity ||
+                    held.velocity > zone.maxVelocity) continue;
+                const int distance = std::abs(int(note) - int(zone.root));
+                if (distance < nearest) {
+                    release = &zone;
+                    nearest = distance;
+                }
             }
-        }
-        if (!release || held.transitionedAway) return;
-        for (const auto& zone : samples) {
-            if (zone.releaseTrigger && zone.articulation == held.articulation &&
-                zone.root == release->root &&
-                zone.roundRobin == held.roundRobin &&
-                note >= zone.low && note <= zone.high &&
-                held.velocity >= zone.minVelocity && held.velocity <= zone.maxVelocity) {
-                release = &zone;
-                break;
+            if (!release) continue;
+            for (const auto& zone : samples) {
+                if (zone.releaseTrigger && zone.microphone == mic &&
+                    zone.articulation == held.articulation &&
+                    zone.root == release->root &&
+                    zone.roundRobin == held.roundRobin &&
+                    note >= zone.low && note <= zone.high &&
+                    held.velocity >= zone.minVelocity &&
+                    held.velocity <= zone.maxVelocity) {
+                    release = &zone;
+                    break;
+                }
             }
+            startVoice(release, note, held.velocity, channel, held.serial, true);
         }
-        startVoice(release, note, held.velocity, channel, held.serial, true);
     }
 
     void consumeMIDI() {
