@@ -20,6 +20,7 @@
 - The factory refuses to start if the main DAW transport or audio recorder is already recording.
 - Closing the factory during capture/preparation is disabled; dismissing an idle factory discards only temporary prepared files owned by the session.
 - Invalid note/velocity/articulation or over-limit batches are rejected before copying any sample files.
+- If a handoff fails, Studio backs up the processed WAV takes to Application Support/GarritanStudio/SamplerFactoryRecoveries and shows that recovery location. The originals are not destroyed. Successful imports remove only temporary prepared copies.
 - A capture batch maps the same root note at multiple velocity levels into disjoint velocity bands; roots map to nearest-key ranges separately by articulation, mic and interval source. New articulations merge through existing stable keyswitch logic rather than changing previously edited patches.
 - All sample audio processing is outside ss_render and all capture disk writes are outside the input tap. No file decoding, heap allocations or file writes are added to the audio render callback.
 - Max 128 recorded zones, 15 additional articulations, four microphone positions and the existing bounded sampler voice budget remain unchanged.
