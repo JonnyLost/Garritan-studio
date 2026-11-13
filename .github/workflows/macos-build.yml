@@ -5,6 +5,7 @@ on:
     branches:
       - feature/stage-acoustics-sync
       - integration/studio-complete-mac-test
+      - architecture/studio-independence
   pull_request:
     branches:
       - garritan-integration
@@ -30,6 +31,9 @@ jobs:
         run: |
           sw_vers
           swift --version
+
+      - name: Enforce Studio architecture compatibility contracts
+        run: python3 Tools/check_studio_independence.py
 
       - name: Resolve package dependencies
         run: swift package resolve
