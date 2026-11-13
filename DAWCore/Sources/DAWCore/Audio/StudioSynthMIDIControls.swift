@@ -49,7 +49,7 @@ public struct StudioSynthMIDIControlMapping: Codable, Equatable, Identifiable, S
     }
 
     public static func supportsController(_ number: UInt8) -> Bool {
-        (1...119).contains(number) && number != 64
+        (1...119).contains(number) && number != 32 && number != 64
     }
 
     public func validate(layers: [StudioSynthLayer]) -> Bool {
