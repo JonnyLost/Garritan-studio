@@ -59,6 +59,24 @@ receive the generated profile, without adding a third-party plugin or
 runtime convolution. Selecting Apple Medium Hall mutes the added early
 reflection return and returns to the tested legacy route.
 
+### Acoustic realism improvements
+
+A custom room now also sets an **FDN delay-spacing scale** based on the
+cube root of room volume relative to a reference 1,728 m³ stage. Values
+are bounded to approximately 0.72–1.75 so small and large rooms produce
+different initial late-field density without excessive memory demand. Each
+delay line preallocates the largest required ring buffer before rendering.
+When a factory preset is selected, its original delay distances and
+three-band damping remain unchanged.
+
+Custom **early reflection brightness** is derived from area-weighted
+4 kHz surface absorption, with a single precomputed high-cut coefficient
+applied per instrument before its reflection delay. More absorption
+typically makes the reflections darker. All filter coefficients are
+prepared outside the render callback; factory reflections bypass the new
+filter. These are psychoacoustic approximations, not boundary-element
+simulation, full ray tracing, or an acoustically exact model.
+
 The **Apply Custom Acoustic Room** action is intentionally disabled during
 playback and recording. It stops AVAudioEngine, prepares new native DSP
 resources, then restarts the engine. We do not yet provide glitch-free
@@ -72,6 +90,39 @@ definition, alongside \`acousticRoomProfileID\`. Older projects decode as
 before and default to the Apple hall; a project saved with the custom
 room selection will restore its material, geometry and AU configuration.
 Only successfully applied settings are persisted.
+
+## Offline six-band calibration and published reference anchors
+
+The `NativeRoomImpulseAnalyzer` now estimates EDT, T20 and T30 separately
+at 125, 250, 500, 1,000, 2,000 and 4,000 Hz. It integrates **stereo
+energy separately**, avoiding cancellation that occurred when opposite
+polarity channels were averaged. A band too near the sample-rate Nyquist
+limit returns nil rather than inventing a measurement.
+
+The macOS development command
+`swift run -c release RoomAcousticCalibration --seconds 6` produces a JSON
+report for **four factory rooms plus the default custom design**.
+`--design-file <path>` accepts a JSON-encoded `StudioAcousticRoomDesign`
+to measure another design offline. Each row includes:
+- Six-band design/reference target (labeled as a real custom design or as
+  an *interpolated estimate* for three-band factory presets).
+- Measured synthetic EDT, T20 and T30, when enough dynamic range exists.
+- T20 absolute error, percentage error and an **unapplied** tuning
+  suggestion; these are not authoritative or automatic calibration.
+- Wet-only C80, not an ISO-style direct-plus-reverberant C80 value.
+
+The GitHub macOS workflow saves `native-room-calibration.json` and
+prints a compact per-frequency comparison. Actual numeric results must
+be reviewed before making stronger accuracy claims.
+
+The [REVERBDATA research anchors](./reverbdata-measured-anchors.json)
+preserve source-attributed **T30,wide** values and the measurement positions
+for Gulbenkian Hall, the Convent of Christ church and refectory, Jerónimos
+church, and the Crow's Cloister cistern. These *broadband* values are not
+reused as six octave-band RT targets. Website licensing is CC BY-NC-SA,
+so no external impulse audio is distributed or embedded in Studio.
+Additional dataset rights and measurement conditions need review before
+using individual octave-band curves for quantitative tuning.
 
 ## Testing and remaining validation
 
