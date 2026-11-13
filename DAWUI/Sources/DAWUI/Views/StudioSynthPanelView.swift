@@ -536,21 +536,23 @@ public struct StudioSynthPanelView: View {
 
     private func physicalEditor(_ layer: StudioSynthLayer) -> some View {
         let model = (currentLayer(layer.id)?.physicalPatch ?? StudioPhysicalPatch()).model
-        let common: [StudioPhysicalParameter] = [
-            .brightness, .damping, .position, .bodyMix, .bodySize,
-            .release, .gain
-        ]
+        let common: [StudioPhysicalParameter]
         let specialized: [StudioPhysicalParameter]
         switch model {
         case .plucked, .struck:
             specialized = [.pickHardness, .stiffness]
+            common = [.brightness, .damping, .position, .bodyMix,
+                      .bodySize, .release, .gain]
         case .bowed:
             specialized = [.bowPressure, .bowSpeed, .bowNoise]
+            common = [.brightness, .bodyMix, .bodySize, .release, .gain]
         case .reed, .brass:
             specialized = [.breath, .reedStiffness, .airNoise, .bore]
+            common = [.bodyMix, .bodySize, .release, .gain]
         case .mallet, .bell, .membrane:
             specialized = [.percussionHardness, .percussionDecay,
                            .percussionInharmonicity, .percussionAttackNoise]
+            common = [.position, .release, .gain]
         }
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
