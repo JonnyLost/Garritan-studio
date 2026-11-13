@@ -28,6 +28,8 @@ public enum StudioSamplerMappingBuilder {
         var roundRobin: UInt8?
         var isRelease: Bool
         var articulation: String?
+        var microphone: UInt8
+        var legatoFrom: UInt8?
     }
 
     /// Analyze filenames without changing the recordings. Each articulation
@@ -40,79 +42,111 @@ public enum StudioSamplerMappingBuilder {
         let sorted = urls.sorted {
             $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending
         }
-        let names = Array(Set(sorted.compactMap { articulationHint(in: $0) })).sorted()
+        let names = Array(Set(sorted.compactMap { url -> String? in
+            // 'legato' in fromC4_toD4_legato is a transition technique,
+            // not automatically a separate playback articulation.
+            if legatoIntervalHint(in: url) != nil &&
+               articulationHint(in: url) == "Legato" { return nil }
+            return articulationHint(in: url)
+        })).sorted()
         guard names.count <= 15 else { throw MappingError.tooManyArticulations }
         let articulationIDs = Dictionary(uniqueKeysWithValues:
             names.enumerated().map { ($0.element, UInt8($0.offset + 1)) })
         let candidates = sorted.enumerated().map { index, url in
-            Candidate(url: url,
-                      root: noteNumber(in: url) ?? min(127, 60 + index),
+            let interval = legatoIntervalHint(in: url)
+            let detected = articulationHint(in: url)
+            return Candidate(url: url,
+                      root: interval?.to ?? (noteNumber(in: url) ?? min(127, 60 + index)),
                       velocity: velocityHint(in: url),
                       roundRobin: roundRobinHint(in: url),
                       isRelease: releaseHint(in: url),
-                      articulation: articulationHint(in: url))
+                      articulation: interval != nil && detected == "Legato" ? nil : detected,
+                      microphone: microphoneHint(in: url) ?? 0,
+                      legatoFrom: interval.map { UInt8($0.from) })
+
         }
         var zones: [StudioSamplerZone] = []
         let groups: [String?] = [nil] + names.map(Optional.some)
 
         for articulation in groups {
-            let subset = candidates.filter { $0.articulation == articulation }
-            guard !subset.isEmpty else { continue }
-            let roots = Array(Set(subset.map(\.root))).sorted()
-            for (rootIndex, root) in roots.enumerated() {
-                let lowestKey = rootIndex == 0 ? 0 : (roots[rootIndex - 1] + root) / 2 + 1
-                let highestKey = rootIndex + 1 == roots.count
-                    ? 127 : (root + roots[rootIndex + 1]) / 2
-
-                for isRelease in [false, true] {
-                    let group = subset.filter {
-                        $0.root == root && $0.isRelease == isRelease
-                    }.sorted { left, right in
-                        if (left.velocity ?? 64) != (right.velocity ?? 64) {
-                            return (left.velocity ?? 64) < (right.velocity ?? 64)
-                        }
-                        return left.url.lastPathComponent.localizedStandardCompare(
-                            right.url.lastPathComponent
-                        ) == .orderedAscending
-                    }
-                    guard !group.isEmpty else { continue }
-
-                    // Files explicitly tagged rr1/rr2 share their velocity
-                    // layer; attack and release recordings are separate.
-                    var bands: [[Candidate]] = []
-                    for candidate in group {
-                        if candidate.roundRobin != nil,
-                           let last = bands.indices.last,
-                           let first = bands[last].first,
-                           first.roundRobin != nil &&
-                           (first.velocity ?? 64) == (candidate.velocity ?? 64) {
-                            bands[last].append(candidate)
-                        } else {
-                            bands.append([candidate])
-                        }
-                    }
-                    for (index, band) in bands.enumerated() {
-                        let low = min(127, 1 + (index * 127) / bands.count)
-                        let high = max(low, (index + 1) * 127 / bands.count)
-                        for candidate in band {
-                            var zone = StudioSamplerZone(
-                                sampleURL: candidate.url,
-                                rootNote: UInt8(root),
-                                lowestNote: UInt8(lowestKey),
-                                highestNote: UInt8(highestKey),
-                                lowestVelocity: UInt8(low),
-                                highestVelocity: UInt8(high)
-                            )
-                            zone.roundRobinIndex = candidate.roundRobin
-                            zone.isReleaseTrigger = candidate.isRelease ? true : nil
-                            zone.articulationID = articulation.flatMap { articulationIDs[$0] }
-                            zones.append(zone)
+            for mic in UInt8(0)...UInt8(3) {
+                let microphoneCandidates = candidates.filter {
+                    $0.articulation == articulation && $0.microphone == mic
+                }
+                let transitionSources: [UInt8?] = [nil] +
+                    Array(Set(microphoneCandidates.compactMap(\.legatoFrom)))
+                        .sorted().map(Optional.some)
+                for from in transitionSources {
+                    let subset = microphoneCandidates.filter { $0.legatoFrom == from }
+                    guard !subset.isEmpty else { continue }
+                    let roots = Array(Set(subset.map(\.root))).sorted()
+                    for (rootIndex, root) in roots.enumerated() {
+                        let lowestKey = from != nil ? root :
+                            rootIndex == 0 ? 0 : (roots[rootIndex - 1] + root) / 2 + 1
+                        let highestKey = from != nil ? root :
+                            rootIndex + 1 == roots.count ? 127 :
+                            (root + roots[rootIndex + 1]) / 2
+                        for isRelease in [false, true] {
+                            let group = subset.filter {
+                                $0.root == root && $0.isRelease == isRelease
+                            }.sorted { left, right in
+                                if (left.velocity ?? 64) != (right.velocity ?? 64) {
+                                    return (left.velocity ?? 64) < (right.velocity ?? 64)
+                                }
+                                return left.url.lastPathComponent.localizedStandardCompare(
+                                    right.url.lastPathComponent
+                                ) == .orderedAscending
+                            }
+                            guard !group.isEmpty else { continue }
+                            var bands: [[Candidate]] = []
+                            for candidate in group {
+                                if candidate.roundRobin != nil,
+                                   let last = bands.indices.last,
+                                   let first = bands[last].first,
+                                   first.roundRobin != nil &&
+                                   (first.velocity ?? 64) == (candidate.velocity ?? 64) {
+                                    bands[last].append(candidate)
+                                } else {
+                                    bands.append([candidate])
+                                }
+                            }
+                            for (index, band) in bands.enumerated() {
+                                let low = min(127, 1 + (index * 127) / bands.count)
+                                let high = max(low, (index + 1) * 127 / bands.count)
+                                for candidate in band {
+                                    var zone = StudioSamplerZone(
+                                        sampleURL: candidate.url,
+                                        rootNote: UInt8(root),
+                                        lowestNote: UInt8(lowestKey),
+                                        highestNote: UInt8(highestKey),
+                                        lowestVelocity: UInt8(low),
+                                        highestVelocity: UInt8(high)
+                                    )
+                                    zone.roundRobinIndex = candidate.roundRobin
+                                    zone.isReleaseTrigger = candidate.isRelease ? true : nil
+                                    zone.articulationID = articulation.flatMap { articulationIDs[$0] }
+                                    zone.microphoneID = mic == 0 ? nil : mic
+                                    zone.legatoFromNote = candidate.legatoFrom
+                                    zones.append(zone)
+                                }
+                            }
                         }
                     }
                 }
             }
         }
         var patch = StudioSamplerPatch(zones: zones)
+        let microphoneIDs = Array(Set(candidates.map(.microphone))).sorted()
+        if microphoneIDs.contains(where: { $0 > 0 }) {
+            let micNames = ["Close", "Main / Tree", "Room", "Spot"]
+            patch.microphones = microphoneIDs.map { id in
+                StudioSamplerMicrophone(id: id, name: micNames[Int(id)])
+            }
+        }
+        if candidates.contains(where: { $0.legatoFrom != nil }) {
+            patch.legatoEnabled = true
+            patch.legatoCrossfadeMilliseconds = 40
+        }
         if !names.isEmpty {
             patch.articulations = names.enumerated().map { index, name in
                 StudioSamplerArticulation(id: UInt8(index + 1),
@@ -160,6 +194,17 @@ public enum StudioSamplerMappingBuilder {
                 idMap[addedZones[index].articulationID ?? 0].flatMap { $0 == 0 ? nil : $0 }
         }
         merged.zones.append(contentsOf: addedZones)
+        var microphoneGroups = merged.microphones ?? []
+        for microphone in imported.microphones ?? [] where
+            !microphoneGroups.contains(where: { $0.id == microphone.id }) {
+            microphoneGroups.append(microphone)
+        }
+        if !microphoneGroups.isEmpty { merged.microphones = microphoneGroups }
+        if imported.legatoEnabled == true && merged.legatoEnabled == nil {
+            merged.legatoEnabled = true
+            merged.legatoCrossfadeMilliseconds =
+                imported.legatoCrossfadeMilliseconds ?? 40
+        }
         if !articulations.isEmpty {
             merged.articulations = articulations
             if merged.defaultKeyswitchNote == nil {
@@ -235,6 +280,38 @@ public enum StudioSamplerMappingBuilder {
             }
         }
         return nil
+    }
+
+    /// Explicit recordings of an interval: "fromC4_toD4_legato.wav".
+    /// No pitch detection or fabricated interval is attempted.
+    public static func legatoIntervalHint(in url: URL) -> (from: Int, to: Int)? {
+        var from: Int?
+        var to: Int?
+        for token in filenameTokens(url) {
+            let lower = token.lowercased()
+            if lower.hasPrefix("from") {
+                let note = String(token.dropFirst(4))
+                from = noteNumber(in: URL(fileURLWithPath: note + ".wav"))
+            }
+            if lower.hasPrefix("to") {
+                let note = String(token.dropFirst(2))
+                to = noteNumber(in: URL(fileURLWithPath: note + ".wav"))
+            }
+        }
+        if let from, let to, from != to { return (from, to) }
+        return nil
+    }
+
+    /// Mic labels may be embedded in recording names. Untagged samples stay
+    /// on legacy mic 0; separate positions never form velocity bands.
+    public static func microphoneHint(in url: URL) -> UInt8? {
+        let names: [String: UInt8] = [
+            "close": 0, "dry": 0,
+            "main": 1, "tree": 1, "decca": 1,
+            "room": 2, "ambient": 2, "far": 2,
+            "spot": 3, "outrigger": 3
+        ]
+        return filenameTokens(url).compactMap { names[$0.lowercased()] }.first
     }
 
     /// Common orchestral articulation tokens. A plain sustain recording
