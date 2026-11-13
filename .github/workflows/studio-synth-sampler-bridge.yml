@@ -23,6 +23,7 @@ jobs:
         run: |
           swiftc -frontend -parse \
             DAWCore/Sources/DAWCore/Audio/StudioSynthSamplerCapture.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioSharedSampleCache.swift \
             DAWCore/Sources/DAWCore/Audio/StudioGranularSamplerBridge.swift \
             DAWCore/Sources/DAWCore/Audio/StudioSamplerInstrument.swift \
             DAWCore/Sources/DAWCore/Audio/StudioSamplerInstrumentFactory.swift \
@@ -38,16 +39,31 @@ jobs:
         run: |
           clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror \
             -fsanitize=address,undefined -fno-omit-frame-pointer \
-            -I StudioSamplerDSP/include StudioSamplerDSP/src/StudioSamplerDSP.cpp \
+            -I StudioSamplerDSP/include -I StudioSharedPCM/include \
+            StudioSharedPCM/src/StudioSharedPCM.cpp \
+            StudioSamplerDSP/src/StudioSamplerDSP.cpp \
             Tests/StudioSamplerDSPStandalone/main.cpp -o /tmp/studio-sampler-test
           ASAN_OPTIONS=detect_leaks=1 /tmp/studio-sampler-test
       - name: Sanitize Granular synthesis DSP
         run: |
           clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror \
             -fsanitize=address,undefined -fno-omit-frame-pointer \
-            -I StudioGranularDSP/include StudioGranularDSP/src/StudioGranularDSP.cpp \
+            -I StudioGranularDSP/include -I StudioSharedPCM/include \
+            StudioSharedPCM/src/StudioSharedPCM.cpp \
+            StudioGranularDSP/src/StudioGranularDSP.cpp \
             Tests/StudioGranularDSPStandalone/main.cpp -o /tmp/studio-granular-test
           ASAN_OPTIONS=detect_leaks=1 /tmp/studio-granular-test
+      - name: Test shared PCM lifetime and cross-engine zero-copy
+        run: |
+          clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I StudioSharedPCM/include -I StudioSamplerDSP/include \
+            -I StudioGranularDSP/include \
+            StudioSharedPCM/src/StudioSharedPCM.cpp \
+            StudioSamplerDSP/src/StudioSamplerDSP.cpp \
+            StudioGranularDSP/src/StudioGranularDSP.cpp \
+            Tests/StudioSharedPCMStandalone/main.cpp -o /tmp/studio-shared-pcm-test
+          ASAN_OPTIONS=detect_leaks=1 /tmp/studio-shared-pcm-test
   macos-integration:
     name: macOS integrated build and tests
     runs-on: macos-15
