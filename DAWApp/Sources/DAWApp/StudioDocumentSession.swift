@@ -31,6 +31,12 @@ final class AppState: ObservableObject {
     private var isCapturingSnapshot = false
     private var pendingPluginRestoreID: UUID?
 
+    /// Include in-flight operations even if the last saved revision currently
+    /// matches the edited revision. Closing mid-write can still lose data.
+    var needsExitNegotiation: Bool {
+        hasUnsavedChanges || isSaving || isTransitioning
+    }
+
     init() {
         let fileManager = ProjectFileManager()
         self.fileManager = fileManager

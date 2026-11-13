@@ -9,7 +9,7 @@ final class StudioApplicationLifecycle: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let appState else { return .terminateNow }
-        guard appState.hasUnsavedChanges else { return .terminateNow }
+        guard appState.needsExitNegotiation else { return .terminateNow }
 
         Task { @MainActor in
             let confirmed = await appState.confirmApplicationTermination()

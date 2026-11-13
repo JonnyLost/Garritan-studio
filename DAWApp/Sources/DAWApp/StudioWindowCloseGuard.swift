@@ -76,7 +76,7 @@ struct StudioWindowCloseGuard: NSViewRepresentable {
             }
             guard !pendingConfirmation else { return false }
             guard let appState else { return true }
-            guard appState.hasUnsavedChanges else {
+            guard appState.needsExitNegotiation else {
                 return originalDelegate?.windowShouldClose?(sender) ?? true
             }
 

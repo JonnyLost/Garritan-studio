@@ -134,3 +134,14 @@ whether the completed snapshot is current. This closes a potential
 last-writer-wins race where an older autosave could overwrite a newer manual
 Save on disk. Added deterministic XCTest coverage for an autosave blocked by a
 manual Save and a manual Save waiting for an in-flight snapshot.
+
+## Exit guard while file operations are in progress
+
+Application Quit and window Close now consult
+`AppState.needsExitNegotiation`, which includes both unsaved revisions
+**and** in-flight Save or project transitions. An active operation cannot
+be abandoned simply because the Edited marker is momentarily clear;
+`confirmApplicationTermination()` refuses to close while these operations
+are running. A later, explicit Close/Quit can succeed when the operation
+finishes. This avoids a premature exit while a project package is being
+written or switched.
