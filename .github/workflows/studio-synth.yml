@@ -23,11 +23,13 @@ jobs:
         run: |
           swiftc -frontend -parse \
             DAWCore/Sources/DAWCore/Audio/StudioSynthPatch.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioSynthMIDIControls.swift \
             DAWCore/Sources/DAWCore/Audio/StudioSynthInstrument.swift \
             DAWCore/Sources/DAWCore/Models/Track.swift \
             DAWCore/Sources/DAWCore/Audio/PlaybackEngine.swift \
             DAWUI/Sources/DAWUI/ViewModels/ProjectViewModel.swift \
             DAWUI/Sources/DAWUI/Views/StudioSynthPanelView.swift \
+            DAWUI/Sources/DAWUI/Views/StudioSynthMIDILearnView.swift \
             DAWUI/Sources/DAWUI/Views/Timeline/TrackHeaderView.swift \
             Tests/DAWCoreTests/StudioSynthTests.swift \
             DAWCore/Sources/DAWCore/Audio/StudioWavetablePatch.swift \
@@ -38,7 +40,8 @@ jobs:
             DAWCore/Sources/DAWCore/Audio/StudioSynthModulation.swift \
             DAWCore/Sources/DAWCore/Audio/StudioSynthModulationWorker.swift \
             DAWUI/Sources/DAWUI/Views/StudioSynthModulationView.swift \
-            Tests/DAWCoreTests/StudioSynthModulationTests.swift
+            Tests/DAWCoreTests/StudioSynthModulationTests.swift \
+            Tests/DAWCoreTests/StudioSynthMIDILearnTests.swift
       - name: Compile and execute shared modulation core on Linux
         run: |
           # Debug assertions must stay active for these executable checks.
@@ -49,6 +52,7 @@ jobs:
             DAWCore/Sources/DAWCore/Audio/StudioWavetablePatch.swift \
             DAWCore/Sources/DAWCore/Audio/StudioSynthModulation.swift \
             DAWCore/Sources/DAWCore/Audio/StudioSynthPatch.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioSynthMIDIControls.swift \
             DAWCore/Sources/DAWCore/Audio/StudioSynthModulationWorker.swift \
             Tests/StudioSynthModulationStandalone/main.swift \
             -o /tmp/studio-synth-modulation
