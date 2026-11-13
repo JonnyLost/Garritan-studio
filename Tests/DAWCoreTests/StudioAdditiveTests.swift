@@ -116,6 +116,30 @@ final class StudioAdditiveTests: XCTestCase {
         XCTAssertTrue(instrument.allNotesOff())
     }
 
+    func testHybridFactoryRecipesAreValidPortableAndMacBookConscious() throws {
+        let presets = StudioSynthHybridFactoryLibrary.presets
+        XCTAssertEqual(presets.count, 10)
+        XCTAssertEqual(Set(presets.map(\.id)).count, presets.count)
+        for preset in presets {
+            XCTAssertTrue(preset.patch.validate(), preset.name)
+            XCTAssertTrue((2...4).contains(preset.patch.layers.count), preset.name)
+            XCTAssertTrue(preset.patch.layers.allSatisfy { $0.gain <= 0.45 },
+                          "\(preset.name) has an unexpectedly loud layer")
+            XCTAssertTrue(preset.patch.layers.contains(where: {
+                $0.engine == .additive
+            }), "\(preset.name) should showcase the new additive engine")
+            let encoded = try JSONEncoder().encode(preset.patch)
+            XCTAssertEqual(try JSONDecoder().decode(StudioSynthPatch.self,
+                                                    from: encoded), preset.patch)
+            XCTAssertNil(preset.patch.midiControls)
+        }
+        let flagship = try XCTUnwrap(presets.first(where: {
+            $0.name == "Fourfold Spectrum"
+        }))
+        XCTAssertEqual(Set(flagship.patch.layers.map(\.engine)),
+                       Set(StudioSynthEngine.allCases))
+    }
+
     func testFourEngineHybridCanRouteMIDIAndLiveAdditiveControls() throws {
         var patch = StudioSynthPatch()
         patch.layers.append(StudioSynthLayer(engine: .wavetable))
