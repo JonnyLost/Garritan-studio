@@ -216,12 +216,15 @@ class AppState: ObservableObject {
 
     private enum DocumentError: LocalizedError {
         case snapshotUnavailable
+        case pluginStateCaptureFailed(String)
         case sessionChanged
 
         var errorDescription: String? {
             switch self {
             case .snapshotUnavailable:
                 return "Studio could not capture the current instruments and project state. The project was not saved; please try again."
+            case .pluginStateCaptureFailed(let message):
+                return "Studio could not capture the current instrument or effect state. Nothing was saved. \(message)"
             case .sessionChanged:
                 return "The project changed during saving. The current document was not marked as saved."
             }
@@ -310,6 +313,13 @@ class AppState: ObservableObject {
     private func captureProjectWithPluginStates() throws -> Project {
         let expectedProjectID = currentProject.id
         var snapshot: Project?
+        var captureFailure: String?
+        let failureObserver = NotificationCenter.default.addObserver(
+            forName: .projectStateCaptureFailed, object: nil, queue: nil
+        ) { notification in
+            captureFailure = notification.object as? String
+        }
+        defer { NotificationCenter.default.removeObserver(failureObserver) }
         let observer = NotificationCenter.default.addObserver(
             forName: .projectDataForSave, object: nil, queue: nil
         ) { notification in
@@ -320,6 +330,7 @@ class AppState: ObservableObject {
         defer { NotificationCenter.default.removeObserver(observer) }
 
         NotificationCenter.default.post(name: .captureProjectForSave, object: nil)
+        if let captureFailure { throw DocumentError.pluginStateCaptureFailed(captureFailure) }
         guard let snapshot else { throw DocumentError.snapshotUnavailable }
         return snapshot
     }
