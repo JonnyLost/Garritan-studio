@@ -97,8 +97,17 @@ public enum StudioSynthSamplerCapture {
             }
         }
 
-        let sampler = try StudioSamplerInstrumentFactory.assemble(
+        var sampler = try StudioSamplerInstrumentFactory.assemble(
             takes, sampleDirectory: sampleDirectory)
+        if sampleDirectory != nil {
+            // The Sampler's managedFileName resolves against the user's
+            // normal library by design. Isolated test/export directories
+            // must retain explicit local paths rather than falsely claiming
+            // those copies are in the default managed library.
+            for index in sampler.zones.indices {
+                sampler.zones[index].managedFileName = nil
+            }
+        }
         let metadata = StudioSamplerInstrumentPackage.Metadata(
             name: trimmed, category: "Synth Captures",
             tags: ["Studio Synth", "Native Multisample"])
