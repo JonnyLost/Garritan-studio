@@ -80,7 +80,7 @@ public enum StudioPhysicalParameter: Int32, Codable, CaseIterable, Sendable {
     }
 
     public func position(for value: Float) -> Double {
-        let range = range
+        let range = self.range
         let v = min(range.upperBound, max(range.lowerBound, value))
         if self == .release {
             return log(Double(v / range.lowerBound)) /
@@ -92,7 +92,7 @@ public enum StudioPhysicalParameter: Int32, Codable, CaseIterable, Sendable {
 
     public func value(at position: Double) -> Float {
         let t = min(1, max(0, position.isFinite ? position : 0))
-        let range = range
+        let range = self.range
         if self == .release {
             return Float(Double(range.lowerBound) *
                          pow(Double(range.upperBound / range.lowerBound), t))
