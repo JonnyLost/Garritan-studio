@@ -163,8 +163,10 @@ struct SSSampler {
         targetCC21.fill(0.f);
         micGain.fill(1.f);
         targetMicGain.fill(1.f);
-        micPan.fill(0.f);
-        targetMicPan.fill(0.f);
+        micPanLeft.fill(1.f);
+        micPanRight.fill(1.f);
+        targetMicLeft.fill(1.f);
+        targetMicRight.fill(1.f);
         targetCC1.fill(127.f);
         targetCC11.fill(127.f);
         keyswitchArticulations.fill(255); // 255 denotes ordinary musical note
@@ -197,9 +199,11 @@ struct SSSampler {
     bool legatoEnabled = false;
     int legatoFadeFrames = 1764; // default 40ms at 44.1 kHz
     std::array<float, 4> micGain{};
-    std::array<float, 4> micPan{};
+    std::array<float, 4> micPanLeft{};
+    std::array<float, 4> micPanRight{};
     std::array<float, 4> targetMicGain{};
-    std::array<float, 4> targetMicPan{};
+    std::array<float, 4> targetMicLeft{};
+    std::array<float, 4> targetMicRight{};
     std::array<float, 16> smoothCC2{};
     std::array<float, 16> targetCC2{};
     std::array<float, 16> smoothCC21{};
@@ -803,7 +807,13 @@ struct SSSampler {
                 break;
             case CommandKind::microphone:
                 targetMicGain[command.note] = command.value1;
-                targetMicPan[command.note] = command.value2;
+                // A pan event only changes target coefficients once per
+                // MIDI block. The DSP smoothly interpolates those gains
+                // without evaluating trigonometry on every sample frame.
+                targetMicLeft[command.note] =
+                    std::cos(std::max(0.f, command.value2) * kHalfPi);
+                targetMicRight[command.note] =
+                    std::cos(std::max(0.f, -command.value2) * kHalfPi);
                 break;
             case CommandKind::legato:
                 legatoEnabled = command.velocity != 0;
@@ -1222,12 +1232,12 @@ void ss_render(SSSampler *sampler, float *left, float *right, int32_t frames) {
         for (int mic = 0; mic < 4; ++mic) {
             sampler->micGain[mic] +=
                 (sampler->targetMicGain[mic] - sampler->micGain[mic]) * smoothing;
-            sampler->micPan[mic] +=
-                (sampler->targetMicPan[mic] - sampler->micPan[mic]) * smoothing;
-            micLeft[mic] = sampler->micGain[mic] *
-                std::cos(std::max(0.f, sampler->micPan[mic]) * kHalfPi);
-            micRight[mic] = sampler->micGain[mic] *
-                std::cos(std::max(0.f, -sampler->micPan[mic]) * kHalfPi);
+            sampler->micPanLeft[mic] +=
+                (sampler->targetMicLeft[mic] - sampler->micPanLeft[mic]) * smoothing;
+            sampler->micPanRight[mic] +=
+                (sampler->targetMicRight[mic] - sampler->micPanRight[mic]) * smoothing;
+            micLeft[mic] = sampler->micGain[mic] * sampler->micPanLeft[mic];
+            micRight[mic] = sampler->micGain[mic] * sampler->micPanRight[mic];
         }
         float leftSum = 0;
         float rightSum = 0;
