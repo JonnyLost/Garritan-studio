@@ -96,6 +96,9 @@ public struct StudioSynthPanelView: View {
                     Button("New Granular Instrument") {
                         replace(with: StudioSynthPatch.individual(.granular))
                     }
+                    Button("New Physical Modeling Instrument") {
+                        replace(with: StudioSynthPatch.individual(.physical))
+                    }
                     Button("New Analog + FM Hybrid") {
                         replace(with: StudioSynthPatch())
                     }
@@ -123,6 +126,7 @@ public struct StudioSynthPanelView: View {
                     Button("Wavetable Layer") { addLayer(.wavetable) }
                     Button("Additive Layer") { addLayer(.additive) }
                     Button("Granular Layer") { addLayer(.granular) }
+                    Button("Physical Modeling Layer") { addLayer(.physical) }
                 } label: {
                     Label("Add Layer", systemImage: "plus")
                 }
@@ -210,6 +214,25 @@ public struct StudioSynthPanelView: View {
                                         Label("Granular Factory Sounds",
                                               systemImage: "circle.hexagongrid")
                                     }
+                                } else if layer.engine == .physical {
+                                    Menu {
+                                        ForEach(["Strings", "Keys", "Winds", "Brass",
+                                                 "Percussion"], id: \.self) { family in
+                                            Menu(family) {
+                                                ForEach(StudioPhysicalFactoryLibrary.presets.filter {
+                                                    $0.family == family
+                                                }) { preset in
+                                                    Button(preset.name) {
+                                                        loadPhysicalPreset(preset.patch,
+                                                                           layerID: layer.id)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } label: {
+                                        Label("Physical Factory Sounds",
+                                              systemImage: "waveform.path")
+                                    }
                                 } else if layer.engine == .additive {
                                     Menu {
                                         ForEach(["Keys", "Winds", "Pads", "Bass",
@@ -248,6 +271,8 @@ public struct StudioSynthPanelView: View {
                                 wavetableEditor(layer)
                             } else if layer.engine == .additive {
                                 additiveEditor(layer)
+                            } else if layer.engine == .physical {
+                                physicalEditor(layer)
                             } else if layer.engine == .granular {
                                 StudioGranularEditorView(
                                     viewModel:viewModel,trackID:trackID,
@@ -434,6 +459,14 @@ public struct StudioSynthPanelView: View {
         replace(with:changed)
     }
 
+    private func loadPhysicalPreset(_ preset: StudioPhysicalPatch, layerID: UUID) {
+        var changed = patch
+        guard let index = changed.layers.firstIndex(where: { $0.id == layerID }),
+              changed.layers[index].engine == .physical else { return }
+        changed.layers[index].physicalPatch = preset
+        replace(with: changed)
+    }
+
     private func loadFMPreset(_ preset: StudioFMPatch, layerID: UUID) {
         var changed = patch
         guard let index = changed.layers.firstIndex(where: { $0.id == layerID }) else {
@@ -464,6 +497,98 @@ public struct StudioSynthPanelView: View {
                     changed.mappings.removeAll { $0.target == target }
                     _ = viewModel.setStudioSynthMIDIControls(changed, for: trackID)
                 }
+            }
+        }
+    }
+
+    private func physicalValue(_ parameter: StudioPhysicalParameter,
+                               layerID: UUID) -> Float {
+        currentLayer(layerID)?.physicalPatch?.value(for: parameter)
+            ?? parameter.defaultValue
+    }
+
+    private func physicalSlider(_ parameter: StudioPhysicalParameter,
+                                layerID: UUID) -> some View {
+        let value = physicalValue(parameter, layerID: layerID)
+        return HStack(spacing: 10) {
+            Text(parameter.name)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 155, alignment: .leading)
+            Slider(value: Binding<Double>(
+                get: {
+                    parameter.position(for: physicalValue(parameter, layerID: layerID))
+                },
+                set: { position in
+                    viewModel.setStudioSynthPhysicalParameter(
+                        parameter, value: parameter.value(at: position),
+                        for: trackID, layerID: layerID)
+                }), in: 0...1)
+                .tint(.cyan)
+            Text(parameter.displayValue(value))
+                .font(.caption.monospacedDigit())
+                .frame(width: 72, alignment: .trailing)
+        }
+        .contextMenu {
+            midiLearnActions(layerID: layerID, destination: .physical(parameter))
+        }
+    }
+
+    private func physicalEditor(_ layer: StudioSynthLayer) -> some View {
+        let model = (currentLayer(layer.id)?.physicalPatch ?? StudioPhysicalPatch()).model
+        let common: [StudioPhysicalParameter] = [
+            .brightness, .damping, .position, .bodyMix, .bodySize,
+            .release, .gain
+        ]
+        let specialized: [StudioPhysicalParameter]
+        switch model {
+        case .plucked, .struck:
+            specialized = [.pickHardness, .stiffness]
+        case .bowed:
+            specialized = [.bowPressure, .bowSpeed, .bowNoise]
+        case .reed, .brass:
+            specialized = [.breath, .reedStiffness, .airNoise, .bore]
+        case .mallet, .bell, .membrane:
+            specialized = [.percussionHardness, .percussionDecay,
+                           .percussionInharmonicity, .percussionAttackNoise]
+        }
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Physical Model")
+                    .font(.caption.weight(.semibold))
+                Picker("Physical Model", selection: Binding<Int32>(
+                    get: {
+                        Int32(physicalValue(.model, layerID: layer.id))
+                    },
+                    set: { raw in
+                        viewModel.setStudioSynthPhysicalParameter(
+                            .model, value: Float(raw),
+                            for: trackID, layerID: layer.id)
+                    })) {
+                        ForEach(StudioPhysicalModel.allCases) { type in
+                            Text(type.title).tag(type.rawValue)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 205)
+                Spacer()
+            }
+            Text("Original native modeling · strings, air columns and tuned resonators. Models are prototypes awaiting final listening calibration.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Divider()
+            Text("INSTRUMENT CHARACTER")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            ForEach(specialized, id: \.self) { parameter in
+                physicalSlider(parameter, layerID: layer.id)
+            }
+            Divider()
+            Text("BODY & OUTPUT")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            ForEach(common, id: \.self) { parameter in
+                physicalSlider(parameter, layerID: layer.id)
             }
         }
     }
