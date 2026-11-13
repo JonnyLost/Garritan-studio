@@ -268,9 +268,18 @@ public struct MainWindowView: View {
             }
         }
         .onAppear {
-            snapshotBridge?.register(projectID: viewModel.project.id) { [weak viewModel] in
-                viewModel?.project
-            }
+            snapshotBridge?.register(
+                projectID: viewModel.project.id,
+                provider: { [weak viewModel] in viewModel?.project },
+                clearPlugins: { [weak viewModel] in
+                    viewModel?.clearAllPlugins()
+                },
+                restorePlugins: { [weak viewModel] in
+                    Task { @MainActor [weak viewModel] in
+                        await viewModel?.restoreAllPluginStates()
+                    }
+                }
+            )
             setupInitialState()
             if viewModel.isEngineReady {
                 NotificationCenter.default.post(
@@ -309,14 +318,6 @@ public struct MainWindowView: View {
         .onReceive(NotificationCenter.default.publisher(for: .savePluginStates)) { _ in
             syncDAWState()
             viewModel.saveAllPluginStates()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .clearAllPlugins)) { _ in
-            viewModel.clearAllPlugins()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .restorePluginStates)) { _ in
-            Task {
-                await viewModel.restoreAllPluginStates()
-            }
         }
     }
     

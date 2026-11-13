@@ -26,6 +26,37 @@ final class StudioProjectSnapshotBridgeTests: XCTestCase {
         XCTAssertNil(bridge.snapshot(for: newer.id))
     }
 
+    func testPluginLifecycleCommandsAreScopedToActiveSession() {
+        let bridge = StudioProjectSnapshotBridge()
+        let old = Project(name: "Old")
+        let current = Project(name: "Current")
+        var events: [String] = []
+        bridge.register(
+            projectID: old.id,
+            provider: { old },
+            clearPlugins: { events.append("old cleared") },
+            restorePlugins: { events.append("old restored") }
+        )
+        bridge.register(
+            projectID: current.id,
+            provider: { current },
+            clearPlugins: { events.append("current cleared") },
+            restorePlugins: { events.append("current restored") }
+        )
+
+        XCTAssertFalse(bridge.clearPlugins(for: old.id))
+        XCTAssertFalse(bridge.restorePlugins(for: old.id))
+        XCTAssertTrue(bridge.clearPlugins(for: current.id))
+        XCTAssertTrue(bridge.restorePlugins(for: current.id))
+        XCTAssertEqual(events, ["current cleared", "current restored"])
+
+        bridge.unregister(projectID: old.id)
+        XCTAssertTrue(bridge.clearPlugins(for: current.id))
+        bridge.unregister(projectID: current.id)
+        XCTAssertFalse(bridge.restorePlugins(for: current.id))
+        XCTAssertEqual(events, ["current cleared", "current restored", "current cleared"])
+    }
+
     func testStaleProviderCannotReturnDifferentProject() {
         let bridge = StudioProjectSnapshotBridge()
         let oldProject = Project(name: "Old")

@@ -193,7 +193,7 @@ final class AppState: ObservableObject {
     func openProject() {
         guard !isTransitioning, !isSaving else { return }
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.dawProject]
+        panel.allowedContentTypes = [.dawProject, .json]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = true
         panel.treatsFilePackagesAsDirectories = false
@@ -222,7 +222,7 @@ final class AppState: ObservableObject {
 
             await discardActiveRecovery()
             autosaveManager.stopAutosave()
-            NotificationCenter.default.post(name: .clearAllPlugins, object: nil)
+            snapshotBridge.clearPlugins(for: currentProject.id)
 
             revision.replaceSession()
             currentProject = loadedProject
@@ -254,7 +254,7 @@ final class AppState: ObservableObject {
         guard pendingPluginRestoreID == readyProjectID,
               currentProject.id == readyProjectID else { return }
         pendingPluginRestoreID = nil
-        NotificationCenter.default.post(name: .restorePluginStates, object: nil)
+        snapshotBridge.restorePlugins(for: readyProjectID)
     }
 
     func newProject() {
@@ -270,7 +270,7 @@ final class AppState: ObservableObject {
 
         await discardActiveRecovery()
         autosaveManager.stopAutosave()
-        NotificationCenter.default.post(name: .clearAllPlugins, object: nil)
+        snapshotBridge.clearPlugins(for: currentProject.id)
         revision.replaceSession()
         currentProject = ProjectFactory.createNewProject()
         currentProjectURL = nil
@@ -368,7 +368,7 @@ extension AppState {
                     guard before == revision.saveTicket(),
                           currentProjectURL == nil else { return }
                     autosaveManager.stopAutosave()
-                    NotificationCenter.default.post(name: .clearAllPlugins, object: nil)
+                    snapshotBridge.clearPlugins(for: currentProject.id)
                     revision.replaceSession()
                     currentProject = recovered
                     currentProjectURL = nil
