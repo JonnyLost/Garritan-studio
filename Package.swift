@@ -155,10 +155,13 @@ let package = Package(
             name: "DAWUI",
             dependencies: ["DAWCore", "StudioCloudAuth", "StudioIdentity", "StudioAI"],
             path: "DAWUI/Sources/DAWUI",
-            swiftSettings: studioCloudAuthEnabled ? [] : [.define("STUDIO_LOCAL_AUTH")],
+            exclude: studioCloudAuthEnabled
+                ? ["Views/Auth/OfflineAccountViews.swift"]
+                : ["Views/Auth/AuthenticationView.swift", "Views/Auth/AccountSettingsView.swift"],
             resources: [
                 .copy("Resources/GPO5_keyswitch_catalog.json")
-            ]
+            ],
+            swiftSettings: studioCloudAuthEnabled ? [] : [.define("STUDIO_LOCAL_AUTH")]
         ),
         
         // MARK: - Main Application
