@@ -15,6 +15,7 @@ let package = Package(
         .library(name: "StudioWavetableDSP", targets: ["StudioWavetableDSP"]),
         .library(name: "StudioAdditiveDSP", targets: ["StudioAdditiveDSP"]),
         .library(name: "StudioGranularDSP", targets: ["StudioGranularDSP"]),
+        .library(name: "StudioSharedPCM", targets: ["StudioSharedPCM"]),
         .library(name: "StudioSamplerDSP", targets: ["StudioSamplerDSP"]),
         .library(name: "StudioPhysicalDSP", targets: ["StudioPhysicalDSP"]),
         .library(name: "DAWUI", targets: ["DAWUI"]),
@@ -61,9 +62,19 @@ let package = Package(
             cxxSettings: [.unsafeFlags(["-std=c++17"])]
         ),
 
+        // MARK: - Shared decoded PCM memory for Sampler and Granular
+        .target(
+            name: "StudioSharedPCM",
+            path: "StudioSharedPCM",
+            sources: ["src/StudioSharedPCM.cpp"],
+            publicHeadersPath: "include",
+            cxxSettings: [.unsafeFlags(["-std=c++17"])]
+        ),
+
         // MARK: - Original real-time grain-cloud renderer
         .target(
             name: "StudioGranularDSP",
+            dependencies: ["StudioSharedPCM"],
             path: "StudioGranularDSP",
             sources: ["src/StudioGranularDSP.cpp"],
             publicHeadersPath: "include",
@@ -73,6 +84,7 @@ let package = Package(
         // MARK: - Original native multi-zone sampler with RAM/disk streaming
         .target(
             name: "StudioSamplerDSP",
+            dependencies: ["StudioSharedPCM"],
             path: "StudioSamplerDSP",
             sources: ["src/StudioSamplerDSP.cpp"],
             publicHeadersPath: "include",
@@ -106,6 +118,7 @@ let package = Package(
                 "StudioWavetableDSP",
                 "StudioAdditiveDSP",
                 "StudioGranularDSP",
+                "StudioSharedPCM",
                 "StudioPhysicalDSP",
                 "StudioSamplerDSP",
                 .product(name: "Supabase", package: "supabase-swift")
