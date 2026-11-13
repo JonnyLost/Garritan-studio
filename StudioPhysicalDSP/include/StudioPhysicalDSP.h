@@ -10,7 +10,7 @@ extern "C" {
  * One serialized MIDI producer; the audio callback is the only consumer.
  */
 typedef struct SPMSynth SPMSynth;
-#define SPM_PARAM_MODEL 0          /* 0 plucked, 1 struck, 2 bowed string */
+#define SPM_PARAM_MODEL 0          /* 0 plucked, 1 struck, 2 bowed string, 3 reed, 4 brass */
 #define SPM_PARAM_BRIGHTNESS 1     /* 0..1 excitation / loop-filter brightness */
 #define SPM_PARAM_DAMPING 2        /* 0..1 higher = longer decay */
 #define SPM_PARAM_POSITION 3       /* 0.05..0.95 string contact position */
@@ -24,13 +24,18 @@ typedef struct SPMSynth SPMSynth;
 #define SPM_PARAM_BOW_PRESSURE 10  /* 0..1 bow/string contact force */
 #define SPM_PARAM_BOW_SPEED 11     /* 0..1 bow velocity */
 #define SPM_PARAM_BOW_NOISE 12     /* 0..1 bow hair texture */
-#define SPM_PARAMETER_COUNT 13
+#define SPM_PARAM_BREATH 13       /* 0..1 breath pressure */
+#define SPM_PARAM_REED_STIFFNESS 14 /* 0..1 reed/lip response */
+#define SPM_PARAM_AIR_NOISE 15    /* 0..1 breath turbulence */
+#define SPM_PARAM_BORE 16         /* 0..1 bore shape / spectral tilt */
+#define SPM_PARAMETER_COUNT 17
 
 SPMSynth* spm_create(double sampleRate, int32_t polyphony);
 void spm_destroy(SPMSynth* synth);
 int32_t spm_set_parameter(SPMSynth* synth, int32_t parameter, float value);
 float spm_get_parameter(const SPMSynth* synth, int32_t parameter);
-/* MIDI: note on/off, CC1 (expression), CC11 (volume expression),\n * CC64, CC120/123 and +/-2-semitone pitch bend.
+/* MIDI: note on/off, CC1 (expression), CC2 (breath), CC11 (volume expression),
+ * CC64, CC120/123 and +/-2-semitone pitch bend.
  * Frame offsets carry across successive renders; 1 accepted, 0 rejected. */
 int32_t spm_midi_event(SPMSynth* synth, uint8_t status, uint8_t data1,
                        uint8_t data2, uint32_t frameOffset);
