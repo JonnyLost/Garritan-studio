@@ -4,11 +4,22 @@ import UniformTypeIdentifiers
 import DAWCore
 import DAWUI
 
+// MARK: - Application Identity & Legacy Project Compatibility
+
+/// Product-facing identity is independent of persisted project identifiers.
+enum StudioApplicationIdentity {
+    static let displayName = "Studio"
+
+    /// Preserve the original project type so existing sessions remain recognizable.
+    /// Changing this requires a separately tested project-format migration.
+    static let legacyProjectTypeIdentifier = "com.musio.create.project"
+}
+
 // MARK: - UTType Extension
 
 extension UTType {
     static var dawProject: UTType {
-        UTType(exportedAs: "com.musio.create.project")
+        UTType(exportedAs: StudioApplicationIdentity.legacyProjectTypeIdentifier)
     }
 }
 
@@ -20,15 +31,15 @@ struct DAWApp: App {
 
     init() {
         // The development executable is named DAWApp for compatibility with
-        // 'swift run DAWApp', but the visible product is Garritan Studio.
-        ProcessInfo.processInfo.processName = "Garritan Studio"
+        // 'swift run DAWApp'; the visible product name is managed separately.
+        ProcessInfo.processInfo.processName = StudioApplicationIdentity.displayName
         // The SwiftPM executable isn't a bundled .app; make it foreground-capable.
         NSApplication.shared.setActivationPolicy(.regular)
     }
 
     var body: some Scene {
         // Main document window
-        WindowGroup("Garritan Studio") {
+        WindowGroup(StudioApplicationIdentity.displayName) {
             StudioAppearanceHost {
                 MainWindowView(project: appState.currentProject)
                 .onAppear {
@@ -418,8 +429,8 @@ private struct AppearanceSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Garritan Studio Appearance").font(.title3.bold())
-                Text("Three visual styles inspired by Garritan's orchestral heritage.")
+                Text("\(StudioApplicationIdentity.displayName) Appearance").font(.title3.bold())
+                Text("Choose a visual style for your composing workspace.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
