@@ -142,4 +142,52 @@ final class StudioSamplerMappingBuilderTests: XCTestCase {
         XCTAssertNotEqual(combined.zones[1].articulationID, combined.zones[2].articulationID)
     }
 
+    func testOrchestralMicAndIntervalFilenamesStayDistinctFromSustains() throws {
+        let patch = try StudioSamplerMappingBuilder.makePatch(urls: [
+            file("Violin_C4_close_mf.wav"),
+            file("Violin_C4_room_mf.wav"),
+            file("Violin_D4_close_mf.wav"),
+            file("Violin_D4_room_mf.wav"),
+            file("Violin_fromC4_toD4_legato_close_mf.wav"),
+            file("Violin_fromC4_toD4_legato_room_mf.wav")
+        ])
+        XCTAssertTrue(patch.isValid)
+        XCTAssertEqual(patch.zones.count, 6)
+        XCTAssertTrue(patch.legatoEnabled == true)
+        XCTAssertEqual(patch.legatoCrossfadeMilliseconds, 40)
+        XCTAssertEqual(patch.microphones?.map(\.id), [0, 2])
+        let transitions = patch.zones.filter { $0.legatoFromNote != nil }
+        XCTAssertEqual(transitions.count, 2)
+        XCTAssertEqual(transitions.map(\.legatoFromNote), [60, 60])
+        XCTAssertEqual(transitions.map(\.rootNote), [62, 62])
+        XCTAssertTrue(transitions.allSatisfy {
+            $0.lowestNote == 62 && $0.highestNote == 62
+        })
+        XCTAssertEqual(Set(transitions.map { $0.microphoneID ?? 0 }), Set([0, 2]))
+        XCTAssertEqual(patch.zones.filter { $0.legatoFromNote == nil }.count, 4)
+        XCTAssertNil(patch.articulations)
+        XCTAssertEqual(StudioSamplerMappingBuilder.microphoneHint(in: file("flute_room.wav")), 2)
+        XCTAssertEqual(StudioSamplerMappingBuilder.legatoIntervalHint(
+            in: file("Violin_fromC4_toD4_legato.wav"))?.to, 62)
+        XCTAssertNil(StudioSamplerMappingBuilder.legatoIntervalHint(
+            in: file("Violin_C4_legato.wav")))
+    }
+
+    func testAppendPreservesMicLevelsAndAddsNewPosition() throws {
+        let existing = try StudioSamplerMappingBuilder.makePatch(
+            urls: [file("Violin_C4_room.wav")]
+        )
+        var modified = existing
+        modified.microphones?[0].gain = 0.2
+        let incoming = try StudioSamplerMappingBuilder.makePatch(
+            urls: [file("Violin_C4_tree.wav")]
+        )
+        let merged = try StudioSamplerMappingBuilder.append(incoming, to: modified)
+        XCTAssertTrue(merged.isValid)
+        XCTAssertEqual(merged.zones.count, 2)
+        XCTAssertEqual(merged.microphones?.count, 2)
+        XCTAssertEqual(merged.microphones?.first(where: { $0.id == 2 })?.gain, 0.2)
+        XCTAssertEqual(Set(merged.zones.map { $0.microphoneID ?? 0 }), Set([1, 2]))
+    }
+
 }
