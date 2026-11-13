@@ -590,7 +590,7 @@ public struct StudioSamplerMapView: View {
                 )).toggleStyle(.switch)
                 if zone.legatoFromNote != nil {
                     Stepper(
-                        "From (SamplerNoteNames.name(zone.legatoFromNote ?? 60)) → (SamplerNoteNames.name(zone.rootNote))",
+                        "From \(SamplerNoteNames.name(zone.legatoFromNote ?? 60)) → \(SamplerNoteNames.name(zone.rootNote))",
                         value: Binding(
                             get: { Int(selectedZone?.legatoFromNote ?? 60) },
                             set: { from in
@@ -838,13 +838,21 @@ public struct StudioSamplerMapView: View {
         }
     }
 
-    /// The capture modal gives ownership of temporary prepared WAV files
-    /// to this import task. They are deleted after managed copies are made,
-    /// even when mapping validation fails. No orphan temporary recordings.
+    /// The capture modal hands temporary prepared WAVs to this task. On a
+    /// failed mapping import, Studio backs up those recordings inside the
+    /// user's application support folder instead of losing the performance.
     private func addFactoryTakes(_ takes: [StudioSamplerFactoryTake]) {
-        guard !takes.isEmpty, !isImporting else {
-            for take in takes {
-                try? FileManager.default.removeItem(at: take.source)
+        guard !takes.isEmpty else { return }
+        guard !isImporting else {
+            Task { @MainActor in
+                do {
+                    let backup = try await Task.detached(priority: .utility) {
+                        try StudioSamplerFactoryRecovery.preserve(takes)
+                    }.value
+                    errorMessage = "Another sampler import was in progress. Your prepared recordings are safe at \(backup.path)."
+                } catch {
+                    errorMessage = "Another sampler import was in progress. The temporary recordings were retained; recovery failed: \(error.localizedDescription)"
+                }
             }
             return
         }
@@ -856,17 +864,33 @@ public struct StudioSamplerMapView: View {
             defer { isImporting = false }
             do {
                 let rebuilt = try await Task.detached(priority: .userInitiated) {
-                    defer {
+                    do {
+                        let result = try StudioSamplerInstrumentFactory.assemble(
+                            takes, extending: original)
                         for take in takes {
                             try? FileManager.default.removeItem(at: take.source)
                         }
+                        return result
+                    } catch {
+                        let underlying = error.localizedDescription
+                        if let backup = try? StudioSamplerFactoryRecovery.preserve(takes) {
+                            for take in takes {
+                                try? FileManager.default.removeItem(at: take.source)
+                            }
+                            throw NSError(domain: "StudioSamplerFactory",
+                                          code: 1, userInfo: [
+                                NSLocalizedDescriptionKey:
+                                    "\(underlying) Prepared recordings were saved for recovery at \(backup.path)"
+                            ])
+                        }
+                        throw NSError(domain: "StudioSamplerFactory", code: 2,
+                                      userInfo: [NSLocalizedDescriptionKey:
+                            "\(underlying) Recovery backup failed; prepared recordings remain in the temporary folder."])
                     }
-                    return try StudioSamplerInstrumentFactory.assemble(
-                        takes, extending: original)
                 }.value
                 selectedIndex = original?.zones.count ?? 0
                 draft = rebuilt
-                saveNotice = "Added (takes.count) original recording(s) to the instrument draft. Review the map and choose Apply Mapping."
+                saveNotice = "Added \(takes.count) original recording(s) to the instrument draft. Review the map and choose Apply Mapping."
             } catch {
                 errorMessage = error.localizedDescription
             }
