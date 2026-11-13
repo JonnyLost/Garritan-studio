@@ -179,6 +179,31 @@ final class StudioSamplerTrackIntegrationTests: XCTestCase {
         XCTAssertTrue(sampler.noteOff(69, channel: 0))
     }
 
+    func testEmptySamplerSelectionPersistsWithoutPretendingItCanPlay() throws {
+        // Opening the editor does not need a sample, a sampler audio node,
+        // or a file picker. It must survive track JSON and project reopen.
+        let empty = StudioSamplerPatch(zones: [])
+        XCTAssertTrue(empty.isEmpty)
+        XCTAssertFalse(empty.isValid) // no audio-zone loader can run yet
+
+        var track = Track(name: "Empty Sampler", type: .instrument)
+        track.studioSamplerPatch = empty
+        let restored = try JSONDecoder().decode(
+            Track.self, from: JSONEncoder().encode(track)
+        )
+        XCTAssertNotNil(restored.studioSamplerPatch)
+        XCTAssertTrue(restored.studioSamplerPatch?.isEmpty == true)
+        XCTAssertNil(restored.instrumentSlot)
+        XCTAssertNil(restored.studioAnalogEnabled)
+
+        // Existing instrument mappings still require valid sample zones.
+        let populated = StudioSamplerPatch(
+            sampleURL: URL(fileURLWithPath: "/tmp/violin.wav"), rootNote: 60
+        )
+        XCTAssertFalse(populated.isEmpty)
+        XCTAssertTrue(populated.isValid)
+    }
+
     func testSamplerPatchSurvivesSavingAndOldTrackDecodes() throws {
         var track = Track(name: "Sampled instrument", type: .instrument)
         let url = URL(fileURLWithPath: "/tmp/studio-sample.wav")
