@@ -299,6 +299,14 @@ public struct MainWindowView: View {
             // Send current project back for saving
             NotificationCenter.default.post(name: .projectDataForSave, object: viewModel.project)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .captureProjectForSave)) { _ in
+            // One synchronous main-thread transaction: capture the UI layout,
+            // instrument/effect state, and the exact matching project model.
+            // This replaces timer-based best-effort snapshots during saves.
+            syncDAWState()
+            viewModel.saveAllPluginStates()
+            NotificationCenter.default.post(name: .projectDataForSave, object: viewModel.project)
+        }
     }
     
     /// Sync current UI state to project.dawState for persistence
