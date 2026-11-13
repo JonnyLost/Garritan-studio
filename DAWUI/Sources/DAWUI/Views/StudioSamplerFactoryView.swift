@@ -358,7 +358,7 @@ public struct StudioSamplerFactoryView: View {
                     ? "Original Studio starter instruments are already installed. Browse Instrument Library to load them."
                     : "Installed \(added.count) editable original instruments. Open Instrument Library to load one."
             } catch {
-                error = error.localizedDescription
+                self.error = error.localizedDescription
             }
         }
     }
