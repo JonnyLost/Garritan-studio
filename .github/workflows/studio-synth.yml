@@ -25,6 +25,7 @@ jobs:
             DAWCore/Sources/DAWCore/Audio/StudioSynthPatch.swift \
             DAWCore/Sources/DAWCore/Audio/StudioAdditivePatch.swift \
             DAWCore/Sources/DAWCore/Audio/StudioAdditivePresets.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioSynthHybridPresets.swift \
             DAWCore/Sources/DAWCore/Audio/StudioAdditiveInstrument.swift \
             DAWCore/Sources/DAWCore/Audio/StudioSynthMIDIControls.swift \
             DAWCore/Sources/DAWCore/Audio/StudioSynthInstrument.swift \
