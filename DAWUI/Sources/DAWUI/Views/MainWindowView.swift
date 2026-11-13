@@ -296,26 +296,26 @@ public struct MainWindowView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .requestProjectForSave)) { _ in
-            // Send current project back for saving
-            NotificationCenter.default.post(name: .projectDataForSave, object: viewModel.project)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .captureProjectForSave)) { _ in
-            // One synchronous main-thread transaction: capture the UI layout,
-            // instrument/effect state, and the exact matching project model.
-            // This replaces timer-based best-effort snapshots during saves.
-            syncDAWState()
-            let failures = viewModel.saveAllPluginStates()
-            guard failures.isEmpty else {
-                NotificationCenter.default.post(
-                    name: .projectStateCaptureFailed,
-                    object: failures.joined(separator: "\n")
-                )
-                return
-            }
-            NotificationCenter.default.post(name: .projectDataForSave, object: viewModel.project)
+            captureProjectForSave()
         }
     }
     
+    /// Capture the exact document model and active hosted preset state.
+    /// Keep this outside the large SwiftUI View modifier expression so the
+    /// macOS compiler can type-check the view without expression explosion.
+    private func captureProjectForSave() {
+        syncDAWState()
+        let failures = viewModel.saveAllPluginStates()
+        guard failures.isEmpty else {
+            NotificationCenter.default.post(
+                name: .projectStateCaptureFailed,
+                object: failures.joined(separator: "\n")
+            )
+            return
+        }
+        NotificationCenter.default.post(name: .projectDataForSave, object: viewModel.project)
+    }
+
     /// Sync current UI state to project.dawState for persistence
     private func syncDAWState() {
         viewModel.project.dawState.showVRack = showVRack
