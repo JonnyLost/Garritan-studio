@@ -89,6 +89,9 @@ public struct StudioSynthPanelView: View {
                     Button("New Wavetable Instrument") {
                         replace(with: StudioSynthPatch.individual(.wavetable))
                     }
+                    Button("New Additive Instrument") {
+                        replace(with: StudioSynthPatch.individual(.additive))
+                    }
                     Button("New Analog + FM Hybrid") {
                         replace(with: StudioSynthPatch())
                     }
@@ -99,6 +102,7 @@ public struct StudioSynthPanelView: View {
                     Button("Analog Layer") { addLayer(.analog) }
                     Button("FM Layer") { addLayer(.fm) }
                     Button("Wavetable Layer") { addLayer(.wavetable) }
+                    Button("Additive Layer") { addLayer(.additive) }
                 } label: {
                     Label("Add Layer", systemImage: "plus")
                 }
@@ -167,6 +171,25 @@ public struct StudioSynthPanelView: View {
                                         Label("Wavetable Factory Sounds",
                                               systemImage: "waveform.path.ecg.rectangle")
                                     }
+                                } else if layer.engine == .additive {
+                                    Menu {
+                                        ForEach(["Keys", "Winds", "Pads", "Bass",
+                                                 "Plucks", "Textures"], id: \.self) { family in
+                                            Menu(family) {
+                                                ForEach(StudioAdditiveFactoryLibrary.presets.filter {
+                                                    $0.family == family
+                                                }) { preset in
+                                                    Button(preset.name) {
+                                                        loadAdditivePreset(
+                                                            preset.patch, layerID: layer.id)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } label: {
+                                        Label("Additive Factory Sounds",
+                                              systemImage: "waveform.path")
+                                    }
                                 } else {
                                     Menu {
                                         ForEach(StudioFMFactoryLibrary.presets) { preset in
@@ -184,6 +207,8 @@ public struct StudioSynthPanelView: View {
                                 analogEditor(layer)
                             } else if layer.engine == .wavetable {
                                 wavetableEditor(layer)
+                            } else if layer.engine == .additive {
+                                additiveEditor(layer)
                             } else {
                                 fmEditor(layer)
                             }
@@ -343,6 +368,15 @@ public struct StudioSynthPanelView: View {
             return
         }
         changed.layers[index].wavetablePatch = preset
+        replace(with: changed)
+    }
+
+    private func loadAdditivePreset(_ preset: StudioAdditivePatch, layerID: UUID) {
+        var changed = patch
+        guard let index = changed.layers.firstIndex(where: { $0.id == layerID }) else {
+            return
+        }
+        changed.layers[index].additivePatch = preset
         replace(with: changed)
     }
 
@@ -549,6 +583,106 @@ public struct StudioSynthPanelView: View {
                     .contextMenu {
                         midiLearnActions(layerID: layer.id,
                                          destination: .analog(parameter))
+                    }
+                }
+            }
+        }
+    }
+
+    private func additiveValue(_ parameter: StudioAdditiveParameter,
+                               layerID: UUID) -> Float {
+        currentLayer(layerID)?.additivePatch?.value(for: parameter)
+            ?? parameter.defaultValue
+    }
+
+    private func additiveSlider(_ parameter: StudioAdditiveParameter,
+                                layerID: UUID) -> some View {
+        let value = additiveValue(parameter, layerID: layerID)
+        return HStack(spacing: 8) {
+            Text(parameter.name)
+                .font(.caption)
+                .frame(width: 110, alignment: .leading)
+            Slider(value: Binding<Double>(
+                get: {
+                    parameter.position(for: additiveValue(parameter, layerID: layerID))
+                },
+                set: { fraction in
+                    viewModel.setStudioSynthAdditiveParameter(
+                        parameter, value: parameter.value(at: fraction),
+                        for: trackID, layerID: layerID)
+                }), in: 0...1)
+                .tint(.mint)
+            Text(parameter.displayValue(value))
+                .font(.caption.monospacedDigit())
+                .frame(width: 74, alignment: .trailing)
+        }
+        .contextMenu {
+            midiLearnActions(layerID: layerID, destination: .additive(parameter))
+        }
+    }
+
+    /// The amplitude bars are deliberately view-only: the horizontal
+    /// sliders below are accessible, precise and participate in MIDI Learn.
+    private func additiveEditor(_ layer: StudioSynthLayer) -> some View {
+        let harmonics: [Float] = (0..<16).map {
+            additiveValue(StudioAdditiveParameter.partial($0)!, layerID: layer.id)
+        }
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("HARMONIC SCULPTOR")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.mint)
+                    Text("16 sine partials · spectral evolution · original native additive voices")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("16 PARTIALS")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.mint)
+            }
+            HStack(alignment: .bottom, spacing: 5) {
+                ForEach(0..<16, id: \.self) { index in
+                    VStack(spacing: 6) {
+                        Spacer(minLength: 0)
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(LinearGradient(colors: [.mint.opacity(0.45), .mint],
+                                                 startPoint: .bottom, endPoint: .top))
+                            .frame(height: max(3, CGFloat(harmonics[index]) * 125))
+                        Text("\(index + 1)")
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .frame(height: 160)
+            .padding(12)
+            .background(Color.black.opacity(0.4),
+                        in: RoundedRectangle(cornerRadius: 10))
+            .accessibilityLabel("Current additive partial spectrum, harmonics 1 through 16")
+            Text("Each harmonic is independently adjustable. Spectral Tilt shapes the entire spectrum; Evolution starts brighter or darker and gradually moves toward the sustained spectrum.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            LazyVGrid(columns: [GridItem(.flexible(minimum: 260)),
+                                GridItem(.flexible(minimum: 260))], spacing: 11) {
+                ForEach(StudioAdditiveParameter.allCases.filter {
+                    $0.harmonicIndex == nil
+                }, id: \.rawValue) { parameter in
+                    additiveSlider(parameter, layerID: layer.id)
+                }
+            }
+            Divider()
+            Text("INDIVIDUAL HARMONICS")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.mint)
+            LazyVGrid(columns: [GridItem(.flexible(minimum: 260)),
+                                GridItem(.flexible(minimum: 260))], spacing: 9) {
+                ForEach(0..<16, id: \.self) { index in
+                    if let parameter = StudioAdditiveParameter.partial(index) {
+                        additiveSlider(parameter, layerID: layer.id)
                     }
                 }
             }
