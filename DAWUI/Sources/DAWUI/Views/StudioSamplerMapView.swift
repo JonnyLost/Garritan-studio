@@ -27,6 +27,7 @@ public struct StudioSamplerMapView: View {
     @State private var errorMessage: String?
     @State private var saveNotice: String?
     @State private var showLibrary = false
+    @State private var showFactory = false
     @State private var showPackageImporter = false
     @State private var showSaveSheet = false
     @State private var exportInsteadOfSave = false
@@ -73,6 +74,12 @@ public struct StudioSamplerMapView: View {
                         .disabled(draft?.isValid != true)
                 } label: {
                     Label("Instruments", systemImage: "square.stack.3d.up")
+                }
+                .disabled(isImporting)
+                Button {
+                    showFactory = true
+                } label: {
+                    Label("Instrument Factory…", systemImage: "waveform.badge.mic")
                 }
                 .disabled(isImporting)
                 Button {
@@ -167,8 +174,11 @@ public struct StudioSamplerMapView: View {
                     Text("Start with an empty instrument, then add WAV, AIFF, or other supported recordings. Studio will map them across the keyboard.")
                         .font(.callout).foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
-                    Button("Add Samples…") { showImporter = true }
-                        .buttonStyle(.borderedProminent)
+                    HStack {
+                        Button("Record / Build Instrument…") { showFactory = true }
+                            .buttonStyle(.borderedProminent)
+                        Button("Add Samples…") { showImporter = true }
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
@@ -242,6 +252,10 @@ public struct StudioSamplerMapView: View {
         }
         .sheet(isPresented: $showLibrary) {
             StudioSamplerLibraryBrowser(onChoose: { url in loadPackage(url) })
+        }
+        .sheet(isPresented: $showFactory) {
+            StudioSamplerFactoryView(viewModel: viewModel, trackID: trackID,
+                                     onAdd: { takes in addFactoryTakes(takes) })
         }
         .sheet(isPresented: $showSaveSheet) {
             instrumentSaveSheet
@@ -818,6 +832,41 @@ public struct StudioSamplerMapView: View {
                     draft = patch
                     relinkMessage = "Relinked \(repaired) zone(s) in the draft. Apply Mapping to activate."
                 }
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    /// The capture modal gives ownership of temporary prepared WAV files
+    /// to this import task. They are deleted after managed copies are made,
+    /// even when mapping validation fails. No orphan temporary recordings.
+    private func addFactoryTakes(_ takes: [StudioSamplerFactoryTake]) {
+        guard !takes.isEmpty, !isImporting else {
+            for take in takes {
+                try? FileManager.default.removeItem(at: take.source)
+            }
+            return
+        }
+        let original = draft
+        isImporting = true
+        errorMessage = nil
+        saveNotice = nil
+        Task { @MainActor in
+            defer { isImporting = false }
+            do {
+                let rebuilt = try await Task.detached(priority: .userInitiated) {
+                    defer {
+                        for take in takes {
+                            try? FileManager.default.removeItem(at: take.source)
+                        }
+                    }
+                    return try StudioSamplerInstrumentFactory.assemble(
+                        takes, extending: original)
+                }.value
+                selectedIndex = original?.zones.count ?? 0
+                draft = rebuilt
+                saveNotice = "Added (takes.count) original recording(s) to the instrument draft. Review the map and choose Apply Mapping."
             } catch {
                 errorMessage = error.localizedDescription
             }
