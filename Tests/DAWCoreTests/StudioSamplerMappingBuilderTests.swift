@@ -190,4 +190,29 @@ final class StudioSamplerMappingBuilderTests: XCTestCase {
         XCTAssertEqual(Set(merged.zones.map { $0.microphoneID ?? 0 }), Set([1, 2]))
     }
 
+    func testLegatoIntervalsFollowDedicatedArticulationAcrossBatches() throws {
+        let sustainSources = [
+            file("Violin_C4_legato.wav"),
+            file("Violin_D4_legato.wav")
+        ]
+        let transitionFile = file("Violin_fromC4_toD4_legato.wav")
+        let allAtOnce = try StudioSamplerMappingBuilder.makePatch(
+            urls: sustainSources + [transitionFile]
+        )
+        let articulation = try XCTUnwrap(allAtOnce.articulations?.first)
+        XCTAssertEqual(articulation.name, "Legato")
+        XCTAssertTrue(allAtOnce.zones.allSatisfy { $0.articulationID == articulation.id })
+        XCTAssertEqual(allAtOnce.zones.filter { $0.legatoFromNote != nil }.count, 1)
+
+        let existing = try StudioSamplerMappingBuilder.makePatch(urls: sustainSources)
+        let incoming = try StudioSamplerMappingBuilder.makePatch(urls: [transitionFile])
+        XCTAssertNil(incoming.articulations)
+        let merged = try StudioSamplerMappingBuilder.append(incoming, to: existing)
+        XCTAssertTrue(merged.isValid)
+        XCTAssertEqual(merged.zones.count, 3)
+        XCTAssertEqual(merged.zones.last?.articulationID, existing.articulations?.first?.id)
+        XCTAssertEqual(merged.zones.last?.legatoFromNote, 60)
+        XCTAssertTrue(merged.legatoEnabled == true)
+    }
+
 }
