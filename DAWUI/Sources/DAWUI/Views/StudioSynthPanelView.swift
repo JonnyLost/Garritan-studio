@@ -11,6 +11,12 @@ public struct StudioSynthPanelView: View {
     @State private var selectedLayerID: UUID?
     @State private var selectedAdditiveHarmonic = 0
     @State private var panelError: String?
+    @State private var showSampleCapture = false
+    @State private var sampleCaptureName = ""
+    @State private var sampleCaptureExpanded = false
+    @State private var samplingInProgress = false
+    @State private var sampleCaptureError: String?
+    @State private var sampleCaptureResult: StudioSynthSamplerCapture.Result?
 
     public init(viewModel: ProjectViewModel, trackID: TrackID) {
         self.viewModel = viewModel
@@ -48,6 +54,14 @@ public struct StudioSynthPanelView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
+                Button {
+                    sampleCaptureName = viewModel.project.track(withID: trackID)?.name
+                        ?? "Studio Synth Capture"
+                    showSampleCapture = true
+                } label: {
+                    Label("Make Sampled Instrument", systemImage: "square.stack.3d.up")
+                }
+                .buttonStyle(.bordered)
                 Label(connected ? "Audio connected" : "Engine unavailable",
                       systemImage: connected ? "checkmark.circle" : "exclamationmark.triangle")
                     .font(.caption).foregroundStyle(.secondary)
@@ -294,8 +308,102 @@ public struct StudioSynthPanelView: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .frame(minWidth: 800, minHeight: 580)
+        .sheet(isPresented: $showSampleCapture) {
+            synthSampleCaptureSheet
+        }
         .onDisappear {
             viewModel.cancelStudioSynthMIDILearn(for: trackID)
+        }
+    }
+
+    private var synthSampleCaptureSheet: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("CREATE SAMPLED INSTRUMENT")
+                .font(.title2.weight(.bold))
+            Text("Studio will render this entire Synth patch offline, record each note and velocity into WAV files, then create a playable native Sampler instrument. Your live Synth remains unchanged.")
+                .font(.callout).foregroundStyle(.secondary)
+            TextField("Instrument name", text: $sampleCaptureName)
+                .textFieldStyle(.roundedBorder)
+            Toggle("Extended key coverage (5 keys × 2 velocities)",
+                   isOn: $sampleCaptureExpanded)
+            Text(sampleCaptureExpanded
+                 ? "Roots: C2, C3, C4, C5, C6 · two velocity layers"
+                 : "Roots: C3, C4, C5 · two velocity layers")
+                .font(.caption).foregroundStyle(.secondary)
+
+            if samplingInProgress {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text("Rendering samples and creating instrument…")
+                        .font(.caption)
+                }
+            }
+            if let sampleCaptureError {
+                Text(sampleCaptureError).foregroundStyle(.orange)
+                    .font(.caption)
+            }
+            if let result = sampleCaptureResult {
+                Text("Created \(result.takeCount) samples: \(result.packageURL.lastPathComponent)")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Button("Load as Sampler on This Track") {
+                        do {
+                            try viewModel.loadStudioSampler(
+                                for: trackID, patch: result.patch)
+                            showSampleCapture = false
+                        } catch {
+                            sampleCaptureError = error.localizedDescription
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Button("Show in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting(
+                            [result.packageURL])
+                    }
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Close") { showSampleCapture = false }
+                    .disabled(samplingInProgress)
+                Button("Capture to Sampler Library") {
+                    beginSynthSampleCapture()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(samplingInProgress ||
+                          sampleCaptureName.trimmingCharacters(
+                            in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(24)
+        .frame(width: 560)
+    }
+
+    private func beginSynthSampleCapture() {
+        guard !samplingInProgress else { return }
+        samplingInProgress = true
+        sampleCaptureError = nil
+        sampleCaptureResult = nil
+        let sourcePatch = patch
+        let name = sampleCaptureName
+        let rootNotes: [UInt8] = sampleCaptureExpanded
+            ? [36, 48, 60, 72, 84] : [48, 60, 72]
+        Task.detached(priority: .utility) {
+            do {
+                let options = StudioSynthSamplerCapture.Options(
+                    rootNotes: rootNotes, velocities: [64, 112])
+                let result = try StudioSynthSamplerCapture.capture(
+                    patch: sourcePatch, name: name, options: options)
+                await MainActor.run {
+                    self.sampleCaptureResult = result
+                    self.samplingInProgress = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.sampleCaptureError = error.localizedDescription
+                    self.samplingInProgress = false
+                }
+            }
         }
     }
 
