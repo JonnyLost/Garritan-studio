@@ -28,6 +28,7 @@ final class AppState: ObservableObject {
     private var hasReportedRecoveryError = false
     private var isTransitioning = false
     private var isSaving = false
+    private var isCapturingSnapshot = false
     private var pendingPluginRestoreID: UUID?
 
     init() {
@@ -54,6 +55,9 @@ final class AppState: ObservableObject {
     func updateProject(_ project: Project) {
         guard project.id == currentProject.id else { return }
         currentProject = project
+        // Reading AU state and DAW layout can mutate the value-type project.
+        // This is a save snapshot, not a fresh user edit.
+        guard !isCapturingSnapshot else { return }
         markUnsavedChanges()
     }
 
@@ -76,6 +80,8 @@ final class AppState: ObservableObject {
     /// The save ticket is taken AFTER the capture, so any mutations caused by
     /// collecting AU state are included in the saved revision.
     private func captureProjectSnapshot() -> StudioAutosaveSnapshot {
+        isCapturingSnapshot = true
+        defer { isCapturingSnapshot = false }
         NotificationCenter.default.post(name: .savePluginStates, object: nil)
 
         // Plugin state gathering still notifies the composing view; the
