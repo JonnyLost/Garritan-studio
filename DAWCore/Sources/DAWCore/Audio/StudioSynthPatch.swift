@@ -9,6 +9,7 @@ public enum StudioSynthEngine: String, Codable, CaseIterable, Sendable, Identifi
     case wavetable
     case additive
     case granular
+    case physical
 
     public var id: String { rawValue }
     public var title: String {
@@ -18,6 +19,7 @@ public enum StudioSynthEngine: String, Codable, CaseIterable, Sendable, Identifi
         case .wavetable: return "Wavetable"
         case .additive: return "Additive"
         case .granular: return "Granular"
+        case .physical: return "Physical"
         }
     }
 }
@@ -36,6 +38,7 @@ public struct StudioSynthLayer: Codable, Equatable, Identifiable, Sendable {
     public var wavetablePatch: StudioWavetablePatch?
     public var additivePatch: StudioAdditivePatch?
     public var granularPatch: StudioGranularPatch?
+    public var physicalPatch: StudioPhysicalPatch?
 
     public init(id: UUID = UUID(), engine: StudioSynthEngine,
                 name: String? = nil, enabled: Bool = true,
@@ -44,7 +47,8 @@ public struct StudioSynthLayer: Codable, Equatable, Identifiable, Sendable {
                 fmPatch: StudioFMPatch? = nil,
                 wavetablePatch: StudioWavetablePatch? = nil,
                 additivePatch: StudioAdditivePatch? = nil,
-                granularPatch: StudioGranularPatch? = nil) {
+                granularPatch: StudioGranularPatch? = nil,
+                physicalPatch: StudioPhysicalPatch? = nil) {
         self.id = id
         self.engine = engine
         self.name = name ?? engine.title
@@ -56,6 +60,7 @@ public struct StudioSynthLayer: Codable, Equatable, Identifiable, Sendable {
         self.wavetablePatch = wavetablePatch
         self.additivePatch = additivePatch
         self.granularPatch = granularPatch
+        self.physicalPatch = physicalPatch
     }
 
     public func validate() -> Bool {
@@ -84,6 +89,8 @@ public struct StudioSynthLayer: Codable, Equatable, Identifiable, Sendable {
             return additivePatch?.validate() ?? true
         case .granular:
             return granularPatch?.validate() ?? true
+        case .physical:
+            return physicalPatch?.validate() ?? true
         }
     }
 }
