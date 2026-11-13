@@ -116,6 +116,79 @@ final class StudioAcousticRoomDesignerTests: XCTestCase {
         XCTAssertTrue(right.allSatisfy(\.isFinite))
     }
 
+    func testGeometryChangesLateDelayScaleWithoutChangingFactoryPresets() {
+        let small = StudioAcousticRoomDesign(
+            lengthMeters: 5, widthMeters: 4, heightMeters: 3).makeProfile()
+        let large = StudioAcousticRoomDesign(
+            lengthMeters: 35, widthMeters: 25, heightMeters: 12).makeProfile()
+        XCTAssertLessThan(small.lateDelayScale ?? 0, large.lateDelayScale ?? 0)
+        XCTAssertNotNil(small.lateDelayScale)
+        XCTAssertNil(StudioRoomAcousticProfile.abbeyRoadStudioOne.lateDelayScale)
+        XCTAssertNil(StudioRoomAcousticProfile.abbeyRoadStudioOne.earlyReflectionHighCutHz)
+    }
+
+    func testMaterialsChangeEarlyReflectionHighFrequencyAbsorption() {
+        let reflective = StudioAcousticRoomDesign(
+            wallMaterial: .smoothConcrete, floorMaterial: .smoothConcrete,
+            ceilingMaterial: .smoothConcrete).makeProfile()
+        let treated = StudioAcousticRoomDesign(
+            wallMaterial: .acousticPanel, floorMaterial: .heavyCarpet,
+            ceilingMaterial: .acousticPanel).makeProfile()
+        XCTAssertGreaterThan(reflective.earlyReflectionHighCutHz ?? 0,
+                             treated.earlyReflectionHighCutHz ?? 0)
+    }
+
+    func testMaterialFilteringChangesActualEarlyReflectionAudio() {
+        func render(highCut: Float) -> [Float] {
+            var room = StudioRoomAcousticProfile.abbeyRoadStudioOne
+            room.earlyReflectionHighCutHz = highCut
+            let dsp = NativeStageEarlyReflectionProcessor(sampleRate: 48_000,
+                                                            profiles: [room])
+            dsp.update(roomIndex: 0, pan: 0, zone: 2)
+            var l = [Float](repeating: 0, count: 7_000)
+            var r = l
+            l[0] = 1; r[0] = 1
+            l.withUnsafeMutableBufferPointer { lp in
+                r.withUnsafeMutableBufferPointer { rp in
+                    dsp.process(left: lp.baseAddress!, right: rp.baseAddress!,
+                                frameCount: lp.count)
+                }
+            }
+            return l
+        }
+        let bright = render(highCut: 15_000)
+        let dark = render(highCut: 1_500)
+        XCTAssertNotEqual(bright, dark)
+        XCTAssertGreaterThan(bright.map { abs($0) }.max() ?? 0,
+                             dark.map { abs($0) }.max() ?? 0)
+    }
+
+    func testRoomScaleChangesNativeLateDelayArrival() {
+        func render(scale: Float) -> [Float] {
+            var profile = StudioRoomAcousticProfile.abbeyRoadStudioOne
+            profile.earlyReflections = []
+            profile.lateDelayScale = scale
+            let dsp = NativeRoomReverbProcessor(sampleRate: 24_000, profile: profile)
+            var l = [Float](repeating: 0, count: 10_000)
+            var r = l
+            l[0] = 1; r[0] = 1
+            l.withUnsafeMutableBufferPointer { lp in
+                r.withUnsafeMutableBufferPointer { rp in
+                    dsp.process(left: lp.baseAddress!, right: rp.baseAddress!,
+                                frameCount: lp.count)
+                }
+            }
+            return l
+        }
+        let short = render(scale: 0.72)
+        let long = render(scale: 1.5)
+        let firstShort = short.firstIndex(where: { abs($0) > 0.00001 }) ?? short.count
+        let firstLong = long.firstIndex(where: { abs($0) > 0.00001 }) ?? long.count
+        XCTAssertLessThan(firstShort, firstLong)
+        XCTAssertTrue(short.allSatisfy(\.isFinite))
+        XCTAssertTrue(long.allSatisfy(\.isFinite))
+    }
+
     func testTwoDesignedRoomsGenerateDifferentNativeImpulseTails() {
         var live = StudioAcousticRoomDesign(method: .eyring)
         var dry = live
