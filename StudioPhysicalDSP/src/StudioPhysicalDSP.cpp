@@ -9,18 +9,21 @@
 
 namespace {
 constexpr int kMaxVoices = 8;
+constexpr size_t kPercussionModes = 6;
 constexpr int kDelayCapacity = 16384; // Supports A0 at 384 kHz with margin.
 constexpr uint32_t kQueueCapacity = 512;
 constexpr double kTau = 6.28318530717958647692;
 constexpr std::array<float, SPM_PARAMETER_COUNT> kDefaults{{
     0.f, 0.55f, 0.7f, 0.25f, 0.25f, 0.2f, 0.5f,
-    0.45f, 0.15f, 0.5f, 0.55f, 0.65f, 0.12f, 0.65f, 0.55f, 0.12f, 0.5f
+    0.45f, 0.15f, 0.5f, 0.55f, 0.65f, 0.12f, 0.65f, 0.55f, 0.12f, 0.5f,
+    0.5f, 0.55f, 0.8f, 0.18f
 }};
 
 bool valid(int id, float value) noexcept {
     if (id < 0 || id >= SPM_PARAMETER_COUNT || !std::isfinite(value)) return false;
     switch (id) {
-        case SPM_PARAM_MODEL: return value == 0.f || value == 1.f || value == 2.f || value == 3.f || value == 4.f;
+        case SPM_PARAM_MODEL: return value >= 0.f && value <= 7.f &&
+            value == std::floor(value);
         case SPM_PARAM_POSITION: return value >= 0.05f && value <= 0.95f;
         case SPM_PARAM_RELEASE: return value >= 0.01f && value <= 4.f;
         default: return value >= 0.f && value <= 1.f;
@@ -76,6 +79,50 @@ struct Mode {
         return y;
     }
 };
+/* Six independently tuned, exponentially decaying modes. The oscillator
+ * rotation and damping coefficients are prepared on note-on or pitch bend;
+ * processing is allocation-free, branch-light and trigonometry-free. */
+struct PercussionMode {
+    float cosine=1.f, sine=0.f, radius=0.f;
+    float real=0.f, imaginary=0.f, gain=0.f;
+    double ratio=1.0;
+    bool enabled=false;
+
+    void retune(double rate, double fundamental) noexcept {
+        const double hz=fundamental*ratio;
+        enabled=hz>0.0 && hz<rate*0.45;
+        if(!enabled) return;
+        const double phase=kTau*hz/rate;
+        cosine=float(std::cos(phase));
+        sine=float(std::sin(phase));
+    }
+    void configure(double rate, double fundamental, double modeRatio,
+                   double seconds, float amplitude) noexcept {
+        ratio=modeRatio;
+        gain=amplitude;
+        real=imaginary=0.f;
+        radius=float(std::exp(-1.0/(rate*seconds)));
+        retune(rate,fundamental);
+    }
+    float tick(float impulse) noexcept {
+        if(!enabled) return 0.f;
+        const float nextReal=radius*(cosine*real-sine*imaginary)+impulse*gain;
+        const float nextImag=radius*(sine*real+cosine*imaginary);
+        real=nextReal;
+        imaginary=nextImag;
+        return nextReal;
+    }
+};
+constexpr std::array<double,kPercussionModes> kMalletRatios{{
+    1.0,3.93,9.20,16.80,25.40,34.70
+}};
+constexpr std::array<double,kPercussionModes> kBellRatios{{
+    1.0,1.50,2.05,2.66,3.89,5.40
+}};
+constexpr std::array<double,kPercussionModes> kMembraneRatios{{
+    1.0,1.59,2.14,2.30,2.65,2.92
+}};
+
 struct Voice {
     std::array<float,kDelayCapacity> delay{};
     int write=0,whole=2;
@@ -89,6 +136,10 @@ struct Voice {
     float contact=0.25f,hardness=0.45f,stiffness=0.15f;
     float bowFriction=0.f,bowMotion=0.f;
     float airState=0.f,lipState=0.f;
+    std::array<PercussionMode,kPercussionModes> percussion{};
+    uint64_t percussionTail=0;
+    uint32_t attackSamples=0;
+    double fundamental=440.0;
     int model=0;
     Mode wood{},metal{};
 
@@ -105,6 +156,36 @@ struct Voice {
             std::min(double(kDelayCapacity-2),rate/frequency-0.5));
         whole = int(length);
         fraction=float(length-double(whole));
+        fundamental=frequency;
+        // Retune ringing partials in place, preserving their decay state.
+        if(model>=5 && age>0)
+            for(auto& partial:percussion) partial.retune(rate,frequency);
+    }
+    void configurePercussion(double rate,
+                             const std::array<float,SPM_PARAMETER_COUNT>& p) noexcept {
+        const auto& ratios=model==5 ? kMalletRatios :
+            (model==6 ? kBellRatios : kMembraneRatios);
+        const double hardness=p[SPM_PARAM_PERC_HARDNESS];
+        const double material=p[SPM_PARAM_PERC_INHARMONICITY];
+        const double decay=p[SPM_PARAM_PERC_DECAY];
+        const double tail=model==6 ? 0.25+6.0*decay :
+            (model==5 ? 0.12+4.0*decay : 0.06+1.8*decay);
+        for(size_t i=0;i<percussion.size();++i) {
+            const double harmonic=double(i+1);
+            const double ratio=harmonic+(ratios[i]-harmonic)*material;
+            const double contactWeight=0.30+0.70*std::abs(
+                std::sin(kTau*0.5*ratio*double(contact)));
+            const double hardnessWeight=i==0 ? 1.0 : 0.15+0.85*hardness;
+            const float amplitude=float(0.70*std::pow(0.64,double(i))*
+                contactWeight*hardnessWeight);
+            percussion[i].configure(rate,fundamental,ratio,
+                tail*std::pow(0.84,double(i)),amplitude);
+        }
+        attackSamples=uint32_t(rate*(0.0015+0.006*hardness));
+        burst=1.f;
+        burstDecay=float(std::exp(-8.0/double(std::max(1u,attackSamples))));
+        percussionTail=uint64_t(rate*std::min(20.0,tail*6.0));
+        env=1.f; // Preserve the fast transient of a mallet/striker.
     }
     void start(uint8_t n,uint8_t vel,uint8_t ch,uint64_t order,
                double rate,uint16_t pitchBend,
@@ -124,6 +205,7 @@ struct Voice {
         const double bodyScale=std::exp2((0.5-double(p[SPM_PARAM_BODY_SIZE]))*1.5);
         wood.configure(rate,190.*bodyScale,0.09);
         metal.configure(rate,460.*bodyScale,0.04);
+        if(model>=5) configurePercussion(rate,p);
     }
     void release(double rate, float seconds) noexcept {
         held=false;
@@ -134,6 +216,25 @@ struct Voice {
     float tick(const std::array<float,SPM_PARAMETER_COUNT>& p,
                float expression, float dynamics, float breath) noexcept {
         if(!active) return 0;
+        if(model>=5) {
+            // Single impact excites tuned, inharmonic, material-dependent modes.
+            // Short bounded noise burst models mallet and membrane transients.
+            float impact=age==0 ? 0.65f : 0.f;
+            if(age<attackSamples) {
+                impact+=randomBipolar(random)*
+                    p[SPM_PARAM_PERC_ATTACK_NOISE]*0.10f*burst;
+                burst*=burstDecay;
+            }
+            float sum=0.f;
+            for(auto& partial:percussion) sum+=partial.tick(impact);
+            ++age;
+            if(releasing) {
+                env-=releaseStep;
+                if(env<=0.f) {stop();return 0.f;}
+            }
+            if(age>=percussionTail) {stop();return 0.f;}
+            return sum*env*velocity*dynamics;
+        }
         // Only read cells written since this note was started. Old buffer
         // contents from a stolen voice are never heard; no O(delay) clear.
         float delayed=0;
@@ -248,7 +349,7 @@ struct SPMSynth {
     }
     void resetVoices() noexcept {
         pendingCount=0;sequence=0;sustain.fill(false);bend.fill(8192);
-        bowExpression.fill(1.f);dynamics.fill(1.f);
+        bowExpression.fill(1.f);dynamics.fill(1.f);breathExpression.fill(1.f);
         for(auto& v:voices) v.stop();
     }
     void handle(Event e, const std::array<float,SPM_PARAMETER_COUNT>& p) noexcept {
