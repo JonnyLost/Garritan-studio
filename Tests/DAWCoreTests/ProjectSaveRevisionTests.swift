@@ -49,18 +49,18 @@ final class ProjectSaveRevisionTests: XCTestCase {
         XCTAssertEqual(revision.saved, newer)
     }
 
-    func testSessionResetCannotAcknowledgeStaleSnapshotAfterNewEdit() {
+    func testSessionResetStartsNewCleanRevisionHistory() {
         var revision = ProjectSaveRevision()
         revision.markChanged()
-        let priorSession = revision.capture()
-        revision.resetForNewSession()
-        revision.markChanged()
-
-        // AppState also uses an independent session UUID to fence save work.
-        // The revision tracker itself tracks changes only within one session.
-        XCTAssertEqual(priorSession, revision.capture())
         XCTAssertTrue(revision.hasUnsavedChanges)
-        XCTAssertTrue(revision.acknowledgeSave(snapshot: revision.capture()))
+
+        // AppState checks its independent session UUID before acknowledging
+        // any asynchronous save from the preceding project.
+        revision.resetForNewSession()
         XCTAssertFalse(revision.hasUnsavedChanges)
+        XCTAssertEqual(revision.current, 0)
+        XCTAssertEqual(revision.saved, 0)
+        revision.markChanged()
+        XCTAssertTrue(revision.hasUnsavedChanges)
     }
 }
