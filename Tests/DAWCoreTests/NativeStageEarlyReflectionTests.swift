@@ -104,6 +104,32 @@ final class NativeRoomImpulseAnalyzerTests: XCTestCase {
         XCTAssertEqual(measured ?? 0, targetRT60, accuracy: 0.2)
     }
 
+    func testStereoAntiPhaseImpulseStillReportsValidDecay() {
+        // A mono (L+R)/2 analysis would cancel this entire signal.
+        let rate = 24_000.0
+        let frames = Int(rate * 3)
+        var left = [Float](repeating: 0, count: frames)
+        for n in 0..<frames {
+            let t = Double(n) / rate
+            left[n] = Float(exp(-3 * log(10) * t / 1.8) *
+                            sin(2 * Double.pi * 1_000 * t))
+        }
+        let right = left.map { -$0 }
+        let result = NativeRoomImpulseAnalyzer.analyze(
+            left: left, right: right, sampleRate: rate, roomID: "anti-phase")
+        XCTAssertEqual(result.bands.count, 6)
+        XCTAssertEqual(result.bands[3].t20Seconds ?? 0, 1.8, accuracy: 0.2)
+    }
+
+    func testFrequencyAboveNyquistIsNotReportedAsMeasured() {
+        let rate = 8_000.0
+        let left = [Float](repeating: 0, count: 8_000)
+        let measured = NativeRoomImpulseAnalyzer.analyze(
+            left: left, right: left, sampleRate: rate, roomID: "silent")
+        XCTAssertEqual(measured.bands.count, 6)
+        XCTAssertNil(measured.bands.last?.t20Seconds)
+    }
+
     func testAllFourRoomsHaveFiniteOfflineCalibrationReports() throws {
         let profiles = StudioRoomAcousticProfile.starterProfiles
         XCTAssertEqual(profiles.count, 4)
@@ -112,7 +138,9 @@ final class NativeRoomImpulseAnalyzerTests: XCTestCase {
                                                             sampleRate: 24_000,
                                                             seconds: 3.5)
             XCTAssertEqual(report.roomID, room.id)
-            XCTAssertEqual(report.bands.count, 3)
+            XCTAssertEqual(report.bands.count, 6)
+            XCTAssertEqual(report.bands.map(\.bandCenterHz),
+                           [125, 250, 500, 1_000, 2_000, 4_000])
             for band in report.bands {
                 XCTAssertTrue(band.edtSeconds == nil || band.edtSeconds!.isFinite)
                 XCTAssertTrue(band.t20Seconds == nil || band.t20Seconds!.isFinite)
