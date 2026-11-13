@@ -988,6 +988,45 @@ public struct VRackView: View {
         }
     }
 
+    /// Synth lives in the same family hierarchy as the orchestra, with
+    /// independent expandable engine-type folders beneath it.
+    private func compactSynthFolder(_ instruments: [DrawerInstrument]) -> some View {
+        DisclosureGroup {
+            ForEach([
+                "Analog", "FM", "Wavetable", "Additive", "Granular",
+                "Physical Modeling", "Hybrid"
+            ], id: \.self) { engine in
+                let sounds = instruments.filter { $0.instrumentType == engine }
+                if !sounds.isEmpty {
+                    DisclosureGroup("\(engine) (\(sounds.count))") {
+                        ForEach(sounds) { sound in
+                            Button {
+                                chooseInstrument(sound)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "waveform").frame(width: 20)
+                                    Text(sound.name).font(.system(size: 12))
+                                        .lineLimit(1)
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.vertical, 5)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .padding(.leading, 6)
+                }
+            }
+        } label: {
+            Label("SYNTH", systemImage: "waveform")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+    }
+
     private var instrumentsPanel: some View {
         VStack(spacing: 0) {
             HStack {
@@ -1071,6 +1110,9 @@ public struct VRackView: View {
                     ForEach(scoreFamilies, id: \.self) { family in
                         let instruments = filteredCatalog.filter { $0.category == family }
                         if !instruments.isEmpty {
+                            if family == "Synth" {
+                                compactSynthFolder(instruments)
+                            } else {
                             Text(family.uppercased())
                                 .font(.system(size: 10, weight: .semibold))
                                 .foregroundColor(.secondary)
@@ -1106,6 +1148,7 @@ public struct VRackView: View {
                                     .background(viewModel.selectedTrackID.flatMap { viewModel.project.track(withID: $0)?.garritanProgramID } == instrument.id ? Color.accentColor.opacity(0.15) : Color.clear)
                                 }
                                 .buttonStyle(.plain)
+                            }
                             }
                         }
                     }
