@@ -728,6 +728,8 @@ public struct MainWindowView: View {
             }
             .help("Audio Settings (\(viewModel.audioEngine.bufferSize) samples)")
             
+            // Account controls are absent from the default local-first build.
+            #if !STUDIO_LOCAL_AUTH
             // Account button
             Button(action: {
                 if authService.isAuthenticated {
@@ -744,6 +746,7 @@ public struct MainWindowView: View {
                 }
             }
             .help(authService.isAuthenticated ? "Account Settings" : "Sign In")
+            #endif
         }
     }
     

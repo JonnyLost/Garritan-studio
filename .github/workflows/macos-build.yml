@@ -35,6 +35,18 @@ jobs:
       - name: Enforce Studio architecture compatibility contracts
         run: python3 Tools/check_studio_independence.py
 
+      - name: Verify local-first package has no third-party dependencies
+        run: |
+          swift package dump-package > /tmp/studio-manifest.json
+          python3 - <<'PY'
+          import json
+          with open('/tmp/studio-manifest.json') as f:
+              manifest = json.load(f)
+          assert manifest['name'] == 'Studio', manifest['name']
+          assert not manifest['dependencies'], manifest['dependencies']
+          print('Local-first Studio has no external SwiftPM dependencies')
+          PY
+
       - name: Resolve package dependencies
         run: swift package resolve
 
@@ -60,3 +72,19 @@ jobs:
           name: native-room-calibration
           path: native-room-calibration.json
           if-no-files-found: ignore
+
+  cloud-compatibility:
+    name: Opt-in Supabase auth compatibility build
+    runs-on: macos-15
+    timeout-minutes: 35
+    env:
+      STUDIO_ENABLE_CLOUD_AUTH: "1"
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+      - name: Verify opt-in manifest contract
+        run: python3 Tools/check_studio_independence.py
+      - name: Resolve cloud SDK only for opt-in variant
+        run: swift package resolve
+      - name: Compile cloud auth and complete app
+        run: swift build --product DAWApp

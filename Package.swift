@@ -2,9 +2,14 @@
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
+import Foundation
+
+// The normal Studio application is local-first, with no external SwiftPM SDK.
+// Set STUDIO_ENABLE_CLOUD_AUTH=1 to build the existing Supabase sign-in UI.
+let studioCloudAuthEnabled = ProcessInfo.processInfo.environment["STUDIO_ENABLE_CLOUD_AUTH"] == "1"
 
 let package = Package(
-    name: "MusioCreate",
+    name: "Studio",
     platforms: [
         .macOS(.v14)
     ],
@@ -22,9 +27,9 @@ let package = Package(
         .executable(name: "DAWApp", targets: ["DAWApp"]),
         .executable(name: "RoomAcousticCalibration", targets: ["RoomAcousticCalibration"])
     ],
-    dependencies: [
-        .package(url: "https://github.com/supabase/supabase-swift", from: "2.0.0")
-    ],
+    dependencies: studioCloudAuthEnabled
+        ? [.package(url: "https://github.com/supabase/supabase-swift", from: "2.0.0")]
+        : [],
     targets: [
         // MARK: - Original, standalone C++17 modular virtual-analog engine
         .target(
@@ -89,11 +94,16 @@ let package = Package(
         // MARK: - Optional cloud authentication (never required by the DAW core)
         .target(
             name: "StudioCloudAuth",
-            dependencies: [.product(name: "Supabase", package: "supabase-swift")],
+            dependencies: studioCloudAuthEnabled
+                ? [.product(name: "Supabase", package: "supabase-swift")]
+                : [],
             path: "StudioCloudAuth/Sources/StudioCloudAuth",
-            swiftSettings: [
-                .enableExperimentalFeature("StrictConcurrency")
-            ]
+            exclude: studioCloudAuthEnabled
+                ? ["LocalOnlyAuthService.swift"]
+                : ["SupabaseAuthService.swift"],
+            swiftSettings: studioCloudAuthEnabled
+                ? [.enableExperimentalFeature("StrictConcurrency")]
+                : [.enableExperimentalFeature("StrictConcurrency"), .define("STUDIO_LOCAL_AUTH")]
         ),
 
         // MARK: - Core Audio/MIDI Engine
@@ -145,6 +155,7 @@ let package = Package(
             name: "DAWUI",
             dependencies: ["DAWCore", "StudioCloudAuth", "StudioIdentity", "StudioAI"],
             path: "DAWUI/Sources/DAWUI",
+            swiftSettings: studioCloudAuthEnabled ? [] : [.define("STUDIO_LOCAL_AUTH")],
             resources: [
                 .copy("Resources/GPO5_keyswitch_catalog.json")
             ]
@@ -153,7 +164,7 @@ let package = Package(
         // MARK: - Main Application
         .executableTarget(
             name: "DAWApp",
-            dependencies: ["DAWCore", "DAWUI", "VST3Bridge", "StudioIdentity"],
+            dependencies: ["DAWCore", "DAWUI", "StudioIdentity"],
             path: "DAWApp/Sources/DAWApp"
         ),
         

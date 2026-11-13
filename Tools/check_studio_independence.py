@@ -5,6 +5,7 @@ Run on macOS with Python 3 and Swift: python3 Tools/check_studio_independence.py
 No credentials, network requests or project fixtures are needed for this check.
 """
 import json
+import os
 import plistlib
 import re
 import subprocess
@@ -22,6 +23,8 @@ manifest = json.loads(subprocess.check_output(
     ["swift", "package", "dump-package"], cwd=ROOT, text=True
 ))
 targets = {target["name"]: target for target in manifest["targets"]}
+cloud_auth_enabled = os.environ.get("STUDIO_ENABLE_CLOUD_AUTH") == "1"
+require(manifest["name"] == "Studio", "SwiftPM package should be named Studio")
 for name in ("DAWCore", "DAWUI", "DAWApp", "StudioCloudAuth", "StudioIdentity", "StudioAI"):
     require(name in targets, f"missing SwiftPM target {name}")
 
@@ -33,7 +36,14 @@ require("Supabase" not in core_deps, "DAWCore must not depend on Supabase")
 require("StudioCloudAuth" not in core_deps, "DAWCore must not depend on cloud auth")
 require("StudioAI" not in core_deps, "DAWCore must not depend on optional AI")
 require("DAWCore" in ai_deps, "StudioAI must depend on DAWCore, never the reverse")
-require("Supabase" in cloud_deps, "Supabase SDK must remain in the optional auth module")
+if cloud_auth_enabled:
+    require("Supabase" in cloud_deps, "opt-in cloud auth module needs Supabase")
+    require("supabase-swift" in json.dumps(manifest["dependencies"]),
+            "opt-in mode must resolve the Supabase SDK")
+else:
+    require("Supabase" not in cloud_deps, "local-only auth must not import Supabase")
+    require(not manifest["dependencies"],
+            "standard Studio must not require external package dependencies")
 require("StudioCloudAuth" in ui_deps, "DAWUI must explicitly import its auth module")
 require("StudioIdentity" in ui_deps, "DAWUI must use the shared identity module")
 require("StudioAI" in ui_deps, "DAWUI must explicitly import optional AI services")
@@ -60,7 +70,10 @@ require(not (core_root / "Auth" / "SupabaseAuthService.swift").exists(),
         "old DAWCore auth service must not be compiled")
 require((ROOT / "StudioCloudAuth" / "Sources" / "StudioCloudAuth" /
          "SupabaseAuthService.swift").is_file(),
-        "optional auth module implementation is missing")
+        "opt-in auth module implementation is missing")
+require((ROOT / "StudioCloudAuth" / "Sources" / "StudioCloudAuth" /
+         "LocalOnlyAuthService.swift").is_file(),
+        "local-only auth adapter is missing")
 
 persistence = (core_root / "Persistence" / "ProjectPersistence.swift").read_text()
 require('projectExtension = "dawproj"' in persistence, "legacy project extension changed")
@@ -80,4 +93,6 @@ require(any("com.musio.create.project" in t.get("LSItemContentTypes", [])
             for t in info.get("CFBundleDocumentTypes", [])),
         "legacy project file association lost")
 
-print("Studio architecture check passed: DAWCore independent of cloud and AI; legacy project IDs preserved.")
+print("Studio architecture check passed: " +
+      ("opt-in cloud compatibility" if cloud_auth_enabled else "local-first native package") +
+      ", DAWCore independent of cloud and AI, project identifiers preserved.")
