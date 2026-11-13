@@ -10,6 +10,10 @@ public final class NativeRoomReverbAudioUnit: AUAudioUnit {
     private var inputs: AUAudioUnitBusArray!
     private var outputs: AUAudioUnitBusArray!
     private var processor: NativeRoomReverbProcessor?
+    private var designedProfile = StudioAcousticRoomDesign().makeProfile()
+    private var availableProfiles: [StudioRoomAcousticProfile] {
+        StudioRoomAcousticProfile.starterProfiles + [designedProfile]
+    }
     private var roomParameter: AUParameter!
 
     /// Numeric room index, only interpreted using the stable starterProfiles order.
@@ -54,14 +58,27 @@ public final class NativeRoomReverbAudioUnit: AUAudioUnit {
             withIdentifier: "room",
             name: "Room Profile",
             address: Self.roomParameterAddress,
-            min: 0, max: AUValue(StudioRoomAcousticProfile.starterProfiles.count - 1),
+            min: 0, max: AUValue(StudioRoomAcousticProfile.playableProfiles.count - 1),
             unit: .indexed, unitName: nil,
             flags: [.flag_IsReadable, .flag_IsWritable],
-            valueStrings: StudioRoomAcousticProfile.starterProfiles.map(\.name),
+            valueStrings: StudioRoomAcousticProfile.playableProfiles.map(\.name),
             dependentParameters: nil
         )
         parameterTree = AUParameterTree.createTree(withChildren: [roomParameter])
         roomParameter.value = 0
+    }
+
+    /// Apply only while AVAudioEngine is stopped. The 16-line network
+    /// rebuilds off the callback with the selected room's six-band damping.
+    public func configureDesignedRoom(_ design: StudioAcousticRoomDesign) {
+        designedProfile = design.makeProfile()
+        if renderResourcesAllocated {
+            processor = NativeRoomReverbProcessor(
+                sampleRate: outputBus.format.sampleRate,
+                profiles: availableProfiles,
+                includeEarlyReflections: false
+            )
+        }
     }
 
     public override func allocateRenderResources() throws {
@@ -75,7 +92,7 @@ public final class NativeRoomReverbAudioUnit: AUAudioUnit {
         }
         processor = NativeRoomReverbProcessor(
             sampleRate: format.sampleRate,
-            profiles: StudioRoomAcousticProfile.starterProfiles,
+            profiles: availableProfiles,
             includeEarlyReflections: false  // Dedicated per-track ER sidechain
         )
     }
@@ -100,7 +117,7 @@ public final class NativeRoomReverbAudioUnit: AUAudioUnit {
             // and all room taps were prepared in allocateRenderResources().
             let requested = roomParameter.value
             let index = requested.isFinite ? min(
-                StudioRoomAcousticProfile.starterProfiles.count - 1,
+                StudioRoomAcousticProfile.playableProfiles.count - 1,
                 max(0, Int(requested.rounded()))
             ) : 0
             processor.selectProfile(at: index)
