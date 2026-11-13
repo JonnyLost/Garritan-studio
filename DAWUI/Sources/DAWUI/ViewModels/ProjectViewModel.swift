@@ -506,6 +506,7 @@ public final class ProjectViewModel: ObservableObject {
         track.studioAnalogEnabled = true
         track.studioFMEnabled = false
         track.studioSynthEnabled = false
+        track.studioSamplerPatch = nil
         updateTrack(track, description: "Load Studio Analog")
     }
 
@@ -530,6 +531,7 @@ public final class ProjectViewModel: ObservableObject {
         track.studioAnalogEnabled = false
         track.studioFMEnabled = true
         track.studioSynthEnabled = false
+        track.studioSamplerPatch = nil
         updateTrack(track, description: "Load Studio FM")
     }
 
@@ -555,8 +557,180 @@ public final class ProjectViewModel: ObservableObject {
         track.studioAnalogEnabled = false
         track.studioFMEnabled = false
         track.studioSynthEnabled = true
+        track.studioSamplerPatch = nil
         track.studioSynthPatch = patch
         updateTrack(track, description: "Load Studio Synth")
+    }
+
+    /// Open a fully editable native sampler without requiring a recording.
+    /// This stores a lightweight, empty patch on the track; playback remains
+    /// silent until the mapping editor applies real samples. Reopening an
+    /// existing sampler does not discard its zones or interrupt its audio.
+    public func openEmptyStudioSampler(for trackID: TrackID) throws {
+        guard var track = project.track(withID: trackID),
+              track.type == .midi || track.type == .instrument else {
+            throw PlaybackError.trackNotFound(trackID)
+        }
+        if track.studioSamplerPatch != nil { return }
+        // Choosing the sampler replaces the previous track instrument just
+        // like the synth selection does, but does not initialize DSP or read
+        // files until the user imports their first recording.
+        unloadTrackInstrument(for: trackID)
+        track.instrumentSlot = nil
+        track.garritanProgramID = nil
+        track.studioAnalogEnabled = false
+        track.studioFMEnabled = false
+        track.studioSynthEnabled = false
+        track.studioSamplerPatch = StudioSamplerPatch(zones: [])
+        updateTrack(track, description: "Open Empty Studio Sampler")
+    }
+
+    /// Select the native Studio Sampler using a user-provided sample mapping.
+    /// Preserve the loaded instrument and project state if sample decoding fails.
+    public func loadStudioSampler(for trackID: TrackID, patch: StudioSamplerPatch) throws {
+        guard var track = project.track(withID: trackID),
+              track.type == .midi || track.type == .instrument else {
+            throw PlaybackError.trackNotFound(trackID)
+        }
+        let previousPluginID: UUID?
+        if let instrument = playbackEngine.instrument(for: trackID),
+           case .auInstrument(_, let id) = instrument {
+            previousPluginID = id
+        } else {
+            previousPluginID = nil
+        }
+        // Repair old user-home paths to app-managed recordings before any
+        // instrument or plug-in is replaced. Missing files leave the
+        // existing graph and project state unchanged for manual relinking.
+        let resolvedPatch = try StudioSamplerSampleLibrary.resolve(patch)
+        try playbackEngine.loadStudioSampler(for: trackID, patch: resolvedPatch)
+        if let previousPluginID { pluginHost.unloadPlugin(id: previousPluginID) }
+        track.instrumentSlot = nil
+        track.garritanProgramID = nil
+        track.studioAnalogEnabled = false
+        track.studioFMEnabled = false
+        track.studioSynthEnabled = false
+        track.studioSamplerPatch = resolvedPatch
+        updateTrack(track, description: "Load Studio Sampler")
+    }
+
+    /// Choose a presentation layout without rebuilding or replacing samples.
+    /// All three instrument faces use the same native voice engine.
+    public func setStudioSamplerInstrumentKind(_ kind: StudioSamplerInstrumentKind,
+                                                for trackID: TrackID) {
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              var patch = project.tracks[index].studioSamplerPatch else { return }
+        patch.instrumentKind = kind
+        project.tracks[index].studioSamplerPatch = patch
+    }
+
+    /// Switch between discrete velocity selection and live CC1 layer morphing.
+    /// The sampler applies the change to newly triggered notes on the render
+    /// thread; the change never reloads samples or interrupts other tracks.
+    @discardableResult
+    public func setStudioSamplerCC1Crossfade(_ enabled: Bool,
+                                              for trackID: TrackID) -> Bool {
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              var patch = project.tracks[index].studioSamplerPatch,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSampler(let sampler) = instrument,
+              sampler.setCC1Crossfade(enabled) else { return false }
+        patch.cc1Crossfade = enabled
+        project.tracks[index].studioSamplerPatch = patch
+        return true
+    }
+
+    /// Live controller changes go through the same serialized command path
+    /// as incoming MIDI. Persist values for the next project load.
+    @discardableResult
+    public func setStudioSamplerController(_ controller: UInt8, value: UInt8,
+                                            for trackID: TrackID) -> Bool {
+        guard [UInt8(1), 2, 11, 21].contains(controller),
+              let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              var patch = project.tracks[index].studioSamplerPatch,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSampler(let sampler) = instrument,
+              sampler.controller(controller, value: value, channel: 0) else { return false }
+        switch controller {
+        case 1: patch.dynamicsCC1 = value
+        case 2: patch.breathCC2 = value
+        case 11: patch.expressionCC11 = value
+        case 21: patch.vibratoCC21 = value
+        default: break
+        }
+        project.tracks[index].studioSamplerPatch = patch
+        return true
+    }
+
+    /// Runtime microphone changes are persisted but do not reload samples.
+    @discardableResult
+    public func setStudioSamplerMicrophone(_ microphone: StudioSamplerMicrophone,
+                                           for trackID: TrackID) -> Bool {
+        guard microphone.isValid,
+              let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              var patch = project.tracks[index].studioSamplerPatch,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSampler(let sampler) = instrument else { return false }
+        var groups = patch.microphones ?? []
+        if let existing = groups.firstIndex(where: { $0.id == microphone.id }) {
+            groups[existing] = microphone
+        } else {
+            groups.append(microphone)
+        }
+        patch.microphones = groups
+        guard patch.isValid, sampler.setMicrophone(microphone) else { return false }
+        project.tracks[index].studioSamplerPatch = patch
+        return true
+    }
+
+    @discardableResult
+    public func setStudioSamplerLegato(enabled: Bool,
+                                       fadeMilliseconds: Float,
+                                       for trackID: TrackID) -> Bool {
+        guard fadeMilliseconds.isFinite && (5...250).contains(fadeMilliseconds),
+              let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              var patch = project.tracks[index].studioSamplerPatch,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSampler(let sampler) = instrument,
+              sampler.setLegato(enabled: enabled,
+                                fadeMilliseconds: fadeMilliseconds) else { return false }
+        patch.legatoEnabled = enabled
+        patch.legatoCrossfadeMilliseconds = fadeMilliseconds
+        project.tracks[index].studioSamplerPatch = patch
+        return true
+    }
+
+    /// Change the active sampler articulation through the same bounded
+    /// MIDI queue used by note and controller events. The selection is
+    /// persisted as the next project-load default; already held notes remain.
+    @discardableResult
+    public func setStudioSamplerArticulation(_ id: UInt8,
+                                             for trackID: TrackID) -> Bool {
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              var patch = project.tracks[index].studioSamplerPatch,
+              Set((patch.articulations ?? []).map(\.id)).union([0]).contains(id),
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSampler(let sampler) = instrument,
+              sampler.selectArticulation(id) else { return false }
+        patch.selectedArticulationID = id
+        project.tracks[index].studioSamplerPatch = patch
+        return true
+    }
+
+    /// Live ADSR updates are recorded in the project and queued to the
+    /// native renderer. Already-playing voices retain their original ADSR.
+    @discardableResult
+    public func setStudioSamplerEnvelope(_ envelope: StudioSamplerEnvelope,
+                                          for trackID: TrackID) -> Bool {
+        guard envelope.isValid,
+              let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              var patch = project.tracks[index].studioSamplerPatch,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSampler(let sampler) = instrument,
+              sampler.setEnvelope(envelope) else { return false }
+        patch.envelope = envelope
+        project.tracks[index].studioSamplerPatch = patch
+        return true
     }
 
     /// Topology changes happen on the main/control thread while the graph is
