@@ -29,6 +29,9 @@ public final class NativeStageEarlyReflectionProcessor {
     private var writePosition = 0
 
     private let roomTaps: [[SourceTap]]
+    private let highCutCoefficients: [Float]
+    private var currentHighCutCoefficient: Float = 1
+    private var filteredInputState: Float = 0
     private var renderTaps = [RenderTap](repeating: RenderTap(), count: 32)
     private var tapCount = -1
 
@@ -48,6 +51,15 @@ public final class NativeStageEarlyReflectionProcessor {
         samples.initialize(repeating: 0, count: capacity)
 
         let selected = profiles.isEmpty ? [StudioRoomAcousticProfile.abbeyRoadStudioOne] : profiles
+        // Custom rooms can absorb high frequencies in the early reflection
+        // field. Factory profiles keep an exact coefficient of one (bypass).
+        // Coefficients are fully precomputed before the audio callback.
+        highCutCoefficients = selected.map { profile in
+            guard let requested = profile.earlyReflectionHighCutHz,
+                  requested.isFinite else { return 1.0 }
+            let frequency = min(16_000, max(1_000, Double(requested)))
+            return Float(1 - exp(-2 * Double.pi * frequency / rate))
+        }
         roomTaps = selected.map { profile in
             profile.earlyReflections.prefix(32).compactMap { tap -> SourceTap? in
                 guard tap.delayMilliseconds.isFinite, tap.delayMilliseconds >= 0,
@@ -78,6 +90,7 @@ public final class NativeStageEarlyReflectionProcessor {
               self.zone != resolvedZone || tapCount < 0 else { return }
 
         self.roomIndex = resolvedIndex
+        currentHighCutCoefficient = highCutCoefficients[resolvedIndex]
         self.pan = resolvedPan
         self.zone = resolvedZone
 
@@ -108,7 +121,16 @@ public final class NativeStageEarlyReflectionProcessor {
         guard frameCount > 0 else { return }
         for frame in 0..<frameCount {
             let input = (left[frame] + right[frame]) * 0.5
-            samples[writePosition] = input
+            let reflectedInput: Float
+            if currentHighCutCoefficient < 0.999 {
+                filteredInputState += currentHighCutCoefficient *
+                    (input - filteredInputState)
+                reflectedInput = filteredInputState
+            } else {
+                filteredInputState = input
+                reflectedInput = input
+            }
+            samples[writePosition] = reflectedInput
             var reflectedL: Float = 0
             var reflectedR: Float = 0
             for i in 0..<tapCount {
