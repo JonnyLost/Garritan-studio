@@ -261,8 +261,7 @@ public enum StudioSamplerInstrumentPackage {
         guard url.pathExtension.lowercased() == fileExtension,
               url.resolvingSymlinksInPath().deletingLastPathComponent()
                 .standardizedFileURL == root,
-              (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]))
-                .isSymbolicLink != true
+              (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink != true
         else { throw PackageError.unsafeFile }
         try FileManager.default.removeItem(at: url)
     }
