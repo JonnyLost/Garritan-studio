@@ -1,4 +1,4 @@
-name: Studio Synth five-engine native validation
+name: Studio Synth native validation
 
 on:
   push:
@@ -28,6 +28,9 @@ jobs:
             DAWCore/Sources/DAWCore/Audio/StudioSynthHybridPresets.swift \
             DAWCore/Sources/DAWCore/Audio/StudioAdditiveInstrument.swift \
             DAWCore/Sources/DAWCore/Audio/StudioGranularPatch.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioPhysicalPatch.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioPhysicalPresets.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioPhysicalInstrument.swift \
             DAWCore/Sources/DAWCore/Audio/StudioGranularPresets.swift \
             DAWCore/Sources/DAWCore/Audio/StudioGranularInstrument.swift \
             DAWCore/Sources/DAWCore/Audio/StudioSynthMIDIControls.swift \
@@ -40,6 +43,7 @@ jobs:
             DAWUI/Sources/DAWUI/Views/StudioSynthMIDILearnView.swift \
             DAWUI/Sources/DAWUI/Views/Timeline/TrackHeaderView.swift \
             Tests/DAWCoreTests/StudioSynthTests.swift \
+            Tests/DAWCoreTests/StudioPhysicalIntegrationTests.swift \
             DAWCore/Sources/DAWCore/Audio/StudioWavetablePatch.swift \
             DAWCore/Sources/DAWCore/Audio/StudioWavetableInstrument.swift \
             DAWCore/Sources/DAWCore/Audio/StudioWavetablePresets.swift \
@@ -64,6 +68,7 @@ jobs:
             DAWCore/Sources/DAWCore/Audio/StudioSynthPatch.swift \
             DAWCore/Sources/DAWCore/Audio/StudioAdditivePatch.swift \
             DAWCore/Sources/DAWCore/Audio/StudioGranularPatch.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioPhysicalPatch.swift \
             DAWCore/Sources/DAWCore/Audio/StudioSynthMIDIControls.swift \
             DAWCore/Sources/DAWCore/Audio/StudioSynthModulationWorker.swift \
             Tests/StudioSynthModulationStandalone/main.swift \
@@ -101,6 +106,14 @@ jobs:
             Tests/StudioGranularDSPStandalone/main.cpp \
             -o /tmp/studio-granular-synth
           ASAN_OPTIONS=detect_leaks=1 /tmp/studio-granular-synth
+      - name: Native Physical Modeling DSP / AddressSanitizer
+        run: |
+          clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I StudioPhysicalDSP/include \
+            StudioPhysicalDSP/src/StudioPhysicalDSP.cpp \
+            Tests/StudioPhysicalDSPStandalone/main.cpp \
+            -o /tmp/studio-physical-synth
+          ASAN_OPTIONS=detect_leaks=1 /tmp/studio-physical-synth
       - name: Original FM DSP
         run: |
           clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
