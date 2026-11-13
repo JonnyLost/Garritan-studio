@@ -126,6 +126,10 @@ final class AppState: ObservableObject {
         }
 
         let destination = ProjectFileManager.normalizedProjectURL(proposedURL)
+        // Manual Save must never race an older in-flight autosave into the
+        // same .dawproj; the hold ends on success, error, or cancellation.
+        await autosaveManager.beginManualSave()
+        defer { autosaveManager.endManualSave() }
         let snapshot = captureProjectSnapshot()
 
         do {

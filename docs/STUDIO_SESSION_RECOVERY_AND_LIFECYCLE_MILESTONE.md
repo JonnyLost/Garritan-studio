@@ -122,3 +122,15 @@ schema migrations have been performed.
 
 The application remains in a staged independence transition; its audio/MIDI
 internals and inherited artwork/provenance require separate review.
+
+## Follow-on: coordinated manual Save / autosave writes
+
+A manual Save now calls `AutosaveManager.beginManualSave()` **after**
+the user chooses a destination and **before** capturing a project snapshot.
+The manager prevents new autosave writes and waits for any in-flight autosave
+to finish. A `defer` releases the hold on success, failure or cancellation.
+The existing dirty markers and session-revision checks continue to determine
+whether the completed snapshot is current. This closes a potential
+last-writer-wins race where an older autosave could overwrite a newer manual
+Save on disk. Added deterministic XCTest coverage for an autosave blocked by a
+manual Save and a manual Save waiting for an in-flight snapshot.

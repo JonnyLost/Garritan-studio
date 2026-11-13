@@ -28,6 +28,8 @@ public final class AutosaveManager: ObservableObject {
     private var generation = UUID()
     private var editRevision: UInt64 = 0
     private var isSaving = false
+    private var manualSaveHolds = 0
+    private var waitingForIdle: [CheckedContinuation<Void, Never>] = []
 
     @Published public private(set) var lastAutosaveDate: Date?
     @Published public private(set) var hasUnsavedChanges = false
@@ -79,13 +81,36 @@ public final class AutosaveManager: ObservableObject {
         hasUnsavedChanges = false
     }
 
+    /// Hold off new autosaves and wait for the in-flight autosave to finish
+    /// before a manual Save writes to the same package. This prevents a
+    /// previously captured, older autosave from overwriting a newer Save.
+    public func beginManualSave() async {
+        manualSaveHolds += 1
+        guard isSaving else { return }
+        await withCheckedContinuation { continuation in
+            waitingForIdle.append(continuation)
+        }
+    }
+
+    public func endManualSave() {
+        precondition(manualSaveHolds > 0, "Unbalanced manual save hold")
+        manualSaveHolds -= 1
+    }
+
     /// Also callable on application lifecycle events and by unit tests.
     public func saveIfNeeded() async {
-        guard !isSaving, hasUnsavedChanges,
+        guard manualSaveHolds == 0, !isSaving, hasUnsavedChanges,
               let url = projectURL, let snapshotProvider else { return }
 
         isSaving = true
-        defer { isSaving = false }
+        defer {
+            isSaving = false
+            let waiters = waitingForIdle
+            waitingForIdle.removeAll()
+            for waiter in waiters {
+                waiter.resume()
+            }
+        }
         let originalGeneration = generation
         // Capture the dirty revision BEFORE the potentially suspending
         // snapshot request. A later edit must survive this autosave, even if

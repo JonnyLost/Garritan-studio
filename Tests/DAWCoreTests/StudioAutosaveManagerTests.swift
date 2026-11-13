@@ -92,6 +92,78 @@ final class StudioAutosaveManagerTests: XCTestCase {
         manager.stopAutosave()
     }
 
+    func testManualSaveHoldDefersAutosaveWithoutDiscardingDirtyEdits() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("StudioManualBarrier-\(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let manager = AutosaveManager()
+        let url = directory.appendingPathComponent("Sketch.dawproj")
+        var revision = StudioSessionRevision()
+        revision.markEdited()
+        let ticket = revision.saveTicket()
+        var receipts = 0
+        manager.configure(
+            snapshotProvider: {
+                StudioAutosaveSnapshot(project: Project(name: "Autosave"), ticket: ticket)
+            },
+            onSaved: { _, _ in receipts += 1 }
+        )
+        manager.startAutosave(for: url)
+        manager.markUnsavedChanges()
+
+        await manager.beginManualSave()
+        await manager.saveIfNeeded()
+        XCTAssertTrue(manager.hasUnsavedChanges)
+        XCTAssertEqual(receipts, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        manager.endManualSave()
+
+        await manager.saveIfNeeded()
+        XCTAssertEqual(receipts, 1)
+        XCTAssertFalse(manager.hasUnsavedChanges)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+        manager.stopAutosave()
+    }
+
+    func testManualSaveWaitsForInFlightAutosaveBeforeTakingOver() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("StudioManualWait-\(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let manager = AutosaveManager()
+        let gate = AutosaveSnapshotGate()
+        let url = directory.appendingPathComponent("Sketch.dawproj")
+        let session = StudioSessionRevision()
+        let ticket = session.saveTicket()
+        manager.configure(
+            snapshotProvider: {
+                await gate.holdProvider()
+                return StudioAutosaveSnapshot(
+                    project: Project(name: "Earlier autosave"), ticket: ticket
+                )
+            },
+            onSaved: { _, _ in }
+        )
+        manager.startAutosave(for: url)
+        manager.markUnsavedChanges()
+        let ongoingAutosave = Task { await manager.saveIfNeeded() }
+        await gate.awaitProviderStart()
+
+        let manualHold = Task { await manager.beginManualSave() }
+        gate.release()
+        await ongoingAutosave.value
+        await manualHold.value
+
+        manager.markUnsavedChanges()
+        await manager.saveIfNeeded()
+        XCTAssertTrue(manager.hasUnsavedChanges)
+        let beforeManual = try await ProjectFileManager().load(from: url)
+        XCTAssertEqual(beforeManual.name, "Earlier autosave")
+        manager.endManualSave()
+        manager.stopAutosave()
+    }
+
     func testStoppedSessionDoesNotWriteAfterSnapshotDelay() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("StudioAutoSwitch-\(UUID())", isDirectory: true)
