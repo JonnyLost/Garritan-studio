@@ -235,7 +235,11 @@ public final class PlaybackEngine: ObservableObject {
 
         // Reopen saved native sampler mappings before the fallback sound bank.
         if let patch = track.studioSamplerPatch, coreAudioBackend == nil {
-            try loadStudioSampler(for: track.id, patch: patch)
+            // An empty sampler is a valid saved editor selection, not an
+            // audible instrument or a reason to load the fallback soundbank.
+            if !patch.isEmpty {
+                try loadStudioSampler(for: track.id, patch: patch)
+            }
             return
         }
 
