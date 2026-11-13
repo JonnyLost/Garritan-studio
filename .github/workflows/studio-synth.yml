@@ -23,6 +23,9 @@ jobs:
         run: |
           swiftc -frontend -parse \
             DAWCore/Sources/DAWCore/Audio/StudioSynthPatch.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioAdditivePatch.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioAdditivePresets.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioAdditiveInstrument.swift \
             DAWCore/Sources/DAWCore/Audio/StudioSynthMIDIControls.swift \
             DAWCore/Sources/DAWCore/Audio/StudioSynthInstrument.swift \
             DAWCore/Sources/DAWCore/Models/Track.swift \
@@ -52,6 +55,7 @@ jobs:
             DAWCore/Sources/DAWCore/Audio/StudioWavetablePatch.swift \
             DAWCore/Sources/DAWCore/Audio/StudioSynthModulation.swift \
             DAWCore/Sources/DAWCore/Audio/StudioSynthPatch.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioAdditivePatch.swift \
             DAWCore/Sources/DAWCore/Audio/StudioSynthMIDIControls.swift \
             DAWCore/Sources/DAWCore/Audio/StudioSynthModulationWorker.swift \
             Tests/StudioSynthModulationStandalone/main.swift \
@@ -73,6 +77,14 @@ jobs:
             Tests/StudioWavetableDSPStandalone/main.cpp \
             -o /tmp/studio-wavetable-synth
           ASAN_OPTIONS=detect_leaks=1 /tmp/studio-wavetable-synth
+      - name: Original Additive DSP and voice release tests
+        run: |
+          clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I StudioAdditiveDSP/include \
+            StudioAdditiveDSP/src/StudioAdditiveDSP.cpp \
+            Tests/StudioAdditiveDSPStandalone/main.cpp \
+            -o /tmp/studio-additive-synth
+          ASAN_OPTIONS=detect_leaks=1 /tmp/studio-additive-synth
       - name: Original FM DSP
         run: |
           clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
