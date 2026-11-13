@@ -4,6 +4,12 @@ import Combine
 import AVFoundation
 import DAWCore
 
+/// Temporary UI state only; never written to a project or synthesizer patch.
+public struct StudioSynthMIDILearnRequest: Equatable {
+    public let trackID: TrackID
+    public let target: StudioSynthMIDIControlTarget
+}
+
 // MARK: - Project View Model
 
 /// Main view model coordinating all DAW state and operations
@@ -26,6 +32,7 @@ public final class ProjectViewModel: ObservableObject {
     @Published public private(set) var selectedTrackID: TrackID?
     @Published public private(set) var selectedClipIDs: Set<ClipID> = []
     @Published public private(set) var isModified: Bool = false
+    @Published public private(set) var studioSynthMIDILearnRequest: StudioSynthMIDILearnRequest?
     
     /// Transient MIDI drag destination; nil for invalid or inactive drops.
     @Published public var midiDragTargetID: TrackID?
@@ -168,6 +175,30 @@ public final class ProjectViewModel: ObservableObject {
     }
     
     private func handleLiveMIDIEvent(_ event: IncomingMIDIEvent) {
+        // Capture only a physical/virtual CoreMIDI CC from the normal input
+        // stream. A learned assignment does not depend on the track being
+        // record-armed, but normal MIDI playthrough still follows arm state.
+        if let learning = studioSynthMIDILearnRequest,
+           case .controlChange(let number, _) = event.type,
+           StudioSynthMIDIControlMapping.supportsController(number) {
+            var controls = project.track(withID: learning.trackID)?
+                .studioSynthPatch?.midiControls ?? StudioSynthMIDIControlSettings()
+            // Learning again replaces one destination's CC but retains its
+            // chosen output range and avoids duplicate destination ownership.
+            if let index = controls.mappings.firstIndex(where: {
+                $0.target == learning.target
+            }) {
+                controls.mappings[index].controller = number
+                controls.mappings[index].enabled = true
+            } else {
+                controls.mappings.append(StudioSynthMIDIControlMapping(
+                    controller: number, target: learning.target))
+            }
+            if setStudioSynthMIDIControls(controls, for: learning.trackID) {
+                studioSynthMIDILearnRequest = nil
+                print("[Studio Synth MIDI Learn] Assigned CC\(number) to \(learning.target)")
+            }
+        }
         // Show MIDI activity
         midiActivity = true
         midiActivityTimer?.invalidate()
@@ -554,6 +585,49 @@ public final class ProjectViewModel: ObservableObject {
               var patch = project.tracks[index].studioSynthPatch else { return false }
         patch.modulation = settings
         guard patch.validate(), synth.setModulation(settings) else { return false }
+        project.tracks[index].studioSynthPatch = patch
+        return true
+    }
+
+    /// Arm a single target for the next incoming MIDI CC. The audio graph
+    /// and all existing controller assignments remain untouched until a
+    /// supported controller is actually received.
+    @discardableResult
+    public func beginStudioSynthMIDILearn(
+        for trackID: TrackID, target: StudioSynthMIDIControlTarget
+    ) -> Bool {
+        guard let track = project.track(withID: trackID),
+              track.studioSynthEnabled == true,
+              let patch = track.studioSynthPatch,
+              target.validate(layers: patch.layers),
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSynth = instrument else { return false }
+        studioSynthMIDILearnRequest = StudioSynthMIDILearnRequest(
+            trackID: trackID, target: target)
+        return true
+    }
+
+    public func cancelStudioSynthMIDILearn(for trackID: TrackID) {
+        if studioSynthMIDILearnRequest?.trackID == trackID {
+            studioSynthMIDILearnRequest = nil
+        }
+    }
+
+    /// Live updates are applied to the existing control worker and persisted
+    /// in the project, not implemented with an AU host or a new audio graph.
+    @discardableResult
+    public func setStudioSynthMIDIControls(
+        _ controls: StudioSynthMIDIControlSettings, for trackID: TrackID
+    ) -> Bool {
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioSynthEnabled == true,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSynth(let synth) = instrument,
+              var patch = project.tracks[index].studioSynthPatch else {
+            return false
+        }
+        patch.midiControls = controls
+        guard patch.validate(), synth.setMIDIControls(controls) else { return false }
         project.tracks[index].studioSynthPatch = patch
         return true
     }
