@@ -58,6 +58,18 @@
                 <string>com.musio.create.project</string>
             </array>
         </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Studio Native Instrument</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.garritanstudio.instrument</string>
+            </array>
+        </dict>
     </array>
     
     <!-- Exported type declarations -->
@@ -77,6 +89,23 @@
                 <key>public.filename-extension</key>
                 <array>
                     <string>dawproj</string>
+                </array>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>com.apple.package</string>
+            </array>
+            <key>UTTypeDescription</key>
+            <string>Studio Native Instrument</string>
+            <key>UTTypeIdentifier</key>
+            <string>com.garritanstudio.instrument</string>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>studioinstrument</string>
                 </array>
             </dict>
         </dict>
