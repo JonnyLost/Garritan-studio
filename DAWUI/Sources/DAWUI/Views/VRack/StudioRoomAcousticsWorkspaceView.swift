@@ -27,6 +27,32 @@ struct StudioRoomAcousticsWorkspaceView: View {
         viewModel.project.dawState.acousticRoomProfileID ?? "apple-medium-hall"
     }
 
+    private var microphone: StudioVirtualMicrophoneSettings {
+        viewModel.project.dawState.virtualMicrophoneSettings ?? StudioVirtualMicrophoneSettings()
+    }
+
+    private var microphonePerspectiveBinding: Binding<StudioMicrophonePerspective> {
+        Binding(
+            get: { microphone.perspective },
+            set: { next in
+                var current = microphone
+                current.perspective = next
+                viewModel.setVirtualMicrophone(current)
+            }
+        )
+    }
+
+    private var microphoneWidthBinding: Binding<Double> {
+        Binding(
+            get: { Double(microphone.safeWidth) },
+            set: { next in
+                var current = microphone
+                current.stereoWidth = Float(next)
+                viewModel.setVirtualMicrophone(current)
+            }
+        )
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Picker("Room Acoustics Section", selection: $selectedTab) {
@@ -165,6 +191,29 @@ struct StudioRoomAcousticsWorkspaceView: View {
                 in: 0...2
             )
             Divider()
+            StudioSectionHeading("Virtual Stereo Microphone", symbol: "mic")
+            Picker("Listening Position", selection: microphonePerspectiveBinding) {
+                ForEach(StudioMicrophonePerspective.allCases) { perspective in
+                    Text(perspective.displayName).tag(perspective)
+                }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("virtual-microphone-position")
+            HStack {
+                Text("Stereo Width")
+                Spacer()
+                Text(String(format: "%.0f%%", Double(microphone.safeWidth) * 100))
+                    .monospacedDigit()
+            }
+            Slider(value: microphoneWidthBinding, in: 0...1.5)
+                .accessibilityIdentifier("virtual-microphone-stereo-width")
+            Text(currentRoomID == "apple-medium-hall"
+                ? "Virtual microphones are saved, but become audible only with a native room. The original Apple Hall remains unchanged."
+                : "Move between conductor, main stereo pair and audience listening positions. The native room adjusts early reflections and direct sound without rebuilding the audio graph.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Divider()
             if let track = viewModel.selectedTrack,
                track.type == .midi || track.type == .instrument {
                 StudioSectionHeading("Selected Instrument", symbol: "music.note")
@@ -188,7 +237,7 @@ struct StudioRoomAcousticsWorkspaceView: View {
                     .foregroundStyle(.secondary)
             }
             Divider()
-            Text("Advanced decay and early-reflection tuning is calibrated offline. Continuous room morphing and virtual microphone controls are planned separately.")
+            Text("Virtual microphones are an experimental listening model, not a measured mic array. Continuous geometry changes and advanced decay tuning remain future milestones.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             selectionError
