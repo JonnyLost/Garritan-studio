@@ -16,7 +16,8 @@ final class StudioDraftRecoveryStoreTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let sessionID = UUID()
         let original = Project(name: "Unfinished orchestration")
-        XCTAssertTrue(try await store.store(project: original, sessionID: sessionID))
+        let stored = try await store.store(project: original, sessionID: sessionID)
+        XCTAssertTrue(stored)
 
         let drafts = await store.availableDrafts()
         XCTAssertEqual(drafts.count, 1)
@@ -28,7 +29,8 @@ final class StudioDraftRecoveryStoreTests: XCTestCase {
         XCTAssertEqual(reopened.name, original.name)
 
         try await store.discard(sessionID: sessionID)
-        XCTAssertTrue((await store.availableDrafts()).isEmpty)
+        let remaining = await store.availableDrafts()
+        XCTAssertTrue(remaining.isEmpty)
     }
 
     func testUnrelatedDraftsRemainIntactAfterDiscard() async throws {
@@ -48,7 +50,8 @@ final class StudioDraftRecoveryStoreTests: XCTestCase {
         let file = root.appendingPathComponent("\(UUID().uuidString).dawproj")
         try FileManager.default.createDirectory(at: file, withIntermediateDirectories: true)
         try Data("corrupt".utf8).write(to: file.appendingPathComponent("project.json"))
-        XCTAssertTrue((await store.availableDrafts()).isEmpty)
+        let remaining = await store.availableDrafts()
+        XCTAssertTrue(remaining.isEmpty)
         XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
     }
 
@@ -68,7 +71,8 @@ final class StudioDraftRecoveryStoreTests: XCTestCase {
         try await store.store(project: project, sessionID: id)
         try FileManager.default.removeItem(at: recording)
 
-        let draft = try XCTUnwrap((await store.availableDrafts()).first)
+        let drafts = await store.availableDrafts()
+        let draft = try XCTUnwrap(drafts.first)
         let restored = try await store.load(draft)
         let location = try XCTUnwrap(restored.audioFiles.first?.originalPath)
         XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: location)), audio)
