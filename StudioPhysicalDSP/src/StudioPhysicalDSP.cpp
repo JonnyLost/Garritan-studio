@@ -84,6 +84,7 @@ struct Voice {
     uint8_t note=0,channel=0;
     bool active=false,held=false,releasing=false;
     float velocity=0,env=0,releaseStep=0;
+    float burst=1.f,burstDecay=1.f;
     int model=0;
     Mode wood{},metal{};
 
@@ -110,6 +111,7 @@ struct Voice {
         random=0x9E3779B9u ^ (uint32_t(n)<<16) ^ uint32_t(order);
         if(!random) random=1;
         tune(rate,pitchBend);
+        burst=1.f; burstDecay=float(std::exp(-24.0/double(whole+1)));
         wood.configure(rate,190.,0.09);
         metal.configure(rate,460.,0.04);
     }
@@ -145,8 +147,8 @@ struct Voice {
                 excitation=(2.f*triangle-1.f)*0.48f +
                     randomBipolar(random)*brightness*0.045f;
             } else {
-                const float burst=std::exp(-phase*24.f);
                 excitation=randomBipolar(random)*brightness*burst*0.8f;
+                burst*=burstDecay;
             }
         }
         const float value=excitation+retained*filter;
