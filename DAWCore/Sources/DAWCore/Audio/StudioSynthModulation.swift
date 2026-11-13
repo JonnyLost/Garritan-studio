@@ -27,6 +27,7 @@ public enum StudioSynthModDestination: Codable, Hashable, Sendable {
     case fm(StudioFMParameter)
     case wavetable(StudioWavetableParameter)
     case additive(StudioAdditiveParameter)
+    case granular(StudioGranularParameter)
 
     public var engine: StudioSynthEngine {
         switch self {
@@ -34,6 +35,7 @@ public enum StudioSynthModDestination: Codable, Hashable, Sendable {
         case .fm: return .fm
         case .wavetable: return .wavetable
         case .additive: return .additive
+        case .granular: return .granular
         }
     }
 
@@ -48,6 +50,8 @@ public enum StudioSynthModDestination: Codable, Hashable, Sendable {
             return "WT · \(parameter.name)"
         case .additive(let parameter):
             return "Additive · \(parameter.name)"
+        case .granular(let parameter):
+            return "Grain · \(parameter.name)"
         }
     }
 
@@ -63,6 +67,13 @@ public enum StudioSynthModDestination: Codable, Hashable, Sendable {
                     .fm(.op2Level), .fm(.op3Level), .fm(.op4Level),
                     .fm(.op1Ratio), .fm(.op2Ratio), .fm(.modDepth),
                     .fm(.velocityBrightness)]
+        case .granular:
+            return [.granular(.grainSize), .granular(.density),
+                    .granular(.position), .granular(.scanSpeed),
+                    .granular(.pitch), .granular(.pitchJitter),
+                    .granular(.positionJitter), .granular(.panSpread),
+                    .granular(.reverse), .granular(.window),
+                    .granular(.gain)]
         case .additive:
             return [.additive(.outputGain), .additive(.spectralTilt),
                     .additive(.spectralEvolution), .additive(.evolutionTime),
@@ -101,6 +112,7 @@ public enum StudioSynthModDestination: Codable, Hashable, Sendable {
         case .fm(let p): return p.defaultValue
         case .wavetable(let p): return p.defaultValue
         case .additive(let p): return p.defaultValue
+        case .granular(let p): return p.defaultValue
         }
     }
 
@@ -110,6 +122,7 @@ public enum StudioSynthModDestination: Codable, Hashable, Sendable {
         case .fm(let p): return p.position(for: value)
         case .wavetable(let p): return p.position(for: value)
         case .additive(let p): return p.position(for: value)
+        case .granular(let p): return p.position(for: value)
         }
     }
 
@@ -119,6 +132,7 @@ public enum StudioSynthModDestination: Codable, Hashable, Sendable {
         case .fm(let p): return p.value(at: position)
         case .wavetable(let p): return p.value(at: position)
         case .additive(let p): return p.value(at: position)
+        case .granular(let p): return p.value(at: position)
         }
     }
 
@@ -128,6 +142,7 @@ public enum StudioSynthModDestination: Codable, Hashable, Sendable {
         case .fm(let p): return p.valid(value)
         case .wavetable(let p): return p.valid(value)
         case .additive(let p): return p.valid(value)
+        case .granular(let p): return p.valid(value)
         }
     }
 
