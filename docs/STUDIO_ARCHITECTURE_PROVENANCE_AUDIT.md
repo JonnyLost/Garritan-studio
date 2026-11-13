@@ -189,3 +189,54 @@ No branch merges have been authorized or performed. Studio remains able to
 build as the existing `DAWApp` target; real-time hardware verification and
 an independently owned replacement for all historical source are **not yet
 established**.
+
+## Local-first app build: completed source changes (pending new CI verification)
+
+Commits `51949ccf` and `2af3673f` advance the native replacement:
+
+- SwiftPM root package renamed from `MusioCreate` to **`Studio`**.
+  All executable and library target names remain unchanged, and no project
+  serialization or disk identifier was renamed.
+- A standard `swift build` has **zero external Swift Package dependencies**.
+  `StudioCloudAuth` compiles a local-only, network-free authentication adapter
+  using Foundation/Combine and the same public UI-facing service types.
+  Account sign-in controls are absent from the standard composing interface.
+- `STUDIO_ENABLE_CLOUD_AUTH=1 swift build` retains the historical optional
+  Supabase sign-in service, exactly in the separate `StudioCloudAuth` target.
+  This opt-in mode will still resolve the Supabase Swift SDK.
+- The main `DAWApp` executable no longer depends directly on
+  `VST3Bridge`. The standalone bridge target and product remain in the
+  repository; its C++ host is still a stub, not an installed functional plugin.
+- `StudioRecordingLocations` establishes the native
+  `Studio/Recordings` recovery path ahead of `MusioCreate/Recordings`.
+  Old recordings are looked up in place without automatic relocation or
+  deletion. This does **not** yet relocate capture output; writers must be
+  migrated separately after their paths and user-data behavior are audited.
+- Added local-auth disabled-state tests, recording-path regression tests,
+  and standard/opt-in macOS CI configurations.
+
+### Important limitations
+
+The default `StudioAI` module still contains **optional** API clients for
+remote models. No remote account or API call is needed for normal music
+creation, but using those AI features can initiate network requests.
+Therefore "no external SwiftPM dependencies" does not mean "no network
+features anywhere in the application." A fully offline distribution mode
+that disables AI actions is a separate product decision.
+
+The macOS application's `CFBundleIdentifier` remains
+`com.musio.create`, and the project file identifier is still
+`com.musio.create.project`; these are *technical compatibility values*,
+not product-facing branding. A new bundle identifier should be selected and
+migrated deliberately, with preferences, microphone permission, recent files,
+saved projects and plug-in state accounted for. Do not invent a final reverse-
+DNS namespace before the permanent product identity is selected.
+
+Likewise, inherited logos/icons and source history remain unverified; merely
+renaming the Swift package does not establish independent authorship. The
+original transport, audio backend, core MIDI engine and UI will need careful
+component-by-component audits and replacements.
+
+The prior CI run on `416fa557` completed successfully, including debug,
+unit tests, Release compilation and offline acoustic calibration. The
+new local-first and cloud opt-in variants are awaiting their own CI verdict.

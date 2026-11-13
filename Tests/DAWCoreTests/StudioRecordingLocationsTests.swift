@@ -13,4 +13,16 @@ final class StudioRecordingLocationsTests: XCTestCase {
             "/tmp/studio-app-support/MusioCreate/Recordings/take.wav"
         ])
     }
+
+    func testUntrustedFilenameCannotTraverseStorage() {
+        let base = URL(fileURLWithPath: "/tmp/studio-app-support", isDirectory: true)
+        for name in ["", ".", "..", "../secret.wav", "/tmp/secret.wav", "dir\\\\secret.wav"] {
+            XCTAssertTrue(
+                StudioRecordingLocations.recoveryURLs(
+                    forFilename: name, inApplicationSupport: base
+                ).isEmpty,
+                "Unexpected recovery candidate for \(name)"
+            )
+        }
+    }
 }

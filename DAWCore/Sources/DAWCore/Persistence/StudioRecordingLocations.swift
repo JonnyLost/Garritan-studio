@@ -10,7 +10,13 @@ public enum StudioRecordingLocations {
         forFilename filename: String,
         inApplicationSupport directory: URL
     ) -> [URL] {
-        [studioDirectoryName, legacyDirectoryName].map { folder in
+        // Never allow a caller to escape the recordings directory.
+        guard !filename.isEmpty,
+              filename != ".", filename != "..",
+              !filename.contains("/"), !filename.contains("\\") else {
+            return []
+        }
+        return [studioDirectoryName, legacyDirectoryName].map { folder in
             directory.appendingPathComponent(folder, isDirectory: true)
                 .appendingPathComponent(filename, isDirectory: false)
         }
