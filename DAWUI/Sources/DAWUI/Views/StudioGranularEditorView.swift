@@ -114,6 +114,41 @@ struct StudioGranularEditorView: View {
                     Label("Import Audio",systemImage:"square.and.arrow.down")
                 }
                 .buttonStyle(.bordered)
+                Menu {
+                    let trackSources = StudioGranularSamplerBridge.sources(in: viewModel.project)
+                    if trackSources.isEmpty {
+                        Text("No Sampler track recordings in this project")
+                    } else {
+                        Menu("Project Sampler Tracks") {
+                            ForEach(trackSources) { source in
+                                Button(source.title) {
+                                    var updated = sound
+                                    updated.importedAudioPath = source.audioURL.path
+                                    importError = nil
+                                    onChangeSource(updated)
+                                }
+                            }
+                        }
+                    }
+                    let library = StudioGranularSamplerBridge.librarySources()
+                    if library.isEmpty {
+                        Text("Sampler recording library is empty")
+                    } else {
+                        Menu("Studio Sampler Library") {
+                            ForEach(library) { source in
+                                Button(source.title) {
+                                    var updated = sound
+                                    updated.importedAudioPath = source.audioURL.path
+                                    importError = nil
+                                    onChangeSource(updated)
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    Label("Use Sampler Source", systemImage: "square.stack.3d.up")
+                }
+                .buttonStyle(.bordered)
                 if sound.importedAudioPath != nil {
                     Button("Use Factory Source") {
                         var updated=sound
@@ -129,7 +164,7 @@ struct StudioGranularEditorView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            Text("Factory sources are generated inside Studio. Imported audio is decoded once when the instrument loads, up to 524,288 frames; there is no file reading in the audio callback.")
+            Text("Factory sources are generated inside Studio. You can reuse any native Sampler recording from this project or Studio’s managed library. Granular decodes at most 524,288 frames on load, with no disk I/O in the audio callback.")
                 .font(.caption2).foregroundStyle(.secondary)
             if let importError {
                 Text(importError).font(.caption).foregroundStyle(.orange)
