@@ -768,6 +768,33 @@ public final class ProjectViewModel: ObservableObject {
         project.tracks[index].studioSynthPatch = patch
     }
 
+    /// Save physical-model controls in the project and write atomically to
+    /// the active C++ renderer without rebuilding the audio graph. Muted
+    /// layers retain their edits for the next activation.
+    public func setStudioSynthPhysicalParameter(
+        _ parameter: StudioPhysicalParameter, value: Float,
+        for trackID: TrackID, layerID: UUID
+    ) {
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioSynthEnabled == true,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSynth(let synth) = instrument,
+              var patch = project.tracks[index].studioSynthPatch,
+              let layerIndex = patch.layers.firstIndex(where: { $0.id == layerID }),
+              patch.layers[layerIndex].engine == .physical,
+              parameter.valid(value) else { return }
+        if patch.layers[layerIndex].enabled &&
+            !synth.setPhysicalParameter(id: layerID,
+                                        parameter: parameter, value: value) {
+            return
+        }
+        var physical = patch.layers[layerIndex].physicalPatch ??
+            StudioPhysicalPatch()
+        physical.set(value, for: parameter)
+        patch.layers[layerIndex].physicalPatch = physical
+        project.tracks[index].studioSynthPatch = patch
+    }
+
     /// Live FM control updates are atomic in the DSP and persist on the track.
     /// Do not add an undo transaction for every slider substep.
     public func studioFMValue(_ parameter: StudioFMParameter, for trackID: TrackID) -> Float {
