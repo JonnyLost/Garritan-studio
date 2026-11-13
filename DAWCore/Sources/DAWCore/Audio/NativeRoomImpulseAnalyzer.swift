@@ -1,7 +1,7 @@
 import Foundation
 
 /// Offline impulse-response measurements for Studio reverb development.
-/// This is NOT audio-thread code and is NOT yet an ISO 3382 conformant
+/// This is NOT audio-thread code and is NOT an ISO 3382 conformant
 /// analyzer: bandpass filters are 2nd-order octave approximations and finite
 /// impulse-response tails are not noise-floor-corrected. Never describe
 /// these numbers as measured characteristics of a named real venue.
@@ -78,7 +78,7 @@ public enum NativeRoomImpulseAnalyzer {
     }
 
     /// Reports approximate EDT/T20/T30 using backwards energy integration
-    /// and least-squares slopes, with C80 on the wet-only impulse response.
+    /// and least-squares slopes, with stereo-energy C80 on the wet-only impulse response.
     /// Nil means there was insufficient dynamic range to make that estimate.
     public static func analyze(left: [Float], right: [Float],
                                sampleRate: Double, roomID: String) -> NativeRoomCalibrationResult {
@@ -87,21 +87,39 @@ public enum NativeRoomImpulseAnalyzer {
             return NativeRoomCalibrationResult(roomID: roomID, sampleRate: sampleRate,
                                                durationSeconds: 0, bands: [], wetOnlyC80dB: nil)
         }
-        let mono = zip(left, right).map { (Double($0.0) + Double($0.1)) * 0.5 }
-        let centers: [Double] = [125, 500, 2_000]
-        let bands = centers.map { frequency -> NativeRoomDecayMetrics in
-            let filtered = octaveApproximate(mono, sampleRate: sampleRate, centerHz: frequency)
-            let decay = backwardIntegratedDecibels(filtered)
+        // Keep stereo energy separate. Averaging L and R can cancel the
+        // decorrelated, opposite-polarity FDN outputs and distort decay fits.
+        let stereoLeft = left.map(Double.init)
+        let stereoRight = right.map(Double.init)
+        let bands = StudioAcousticRoomDesign.bandCentersHz.map { frequency -> NativeRoomDecayMetrics in
+            let center = Double(frequency)
+            guard center < sampleRate * 0.45 else {
+                // The analysis filter cannot resolve frequencies near/above
+                // Nyquist. Returning nil is preferable to fabricating a value.
+                return NativeRoomDecayMetrics(bandCenterHz: center,
+                                              edtSeconds: nil, t20Seconds: nil,
+                                              t30Seconds: nil)
+            }
+            let filteredL = octaveApproximate(stereoLeft, sampleRate: sampleRate,
+                                               centerHz: center)
+            let filteredR = octaveApproximate(stereoRight, sampleRate: sampleRate,
+                                               centerHz: center)
+            let decay = backwardIntegratedDecibels(left: filteredL, right: filteredR)
             return NativeRoomDecayMetrics(
-                bandCenterHz: frequency,
+                bandCenterHz: center,
                 edtSeconds: fit(decay, fromDB: 0, throughDB: -10, sampleRate: sampleRate),
                 t20Seconds: fit(decay, fromDB: -5, throughDB: -25, sampleRate: sampleRate),
                 t30Seconds: fit(decay, fromDB: -5, throughDB: -35, sampleRate: sampleRate)
             )
         }
-        let cutoff = min(mono.count, Int((0.080 * sampleRate).rounded()))
-        let early = mono.prefix(cutoff).reduce(0.0) { $0 + $1 * $1 }
-        let late = mono.dropFirst(cutoff).reduce(0.0) { $0 + $1 * $1 }
+        let cutoff = min(left.count, Int((0.080 * sampleRate).rounded()))
+        var early = 0.0
+        var late = 0.0
+        for index in left.indices {
+            let total = stereoLeft[index] * stereoLeft[index] +
+                        stereoRight[index] * stereoRight[index]
+            if index < cutoff { early += total } else { late += total }
+        }
         let c80: Double? = early > 0 && late > 0 ? 10 * log10(early / late) : nil
         return NativeRoomCalibrationResult(
             roomID: roomID, sampleRate: sampleRate,
@@ -143,16 +161,17 @@ public enum NativeRoomImpulseAnalyzer {
         return output
     }
 
-    private static func backwardIntegratedDecibels(_ samples: [Double]) -> [Double] {
-        var energies = [Double](repeating: 0, count: samples.count)
+    private static func backwardIntegratedDecibels(left: [Double],
+                                                     right: [Double]) -> [Double] {
+        var energies = [Double](repeating: 0, count: left.count)
         var sum = 0.0
-        for index in samples.indices.reversed() {
-            let v = samples[index]
-            sum += v * v
+        for index in left.indices.reversed() {
+            let l = left[index], r = right[index]
+            sum += l * l + r * r
             energies[index] = sum
         }
         guard sum.isFinite && sum > 1.0e-25 else { return [] }
-        return energies.map { $0 > 0 ? 10 * log10($0 / sum) : -Double.infinity }
+        return energies.map { $0 > 0 ? 10 * log10($0 / sum) : -.infinity }
     }
 
     /// Line fit using all samples within the indicated dB range.
