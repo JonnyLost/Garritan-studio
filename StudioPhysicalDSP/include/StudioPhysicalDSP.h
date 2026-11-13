@@ -17,7 +17,11 @@ typedef struct SPMSynth SPMSynth;
 #define SPM_PARAM_BODY_MIX 4       /* 0..1 modal body resonances */
 #define SPM_PARAM_RELEASE 5        /* 0.01..4 seconds */
 #define SPM_PARAM_GAIN 6           /* 0..1 */
-#define SPM_PARAMETER_COUNT 7
+/* Appended controls preserve the original seven parameter IDs. */
+#define SPM_PARAM_PICK_HARDNESS 7  /* 0..1 soft finger to hard pick / mallet */
+#define SPM_PARAM_STIFFNESS 8      /* 0..1 inharmonic bridge dispersion */
+#define SPM_PARAM_BODY_SIZE 9      /* 0..1 smaller to larger resonant body */
+#define SPM_PARAMETER_COUNT 10
 
 SPMSynth* spm_create(double sampleRate, int32_t polyphony);
 void spm_destroy(SPMSynth* synth);
