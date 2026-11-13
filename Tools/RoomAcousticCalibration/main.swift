@@ -1,8 +1,10 @@
 import Foundation
 import DAWCore
 
-/// Run on macOS: swift run -c release RoomAcousticCalibration
-/// This tool is for development measurements, not an in-app audio processor.
+/// Run on macOS:
+/// swift run -c release RoomAcousticCalibration --seconds 6
+/// swift run -c release RoomAcousticCalibration --design-file my-room.json
+/// Development-only metrics: no real-room samples or convolution.
 struct BandComparison: Codable {
     let centerHz: Double
     let intendedRT60Seconds: Double
@@ -10,6 +12,7 @@ struct BandComparison: Codable {
     let measuredT20Seconds: Double?
     let measuredT30Seconds: Double?
     let t20DifferenceSeconds: Double?
+    let t20ErrorPercent: Double?
     let suggestedInputDecaySeconds: Double?
 }
 
@@ -18,6 +21,7 @@ struct RoomComparison: Codable {
     let roomName: String
     let sampleRate: Double
     let impulseLengthSeconds: Double
+    let targetProvenance: String
     let method: String
     let wetOnlyC80dB: Double?
     let bands: [BandComparison]
@@ -47,37 +51,80 @@ guard (8_000...192_000).contains(sampleRate), (1...20).contains(seconds) else {
     exit(2)
 }
 
-let results = StudioRoomAcousticProfile.starterProfiles.map { room -> RoomComparison in
+// An optional saved design can be measured without changing Studio's
+// running audio engine or the project file itself.
+let design: StudioAcousticRoomDesign
+if let index = arguments.firstIndex(of: "--design-file") {
+    guard index + 1 < arguments.count else {
+        fputs("--design-file requires a path to a StudioAcousticRoomDesign JSON file\n", stderr)
+        exit(2)
+    }
+    do {
+        let data = try Data(contentsOf: URL(fileURLWithPath: arguments[index + 1]))
+        design = try JSONDecoder().decode(StudioAcousticRoomDesign.self, from: data)
+    } catch {
+        fputs("Could not read room design: \(error)\n", stderr)
+        exit(2)
+    }
+} else {
+    design = StudioAcousticRoomDesign()
+}
+
+let profiles = StudioRoomAcousticProfile.profiles(with: design)
+let results: [RoomComparison] = profiles.map { room in
     let measured = NativeRoomImpulseAnalyzer.measure(
         room: room, sampleRate: sampleRate, seconds: seconds
     )
-    let targets = [Double(room.bassRT60), Double(room.midRT60),
-                   Double(room.trebleRT60)]
-    let bands = zip(measured.bands, targets).map { pair -> BandComparison in
-        let (band, intended) = pair
-        let t20 = band.t20Seconds
+
+    // The four factory presets expose three frequency regions, NOT measured
+    // octave-band targets. The interpolated values below are only a rough
+    // diagnostic target and are explicitly identified as such.
+    let targets: [Double]
+    let provenance: String
+    if let six = room.sixBandRT60, six.count == 6 {
+        targets = six.map(Double.init)
+        provenance = "Six-band user-design DSP target (0.2–15s bounded), not real-room measurement"
+    } else {
+        let bass = Double(room.bassRT60)
+        let mid = Double(room.midRT60)
+        let high = Double(room.trebleRT60)
+        targets = [
+            bass,
+            2 * bass / 3 + mid / 3,
+            bass / 3 + 2 * mid / 3,
+            mid,
+            (mid + high) / 2,
+            high
+        ]
+        provenance = "Three-band factory preset, interpolated for diagnostics only"
+    }
+
+    let bands: [BandComparison] = zip(measured.bands, targets).map { measuredBand, target in
+        let t20 = measuredBand.t20Seconds
         let proposed: Double?
         if let t20, t20 > 0.1 {
-            // Only a first-order offline tuning suggestion. Frequency bands
-            // interact within the FDN; never persist it automatically.
-            proposed = min(15, max(0.2, intended * intended / t20))
+            // First-order offline suggestion, NOT automatically applied:
+            // coupled frequency bands and short IR tails require validation.
+            proposed = min(15, max(0.2, target * target / t20))
         } else {
             proposed = nil
         }
         return BandComparison(
-            centerHz: band.bandCenterHz,
-            intendedRT60Seconds: intended,
-            measuredEDTSeconds: band.edtSeconds,
+            centerHz: measuredBand.bandCenterHz,
+            intendedRT60Seconds: target,
+            measuredEDTSeconds: measuredBand.edtSeconds,
             measuredT20Seconds: t20,
-            measuredT30Seconds: band.t30Seconds,
-            t20DifferenceSeconds: t20.map { $0 - intended },
+            measuredT30Seconds: measuredBand.t30Seconds,
+            t20DifferenceSeconds: t20.map { $0 - target },
+            t20ErrorPercent: t20.map { 100 * ($0 - target) / target },
             suggestedInputDecaySeconds: proposed
         )
     }
     return RoomComparison(
-        roomID: room.id, roomName: room.name, sampleRate: sampleRate,
-        impulseLengthSeconds: seconds,
-        method: "Offline wet-only 16-line FDN, approximate 2nd-order octave bandpass, Schroeder backward integration; NO real-room impulse reference",
+        roomID: room.id, roomName: room.name,
+        sampleRate: sampleRate, impulseLengthSeconds: seconds,
+        targetProvenance: provenance,
+        method: "Offline wet-only native early reflections + 16-line FDN; six approximate octave bandpass filters; Schroeder backward energy integration; no room IR reference",
         wetOnlyC80dB: measured.wetOnlyC80dB,
         bands: bands
     )
@@ -86,7 +133,7 @@ let results = StudioRoomAcousticProfile.starterProfiles.map { room -> RoomCompar
 let report = Report(
     generatedAtISO8601: ISO8601DateFormatter().string(from: Date()),
     profileCount: results.count,
-    note: "Development measurements of synthesized wet-only impulses. Not calibrated venue acoustics or ISO 3382-compliant room measurements. Compare against published targets only when conditions/frequencies are equivalent.",
+    note: "Experimental six-band analysis of Studio's own synthesized responses. No venue impulse measurements. T20/T30 may be unavailable for insufficient response length or frequency resolution; filterbanks and finite-tail integration are not ISO 3382 compliant. Suggestions are not applied automatically.",
     rooms: results
 )
 let encoder = JSONEncoder()
