@@ -78,9 +78,13 @@ public struct StudioSamplerInstrumentView: View {
                             controllerPanel
                             envelopePanel
                         }
+                        HStack(alignment: .top, spacing: 14) {
+                            legatoPanel
+                            microphoneMixer(patch)
+                        }
                         sampleOverview(patch)
                         keyboard
-                        Text("Round-robin takes and release-trigger samples are now configured in Edit Mapping. Legato transition modeling and microphone groups remain future milestones.")
+                        Text("Legato uses recorded from→to transitions when available; otherwise it crossfades sustained notes. Individual microphone positions must be captured or imported; Studio does not invent extra mic recordings.")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -342,8 +346,10 @@ public struct StudioSamplerInstrumentView: View {
         VStack(alignment: .leading, spacing: 12) {
             Label("Expression & Dynamics", systemImage: "waveform.path")
                 .font(.subheadline.weight(.semibold))
-            controlRow("Dynamics", controller: 1, caption: "CC1 — dynamic level / layer blend")
+            controlRow("Dynamics", controller: 1, caption: "CC1 — layer blend")
             controlRow("Expression", controller: 11, caption: "CC11 — overall volume")
+            controlRow("Breath", controller: 2, caption: "CC2 — sustained breath intensity")
+            controlRow("Vibrato", controller: 21, caption: "CC21 — continuous pitch vibrato")
             Toggle("CC1 layer crossfade", isOn: Binding(
                 get: { patch?.cc1Crossfade == true },
                 set: { _ = viewModel.setStudioSamplerCC1Crossfade($0, for: trackID) }
@@ -358,16 +364,25 @@ public struct StudioSamplerInstrumentView: View {
         .clipShape(RoundedRectangle(cornerRadius: 9))
     }
 
+    private func controllerValue(_ controller: UInt8) -> UInt8 {
+        switch controller {
+        case 1: return patch?.dynamicsCC1 ?? 127
+        case 2: return patch?.breathCC2 ?? 127
+        case 11: return patch?.expressionCC11 ?? 127
+        case 21: return patch?.vibratoCC21 ?? 0
+        default: return 0
+        }
+    }
+
     private func controlRow(_ name: String, controller: UInt8, caption: String) -> some View {
-        let value = controller == 1 ? (patch?.dynamicsCC1 ?? 127) : (patch?.expressionCC11 ?? 127)
-        return VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 2) {
             HStack {
                 Text(name).font(.caption.weight(.medium))
                 Spacer()
-                Text("\(value)").font(.caption.monospacedDigit())
+                Text("\(controllerValue(controller))").font(.caption.monospacedDigit())
             }
             Slider(value: Binding(
-                get: { Double(controller == 1 ? (patch?.dynamicsCC1 ?? 127) : (patch?.expressionCC11 ?? 127)) },
+                get: { Double(controllerValue(controller)) },
                 set: { _ = viewModel.setStudioSamplerController(
                     controller, value: UInt8(clamping: Int($0.rounded())), for: trackID
                 ) }
@@ -375,6 +390,106 @@ public struct StudioSamplerInstrumentView: View {
             .disabled(!isLoaded)
             Text(caption).font(.caption2).foregroundStyle(.secondary)
         }
+    }
+
+    private var legatoPanel: some View {
+        let patch = self.patch
+        let transitionCount = patch?.zones.filter { $0.legatoFromNote != nil }.count ?? 0
+        return VStack(alignment: .leading, spacing: 12) {
+            Label("Legato Performance", systemImage: "arrow.left.arrow.right")
+                .font(.subheadline.weight(.semibold))
+            Toggle("Overlap legato", isOn: Binding(
+                get: { patch?.legatoEnabled == true },
+                set: { _ = viewModel.setStudioSamplerLegato(
+                    enabled: $0,
+                    fadeMilliseconds: patch?.legatoCrossfadeMilliseconds ?? 40,
+                    for: trackID)
+                }
+            ))
+            .disabled(!isLoaded)
+            let fade = patch?.legatoCrossfadeMilliseconds ?? 40
+            HStack {
+                Text("Transition crossfade")
+                Spacer()
+                Text("\(Int(fade)) ms").monospacedDigit()
+            }
+            .font(.caption)
+            Slider(value: Binding(
+                get: { Double(self.patch?.legatoCrossfadeMilliseconds ?? 40) },
+                set: { _ = viewModel.setStudioSamplerLegato(
+                    enabled: self.patch?.legatoEnabled == true,
+                    fadeMilliseconds: Float($0), for: trackID)
+                }
+            ), in: 5...250)
+            .disabled(!isLoaded)
+            Text("\(transitionCount) recorded interval transitions. Trigger by overlapping notes on the same MIDI channel. Ordinary notes remain polyphonic when disabled.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 9))
+    }
+
+    private func microphoneMixer(_ patch: StudioSamplerPatch) -> some View {
+        let referenced = Set(patch.zones.map { $0.microphoneID ?? 0 })
+        let groups = (patch.microphones ?? []).isEmpty
+            ? [StudioSamplerMicrophone(id: 0, name: "Main")]
+            : (patch.microphones ?? [])
+                .filter { referenced.contains($0.id) }
+                .sorted { $0.id < $1.id }
+        return VStack(alignment: .leading, spacing: 12) {
+            Label("Recorded Microphone Mix", systemImage: "mic")
+                .font(.subheadline.weight(.semibold))
+            ForEach(groups) { mic in
+                let current = self.patch?.microphones?.first(where: { $0.id == mic.id }) ?? mic
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(current.name).font(.caption.weight(.semibold))
+                        Spacer()
+                        Toggle("Mute", isOn: Binding(
+                            get: { current.isMuted },
+                            set: { state in
+                                var copy = current
+                                copy.isMuted = state
+                                _ = viewModel.setStudioSamplerMicrophone(copy, for: trackID)
+                            }
+                        )).labelsHidden()
+                    }
+                    HStack {
+                        Text("Level").font(.caption2).frame(width: 36, alignment: .leading)
+                        Slider(value: Binding(
+                            get: { Double(current.gain) },
+                            set: { value in
+                                var copy = current
+                                copy.gain = Float(value)
+                                _ = viewModel.setStudioSamplerMicrophone(copy, for: trackID)
+                            }
+                        ), in: 0...2)
+                        Text(String(format: "%.2f", current.gain))
+                            .font(.caption2.monospacedDigit()).frame(width: 32)
+                    }
+                    HStack {
+                        Text("Pan").font(.caption2).frame(width: 36, alignment: .leading)
+                        Slider(value: Binding(
+                            get: { Double(current.pan) },
+                            set: { value in
+                                var copy = current
+                                copy.pan = Float(value)
+                                _ = viewModel.setStudioSamplerMicrophone(copy, for: trackID)
+                            }
+                        ), in: -1...1)
+                    }
+                }
+                .disabled(!isLoaded)
+            }
+            Text("Each position uses its own imported recording. Levels and pans change smoothly while MIDI notes play.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 9))
     }
 
     private enum ADSRField {
