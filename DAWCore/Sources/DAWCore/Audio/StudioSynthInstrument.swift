@@ -102,6 +102,11 @@ public final class StudioSynthInstrument {
     public let patch: StudioSynthPatch
     private let runtime: [StudioSynthRuntimeLayer]
     private var modulationWorker: StudioSynthModulationWorker?
+    // MIDI producers and the SwiftUI editor may run on different queues.
+    // Protect the worker reference, never the AVAudioSourceNode callback.
+    private let workerReferenceLock = NSLock()
+    private var currentModulation: StudioSynthModulationSettings
+    private var currentMIDIControls: StudioSynthMIDIControlSettings
     private var tempo: Double
 
     public init(sampleRate: Double, patch: StudioSynthPatch,
@@ -109,17 +114,26 @@ public final class StudioSynthInstrument {
         guard patch.validate() else { throw StudioSynthError.invalidPatch }
         self.patch = patch
         self.tempo = tempo.isFinite && tempo > 0 ? tempo : 120
+        currentModulation = patch.modulation ?? StudioSynthModulationSettings()
+        currentMIDIControls = patch.midiControls ?? StudioSynthMIDIControlSettings()
         runtime = try patch.layers.filter(\.enabled).map {
             try StudioSynthRuntimeLayer($0, sampleRate: sampleRate)
         }
-        if let settings = patch.modulation, settings.hasEnabledRoutes {
-            createModulationWorker(settings)
+        if currentModulation.hasEnabledRoutes || currentMIDIControls.hasEnabledMappings {
+            createControlWorker()
         }
     }
 
-    private func createModulationWorker(_ settings: StudioSynthModulationSettings) {
-        modulationWorker = StudioSynthModulationWorker(
-            settings: settings, tempo: tempo,
+    private func controlWorker() -> StudioSynthModulationWorker? {
+        workerReferenceLock.lock()
+        defer { workerReferenceLock.unlock() }
+        return modulationWorker
+    }
+
+    private func createControlWorker() {
+        let worker = StudioSynthModulationWorker(
+            settings: currentModulation, midiControls: currentMIDIControls,
+            tempo: tempo,
             read: { [weak self] id, destination in
                 self?.directParameter(id: id, destination: destination)
             },
@@ -127,6 +141,25 @@ public final class StudioSynthInstrument {
                 self?.writeParameter(id: id, destination: destination, value: value)
                     ?? false
             })
+        workerReferenceLock.lock()
+        modulationWorker = worker
+        workerReferenceLock.unlock()
+    }
+
+    private func refreshControlWorker() {
+        let needed = currentModulation.hasEnabledRoutes ||
+            currentMIDIControls.hasEnabledMappings
+        if let worker = controlWorker() {
+            worker.update(currentModulation)
+            worker.updateMIDIControls(currentMIDIControls)
+            if !needed {
+                workerReferenceLock.lock()
+                modulationWorker = nil
+                workerReferenceLock.unlock()
+            }
+        } else if needed {
+            createControlWorker()
+        }
     }
 
     private func directParameter(id: UUID,
@@ -161,12 +194,18 @@ public final class StudioSynthInstrument {
     @discardableResult
     public func setModulation(_ settings: StudioSynthModulationSettings) -> Bool {
         guard settings.validate(layers: patch.layers) else { return false }
-        if let worker = modulationWorker {
-            worker.update(settings)
-            if !settings.hasEnabledRoutes { modulationWorker = nil }
-        } else if settings.hasEnabledRoutes {
-            createModulationWorker(settings)
-        }
+        currentModulation = settings
+        refreshControlWorker()
+        return true
+    }
+
+    /// Install controller mappings in place, without rebuilding the audio
+    /// graph or mutating the original, saved sound parameter defaults.
+    @discardableResult
+    public func setMIDIControls(_ controls: StudioSynthMIDIControlSettings) -> Bool {
+        guard controls.validate(layers: patch.layers) else { return false }
+        currentMIDIControls = controls
+        refreshControlWorker()
         return true
     }
 
@@ -175,7 +214,7 @@ public final class StudioSynthInstrument {
     public func setTempo(_ bpm: Double) {
         guard bpm.isFinite && bpm > 0 else { return }
         tempo = bpm
-        modulationWorker?.setTempo(bpm)
+        controlWorker()?.setTempo(bpm)
     }
 
     /// Useful for both UI meters and regression tests: reads the engine's
@@ -222,7 +261,7 @@ public final class StudioSynthInstrument {
         }
         // The matrix receives a copy on its own low-priority control worker.
         // No modulation calculations or locks are added to render callbacks.
-        modulationWorker?.receiveMIDI(status: status, data1: data1, data2: data2)
+        controlWorker()?.receiveMIDI(status: status, data1: data1, data2: data2)
         return accepted
     }
 
@@ -263,7 +302,7 @@ public final class StudioSynthInstrument {
         for layer in runtime {
             if !layer.allNotesOff() { accepted = false }
         }
-        modulationWorker?.panic()
+        controlWorker()?.panic()
         return accepted
     }
 
@@ -283,7 +322,7 @@ public final class StudioSynthInstrument {
             return false
         }
         let destination = StudioSynthModDestination.analog(parameter)
-        return modulationWorker?.setBase(layer: id, destination: destination,
+        return controlWorker()?.setBase(layer: id, destination: destination,
                                           value: value) ??
             writeParameter(id: id, destination: destination, value: value)
     }
@@ -295,7 +334,7 @@ public final class StudioSynthInstrument {
             return false
         }
         let destination = StudioSynthModDestination.wavetable(parameter)
-        return modulationWorker?.setBase(layer: id, destination: destination,
+        return controlWorker()?.setBase(layer: id, destination: destination,
                                           value: value) ??
             writeParameter(id: id, destination: destination, value: value)
     }
@@ -307,7 +346,7 @@ public final class StudioSynthInstrument {
             return false
         }
         let destination = StudioSynthModDestination.fm(parameter)
-        return modulationWorker?.setBase(layer: id, destination: destination,
+        return controlWorker()?.setBase(layer: id, destination: destination,
                                           value: value) ??
             writeParameter(id: id, destination: destination, value: value)
     }
