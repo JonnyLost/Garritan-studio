@@ -10,6 +10,7 @@ import Foundation
 public final class NativeRoomReverbProcessor {
     private final class DelayLine {
         private struct DecayGains {
+            let delayFrames: Int
             let bass: Float
             let mid: Float
             let treble: Float
@@ -17,7 +18,8 @@ public final class NativeRoomReverbProcessor {
         }
 
         private let storage: UnsafeMutablePointer<Float>
-        private let count: Int
+        private let capacity: Int
+        private var activeDelayFrames: Int
         private var position = 0
         private var lowState: Float = 0
         private var highState: Float = 0
@@ -34,26 +36,37 @@ public final class NativeRoomReverbProcessor {
         private var trebleGain: Float
 
         init(frames: Int, sampleRate: Double, profiles: [StudioRoomAcousticProfile]) {
-            count = max(2, frames)
-            let delayFrameCount = Float(max(2, frames))
-            storage = .allocate(capacity: count)
-            storage.initialize(repeating: 0, count: count)
+            let baseFrames = max(2, frames)
+            let profileDelays = profiles.map { profile -> Int in
+                guard let requested = profile.lateDelayScale, requested.isFinite else {
+                    return baseFrames
+                }
+                let scale = max(0.65, min(1.8, Double(requested)))
+                return max(2, Int((Double(baseFrames) * scale).rounded()))
+            }
+            capacity = max(baseFrames, profileDelays.max() ?? baseFrames)
+            activeDelayFrames = profileDelays.first ?? baseFrames
+            storage = .allocate(capacity: capacity)
+            storage.initialize(repeating: 0, count: capacity)
             lowCoefficient = Float(1 - exp(-2 * Double.pi * 250 / sampleRate))
             highCoefficient = Float(1 - exp(-2 * Double.pi * 2500 / sampleRate))
             octaveCoefficients = [177.0, 354, 707, 1_414, 2_828].map {
                 Float(1 - exp(-2 * Double.pi * $0 / sampleRate))
             }
-            func gain(_ seconds: Float) -> Float {
+            func gain(_ seconds: Float, delayFrames: Int) -> Float {
                 let safe = seconds.isFinite ? max(0.2, min(15, seconds)) : 2
-                return pow(10, -3 * delayFrameCount / (Float(sampleRate) * safe))
+                return pow(10, -3 * Float(delayFrames) / (Float(sampleRate) * safe))
             }
-            let all = profiles.map { profile in
-                DecayGains(
-                    bass: gain(profile.bassRT60),
-                    mid: gain(profile.midRT60),
-                    treble: gain(profile.trebleRT60),
-                    octaveGains: profile.sixBandRT60?.count == 6
-                        ? profile.sixBandRT60!.map { gain($0) } : nil
+            let all = profiles.enumerated().map { index, profile in
+                let delayFrames = profileDelays[index]
+                let octave = profile.sixBandRT60
+                return DecayGains(
+                    delayFrames: delayFrames,
+                    bass: gain(profile.bassRT60, delayFrames: delayFrames),
+                    mid: gain(profile.midRT60, delayFrames: delayFrames),
+                    treble: gain(profile.trebleRT60, delayFrames: delayFrames),
+                    octaveGains: octave?.count == 6
+                        ? octave!.map { gain($0, delayFrames: delayFrames) } : nil
                 )
             }
             presetGains = all
@@ -67,19 +80,25 @@ public final class NativeRoomReverbProcessor {
         @inline(__always) func selectProfile(at index: Int) {
             selectedGainIndex = index
             let gains = presetGains[index]
+            activeDelayFrames = gains.delayFrames
             bassGain = gains.bass
             midGain = gains.mid
             trebleGain = gains.treble
         }
 
         deinit {
-            storage.deinitialize(count: count)
+            storage.deinitialize(count: capacity)
             storage.deallocate()
         }
 
         /// Read feedback sample at the current position and apply band decays.
         @inline(__always) func readDamped() -> Float {
-            let sample = storage[position]
+            // A larger ring stores all prepared delay lengths. The selected
+            // tap distance changes only when the host changes room profile.
+            // Factory rooms retain their previous delay lengths exactly.
+            var readPosition = position - activeDelayFrames
+            if readPosition < 0 { readPosition += capacity }
+            let sample = storage[readPosition]
             if let gains = presetGains[selectedGainIndex].octaveGains {
                 var previousLow: Float = 0
                 var output: Float = 0
@@ -103,7 +122,7 @@ public final class NativeRoomReverbProcessor {
         @inline(__always) func write(_ sample: Float) {
             storage[position] = sample
             position += 1
-            if position == count { position = 0 }
+            if position == capacity { position = 0 }
         }
     }
 
