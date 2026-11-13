@@ -329,7 +329,7 @@ class AppState: ObservableObject {
         }
         defer { NotificationCenter.default.removeObserver(observer) }
 
-        NotificationCenter.default.post(name: .captureProjectForSave, object: nil)
+        NotificationCenter.default.post(name: .requestProjectForSave, object: nil)
         if let captureFailure { throw DocumentError.pluginStateCaptureFailed(captureFailure) }
         guard let snapshot else { throw DocumentError.snapshotUnavailable }
         return snapshot
