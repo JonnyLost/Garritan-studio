@@ -140,6 +140,98 @@ final class StudioAdditiveTests: XCTestCase {
                        Set(StudioSynthEngine.allCases))
     }
 
+    func testIndependentHarmonicParameterLayoutAndValidation() throws {
+        XCTAssertEqual(StudioAdditiveParameter.allCases.count, 110)
+        XCTAssertEqual(StudioAdditiveParameter.partial(15)?.rawValue, 24)
+        XCTAssertNil(StudioAdditiveParameter.partial(16))
+        for i in 0..<16 {
+            for (control, base): (StudioAdditiveHarmonicControl, Int32) in [
+                (.attack,30),(.decay,46),(.sustain,62),
+                (.release,78),(.motion,94)
+            ] {
+                let parameter = try XCTUnwrap(StudioAdditiveParameter.harmonic(
+                    i, control: control))
+                XCTAssertEqual(parameter.rawValue,base+Int32(i))
+                XCTAssertEqual(parameter.harmonicShape?.index, i)
+                XCTAssertEqual(parameter.harmonicShape?.control, control)
+                XCTAssertTrue(parameter.valid(parameter.defaultValue))
+                XCTAssertEqual(parameter.value(at: parameter.position(
+                    for: parameter.defaultValue)),parameter.defaultValue,
+                    accuracy:0.0005)
+            }
+        }
+        XCTAssertNil(StudioAdditiveParameter.harmonic(16,control:.attack))
+        XCTAssertTrue(StudioAdditiveParameter.motionDepth.valid(1))
+        XCTAssertFalse(StudioAdditiveParameter.motionDepth.valid(1.1))
+        XCTAssertFalse(StudioAdditiveParameter.motionRate.valid(13))
+        XCTAssertTrue(StudioAdditiveParameter.motionRate.valid(0.02))
+        let envelope = try XCTUnwrap(StudioAdditiveParameter.harmonic(
+            8,control:.attack))
+        XCTAssertFalse(envelope.valid(-1))
+        XCTAssertFalse(envelope.valid(.nan))
+    }
+
+    func testAnimatedSpectraPersistAndShareMIDIAndModulation() throws {
+        var patch = StudioSynthPatch.individual(.additive)
+        let id = try XCTUnwrap(patch.layers.first?.id)
+        let shape = try XCTUnwrap(StudioAdditiveParameter.harmonic(
+            6,control:.release))
+        var sound = StudioAdditivePatch()
+        sound.set(1,for:.partialEnvelopeMix)
+        sound.set(0.64,for:.motionDepth)
+        sound.set(1.8,for:.motionRate)
+        sound.set(0.4,for:.motionShape)
+        sound.set(2.2,for:shape)
+        patch.layers[0].additivePatch = sound
+        patch.midiControls = StudioSynthMIDIControlSettings(mappings: [
+            StudioSynthMIDIControlMapping(controller:74,target:.parameter(
+                layerID:id,destination:.additive(.motionDepth)))
+        ])
+        var modulation = StudioSynthModulationSettings()
+        modulation.routes = [
+            StudioSynthModRoute(source:.lfo1,layerID:id,
+                                destination:.additive(.motionRate),depth:0.15)
+        ]
+        patch.modulation = modulation
+        XCTAssertTrue(patch.validate())
+        let encoded = try JSONEncoder().encode(patch)
+        let reloaded = try JSONDecoder().decode(StudioSynthPatch.self,from:encoded)
+        XCTAssertEqual(reloaded,patch)
+        let instrument = try StudioSynthInstrument(sampleRate:44_100,patch:patch)
+        XCTAssertEqual(instrument.effectiveParameter(id:id,
+                         destination:.additive(shape))!,2.2,accuracy:0.001)
+        XCTAssertTrue(instrument.controller(74,value:127))
+        var achieved = false
+        for _ in 0..<100 {
+            if let current = instrument.effectiveParameter(
+                id:id,destination:.additive(.motionDepth)),
+                abs(current-1)<0.005 {
+                achieved = true
+                break
+            }
+            Thread.sleep(forTimeInterval:0.01)
+        }
+        XCTAssertTrue(achieved,"MIDI Learn must sweep spectral motion depth")
+        XCTAssertTrue(instrument.noteOn(67,velocity:106))
+        XCTAssertTrue(instrument.noteOff(67))
+        XCTAssertTrue(instrument.allNotesOff())
+    }
+
+    func testOriginalFactoryPatchesStayClassicUnlessExplicitlyEnhanced() {
+        let presets=StudioAdditiveFactoryLibrary.presets
+        let animated=presets.filter {
+            $0.patch.value(for:.partialEnvelopeMix)>0 &&
+            $0.patch.value(for:.motionDepth)>0
+        }
+        XCTAssertEqual(animated.count,6)
+        XCTAssertTrue(presets.first {
+            $0.name=="Pure Foundation"
+        }!.patch.value(for:.motionDepth)==0)
+        for preset in presets {
+            XCTAssertTrue(preset.patch.validate(),preset.name)
+        }
+    }
+
     func testFourEngineHybridCanRouteMIDIAndLiveAdditiveControls() throws {
         var patch = StudioSynthPatch()
         patch.layers.append(StudioSynthLayer(engine: .wavetable))
