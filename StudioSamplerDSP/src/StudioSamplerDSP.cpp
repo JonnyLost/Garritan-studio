@@ -1,4 +1,5 @@
 #include "StudioSamplerDSP.h"
+#include "StudioSharedPCM.h"
 
 #include <algorithm>
 #include <array>
@@ -29,6 +30,7 @@ constexpr double kMaximumRate = 384000.0;
 struct Sample {
     std::vector<float> left;
     std::vector<float> right;
+    std::shared_ptr<SSSharedPCM> shared; // retained for every render voice
     double rate = 44100.0;
     uint8_t root = 60;
     uint8_t low = 0;
@@ -224,6 +226,12 @@ struct SSSampler {
         const Sample& sample = *voice.sample;
         if (frame >= sample.playbackEnd) return false;
         if (!sample.streamed) {
+            if(sample.shared) {
+                if(frame>=sspcm_frames(sample.shared.get())) return false;
+                leftOut=sspcm_left(sample.shared.get())[frame];
+                rightOut=sspcm_right(sample.shared.get())[frame];
+                return true;
+            }
             if (frame >= sample.left.size()) return false;
             leftOut = sample.left[frame];
             rightOut = sample.right[frame];
@@ -256,8 +264,19 @@ struct SSSampler {
     bool streamLinear(const Voice& voice, double position, float& leftOut,
                       float& rightOut) const {
         if (!voice.sample->streamed) {
-            leftOut = readLinear(voice.sample->left, position);
-            rightOut = readLinear(voice.sample->right, position);
+            if (voice.sample->shared) {
+                const auto* pcm=voice.sample->shared.get();
+                const uint32_t frames=sspcm_frames(pcm);
+                if(position<0 || position>=double(frames)) return false;
+                const size_t a=size_t(position), b=std::min(a+1,size_t(frames-1));
+                const float t=float(position-double(a));
+                const float* l=sspcm_left(pcm), *r=sspcm_right(pcm);
+                leftOut=l[a]+(l[b]-l[a])*t;
+                rightOut=r[a]+(r[b]-r[a])*t;
+            } else {
+                leftOut = readLinear(voice.sample->left, position);
+                rightOut = readLinear(voice.sample->right, position);
+            }
             return true;
         }
         if (position < 0 || position >= double(voice.sample->playbackEnd)) return false;
@@ -945,6 +964,60 @@ int32_t ss_add_zone_with_variation(SSSampler *sampler,
         zone.articulation = articulation_id;
         zone.roundRobin = round_robin_index;
         zone.releaseTrigger = release_trigger == 1;
+        sampler->samples.emplace_back(std::move(zone));
+        return 1;
+    } catch (...) { return 0; }
+}
+
+/* Reuses the same immutable Float32 backing allocation across Sampler
+ * zones and Granular instruments. The PCM handle is retained until sampler
+ * destruction; no refcount operations occur on the render thread. */
+int32_t ss_add_shared_zone_with_variation(SSSampler* sampler,
+                    uint8_t root_note, uint8_t lowest_note, uint8_t highest_note,
+                    uint8_t lowest_velocity, uint8_t highest_velocity,
+                    SSSharedPCM* pcm,
+                    uint32_t playback_start_frame, uint32_t playback_end_frame,
+                    uint32_t loop_start_frame, uint32_t loop_end_frame,
+                    uint32_t loop_crossfade_frames,
+                    uint32_t fade_in_frames, uint32_t fade_out_frames,
+                    uint8_t articulation_id,
+                    uint8_t round_robin_index, uint8_t release_trigger) {
+    const uint32_t frames=sspcm_frames(pcm);
+    const double source_sample_rate=sspcm_sample_rate(pcm);
+    const bool validRegion=playback_start_frame<playback_end_frame &&
+        playback_end_frame<=frames && playback_end_frame-playback_start_frame>=2;
+    const bool noLoop=loop_start_frame==0 && loop_end_frame==0 &&
+        loop_crossfade_frames==0;
+    const bool validLoop=loop_start_frame>=playback_start_frame &&
+        loop_end_frame<=playback_end_frame &&
+        loop_start_frame<=loop_end_frame &&
+        loop_end_frame-loop_start_frame>=4 &&
+        loop_crossfade_frames<=(loop_end_frame-loop_start_frame)/2;
+    const bool validFade=validRegion &&
+        uint64_t(fade_in_frames)+uint64_t(fade_out_frames)<=
+        uint64_t(playback_end_frame-playback_start_frame);
+    if(!sampler || !pcm || !validRegion || !validFade ||
+       (!noLoop && !validLoop) || (release_trigger==1 && !noLoop) ||
+       frames>kMaxSampleFrames || sampler->samples.size()>=kMaxZones ||
+       !validRate(source_sample_rate) || root_note>127 ||
+       lowest_note>highest_note || highest_note>127 ||
+       lowest_velocity<1 || lowest_velocity>highest_velocity ||
+       highest_velocity>127 || articulation_id>15 ||
+       round_robin_index>7 || release_trigger>1) return 0;
+    try {
+        Sample zone;
+        zone.shared=std::shared_ptr<SSSharedPCM>(
+            sspcm_retain(pcm),sspcm_release);
+        zone.rate=source_sample_rate;
+        zone.root=root_note;zone.low=lowest_note;zone.high=highest_note;
+        zone.minVelocity=lowest_velocity;zone.maxVelocity=highest_velocity;
+        zone.playbackStart=playback_start_frame;
+        zone.playbackEnd=playback_end_frame;
+        zone.loopStart=loop_start_frame;zone.loopEnd=loop_end_frame;
+        zone.loopCrossfade=loop_crossfade_frames;
+        zone.fadeIn=fade_in_frames;zone.fadeOut=fade_out_frames;
+        zone.articulation=articulation_id;zone.roundRobin=round_robin_index;
+        zone.releaseTrigger=release_trigger==1;
         sampler->samples.emplace_back(std::move(zone));
         return 1;
     } catch (...) { return 0; }
