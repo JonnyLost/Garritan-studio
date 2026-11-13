@@ -70,6 +70,19 @@ Useful methodology:
 - https://acousticstoday.org/wp-content/uploads/2019/03/The-Art-of-Concert-Hall-Acoustics-Current-Trends-and-Questions-in-Research-and-Design-Kelsey-A.-Hochgraf.pdf
 - https://docs.jmrp.io/phonometry/buildings/rooms/room-acoustics/
 
+## Custom Acoustic Room Designer
+
+The [Acoustic Room Designer](./acoustic-room-designer.md) is available within
+the Orchestral Stage inspector. It predicts T60 in six octave bands from
+dimension, material, and wall treatment and applies a fifth, project-persisted
+custom room slot to the existing native FDN. The four historic factory rooms
+continue using their previous three-band damping. No convolution or external
+reverb plug-in is used.
+
+Material absorption coefficients are indicative; estimated decay and
+dimension-derived early reflections are not certified room measurements.
+The designer preview is always available, but Apply requires stopped transport.
+
 ## Acoustic reference catalog
 
 A separate [127-room research index](./acoustic-room-reference-index.md) and [machine-readable source catalog](./acoustic-room-reference-catalog.json) record worldwide scoring stages, live rooms, concert halls, opera houses, echo chambers and cathedrals. Of these, 55 have published/reported reverberation values; most are **not playable presets** and still require acoustic calibration. Room names are research inspirations, not official licensed emulations.
