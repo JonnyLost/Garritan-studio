@@ -1,6 +1,7 @@
 import SwiftUI
 import CoreAudio
 import DAWCore
+import StudioCloudAuth
 import UniformTypeIdentifiers
 
 // MARK: - Main Window View

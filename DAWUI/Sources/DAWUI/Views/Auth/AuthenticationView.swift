@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import AuthenticationServices
 import DAWCore
+import StudioCloudAuth
 
 // MARK: - Authentication View
 

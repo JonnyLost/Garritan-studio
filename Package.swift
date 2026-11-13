@@ -10,6 +10,7 @@ let package = Package(
     ],
     products: [
         .library(name: "DAWCore", targets: ["DAWCore"]),
+        .library(name: "StudioCloudAuth", targets: ["StudioCloudAuth"]),
         .library(name: "StudioAnalogDSP", targets: ["StudioAnalogDSP"]),
         .library(name: "StudioSamplerDSP", targets: ["StudioSamplerDSP"]),
         .library(name: "StudioFMDSP", targets: ["StudioFMDSP"]),
@@ -67,6 +68,16 @@ let package = Package(
             publicHeadersPath: "include"
         ),
 
+        // MARK: - Optional cloud authentication (never required by the DAW core)
+        .target(
+            name: "StudioCloudAuth",
+            dependencies: [.product(name: "Supabase", package: "supabase-swift")],
+            path: "StudioCloudAuth/Sources/StudioCloudAuth",
+            swiftSettings: [
+                .enableExperimentalFeature("StrictConcurrency")
+            ]
+        ),
+
         // MARK: - Core Audio/MIDI Engine
         .target(
             name: "DAWCore",
@@ -75,8 +86,7 @@ let package = Package(
                 "StudioAnalogDSP",
                 "StudioFMDSP",
                 "StudioWavetableDSP",
-                "StudioSamplerDSP",
-                .product(name: "Supabase", package: "supabase-swift")
+                "StudioSamplerDSP"
             ],
             path: "DAWCore/Sources/DAWCore",
             swiftSettings: [
@@ -115,7 +125,7 @@ let package = Package(
         // MARK: - SwiftUI Layer
         .target(
             name: "DAWUI",
-            dependencies: ["DAWCore"],
+            dependencies: ["DAWCore", "StudioCloudAuth"],
             path: "DAWUI/Sources/DAWUI",
             resources: [
                 .copy("Resources/GPO5_keyswitch_catalog.json")
