@@ -588,62 +588,71 @@ public struct ProjectMetadataInfo: Identifiable, Sendable {
 /// Manages periodic autosaving of projects
 @MainActor
 public final class AutosaveManager: ObservableObject {
-    
     private var autosaveTimer: Timer?
-    private let fileManager: ProjectFileManager
-    private var projectProvider: (() -> Project)?
+    private var saveHandler: (@MainActor () async -> Bool)?
     private var projectURL: URL?
-    
-    @Published public var lastAutosaveDate: Date?
-    @Published public var hasUnsavedChanges: Bool = false
-    
-    /// Autosave interval in seconds
+    private var isAutosaving = false
+
+    @Published public private(set) var lastAutosaveDate: Date?
+    @Published public private(set) var hasUnsavedChanges: Bool = false
+
+    /// Autosave interval in seconds.
     public var autosaveInterval: TimeInterval = 60
-    
-    public init() {
-        self.fileManager = ProjectFileManager()
+
+    public init() {}
+
+    /// AppState owns the save coordinator and Audio Unit snapshot. Autosave
+    /// must use that exact same path; a standalone disk writer could overwrite
+    /// a more recent manual save or omit live plugin preset changes.
+    public func configure(saveHandler: @escaping @MainActor () async -> Bool) {
+        self.saveHandler = saveHandler
     }
-    
-    public func configure(projectProvider: @escaping () -> Project) {
-        self.projectProvider = projectProvider
-    }
-    
+
     public func startAutosave(for projectURL: URL) {
         self.projectURL = projectURL
-        
         autosaveTimer?.invalidate()
         autosaveTimer = Timer.scheduledTimer(
-            withTimeInterval: autosaveInterval,
-            repeats: true
+            withTimeInterval: autosaveInterval, repeats: true
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 await self?.performAutosave()
             }
         }
     }
-    
+
     public func stopAutosave() {
         autosaveTimer?.invalidate()
         autosaveTimer = nil
+        projectURL = nil
     }
-    
+
     private func performAutosave() async {
-        guard hasUnsavedChanges, 
-              let url = projectURL,
-              let project = projectProvider?() else { return }
-        
-        do {
-            try await fileManager.saveQuick(project: project, to: url)
+        guard hasUnsavedChanges,
+              projectURL != nil,
+              !isAutosaving,
+              let saveHandler else { return }
+
+        isAutosaving = true
+        defer { isAutosaving = false }
+
+        if await saveHandler() {
             lastAutosaveDate = Date()
-            hasUnsavedChanges = false
-            print("[Autosave] Saved at \(Date())")
-        } catch {
-            print("[Autosave] Failed: \(error)")
+            print("[Autosave] Saved at \(lastAutosaveDate!)")
+        } else {
+            // Keep the dirty flag; a failed snapshot or busy manual save is
+            // not proof that disk contains the latest instrument state.
+            print("[Autosave] Deferred; project remains dirty")
         }
     }
-    
+
     public func markUnsavedChanges() {
         hasUnsavedChanges = true
+    }
+
+    /// Called only by AppState after a revision-matched successful save,
+    /// or when a brand-new/loaded document resets the session.
+    public func markSaved() {
+        hasUnsavedChanges = false
     }
 }
 
