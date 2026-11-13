@@ -2184,6 +2184,22 @@ public final class PlaybackEngine: ObservableObject {
         instrument.stopNote(pitch, channel: 0)
     }
     
+    /// Channel-aware immediate note delivery for the native ostinato auditioner.
+    /// Uses the same hosted track instrument and Core Audio backend as piano-roll preview.
+    public func sendOstinatoPreviewNote(pitch: UInt8, velocity: UInt8, channel: UInt8, on trackID: TrackID, isNoteOn: Bool) {
+        let channel = min(15, channel)
+        if let backend = coreAudioBackend {
+            backend.sendImmediateMIDI(status: (isNoteOn ? 0x90 : 0x80) | channel,
+                                      data1: pitch, data2: isNoteOn ? velocity : 0, to: trackID)
+        } else if let instrument = trackInstruments[trackID] {
+            if isNoteOn {
+                instrument.startNote(pitch, velocity: velocity, channel: channel)
+            } else {
+                instrument.stopNote(pitch, channel: channel)
+            }
+        }
+    }
+
     /// Play a test note to verify audio is working
     public func playTestNote(on trackID: TrackID) {
         // Core Audio backend path
