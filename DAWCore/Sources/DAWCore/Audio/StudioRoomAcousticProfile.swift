@@ -22,15 +22,20 @@ public struct StudioRoomAcousticProfile: Codable, Equatable, Sendable, Identifia
     public var bassRT60: Float
     public var midRT60: Float
     public var trebleRT60: Float
+    /// Six octave-band RT targets only for designed rooms. Existing presets
+    /// retain their original three-band DSP mode.
+    public var sixBandRT60: [Float]?
     public var earlyReflections: [StudioEarlyReflection]
 
     public init(id: String, name: String, bassRT60: Float, midRT60: Float,
-                trebleRT60: Float, earlyReflections: [StudioEarlyReflection]) {
+                trebleRT60: Float, earlyReflections: [StudioEarlyReflection],
+                sixBandRT60: [Float]? = nil) {
         self.id = id
         self.name = name
         self.bassRT60 = bassRT60
         self.midRT60 = midRT60
         self.trebleRT60 = trebleRT60
+        self.sixBandRT60 = sixBandRT60
         self.earlyReflections = earlyReflections
     }
 
@@ -99,7 +104,18 @@ public struct StudioRoomAcousticProfile: Codable, Equatable, Sendable, Identifia
         .synchronViennaInspired, .bostonSymphonyInspired
     ]
 
+    /// The custom slot always follows the four historic factory profiles.
+    /// All AU parameter indices refer to this stable order.
+    public static var playableProfiles: [StudioRoomAcousticProfile] {
+        starterProfiles + [StudioAcousticRoomDesign().makeProfile()]
+    }
+
+    public static func profiles(with design: StudioAcousticRoomDesign)
+        -> [StudioRoomAcousticProfile] {
+        starterProfiles + [design.makeProfile()]
+    }
+
     public static func index(forID id: String) -> Int? {
-        starterProfiles.firstIndex(where: { $0.id == id })
+        playableProfiles.firstIndex(where: { $0.id == id })
     }
 }
