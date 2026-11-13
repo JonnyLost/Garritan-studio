@@ -67,8 +67,11 @@ public enum StudioSynthSamplerCapture {
     /// Call from a background/control queue, never from an audio callback.
     /// The original Synth track remains unchanged. A returned patch may be
     /// loaded on that track using ProjectViewModel.loadStudioSampler.
+    /// Optional directories let automated tests use isolated temporary files.
     public static func capture(patch: StudioSynthPatch, name: String,
-                               options: Options = Options()) throws -> Result {
+                               options: Options = Options(),
+                               sampleDirectory: URL? = nil,
+                               packageDirectory: URL? = nil) throws -> Result {
         guard patch.validate(), options.isValid else {
             throw CaptureError.invalidOptions
         }
@@ -94,13 +97,14 @@ public enum StudioSynthSamplerCapture {
             }
         }
 
-        let sampler = try StudioSamplerInstrumentFactory.assemble(takes)
+        let sampler = try StudioSamplerInstrumentFactory.assemble(
+            takes, sampleDirectory: sampleDirectory)
         let metadata = StudioSamplerInstrumentPackage.Metadata(
             name: trimmed, category: "Synth Captures",
             tags: ["Studio Synth", "Native Multisample"])
         do {
             let package = try StudioSamplerInstrumentPackage.saveToLibrary(
-                sampler, metadata: metadata)
+                sampler, metadata: metadata, in: packageDirectory)
             return Result(patch: sampler, packageURL: package,
                           takeCount: takes.count)
         } catch {
