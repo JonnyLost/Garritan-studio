@@ -96,6 +96,7 @@ let package = Package(
                 "StudioWavetableDSP",
                 "StudioAdditiveDSP",
                 "StudioGranularDSP",
+                "StudioPhysicalDSP",
                 .product(name: "Supabase", package: "supabase-swift")
             ],
             path: "DAWCore/Sources/DAWCore",
