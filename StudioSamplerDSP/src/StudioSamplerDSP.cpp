@@ -544,73 +544,152 @@ struct SSSampler {
             return;
         }
         const uint8_t articulation = selectedArticulations[channel];
-        const Sample *selected = nullptr;
-        int bestDistance = std::numeric_limits<int>::max();
+
+        // Find the most recent overlapping held pitch (never another channel
+        // or keyswitch). Real transition recordings only play in this case.
+        HeldNote *previousHeld = nullptr;
+        uint64_t previousSerial = 0;
+        uint8_t fromNote = 0;
+        if (legatoEnabled) {
+            for (int pitch = 0; pitch < 128; ++pitch) {
+                if (pitch == note) continue;
+                for (auto& held : heldNotes[channel][pitch]) {
+                    if (held.down && !held.transitionedAway &&
+                        held.articulation == articulation &&
+                        held.serial > previousSerial) {
+                        previousSerial = held.serial;
+                        previousHeld = &held;
+                        fromNote = uint8_t(pitch);
+                    }
+                }
+            }
+        }
+
+        // Each microphone has its own nearest-root selection so close/tree/
+        // room recordings play as a coherent multichannel sample set.
+        std::array<const Sample *, 4> best{};
+        std::array<int, 4> distances{};
+        distances.fill(std::numeric_limits<int>::max());
         for (const auto& sample : samples) {
-            if (sample.releaseTrigger || sample.articulation != articulation ||
-                note < sample.low || note > sample.high ||
-                (!cc1Crossfade &&
-                 (velocity < sample.minVelocity || velocity > sample.maxVelocity)))
+            if (sample.releaseTrigger || sample.legatoFrom >= 0 ||
+                sample.articulation != articulation || note < sample.low ||
+                note > sample.high || (!cc1Crossfade &&
+                (velocity < sample.minVelocity || velocity > sample.maxVelocity)))
                 continue;
+            const int mic = sample.microphone;
             const int distance = std::abs(int(note) - int(sample.root));
-            if (distance < bestDistance) {
-                selected = &sample;
-                bestDistance = distance;
+            if (distance < distances[mic]) {
+                distances[mic] = distance;
+                best[mic] = &sample;
             }
         }
-        if (!selected) return;
+        const Sample *primary = nullptr;
+        for (const Sample *sample : best) {
+            if (sample) { primary = sample; break; }
+        }
+        if (!primary) return;
+
         const uint8_t variation =
-            chooseRoundRobin(note, channel, articulation, *selected);
-        const uint64_t noteSerial = rememberNote(
+            chooseRoundRobin(note, channel, articulation, *primary);
+        const uint64_t serial = rememberNote(
             note, velocity, channel, articulation, variation);
+        const int legatoFade = previousHeld ? legatoFadeFrames : 0;
 
-        if (!cc1Crossfade) {
-            const Sample *take = selected;
-            for (const auto& sample : samples) {
-                if (!sample.releaseTrigger && sample.articulation == articulation &&
-                    sample.root == selected->root && sample.roundRobin == variation &&
-                    sample.minVelocity == selected->minVelocity &&
-                    sample.maxVelocity == selected->maxVelocity &&
-                    note >= sample.low && note <= sample.high) {
-                    take = &sample;
-                    break;
+        if (previousHeld) {
+            previousHeld->transitionedAway = true;
+            for (auto& voice : voices) {
+                if (voice.active && !voice.releaseTrigger &&
+                    voice.noteSerial == previousSerial) {
+                    startRelease(voice, legatoFadeFrames);
                 }
             }
-            startVoice(take, note, velocity, channel, noteSerial);
-            return;
         }
 
-        // Each dynamic band contributes ONE recorded variation (maximum 8
-        // bands), never a sum of all round-robin takes. Missing variations
-        // fall back to the first sample for that band.
-        std::array<uint16_t, 8> playedBands{};
-        int bands = 0;
-        for (const auto& sample : samples) {
-            if (sample.releaseTrigger || sample.articulation != articulation ||
-                sample.root != selected->root || note < sample.low || note > sample.high)
-                continue;
-            const uint16_t band = uint16_t(sample.minVelocity) << 8 |
-                                  uint16_t(sample.maxVelocity);
-            bool alreadyPlayed = false;
-            for (int i = 0; i < bands; ++i) {
-                if (playedBands[i] == band) { alreadyPlayed = true; break; }
-            }
-            if (alreadyPlayed) continue;
-            if (bands >= 8) break;
-            playedBands[bands++] = band;
-            const Sample *take = &sample;
-            for (const auto& possible : samples) {
-                if (!possible.releaseTrigger && possible.root == sample.root &&
-                    possible.articulation == articulation &&
-                    possible.minVelocity == sample.minVelocity &&
-                    possible.maxVelocity == sample.maxVelocity &&
-                    possible.roundRobin == variation &&
-                    note >= possible.low && note <= possible.high) {
-                    take = &possible;
-                    break;
+        for (int mic = 0; mic < 4; ++mic) {
+            const Sample *selected = best[mic];
+            if (!selected) continue;
+            if (!cc1Crossfade) {
+                const Sample *take = selected;
+                for (const auto& sample : samples) {
+                    if (!sample.releaseTrigger && sample.legatoFrom < 0 &&
+                        sample.microphone == mic &&
+                        sample.articulation == articulation &&
+                        sample.root == selected->root &&
+                        sample.roundRobin == variation &&
+                        sample.minVelocity == selected->minVelocity &&
+                        sample.maxVelocity == selected->maxVelocity &&
+                        note >= sample.low && note <= sample.high) {
+                        take = &sample;
+                        break;
+                    }
+                }
+                startVoice(take, note, velocity, channel, serial, false, false,
+                           legatoFade);
+            } else {
+                // Dynamic layers crossfade independently within each mic,
+                // never across microphones or transition-only recordings.
+                std::array<uint16_t, 8> playedBands{};
+                int bands = 0;
+                for (const auto& sample : samples) {
+                    if (sample.releaseTrigger || sample.legatoFrom >= 0 ||
+                        sample.microphone != mic ||
+                        sample.articulation != articulation ||
+                        sample.root != selected->root ||
+                        note < sample.low || note > sample.high) continue;
+                    const uint16_t band = uint16_t(sample.minVelocity) << 8 |
+                                          uint16_t(sample.maxVelocity);
+                    bool played = false;
+                    for (int i = 0; i < bands; ++i) {
+                        if (playedBands[i] == band) { played = true; break; }
+                    }
+                    if (played) continue;
+                    if (bands >= 8) break;
+                    playedBands[bands++] = band;
+                    const Sample *take = &sample;
+                    for (const auto& possible : samples) {
+                        if (!possible.releaseTrigger && possible.legatoFrom < 0 &&
+                            possible.microphone == mic &&
+                            possible.root == sample.root &&
+                            possible.articulation == articulation &&
+                            possible.minVelocity == sample.minVelocity &&
+                            possible.maxVelocity == sample.maxVelocity &&
+                            possible.roundRobin == variation &&
+                            note >= possible.low && note <= possible.high) {
+                            take = &possible;
+                            break;
+                        }
+                    }
+                    startVoice(take, note, velocity, channel, serial, false, false,
+                               legatoFade);
                 }
             }
-            startVoice(take, note, velocity, channel, noteSerial);
+
+            if (!previousHeld) continue;
+            // Exact from/to recordings are one-shots layered over the gentle
+            // incoming sustain fade. If the recording is absent, the two
+            // sustained notes simply crossfade without synthesizing a fake
+            // sampled transition.
+            const Sample *transition = nullptr;
+            int bestVelocity = std::numeric_limits<int>::max();
+            for (const auto& zone : samples) {
+                if (zone.legatoFrom != fromNote || zone.root != note ||
+                    zone.microphone != mic || zone.articulation != articulation ||
+                    note < zone.low || note > zone.high ||
+                    velocity < zone.minVelocity || velocity > zone.maxVelocity)
+                    continue;
+                const int distance = std::abs(velocity -
+                    int(zone.minVelocity + zone.maxVelocity) / 2);
+                if (distance < bestVelocity) {
+                    transition = &zone;
+                    bestVelocity = distance;
+                }
+            }
+            if (transition) {
+                // Transition samples have a bounded natural tail and are
+                // never used to sustain a MIDI note.
+                startVoice(transition, note, velocity, channel, serial,
+                           false, true, 0);
+            }
         }
     }
 
