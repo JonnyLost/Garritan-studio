@@ -38,6 +38,8 @@ public final class NativeStageEarlyReflectionProcessor {
     public private(set) var roomIndex = 0
     public private(set) var pan: Float = 0
     public private(set) var zone: Int = 2
+    public private(set) var microphonePerspectiveIndex: Int = 0
+    public private(set) var microphoneStereoWidth: Float = 1
 
     public init(sampleRate: Double,
                 profiles: [StudioRoomAcousticProfile] = StudioRoomAcousticProfile.starterProfiles) {
@@ -45,8 +47,9 @@ public final class NativeStageEarlyReflectionProcessor {
             ? sampleRate : 48_000
         self.sampleRate = rate
         // Maximum stored profile reflection: 120 ms. Geometric offsets can
-        // contribute another 12 ms. At 48 kHz this uses about 26 KB/track.
-        capacity = Int((rate * 0.134).rounded(.up)) + 2
+        // contribute up to 6 ms of depth, ~5.25 ms lateral and 8 ms of
+        // virtual microphone travel. Budget 150 ms at all sample rates.
+        capacity = Int((rate * 0.150).rounded(.up)) + 2
         samples = .allocate(capacity: capacity)
         samples.initialize(repeating: 0, count: capacity)
 
@@ -81,18 +84,28 @@ public final class NativeStageEarlyReflectionProcessor {
 
     /// Called only by the owning render thread (e.g. once per AU render
     /// block). No allocation, locking, sample-buffer reset, or exponentials.
-    public func update(roomIndex: Int, pan: Float, zone: Int) {
+    public func update(roomIndex: Int, pan: Float, zone: Int,
+                       microphonePerspective: Int = 0,
+                       microphoneWidth: Float = 1) {
         let resolvedIndex = roomTaps.indices.contains(roomIndex) ? roomIndex : 0
         let resolvedPan = pan.isFinite ? min(1, max(-1, pan)) : 0
         let resolvedZone = min(5, max(0, zone))
+        let resolvedMic = min(2, max(0, microphonePerspective))
+        let resolvedWidth: Float = microphoneWidth.isFinite ?
+            min(1.5, max(0, microphoneWidth)) : 1
         guard self.roomIndex != resolvedIndex ||
               self.pan != resolvedPan ||
-              self.zone != resolvedZone || tapCount < 0 else { return }
+              self.zone != resolvedZone ||
+              self.microphonePerspectiveIndex != resolvedMic ||
+              self.microphoneStereoWidth != resolvedWidth ||
+              tapCount < 0 else { return }
 
         self.roomIndex = resolvedIndex
         currentHighCutCoefficient = highCutCoefficients[resolvedIndex]
         self.pan = resolvedPan
         self.zone = resolvedZone
+        self.microphonePerspectiveIndex = resolvedMic
+        self.microphoneStereoWidth = resolvedWidth
 
         // Zone zero intentionally has no reflections: conductor/dry.
         guard resolvedZone > 0 else { tapCount = 0; return }
@@ -100,18 +113,29 @@ public final class NativeStageEarlyReflectionProcessor {
         let taps = roomTaps[resolvedIndex]
         tapCount = taps.count
         let depthFrames = Int((Double(resolvedZone - 1) * sampleRate * 0.0015).rounded())
-        let lateralFrames = Int((Double(resolvedPan) * sampleRate * 0.0035).rounded())
+        let lateralFrames = Int((Double(resolvedPan * resolvedWidth) *
+                                 sampleRate * 0.0035).rounded())
+        let microphone: StudioMicrophonePerspective =
+            resolvedMic == 1 ? .mainPair : (resolvedMic == 2 ? .audience : .conductor)
+        let microphoneFrames = Int((
+            microphone.additionalReflectionMilliseconds * sampleRate / 1_000
+        ).rounded())
         // More distant positions have slightly later/more diffuse reflections;
         // the overall hall-send gain is still owned by TrackAudioNode.
-        let distanceGain: Float = 1.0 - Float(resolvedZone - 1) * 0.055
+        let distanceGain: Float = (1.0 - Float(resolvedZone - 1) * 0.055) *
+            microphone.earlyReflectionLevel
 
         for i in 0..<tapCount {
             let tap = taps[i]
-            let offset = tap.delayFrames + depthFrames
+            let offset = tap.delayFrames + depthFrames + microphoneFrames
             renderTaps[i].leftOffset = min(capacity - 1, max(1, offset + lateralFrames))
             renderTaps[i].rightOffset = min(capacity - 1, max(1, offset - lateralFrames))
-            renderTaps[i].leftGain = tap.leftGain * distanceGain * (1 - 0.25 * resolvedPan)
-            renderTaps[i].rightGain = tap.rightGain * distanceGain * (1 + 0.25 * resolvedPan)
+            let left = tap.leftGain * (1 - 0.25 * resolvedPan)
+            let right = tap.rightGain * (1 + 0.25 * resolvedPan)
+            let mid = (left + right) * 0.5
+            let side = (left - right) * 0.5 * resolvedWidth
+            renderTaps[i].leftGain = (mid + side) * distanceGain
+            renderTaps[i].rightGain = (mid - side) * distanceGain
         }
     }
 
