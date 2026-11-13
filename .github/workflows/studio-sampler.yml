@@ -38,7 +38,8 @@ jobs:
       - name: Compile and run sampler standalone checks
         run: |
           clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
-            -I StudioSamplerDSP/include \
+            -I StudioSamplerDSP/include -I StudioSharedPCM/include \
+            StudioSharedPCM/src/StudioSharedPCM.cpp \
             StudioSamplerDSP/src/StudioSamplerDSP.cpp \
             Tests/StudioSamplerDSPStandalone/main.cpp \
             -o /tmp/studio-sampler-smoke
@@ -46,7 +47,8 @@ jobs:
       - name: Stress 72 streamed zones and concurrent delayed disk reader
         run: |
           clang++ -std=c++17 -O1 -g -pthread -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
-            -I StudioSamplerDSP/include \
+            -I StudioSamplerDSP/include -I StudioSharedPCM/include \
+            StudioSharedPCM/src/StudioSharedPCM.cpp \
             StudioSamplerDSP/src/StudioSamplerDSP.cpp \
             Tests/StudioSamplerDSPStandalone/stream_stress.cpp \
             -o /tmp/studio-sampler-stress
