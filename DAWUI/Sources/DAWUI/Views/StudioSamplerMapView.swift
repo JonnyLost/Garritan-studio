@@ -498,6 +498,7 @@ public struct StudioSamplerMapView: View {
                         patch.zones[selectedIndex].isReleaseTrigger = isRelease
                         if isRelease {
                             // Release samples are one-shots, never sustain loops.
+                            patch.zones[selectedIndex].legatoFromNote = nil
                             patch.zones[selectedIndex].loopStartFrame = nil
                             patch.zones[selectedIndex].loopEndFrame = nil
                             patch.zones[selectedIndex].loopCrossfadeFrames = nil
@@ -522,9 +523,75 @@ public struct StudioSamplerMapView: View {
                 .frame(minWidth: 190)
                 Spacer()
             }
-            Text("Round-robin takes share the same articulation, root and velocity band. Release recordings trigger only when a held MIDI note ends.")
+            Text("Round-robin takes share one articulation, root, microphone and velocity band. Release recordings play only on note-off.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+            HStack(spacing: 18) {
+                Picker("Recorded microphone", selection: Binding(
+                    get: { selectedZone?.microphoneID ?? 0 },
+                    set: { micID in
+                        guard var patch = draft,
+                              patch.zones.indices.contains(selectedIndex) else { return }
+                        patch.zones[selectedIndex].microphoneID =
+                            micID == 0 ? nil : micID
+                        if !((patch.microphones ?? []).contains(where: { $0.id == micID })) {
+                            let names = ["Close", "Main / Tree", "Room", "Spot"]
+                            patch.microphones = (patch.microphones ?? []) + [
+                                StudioSamplerMicrophone(id: micID, name: names[Int(micID)])
+                            ]
+                        }
+                        draft = patch
+                    }
+                )) {
+                    Text("Close / Default").tag(UInt8(0))
+                    Text("Main / Tree").tag(UInt8(1))
+                    Text("Room").tag(UInt8(2))
+                    Text("Spot").tag(UInt8(3))
+                }
+                .frame(maxWidth: 270)
+                Toggle("Recorded legato transition", isOn: Binding(
+                    get: { selectedZone?.legatoFromNote != nil },
+                    set: { enabled in
+                        guard var patch = draft,
+                              patch.zones.indices.contains(selectedIndex) else { return }
+                        var zone = patch.zones[selectedIndex]
+                        if enabled {
+                            zone.isReleaseTrigger = nil
+                            zone.loopStartFrame = nil
+                            zone.loopEndFrame = nil
+                            zone.loopCrossfadeFrames = nil
+                            zone.legatoFromNote = zone.rootNote == 60 ? 59 : 60
+                            zone.lowestNote = zone.rootNote
+                            zone.highestNote = zone.rootNote
+                            patch.legatoEnabled = true
+                            if patch.legatoCrossfadeMilliseconds == nil {
+                                patch.legatoCrossfadeMilliseconds = 40
+                            }
+                        } else {
+                            zone.legatoFromNote = nil
+                        }
+                        patch.zones[selectedIndex] = zone
+                        draft = patch
+                    }
+                )).toggleStyle(.switch)
+                if zone.legatoFromNote != nil {
+                    Stepper(
+                        "From (SamplerNoteNames.name(zone.legatoFromNote ?? 60)) → (SamplerNoteNames.name(zone.rootNote))",
+                        value: Binding(
+                            get: { Int(selectedZone?.legatoFromNote ?? 60) },
+                            set: { from in
+                                guard var patch = draft,
+                                      patch.zones.indices.contains(selectedIndex) else { return }
+                                patch.zones[selectedIndex].legatoFromNote = UInt8(clamping: from)
+                                draft = patch
+                            }
+                        ), in: 0...127
+                    )
+                }
+            }
+            .font(.caption)
+            Text("A transition sample is triggered only if its From note overlaps the exact destination root pitch. Regular sustain recordings are still required.")
+                .font(.caption2).foregroundStyle(.secondary)
             articulationEditor
         }
         .padding(12)
@@ -673,6 +740,12 @@ public struct StudioSamplerMapView: View {
             patch.articulations = draft.articulations ?? patch.articulations
             patch.defaultKeyswitchNote = draft.defaultKeyswitchNote ?? patch.defaultKeyswitchNote
             patch.selectedArticulationID = draft.selectedArticulationID
+            patch.microphones = draft.microphones ?? patch.microphones
+            patch.legatoEnabled = draft.legatoEnabled ?? patch.legatoEnabled
+            patch.legatoCrossfadeMilliseconds =
+                draft.legatoCrossfadeMilliseconds ?? patch.legatoCrossfadeMilliseconds
+            patch.vibratoCC21 = draft.vibratoCC21
+            patch.breathCC2 = draft.breathCC2
             // Preserve distinct edits when the same imported recording
             // appears in multiple articulations or velocity zones. Consume
             // each matching old zone only once during automatic remapping.
@@ -694,6 +767,10 @@ public struct StudioSamplerMapView: View {
                         oldZone.roundRobinIndex ?? patch.zones[index].roundRobinIndex
                     patch.zones[index].isReleaseTrigger =
                         oldZone.isReleaseTrigger ?? patch.zones[index].isReleaseTrigger
+                    patch.zones[index].microphoneID =
+                        oldZone.microphoneID ?? patch.zones[index].microphoneID
+                    patch.zones[index].legatoFromNote =
+                        oldZone.legatoFromNote ?? patch.zones[index].legatoFromNote
                 }
             }
             self.draft = patch
