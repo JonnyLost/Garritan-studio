@@ -14,13 +14,13 @@ constexpr uint32_t kQueueCapacity = 512;
 constexpr double kTau = 6.28318530717958647692;
 constexpr std::array<float, SPM_PARAMETER_COUNT> kDefaults{{
     0.f, 0.55f, 0.7f, 0.25f, 0.25f, 0.2f, 0.5f,
-    0.45f, 0.15f, 0.5f, 0.55f, 0.65f, 0.12f
+    0.45f, 0.15f, 0.5f, 0.55f, 0.65f, 0.12f, 0.65f, 0.55f, 0.12f, 0.5f
 }};
 
 bool valid(int id, float value) noexcept {
     if (id < 0 || id >= SPM_PARAMETER_COUNT || !std::isfinite(value)) return false;
     switch (id) {
-        case SPM_PARAM_MODEL: return value == 0.f || value == 1.f || value == 2.f;
+        case SPM_PARAM_MODEL: return value == 0.f || value == 1.f || value == 2.f || value == 3.f || value == 4.f;
         case SPM_PARAM_POSITION: return value >= 0.05f && value <= 0.95f;
         case SPM_PARAM_RELEASE: return value >= 0.01f && value <= 4.f;
         default: return value >= 0.f && value <= 1.f;
@@ -88,12 +88,13 @@ struct Voice {
     float burst=1.f,burstDecay=1.f;
     float contact=0.25f,hardness=0.45f,stiffness=0.15f;
     float bowFriction=0.f,bowMotion=0.f;
+    float airState=0.f,lipState=0.f;
     int model=0;
     Mode wood{},metal{};
 
     void stop() noexcept {
         active=held=releasing=false;
-        env=filter=dispersion=bowFriction=bowMotion=0;age=0;write=0;
+        env=filter=dispersion=bowFriction=bowMotion=airState=lipState=0;age=0;write=0;
     }
     void tune(double rate, uint16_t pitchBend) noexcept {
         const double semitones = double(int(note)-69) +
@@ -131,7 +132,7 @@ struct Voice {
         releaseStep=1.f/float(rate*double(seconds));
     }
     float tick(const std::array<float,SPM_PARAMETER_COUNT>& p,
-               float expression, float dynamics) noexcept {
+               float expression, float dynamics, float breath) noexcept {
         if(!active) return 0;
         // Only read cells written since this note was started. Old buffer
         // contents from a stolen voice are never heard; no O(delay) clear.
@@ -149,10 +150,31 @@ struct Voice {
         // string stiffness without unstable feedback or extra allocations.
         const float dispersed=delayed + stiffness*(dispersion-delayed);
         dispersion=delayed;
-        filter += (0.12f + brightness*0.78f)*(dispersed-filter);
+        const float filterCutoff=(model>=3 ? 0.08f+0.68f*p[SPM_PARAM_BORE] :
+            0.12f+brightness*0.78f);
+        filter += filterCutoff*(dispersed-filter);
         const float retained=0.992f + 0.0077f*p[SPM_PARAM_DAMPING];
         float excitation=0;
-        if(model==2) {
+        if(model==3 || model==4) {
+            // Bounded nonlinear reed/lip valve coupled to a resonant bore.
+            // Breath pressure is continuously driven, unlike a pluck.
+            const float pressure=p[SPM_PARAM_BREATH]*breath;
+            const float stiffness=p[SPM_PARAM_REED_STIFFNESS];
+            const float bore=p[SPM_PARAM_BORE];
+            const float turbulence=randomBipolar(random)*
+                p[SPM_PARAM_AIR_NOISE]*pressure*0.006f;
+            const float difference=pressure*0.9f-delayed*0.55f;
+            const float opening=std::max(0.f, std::min(1.f,
+                0.5f+difference*(model==3 ? 1.5f+stiffness : 0.6f+stiffness)));
+            const float flow=difference*opening;
+            const float drive=(model==3 ? flow/(1.f+4.f*flow*flow) :
+                flow*flow*flow/(0.25f+flow*flow));
+            const float response=model==3 ? 0.045f : 0.018f;
+            lipState += response*(drive-lipState);
+            airState += (0.015f+0.08f*bore)*(lipState-airState);
+            excitation=(model==3 ? 0.028f : 0.018f)*
+                (lipState+airState)+turbulence;
+        } else if(model==2) {
             // Nonlinear stick/slip excitation, continuously coupled to the
             // string feedback. The low-pass friction state avoids impulses
             // when bow velocity or pressure changes during a held note.
@@ -185,7 +207,7 @@ struct Voice {
         }
         // Sustained bow drive needs a lossier string loop than a pluck;
         // its ongoing excitation supplies the missing energy.
-        const float feedback=(model==2 ? 0.996f : retained)*filter;
+        const float feedback=(model>=2 ? 0.995f : retained)*filter;
         const float value=excitation+feedback;
         delay[size_t(write)]=value;
         if(++write==kDelayCapacity)write=0;
@@ -215,14 +237,14 @@ struct SPMSynth {
     std::atomic<bool> panic{false};
     std::array<bool,16> sustain{};
     std::array<uint16_t,16> bend{};
-    std::array<float,16> bowExpression{}, dynamics{};
+    std::array<float,16> bowExpression{}, dynamics{}, breathExpression{};
     uint64_t sequence=0;
 
     SPMSynth(double sampleRate,int count):rate(sampleRate),polyphony(count) {
         for(size_t i=0;i<kDefaults.size();++i)
             parameters[i].store(kDefaults[i],std::memory_order_relaxed);
         bend.fill(8192);
-        bowExpression.fill(1.f);dynamics.fill(1.f);
+        bowExpression.fill(1.f);dynamics.fill(1.f);breathExpression.fill(1.f);
     }
     void resetVoices() noexcept {
         pendingCount=0;sequence=0;sustain.fill(false);bend.fill(8192);
@@ -239,6 +261,7 @@ struct SPMSynth {
             return;
         }
         if(type==0xB0) {
+            if(e.data1==2) {breathExpression[ch]=float(e.data2)/127.f;return;}
             if(e.data1==1) {bowExpression[ch]=float(e.data2)/127.f;return;}
             if(e.data1==11) {dynamics[ch]=float(e.data2)/127.f;return;}
             if(e.data1==64) {
@@ -311,7 +334,7 @@ int32_t spm_midi_event(SPMSynth* s,uint8_t status,uint8_t d1,
     if(!s||d1>127||d2>127||offset>65535)return 0;
     switch(status&0xF0) {
         case 0x80:case 0x90:case 0xE0:break;
-        case 0xB0: if(d1!=1&&d1!=11&&d1!=64&&d1!=120&&d1!=123)return 0;break;
+        case 0xB0: if(d1!=1&&d1!=2&&d1!=11&&d1!=64&&d1!=120&&d1!=123)return 0;break;
         default:return 0;
     }
     return s->queue.push({status,d1,d2,offset})?1:0;
@@ -359,7 +382,8 @@ void spm_render(SPMSynth* s,float* left,float* right,int32_t frames) {
         for(int v=0;v<s->polyphony;++v)
             sample+=s->voices[v].tick(p,
                 s->bowExpression[s->voices[v].channel],
-                s->dynamics[s->voices[v].channel]);
+                s->dynamics[s->voices[v].channel],
+                s->breathExpression[s->voices[v].channel]);
         sample=std::tanh(sample*p[SPM_PARAM_GAIN]*0.6f);
         left[i]=sample;
         right[i]=sample;
