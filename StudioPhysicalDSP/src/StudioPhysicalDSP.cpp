@@ -14,13 +14,13 @@ constexpr uint32_t kQueueCapacity = 512;
 constexpr double kTau = 6.28318530717958647692;
 constexpr std::array<float, SPM_PARAMETER_COUNT> kDefaults{{
     0.f, 0.55f, 0.7f, 0.25f, 0.25f, 0.2f, 0.5f,
-    0.45f, 0.15f, 0.5f
+    0.45f, 0.15f, 0.5f, 0.55f, 0.65f, 0.12f
 }};
 
 bool valid(int id, float value) noexcept {
     if (id < 0 || id >= SPM_PARAMETER_COUNT || !std::isfinite(value)) return false;
     switch (id) {
-        case SPM_PARAM_MODEL: return value == 0.f || value == 1.f;
+        case SPM_PARAM_MODEL: return value == 0.f || value == 1.f || value == 2.f;
         case SPM_PARAM_POSITION: return value >= 0.05f && value <= 0.95f;
         case SPM_PARAM_RELEASE: return value >= 0.01f && value <= 4.f;
         default: return value >= 0.f && value <= 1.f;
@@ -87,12 +87,13 @@ struct Voice {
     float velocity=0,env=0,releaseStep=0;
     float burst=1.f,burstDecay=1.f;
     float contact=0.25f,hardness=0.45f,stiffness=0.15f;
+    float bowFriction=0.f,bowMotion=0.f;
     int model=0;
     Mode wood{},metal{};
 
     void stop() noexcept {
         active=held=releasing=false;
-        env=filter=dispersion=0;age=0;write=0;
+        env=filter=dispersion=bowFriction=bowMotion=0;age=0;write=0;
     }
     void tune(double rate, uint16_t pitchBend) noexcept {
         const double semitones = double(int(note)-69) +
@@ -129,7 +130,8 @@ struct Voice {
         releasing=true;
         releaseStep=1.f/float(rate*double(seconds));
     }
-    float tick(const std::array<float,SPM_PARAMETER_COUNT>& p) noexcept {
+    float tick(const std::array<float,SPM_PARAMETER_COUNT>& p,
+               float expression, float dynamics) noexcept {
         if(!active) return 0;
         // Only read cells written since this note was started. Old buffer
         // contents from a stolen voice are never heard; no O(delay) clear.
@@ -150,7 +152,23 @@ struct Voice {
         filter += (0.12f + brightness*0.78f)*(dispersed-filter);
         const float retained=0.992f + 0.0077f*p[SPM_PARAM_DAMPING];
         float excitation=0;
-        if(age<=uint64_t(whole+1)) {
+        if(model==2) {
+            // Nonlinear stick/slip excitation, continuously coupled to the
+            // string feedback. The low-pass friction state avoids impulses
+            // when bow velocity or pressure changes during a held note.
+            const float pressure=p[SPM_PARAM_BOW_PRESSURE];
+            const float speed=p[SPM_PARAM_BOW_SPEED]*expression;
+            const float relative=speed*0.8f-delayed*0.65f;
+            const float slip=relative/(1.f+12.f*relative*relative);
+            const float force=(0.001f+0.045f*pressure)*slip;
+            bowFriction += 0.08f*(force-bowFriction);
+            bowMotion += 0.004f*(bowFriction-bowMotion);
+            const float hair=randomBipolar(random)*p[SPM_PARAM_BOW_NOISE]
+                *pressure*speed*0.004f;
+            excitation=bowFriction+bowMotion+hair;
+            if(age<uint64_t(whole))
+                excitation+=randomBipolar(random)*0.003f*pressure*speed;
+        } else if(age<=uint64_t(whole+1)) {
             const float phase=float(age)/float(whole+1);
             if(model==0) {
                 const float triangle = phase<contact ? phase/contact :
@@ -165,7 +183,10 @@ struct Voice {
                 burst*=burstDecay;
             }
         }
-        const float value=excitation+retained*filter;
+        // Sustained bow drive needs a lossier string loop than a pluck;
+        // its ongoing excitation supplies the missing energy.
+        const float feedback=(model==2 ? 0.996f : retained)*filter;
+        const float value=excitation+feedback;
         delay[size_t(write)]=value;
         if(++write==kDelayCapacity)write=0;
         ++age;
@@ -178,7 +199,7 @@ struct Voice {
         const float modal=0.55f*wood.process(value)+
                           0.30f*metal.process(value);
         const float mix=p[SPM_PARAM_BODY_MIX];
-        return ((1.f-mix)*value+mix*modal)*env*velocity;
+        return ((1.f-mix)*value+mix*modal)*env*velocity*dynamics;
     }
 };
 } // namespace
@@ -194,15 +215,18 @@ struct SPMSynth {
     std::atomic<bool> panic{false};
     std::array<bool,16> sustain{};
     std::array<uint16_t,16> bend{};
+    std::array<float,16> bowExpression{}, dynamics{};
     uint64_t sequence=0;
 
     SPMSynth(double sampleRate,int count):rate(sampleRate),polyphony(count) {
         for(size_t i=0;i<kDefaults.size();++i)
             parameters[i].store(kDefaults[i],std::memory_order_relaxed);
         bend.fill(8192);
+        bowExpression.fill(1.f);dynamics.fill(1.f);
     }
     void resetVoices() noexcept {
         pendingCount=0;sequence=0;sustain.fill(false);bend.fill(8192);
+        bowExpression.fill(1.f);dynamics.fill(1.f);
         for(auto& v:voices) v.stop();
     }
     void handle(Event e, const std::array<float,SPM_PARAMETER_COUNT>& p) noexcept {
@@ -215,6 +239,8 @@ struct SPMSynth {
             return;
         }
         if(type==0xB0) {
+            if(e.data1==1) {bowExpression[ch]=float(e.data2)/127.f;return;}
+            if(e.data1==11) {dynamics[ch]=float(e.data2)/127.f;return;}
             if(e.data1==64) {
                 const bool wasDown=sustain[ch];
                 sustain[ch]=e.data2>=64;
@@ -285,7 +311,7 @@ int32_t spm_midi_event(SPMSynth* s,uint8_t status,uint8_t d1,
     if(!s||d1>127||d2>127||offset>65535)return 0;
     switch(status&0xF0) {
         case 0x80:case 0x90:case 0xE0:break;
-        case 0xB0: if(d1!=64&&d1!=120&&d1!=123)return 0;break;
+        case 0xB0: if(d1!=1&&d1!=11&&d1!=64&&d1!=120&&d1!=123)return 0;break;
         default:return 0;
     }
     return s->queue.push({status,d1,d2,offset})?1:0;
@@ -331,7 +357,9 @@ void spm_render(SPMSynth* s,float* left,float* right,int32_t frames) {
             s->handle(s->pending[cursor++],p);
         float sample=0;
         for(int v=0;v<s->polyphony;++v)
-            sample+=s->voices[v].tick(p);
+            sample+=s->voices[v].tick(p,
+                s->bowExpression[s->voices[v].channel],
+                s->dynamics[s->voices[v].channel]);
         sample=std::tanh(sample*p[SPM_PARAM_GAIN]*0.6f);
         left[i]=sample;
         right[i]=sample;
