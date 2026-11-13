@@ -87,11 +87,14 @@ public final class AutosaveManager: ObservableObject {
         isSaving = true
         defer { isSaving = false }
         let originalGeneration = generation
+        // Capture the dirty revision BEFORE the potentially suspending
+        // snapshot request. A later edit must survive this autosave, even if
+        // it occurs before file I/O begins.
+        let savedEditRevision = editRevision
 
         guard let snapshot = await snapshotProvider(),
               originalGeneration == generation,
               projectURL == url else { return }
-        let savedEditRevision = editRevision
 
         do {
             try await fileManager.saveQuick(project: snapshot.project, to: url)
