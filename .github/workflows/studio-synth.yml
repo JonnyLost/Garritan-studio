@@ -1,4 +1,4 @@
-name: Studio Synth shared native engine and wavetable
+name: Studio Synth five-engine native validation
 
 on:
   push:
@@ -27,12 +27,16 @@ jobs:
             DAWCore/Sources/DAWCore/Audio/StudioAdditivePresets.swift \
             DAWCore/Sources/DAWCore/Audio/StudioSynthHybridPresets.swift \
             DAWCore/Sources/DAWCore/Audio/StudioAdditiveInstrument.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioGranularPatch.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioGranularPresets.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioGranularInstrument.swift \
             DAWCore/Sources/DAWCore/Audio/StudioSynthMIDIControls.swift \
             DAWCore/Sources/DAWCore/Audio/StudioSynthInstrument.swift \
             DAWCore/Sources/DAWCore/Models/Track.swift \
             DAWCore/Sources/DAWCore/Audio/PlaybackEngine.swift \
             DAWUI/Sources/DAWUI/ViewModels/ProjectViewModel.swift \
             DAWUI/Sources/DAWUI/Views/StudioSynthPanelView.swift \
+            DAWUI/Sources/DAWUI/Views/StudioGranularEditorView.swift \
             DAWUI/Sources/DAWUI/Views/StudioSynthMIDILearnView.swift \
             DAWUI/Sources/DAWUI/Views/Timeline/TrackHeaderView.swift \
             Tests/DAWCoreTests/StudioSynthTests.swift \
@@ -46,7 +50,8 @@ jobs:
             DAWUI/Sources/DAWUI/Views/StudioSynthModulationView.swift \
             Tests/DAWCoreTests/StudioSynthModulationTests.swift \
             Tests/DAWCoreTests/StudioSynthMIDILearnTests.swift \
-            Tests/DAWCoreTests/StudioAdditiveTests.swift
+            Tests/DAWCoreTests/StudioAdditiveTests.swift \
+            Tests/DAWCoreTests/StudioGranularTests.swift
       - name: Compile and execute shared modulation core on Linux
         run: |
           # Debug assertions must stay active for these executable checks.
@@ -58,6 +63,7 @@ jobs:
             DAWCore/Sources/DAWCore/Audio/StudioSynthModulation.swift \
             DAWCore/Sources/DAWCore/Audio/StudioSynthPatch.swift \
             DAWCore/Sources/DAWCore/Audio/StudioAdditivePatch.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioGranularPatch.swift \
             DAWCore/Sources/DAWCore/Audio/StudioSynthMIDIControls.swift \
             DAWCore/Sources/DAWCore/Audio/StudioSynthModulationWorker.swift \
             Tests/StudioSynthModulationStandalone/main.swift \
@@ -87,6 +93,14 @@ jobs:
             Tests/StudioAdditiveDSPStandalone/main.cpp \
             -o /tmp/studio-additive-synth
           ASAN_OPTIONS=detect_leaks=1 /tmp/studio-additive-synth
+      - name: Original Granular DSP and bounded source tests
+        run: |
+          clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I StudioGranularDSP/include \
+            StudioGranularDSP/src/StudioGranularDSP.cpp \
+            Tests/StudioGranularDSPStandalone/main.cpp \
+            -o /tmp/studio-granular-synth
+          ASAN_OPTIONS=detect_leaks=1 /tmp/studio-granular-synth
       - name: Original FM DSP
         run: |
           clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
