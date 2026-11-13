@@ -1,10 +1,31 @@
 # Studio Physical Modeling DSP
 
 Native C++17 synthesis core exposed to Swift through `StudioPhysicalDSP.h`.
-This target is intentionally standalone on `feature/studio-synth`; it has **not**
-been connected to the Studio instrument browser, DAW track routing or Hybrid
-synthesizer yet. No commercial plugins, sampled instruments or runtime DSP
-dependencies are required.
+The DSP now connects to Studio Synth's individual and Hybrid layers on
+`feature/studio-synth`. StudioPhysicalInstrument uses AVAudioSourceNode and
+the existing per-layer mixer; StudioPhysicalPatch preserves projects and
+StudioPhysicalFactoryLibrary provides twelve original starting patches. The
+Studio Synth panel exposes physical model selection and model-specific controls,
+and the common modulation and MIDI Learn systems can address continuous
+parameters. No commercial plugins, sampled instruments or additional runtime
+DSP dependencies are required.
+
+## Integration and verification
+
+- `DAWCore/Sources/DAWCore/Audio/StudioPhysicalInstrument.swift`: native
+  renderer, MIDI producer lock and planar audio source node.
+- `StudioPhysicalPatch.swift` and `StudioPhysicalPresets.swift`: saved
+  parameter identities and twelve factory configurations.
+- `StudioSynthInstrument.swift`: Hybrid and single-engine mixer/MIDI routing.
+- `StudioSynthModulation.swift`: continuous modulation and MIDI Learn targets.
+- `StudioSynthPanelView.swift`: new Physical tab, factory sounds and controls.
+- `Tests/DAWCoreTests/StudioPhysicalIntegrationTests.swift`: patch persistence,
+  factory distinctness, audio-graph offline rendering and hybrid MIDI behavior.
+- `Tests/StudioPhysicalDSPStandalone/main.cpp`: Linux/CI sanitizer exercise
+  for all eight models at six sample rates.
+
+The original native output is mono copied to two planar channels; the Studio
+layer mixer applies pan and gain. Project files store only data, never pointers.
 
 ## Model IDs
 
@@ -43,8 +64,8 @@ unchanged. The model parameter accepts integer-valued floats 0 through 7.
 MIDI note-on/off, CC1, CC2, CC11, CC64, CC120/123 and pitch bend are supported.
 Events are queued by one serialized producer and consumed on the audio thread,
 with frame offsets carried across render buffers. Eight voices maximum. The
-synth writes identical left/right samples; stereo placement belongs to a later
-integration milestone. Create/destroy/reset are **not** audio-thread operations.
+synth writes identical left/right samples; the parent Studio Synth mixer
+applies each layer's pan and level. Create/destroy/reset are **not** audio-thread operations.
 
 ## Verification
 
@@ -65,7 +86,8 @@ building this full Swift package or listening to the instruments on macOS.**
 
 These are first-pass synthetic models, not acoustically calibrated or
 performance-validated orchestral instruments. In particular, realistic
-mallet/metal plate radiation, membrane coupling, key-off damping, velocity
-layering, articulation, microphone/stereo modeling and instrument-specific
-presets remain future work. Preserve the existing synth branch and do not
+mallet/metal plate radiation, membrane coupling, fine-grained key-off damping,
+velocity layering, articulations, stereo radiation and detailed instrument
+calibration remain future work. First-pass factory sounds are synthesis
+starting points, not certified acoustic instrument recreations. Preserve the existing synth branch and do not
 merge it without the product owner's authorization.
