@@ -105,7 +105,11 @@ public actor StudioDraftRecoveryStore {
     }
 
     public func load(_ draft: StudioRecoveryDraft) async throws -> Project {
-        guard draft.fileURL.standardizedFileURL == draftURL(for: draft.id) else {
+        // FileManager may return a package URL marked isDirectory=true,
+        // while draftURL(for:) is created without that URL flag. Compare
+        // canonical filesystem paths, not the URL's directory hint.
+        guard draft.fileURL.standardizedFileURL.path ==
+                draftURL(for: draft.id).standardizedFileURL.path else {
             throw PersistenceError.invalidFormat("Recovery draft path mismatch")
         }
         return try await fileManager.load(from: draft.fileURL)
