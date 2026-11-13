@@ -100,4 +100,46 @@ final class StudioSamplerMappingBuilderTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: imported[0]), contents)
         XCTAssertEqual(try StudioSamplerSampleLibrary.importFiles(imported), imported)
     }
+    func testArticulationsHaveIndependentKeyMapsAndKeyswitches() throws {
+        let patch = try StudioSamplerMappingBuilder.makePatch(urls: [
+            file("Violin_C4_sustain_pp.wav"), file("Violin_G4_sustain_ff.wav"),
+            file("Violin_C4_pizz_rr1.wav"), file("Violin_C4_pizz_rr2.wav"),
+            file("Violin_D4_stacc_vel100.wav")
+        ])
+        XCTAssertTrue(patch.isValid)
+        let pizz = try XCTUnwrap(patch.articulations?.first(where: { $0.name == "Pizzicato" }))
+        let stacc = try XCTUnwrap(patch.articulations?.first(where: { $0.name == "Staccato" }))
+        XCTAssertNotEqual(pizz.id, stacc.id)
+        let pizzZones = patch.zones.filter { $0.articulationID == pizz.id }
+        XCTAssertEqual(pizzZones.count, 2)
+        XCTAssertEqual(pizzZones.map(\.lowestNote), [0, 0])
+        XCTAssertEqual(pizzZones.map(\.highestNote), [127, 127])
+        XCTAssertEqual(pizzZones.map(\.roundRobinIndex), [0, 1])
+        XCTAssertEqual(patch.zones.filter { ($0.articulationID ?? 0) == 0 }.count, 2)
+        XCTAssertEqual(patch.defaultKeyswitchNote, 23)
+        XCTAssertEqual(StudioSamplerMappingBuilder.noteNumber(in: file("Cello_midi36_pp.wav")), 36)
+        XCTAssertEqual(StudioSamplerMappingBuilder.noteNumber(in: file("Cello_note48_ff.wav")), 48)
+        XCTAssertEqual(StudioSamplerMappingBuilder.articulationHint(
+            in: file("Cello_D3_sustain.wav")), nil)
+    }
+
+    func testAppendReusesArticulationsAndPreservesExistingEdits() throws {
+        let original = try StudioSamplerMappingBuilder.makePatch(urls: [
+            file("Violin_C4_pizz.wav")
+        ])
+        var edited = original
+        edited.zones[0].trimStartFrame = 24
+        edited.zones[0].trimEndFrame = 400
+        let added = try StudioSamplerMappingBuilder.makePatch(urls: [
+            file("Violin_G4_pizz.wav"), file("Violin_D4_stacc.wav")
+        ])
+        let combined = try StudioSamplerMappingBuilder.append(added, to: edited)
+        XCTAssertTrue(combined.isValid)
+        XCTAssertEqual(combined.zones.count, 3)
+        XCTAssertEqual(combined.zones[0].trimStartFrame, 24)
+        XCTAssertEqual(combined.articulations?.count, 2)
+        XCTAssertEqual(combined.zones[0].articulationID, combined.zones[1].articulationID)
+        XCTAssertNotEqual(combined.zones[1].articulationID, combined.zones[2].articulationID)
+    }
+
 }
