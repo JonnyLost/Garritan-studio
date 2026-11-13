@@ -10,6 +10,7 @@ import UniformTypeIdentifiers
 public struct MainWindowView: View {
     @Environment(\.studioPalette) private var palette
     @StateObject private var viewModel: ProjectViewModel
+    private let snapshotBridge: StudioProjectSnapshotBridge?
     
     // Global key monitor for keyboard shortcuts
     @State private var keyMonitor = GlobalKeyMonitor()
@@ -79,7 +80,11 @@ public struct MainWindowView: View {
     private let rulerHeight: CGFloat = 30
     private let trackHeaderWidth: CGFloat = 200
     
-    public init(project: Project = ProjectFactory.createNewProject()) {
+    public init(
+        project: Project = ProjectFactory.createNewProject(),
+        snapshotBridge: StudioProjectSnapshotBridge? = nil
+    ) {
+        self.snapshotBridge = snapshotBridge
         _viewModel = StateObject(wrappedValue: ProjectViewModel(project: project))
         // Initialize UI state from project's dawState
         _showVRack = State(initialValue: project.dawState.showVRack)
@@ -263,6 +268,9 @@ public struct MainWindowView: View {
             }
         }
         .onAppear {
+            snapshotBridge?.register(projectID: viewModel.project.id) { [weak viewModel] in
+                viewModel?.project
+            }
             setupInitialState()
             if viewModel.isEngineReady {
                 NotificationCenter.default.post(
@@ -278,6 +286,7 @@ public struct MainWindowView: View {
             }
         }
         .onDisappear {
+            snapshotBridge?.unregister(projectID: viewModel.project.id)
             // Stop keyboard monitor when view disappears (e.g., project reload)
             keyMonitor.stop()
         }
@@ -308,10 +317,6 @@ public struct MainWindowView: View {
             Task {
                 await viewModel.restoreAllPluginStates()
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .requestProjectForSave)) { _ in
-            // Send current project back for saving
-            NotificationCenter.default.post(name: .projectDataForSave, object: viewModel.project)
         }
     }
     

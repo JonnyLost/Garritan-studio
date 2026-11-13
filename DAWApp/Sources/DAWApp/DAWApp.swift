@@ -31,7 +31,10 @@ struct DAWApp: App {
         // Main document window
         WindowGroup(StudioApplicationIdentity.displayName) {
             StudioAppearanceHost {
-                MainWindowView(project: appState.currentProject)
+                MainWindowView(
+                    project: appState.currentProject,
+                    snapshotBridge: appState.snapshotBridge
+                )
                 .onAppear {
                     DispatchQueue.main.async {
                         NSApplication.shared.activate(ignoringOtherApps: true)

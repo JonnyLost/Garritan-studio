@@ -15,6 +15,7 @@ final class AppState: ObservableObject {
     @Published private(set) var projectID = UUID()
     @Published var projectErrorMessage: String?
 
+    let snapshotBridge = StudioProjectSnapshotBridge()
     let recentProjectsManager = RecentProjectsManager()
     let autosaveManager: AutosaveManager
     private let fileManager: ProjectFileManager
@@ -69,19 +70,9 @@ final class AppState: ObservableObject {
     private func captureProjectSnapshot() -> StudioAutosaveSnapshot {
         NotificationCenter.default.post(name: .savePluginStates, object: nil)
 
-        final class CaptureBox {
-            var project: Project?
-        }
-        let box = CaptureBox()
-        let observer = NotificationCenter.default.addObserver(
-            forName: .projectDataForSave, object: nil, queue: nil
-        ) { notification in
-            box.project = notification.object as? Project
-        }
-        NotificationCenter.default.post(name: .requestProjectForSave, object: nil)
-        NotificationCenter.default.removeObserver(observer)
-
-        let project = box.project ?? currentProject
+        // Plugin state gathering still notifies the composing view; the
+        // document snapshot itself is now a typed project-scoped callback.
+        let project = snapshotBridge.snapshot(for: currentProject.id) ?? currentProject
         return StudioAutosaveSnapshot(project: project, ticket: revision.saveTicket())
     }
 
