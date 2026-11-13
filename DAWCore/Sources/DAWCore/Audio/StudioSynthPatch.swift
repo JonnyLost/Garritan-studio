@@ -8,6 +8,7 @@ public enum StudioSynthEngine: String, Codable, CaseIterable, Sendable, Identifi
     case fm
     case wavetable
     case additive
+    case granular
 
     public var id: String { rawValue }
     public var title: String {
@@ -16,6 +17,7 @@ public enum StudioSynthEngine: String, Codable, CaseIterable, Sendable, Identifi
         case .fm: return "FM"
         case .wavetable: return "Wavetable"
         case .additive: return "Additive"
+        case .granular: return "Granular"
         }
     }
 }
@@ -33,6 +35,7 @@ public struct StudioSynthLayer: Codable, Equatable, Identifiable, Sendable {
     public var fmPatch: StudioFMPatch?
     public var wavetablePatch: StudioWavetablePatch?
     public var additivePatch: StudioAdditivePatch?
+    public var granularPatch: StudioGranularPatch?
 
     public init(id: UUID = UUID(), engine: StudioSynthEngine,
                 name: String? = nil, enabled: Bool = true,
@@ -40,7 +43,8 @@ public struct StudioSynthLayer: Codable, Equatable, Identifiable, Sendable {
                 analogPatch: StudioAnalogPatch? = nil,
                 fmPatch: StudioFMPatch? = nil,
                 wavetablePatch: StudioWavetablePatch? = nil,
-                additivePatch: StudioAdditivePatch? = nil) {
+                additivePatch: StudioAdditivePatch? = nil,
+                granularPatch: StudioGranularPatch? = nil) {
         self.id = id
         self.engine = engine
         self.name = name ?? engine.title
@@ -51,6 +55,7 @@ public struct StudioSynthLayer: Codable, Equatable, Identifiable, Sendable {
         self.fmPatch = fmPatch
         self.wavetablePatch = wavetablePatch
         self.additivePatch = additivePatch
+        self.granularPatch = granularPatch
     }
 
     public func validate() -> Bool {
@@ -77,6 +82,8 @@ public struct StudioSynthLayer: Codable, Equatable, Identifiable, Sendable {
             return wavetablePatch?.validate() ?? true
         case .additive:
             return additivePatch?.validate() ?? true
+        case .granular:
+            return granularPatch?.validate() ?? true
         }
     }
 }
