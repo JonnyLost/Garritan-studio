@@ -26,16 +26,19 @@ private final class StudioSynthRuntimeLayer {
     let analog: StudioAnalogInstrument?
     let fm: StudioFMInstrument?
     let wavetable: StudioWavetableInstrument?
+    let additive: StudioAdditiveInstrument?
 
     var source: AVAudioNode {
         if let analog { return analog.audioNode }
         if let fm { return fm.audioNode }
-        return wavetable!.audioNode
+        if let wavetable { return wavetable.audioNode }
+        return additive!.audioNode
     }
     var format: AVAudioFormat {
         if let analog { return analog.format }
         if let fm { return fm.format }
-        return wavetable!.format
+        if let wavetable { return wavetable.format }
+        return additive!.format
     }
 
     init(_ layer: StudioSynthLayer, sampleRate: Double) throws {
@@ -51,18 +54,28 @@ private final class StudioSynthRuntimeLayer {
             analog = synth
             fm = nil
             wavetable = nil
+            additive = nil
         case .fm:
             let synth = try StudioFMInstrument(sampleRate: sampleRate)
             try synth.apply(layer.fmPatch ?? StudioFMPatch())
             analog = nil
             fm = synth
             wavetable = nil
+            additive = nil
         case .wavetable:
             let synth = try StudioWavetableInstrument(sampleRate: sampleRate)
             try synth.apply(layer.wavetablePatch ?? StudioWavetablePatch())
             analog = nil
             fm = nil
             wavetable = synth
+            additive = nil
+        case .additive:
+            let synth = try StudioAdditiveInstrument(sampleRate: sampleRate)
+            try synth.apply(layer.additivePatch ?? StudioAdditivePatch())
+            analog = nil
+            fm = nil
+            wavetable = nil
+            additive = synth
         }
         mixer.outputVolume = layer.gain
         mixer.pan = layer.pan
@@ -78,14 +91,19 @@ private final class StudioSynthRuntimeLayer {
             return fm.midiMessage(status: status, data1: data1,
                                   data2: data2, frameOffset: frameOffset)
         }
-        return wavetable!.midiMessage(status: status, data1: data1,
-                                      data2: data2, frameOffset: frameOffset)
+        if let wavetable {
+            return wavetable.midiMessage(status: status, data1: data1,
+                                         data2: data2, frameOffset: frameOffset)
+        }
+        return additive!.midiMessage(status: status, data1: data1,
+                                     data2: data2, frameOffset: frameOffset)
     }
 
     func allNotesOff() -> Bool {
         if let analog { return analog.allNotesOff() }
         if let fm { return fm.allNotesOff() }
-        return wavetable!.allNotesOff()
+        if let wavetable { return wavetable.allNotesOff() }
+        return additive!.allNotesOff()
     }
 }
 
@@ -176,6 +194,8 @@ public final class StudioSynthInstrument {
             return layer.fm?.parameter(param)
         case .wavetable(let param):
             return layer.wavetable?.parameter(param)
+        case .additive(let param):
+            return layer.additive?.parameter(param)
         }
     }
 
@@ -190,6 +210,8 @@ public final class StudioSynthInstrument {
             return layer.fm?.setParameter(param, value: value) ?? false
         case .wavetable(let param):
             return layer.wavetable?.setParameter(param, value: value) ?? false
+        case .additive(let param):
+            return layer.additive?.setParameter(param, value: value) ?? false
         }
     }
 
@@ -353,6 +375,18 @@ public final class StudioSynthInstrument {
         let destination = StudioSynthModDestination.wavetable(parameter)
         return controlWorker()?.setBase(layer: id, destination: destination,
                                           value: value) ??
+            writeParameter(id: id, destination: destination, value: value)
+    }
+
+    public func setAdditiveParameter(id: UUID, parameter: StudioAdditiveParameter,
+                                     value: Float) -> Bool {
+        guard parameter.valid(value),
+              runtime.first(where: { $0.id == id })?.additive != nil else {
+            return false
+        }
+        let destination = StudioSynthModDestination.additive(parameter)
+        return controlWorker()?.setBase(layer: id, destination: destination,
+                                        value: value) ??
             writeParameter(id: id, destination: destination, value: value)
     }
 
