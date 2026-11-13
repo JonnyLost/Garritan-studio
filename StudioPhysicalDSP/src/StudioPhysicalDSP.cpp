@@ -138,7 +138,7 @@ struct Voice {
     float airState=0.f,lipState=0.f;
     std::array<PercussionMode,kPercussionModes> percussion{};
     uint64_t percussionTail=0;
-    uint32_t attackSamples=0;
+    uint32_t attackSamples=0,tailFadeSamples=1;
     double fundamental=440.0;
     int model=0;
     Mode wood{},metal{};
@@ -185,6 +185,7 @@ struct Voice {
         burst=1.f;
         burstDecay=float(std::exp(-8.0/double(std::max(1u,attackSamples))));
         percussionTail=uint64_t(rate*std::min(20.0,tail*6.0));
+        tailFadeSamples=std::max(1u,uint32_t(rate*0.02));
         env=1.f; // Preserve the fast transient of a mallet/striker.
     }
     void start(uint8_t n,uint8_t vel,uint8_t ch,uint64_t order,
@@ -233,6 +234,11 @@ struct Voice {
                 if(env<=0.f) {stop();return 0.f;}
             }
             if(age>=percussionTail) {stop();return 0.f;}
+            // Prevent clicks when a long metallic ring reaches the bounded
+            // maximum tail time: fade the final 20 ms to exact silence.
+            const uint64_t remaining=percussionTail-age;
+            if(remaining<tailFadeSamples)
+                sum*=float(remaining)/float(tailFadeSamples);
             return sum*env*velocity*dynamics;
         }
         // Only read cells written since this note was started. Old buffer
