@@ -125,4 +125,27 @@ final class OstinatoPatternTests: XCTestCase {
         XCTAssertEqual(decoded.name, "Existing Session")
         XCTAssertTrue((decoded.ostinatoPatterns ?? []).isEmpty)
     }
+    func testAuditionNotesHaveFinitePositiveDurationsWithinPattern() {
+        let pattern = OstinatoPattern.starter(mode: .melodic, beatsPerBar: 3)
+        let notes = pattern.midiEvents()
+        XCTAssertFalse(notes.isEmpty)
+        for event in notes {
+            guard case .note(let data) = event.type else {
+                return XCTFail("Audition should render ordinary MIDI notes")
+            }
+            XCTAssertTrue(event.beatPosition.isFinite)
+            XCTAssertGreaterThan(data.duration, 0)
+            XCTAssertLessThanOrEqual(event.beatPosition + data.duration,
+                                     pattern.durationInBeats + 0.000001)
+        }
+    }
+
+    func testPreviewRenderingDoesNotMutateSavedPattern() throws {
+        let original = OstinatoPattern.starter(mode: .rhythmic)
+        let before = try JSONEncoder().encode(original)
+        _ = original.midiEvents()
+        _ = original.midiEvents()
+        XCTAssertEqual(try JSONEncoder().encode(original), before)
+    }
+
 }
