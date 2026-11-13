@@ -355,6 +355,17 @@ public actor ProjectFileManager {
 
     // MARK: - Loading
     
+    /// Restore managed Studio Sampler paths after deserializing projects.
+    /// Missing files remain referenced so the user may relink them.
+    private func recoverManagedSamplerReferences(in project: inout Project) {
+        for index in project.tracks.indices {
+            guard let patch = project.tracks[index].studioSamplerPatch,
+                  let resolved = try? StudioSamplerSampleLibrary.resolve(patch)
+            else { continue }
+            project.tracks[index].studioSamplerPatch = resolved
+        }
+    }
+
     /// Load project from a URL
     public func load(from url: URL) async throws -> Project {
         let fm = FileManager.default
@@ -422,13 +433,16 @@ public actor ProjectFileManager {
                 }
             }
             
+            recoverManagedSamplerReferences(in: &project)
             print("[ProjectFileManager] Loaded project from: \(url.path)")
             return project
             
         } catch {
             // Try loading as plain Project (legacy format)
             print("[ProjectFileManager] Trying legacy format...")
-            return try decoder.decode(Project.self, from: data)
+            var legacy = try decoder.decode(Project.self, from: data)
+            recoverManagedSamplerReferences(in: &legacy)
+            return legacy
         }
     }
     
