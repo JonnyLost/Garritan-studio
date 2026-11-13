@@ -374,6 +374,7 @@ public actor ProjectFileManager {
     
     /// Load project from a URL
     public func load(from url: URL) async throws -> Project {
+        _ = try StudioInterruptedSaveRecovery.restoreIfNecessary(at: url)
         let fm = FileManager.default
         
         // Determine if it's a package or single file
@@ -461,6 +462,7 @@ public actor ProjectFileManager {
     
     /// Quick load for recent files check - just get metadata
     public func loadMetadata(from url: URL) async throws -> ProjectMetadataInfo {
+        _ = try StudioInterruptedSaveRecovery.restoreIfNecessary(at: url)
         let fm = FileManager.default
         
         var isDirectory: ObjCBool = false
