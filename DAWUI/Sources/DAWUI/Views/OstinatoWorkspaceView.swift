@@ -7,6 +7,7 @@ public struct OstinatoWorkspaceView: View {
     @Environment(\.studioPalette) private var palette
     @ObservedObject public var viewModel: ProjectViewModel
 
+    @StateObject private var auditioner = OstinatoAuditioner()
     @State private var selectedPatternID: UUID?
     @State private var statusMessage: String?
 
@@ -72,13 +73,17 @@ public struct OstinatoWorkspaceView: View {
             }
         }
         .background(palette.surface)
+        .onDisappear { auditioner.stop() }
+        .onReceive(viewModel.transportState.transportEventSubject) { _ in auditioner.stop() }
+        .onReceive(viewModel.transportState.tempoSubject) { _ in auditioner.stop() }
+        .onChange(of: viewModel.selectedTrackID) { _ in auditioner.stop() }
     }
 
     private func patternToolbar(_ pattern: OstinatoPattern) -> some View {
         HStack(spacing: 14) {
             Menu {
                 ForEach(patterns) { item in
-                    Button(item.name) { selectedPatternID = item.id; statusMessage = nil }
+                    Button(item.name) { auditioner.stop(); selectedPatternID = item.id; statusMessage = nil }
                 }
             } label: {
                 Label(pattern.name, systemImage: "chevron.down")
@@ -121,6 +126,7 @@ public struct OstinatoWorkspaceView: View {
             .pickerStyle(.menu)
 
             Button(role: .destructive) {
+                auditioner.stop()
                 viewModel.deleteOstinatoPattern(id: pattern.id)
                 selectedPatternID = patterns.first?.id
                 statusMessage = nil
@@ -249,6 +255,25 @@ public struct OstinatoWorkspaceView: View {
             }
 
             Spacer()
+            Toggle("Loop", isOn: $auditioner.loops)
+                .toggleStyle(.checkbox)
+                .fixedSize()
+            Button {
+                if auditioner.isAuditioning {
+                    auditioner.stop()
+                } else if let track = selectedMIDITarget,
+                          !viewModel.transportState.isPlaying {
+                    auditioner.start(pattern: pattern, track: track.id,
+                        tempo: viewModel.transportState.tempo.bpm,
+                        engine: viewModel.playbackEngine)
+                }
+            } label: {
+                Label(auditioner.isAuditioning ? "Stop Preview" : "Preview",
+                      systemImage: auditioner.isAuditioning ? "stop.fill" : "play.fill")
+            }
+            .disabled(!auditioner.isAuditioning &&
+                (selectedMIDITarget == nil || pattern.midiEvents().isEmpty ||
+                 viewModel.transportState.isPlaying))
             Text("\(pattern.midiEvents().count) notes · \(pattern.durationInBeats.formatted()) beats")
                 .font(.caption)
                 .foregroundStyle(palette.secondaryText)
@@ -270,6 +295,7 @@ public struct OstinatoWorkspaceView: View {
     }
 
     private func createPattern(_ mode: OstinatoMode) {
+        auditioner.stop()
         let signature = viewModel.project.timeSignature
         let beats = Double(signature.numerator) * 4.0 / Double(max(1, signature.denominator))
         let pattern = OstinatoPattern.starter(mode: mode, beatsPerBar: beats)
@@ -280,6 +306,7 @@ public struct OstinatoWorkspaceView: View {
 
     private func editPattern(_ update: (inout OstinatoPattern) -> Void) {
         guard var pattern = selectedPattern else { return }
+        auditioner.stop()
         update(&pattern)
         viewModel.saveOstinatoPattern(pattern)
         statusMessage = nil
