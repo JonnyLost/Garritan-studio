@@ -9,6 +9,7 @@ public struct StudioSynthPanelView: View {
     public let trackID: TrackID
     @State private var focusedEngine: StudioSynthEngine?
     @State private var selectedLayerID: UUID?
+    @State private var selectedAdditiveHarmonic = 0
     @State private var panelError: String?
 
     public init(viewModel: ProjectViewModel, trackID: TrackID) {
@@ -636,19 +637,20 @@ public struct StudioSynthPanelView: View {
         }
     }
 
-    /// The amplitude bars are deliberately view-only: the horizontal
-    /// sliders below are accessible, precise and participate in MIDI Learn.
+    /// Select one of the sixteen harmonics to edit its independent envelope.
+    /// The other partials and all active Hybrid layers continue sounding.
     private func additiveEditor(_ layer: StudioSynthLayer) -> some View {
         let harmonics: [Float] = (0..<16).map {
             additiveValue(StudioAdditiveParameter.partial($0)!, layerID: layer.id)
         }
+        let selected = min(15, max(0, selectedAdditiveHarmonic))
         return VStack(alignment: .leading, spacing: 14) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("HARMONIC SCULPTOR")
                         .font(.caption.weight(.bold))
                         .foregroundStyle(.mint)
-                    Text("16 sine partials · spectral evolution · original native additive voices")
+                    Text("16 independent partials · evolving spectrum · native DSP")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -659,38 +661,101 @@ public struct StudioSynthPanelView: View {
             }
             HStack(alignment: .bottom, spacing: 5) {
                 ForEach(0..<16, id: \.self) { index in
-                    VStack(spacing: 6) {
-                        Spacer(minLength: 0)
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(LinearGradient(colors: [.mint.opacity(0.45), .mint],
-                                                 startPoint: .bottom, endPoint: .top))
-                            .frame(height: max(3, CGFloat(harmonics[index]) * 125))
-                        Text("\(index + 1)")
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundStyle(.secondary)
+                    Button {
+                        selectedAdditiveHarmonic = index
+                    } label: {
+                        VStack(spacing: 6) {
+                            Spacer(minLength: 0)
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(index == selected ? Color.orange : Color.mint)
+                                .frame(height: max(3, CGFloat(harmonics[index]) * 125))
+                            Text("\(index + 1)")
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(index == selected ? .orange : .secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .contentShape(Rectangle())
                     }
-                    .frame(maxWidth: .infinity)
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Select harmonic \(index+1)")
                 }
             }
             .frame(height: 160)
             .padding(12)
             .background(Color.black.opacity(0.4),
                         in: RoundedRectangle(cornerRadius: 10))
-            .accessibilityLabel("Current additive partial spectrum, harmonics 1 through 16")
-            Text("Each harmonic is independently adjustable. Spectral Tilt shapes the entire spectrum; Evolution starts brighter or darker and gradually moves toward the sustained spectrum.")
+
+            Text("Click a harmonic bar to edit its own attack, decay, sustain, release and motion. The existing master ADSR still controls the complete note.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+            Text("MASTER VOICE & SPECTRAL EVOLUTION")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.mint)
             LazyVGrid(columns: [GridItem(.flexible(minimum: 260)),
                                 GridItem(.flexible(minimum: 260))], spacing: 11) {
                 ForEach(StudioAdditiveParameter.allCases.filter {
-                    $0.harmonicIndex == nil
+                    $0.rawValue >= 0 && $0.rawValue < 9
                 }, id: \.rawValue) { parameter in
                     additiveSlider(parameter, layerID: layer.id)
                 }
             }
+
             Divider()
-            Text("INDIVIDUAL HARMONICS")
+            Text("SPECTRAL ANIMATION")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.mint)
+            Text("Motion Depth introduces cyclic harmonic movement, Rate controls speed, Spread offsets partial phases, and Shape blends sine and triangle curves. All motion runs per voice with no additional timer.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            LazyVGrid(columns: [GridItem(.flexible(minimum: 260)),
+                                GridItem(.flexible(minimum: 260))], spacing: 11) {
+                ForEach(StudioAdditiveParameter.allCases.filter {
+                    $0.rawValue >= 25 && $0.rawValue <= 29
+                }, id: \.rawValue) { parameter in
+                    additiveSlider(parameter, layerID: layer.id)
+                }
+            }
+            Text("Harmonic Envelope Mix at 0% preserves older sounds; increase it to hear each partial's separate envelope. Animation is disabled at 0% Motion Depth.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            Divider()
+            HStack(spacing: 8) {
+                Text("HARMONIC \(selected+1) · INDEPENDENT ENVELOPE")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.orange)
+                Spacer()
+                Button("Reset Shape") {
+                    for control in StudioAdditiveHarmonicControl.allCases {
+                        if let parameter = StudioAdditiveParameter.harmonic(
+                            selected, control: control) {
+                            viewModel.setStudioSynthAdditiveParameter(
+                                parameter, value: parameter.defaultValue,
+                                for: trackID, layerID: layer.id)
+                        }
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Restore this harmonic's ADSR and motion depth only")
+            }
+            LazyVGrid(columns: [GridItem(.flexible(minimum: 260)),
+                                GridItem(.flexible(minimum: 260))], spacing: 11) {
+                if let level = StudioAdditiveParameter.partial(selected) {
+                    additiveSlider(level, layerID: layer.id)
+                }
+                ForEach(StudioAdditiveHarmonicControl.allCases,
+                        id: \.rawValue) { control in
+                    if let parameter = StudioAdditiveParameter.harmonic(
+                        selected, control: control) {
+                        additiveSlider(parameter, layerID: layer.id)
+                    }
+                }
+            }
+
+            Divider()
+            Text("ALL HARMONIC LEVELS")
                 .font(.caption.weight(.bold))
                 .foregroundStyle(.mint)
             LazyVGrid(columns: [GridItem(.flexible(minimum: 260)),
