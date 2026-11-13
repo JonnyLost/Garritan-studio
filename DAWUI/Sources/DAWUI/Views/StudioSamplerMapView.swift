@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import UniformTypeIdentifiers
 import DAWCore
 
@@ -24,6 +25,14 @@ public struct StudioSamplerMapView: View {
     @State private var relinkMessage: String?
     @State private var isImporting = false
     @State private var errorMessage: String?
+    @State private var saveNotice: String?
+    @State private var showLibrary = false
+    @State private var showPackageImporter = false
+    @State private var showSaveSheet = false
+    @State private var exportInsteadOfSave = false
+    @State private var instrumentName = "New Instrument"
+    @State private var instrumentCategory = "Other"
+    @State private var instrumentTags = ""
 
     public init(viewModel: ProjectViewModel, trackID: TrackID) {
         self.viewModel = viewModel
@@ -54,6 +63,18 @@ public struct StudioSamplerMapView: View {
                 Spacer()
                 Text("\(draft?.zones.count ?? 0) zones")
                     .font(.caption.monospacedDigit()).foregroundColor(.secondary)
+                Menu {
+                    Button("Browse Instrument Library…") { showLibrary = true }
+                    Button("Import .studioinstrument…") { showPackageImporter = true }
+                    Divider()
+                    Button("Save to Studio Library…") { beginSaving(export: false) }
+                        .disabled(draft?.isValid != true)
+                    Button("Export Portable Instrument…") { beginSaving(export: true) }
+                        .disabled(draft?.isValid != true)
+                } label: {
+                    Label("Instruments", systemImage: "square.stack.3d.up")
+                }
+                .disabled(isImporting)
                 Button {
                     showImporter = true
                 } label: {
@@ -154,6 +175,10 @@ public struct StudioSamplerMapView: View {
                 }
             }
 
+            if let saveNotice {
+                Label(saveNotice, systemImage: "checkmark.circle")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             if let errorMessage {
                 HStack {
                     Image(systemName: "exclamationmark.triangle")
@@ -202,6 +227,139 @@ public struct StudioSamplerMapView: View {
             switch result {
             case .success(let urls): importSamples(urls)
             case .failure(let error): errorMessage = error.localizedDescription
+            }
+        }
+        .fileImporter(
+            isPresented: $showPackageImporter,
+            allowedContentTypes: [.folder, .data],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                if let url = urls.first { loadPackage(url) }
+            case .failure(let error): errorMessage = error.localizedDescription
+            }
+        }
+        .sheet(isPresented: $showLibrary) {
+            StudioSamplerLibraryBrowser(onChoose: { url in loadPackage(url) })
+        }
+        .sheet(isPresented: $showSaveSheet) {
+            instrumentSaveSheet
+        }
+    }
+
+    private var instrumentSaveSheet: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(exportInsteadOfSave ? "Export Portable Instrument" : "Save Studio Instrument")
+                .font(.title3.weight(.semibold))
+            Text("The instrument package will contain the mapping, performance settings and independent copies of all recordings.")
+                .font(.callout).foregroundStyle(.secondary)
+            TextField("Instrument name", text: $instrumentName)
+                .textFieldStyle(.roundedBorder)
+            TextField("Category (e.g. Strings, Brass, Percussion)", text: $instrumentCategory)
+                .textFieldStyle(.roundedBorder)
+            TextField("Tags (comma-separated)", text: $instrumentTags)
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                Button("Cancel") { showSaveSheet = false }
+                Spacer()
+                Button(exportInsteadOfSave ? "Choose Export Location…" : "Save to Library") {
+                    guard let patch = draft else { return }
+                    let metadata = currentMetadata
+                    guard metadata.isValid, patch.isValid else { return }
+                    showSaveSheet = false
+                    if exportInsteadOfSave {
+                        DispatchQueue.main.async { exportPackage(patch, metadata: metadata) }
+                    } else {
+                        saveToLibrary(patch, metadata: metadata)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!currentMetadata.isValid || draft?.isValid != true)
+            }
+        }
+        .padding(20)
+        .frame(width: 450)
+    }
+
+    private var currentMetadata: StudioSamplerInstrumentPackage.Metadata {
+        StudioSamplerInstrumentPackage.Metadata(
+            name: instrumentName, category: instrumentCategory,
+            tags: instrumentTags.split(separator: ",").map(String.init)
+        )
+    }
+
+    private func beginSaving(export: Bool) {
+        exportInsteadOfSave = export
+        if instrumentName == "New Instrument" {
+            instrumentName = viewModel.project.track(withID: trackID)?.name ?? "New Instrument"
+        }
+        showSaveSheet = true
+    }
+
+    private func saveToLibrary(_ patch: StudioSamplerPatch,
+                               metadata: StudioSamplerInstrumentPackage.Metadata) {
+        isImporting = true
+        errorMessage = nil
+        Task { @MainActor in
+            defer { isImporting = false }
+            do {
+                _ = try await Task.detached(priority: .userInitiated) {
+                    try StudioSamplerInstrumentPackage.saveToLibrary(patch, metadata: metadata)
+                }.value
+                saveNotice = "Saved \(metadata.name) to Studio's instrument library."
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func exportPackage(_ patch: StudioSamplerPatch,
+                               metadata: StudioSamplerInstrumentPackage.Metadata) {
+        let panel = NSSavePanel()
+        panel.title = "Export Studio Instrument"
+        panel.prompt = "Export"
+        panel.nameFieldStringValue = metadata.name + ".studioinstrument"
+        panel.canCreateDirectories = true
+        panel.begin { response in
+            guard response == .OK, let chosen = panel.url else { return }
+            let destination = chosen.pathExtension.lowercased() ==
+                StudioSamplerInstrumentPackage.fileExtension
+                ? chosen : chosen.appendingPathExtension(
+                    StudioSamplerInstrumentPackage.fileExtension)
+            Task { @MainActor in
+                isImporting = true
+                errorMessage = nil
+                defer { isImporting = false }
+                do {
+                    try await Task.detached(priority: .userInitiated) {
+                        try StudioSamplerInstrumentPackage.export(
+                            patch, metadata: metadata, to: destination)
+                    }.value
+                    saveNotice = "Exported \(metadata.name) as a portable instrument."
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func loadPackage(_ url: URL) {
+        guard !isImporting else { return }
+        isImporting = true
+        errorMessage = nil
+        saveNotice = nil
+        Task { @MainActor in
+            defer { isImporting = false }
+            do {
+                let (patch, metadata) = try await Task.detached(priority: .userInitiated) {
+                    try StudioSamplerInstrumentPackage.load(url)
+                }.value
+                try viewModel.loadStudioSampler(for: trackID, patch: patch)
+                restoreSaved()
+                saveNotice = "Loaded \(metadata.name) from its instrument package."
+            } catch {
+                errorMessage = error.localizedDescription
             }
         }
     }
@@ -512,8 +670,8 @@ public struct StudioSamplerMapView: View {
             patch.dynamicsCC1 = draft.dynamicsCC1
             patch.expressionCC11 = draft.expressionCC11
             patch.envelope = draft.envelope
-            patch.articulations = draft.articulations
-            patch.defaultKeyswitchNote = draft.defaultKeyswitchNote
+            patch.articulations = draft.articulations ?? patch.articulations
+            patch.defaultKeyswitchNote = draft.defaultKeyswitchNote ?? patch.defaultKeyswitchNote
             patch.selectedArticulationID = draft.selectedArticulationID
             // Preserve distinct edits when the same imported recording
             // appears in multiple articulations or velocity zones. Consume
@@ -600,13 +758,9 @@ public struct StudioSamplerMapView: View {
                     try StudioSamplerSampleLibrary.importFiles(urls)
                 }.value
                 let added = try StudioSamplerMappingBuilder.makePatch(urls: files)
-                if var patch = draft {
-                    guard patch.zones.count + added.zones.count <= 128 else {
-                        throw StudioSamplerMappingBuilder.MappingError.tooManySamples
-                    }
+                if let patch = draft {
                     let first = patch.zones.count
-                    patch.zones.append(contentsOf: added.zones)
-                    draft = patch
+                    draft = try StudioSamplerMappingBuilder.append(added, to: patch)
                     selectedIndex = first
                 } else {
                     draft = added
