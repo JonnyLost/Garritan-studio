@@ -343,7 +343,12 @@ struct InstrumentSlotButton: View {
     
     var body: some View {
         Button(action: {
-            showBrowser = true
+            // Reopen a native sampler as an instrument, not a file picker.
+            if track.studioSamplerPatch != nil {
+                showStudioSamplerMap = true
+            } else {
+                showBrowser = true
+            }
         }) {
             HStack(spacing: 4) {
                 Image(systemName: "pianokeys")
@@ -515,6 +520,7 @@ struct InstrumentBrowserSheet: View {
     @State private var inspectedRackSlots: [ARIARackSlot] = []
     @State private var rackInspectionSucceeded = false
     @State private var rackLoadTarget: Int? = nil
+    @State private var showSamplerEditor = false
     @State private var showSampleImporter = false
     // Visual rack only: ARIA's individual slot state is not exposed here yet.
     // Do not infer a slot assignment from the track's AU instrument identity.
@@ -550,8 +556,37 @@ struct InstrumentBrowserSheet: View {
         matchingPrograms.first { $0.id == selectedProgramID }
     }
     
-    var body: some View {
+    /// Keep the browser sheet open while replacing its content with the
+    /// actual sampler editor. The user sees an instrument immediately rather
+    /// than a file picker or a hidden panel behind the browser.
+    private var samplerEditorContent: some View {
         VStack(spacing: 0) {
+            HStack {
+                Button {
+                    showSamplerEditor = false
+                } label: {
+                    Label("Instruments", systemImage: "chevron.left")
+                }
+                .buttonStyle(.borderless)
+                Spacer()
+                Text("Studio Sampler")
+                    .font(.headline)
+                Spacer()
+                Button("Done") { isPresented = false }
+            }
+            .padding(12)
+            Divider()
+            StudioSamplerInstrumentView(viewModel: viewModel, trackID: trackID)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    var body: some View {
+        Group {
+            if showSamplerEditor {
+                samplerEditorContent
+            } else {
+                VStack(spacing: 0) {
             HStack(spacing: 12) {
                 Image(systemName: "pianokeys")
                     .font(.title2)
@@ -616,13 +651,21 @@ struct InstrumentBrowserSheet: View {
                         .font(.caption).foregroundColor(.secondary)
                 }
                 Spacer()
-                Button {
-                    showSampleImporter = true
-                } label: {
-                    Label("Load Samples…", systemImage: "waveform")
+                VStack(alignment: .trailing, spacing: 6) {
+                    Button {
+                        openStudioSampler()
+                    } label: {
+                        Label("Open Studio Sampler", systemImage: "slider.horizontal.3")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isLoading)
+                    Button("Quick Import Samples…") {
+                        showSampleImporter = true
+                    }
+                    .font(.caption)
+                    .buttonStyle(.borderless)
+                    .disabled(isLoading)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(isLoading)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -832,6 +875,8 @@ struct InstrumentBrowserSheet: View {
                         }
                     }
                 }
+            }
+        }
             }
         }
         .frame(width: 920, height: 610)
@@ -1051,6 +1096,18 @@ struct InstrumentBrowserSheet: View {
         print(message)  // Also print for good measure
     }
     
+    /// Selecting Studio Sampler opens the full instrument interface before
+    /// importing any audio. Reopening it preserves an already loaded mapping.
+    private func openStudioSampler() {
+        loadError = nil
+        do {
+            try viewModel.openEmptyStudioSampler(for: trackID)
+            showSamplerEditor = true
+        } catch {
+            loadError = error.localizedDescription
+        }
+    }
+
     /// Native instrument selection bypasses third-party AU discovery and hosting.
     private func loadNativeStudioAnalog() {
         loadError = nil
