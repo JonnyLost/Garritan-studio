@@ -69,10 +69,28 @@ public actor StudioDraftRecoveryStore {
             options: []
         ) else { return [] }
 
+        // Include the canonical name of any hidden completed backup.
+        // ProjectFileManager.loadMetadata can restore that backup if a crash
+        // occurred after the old package moved but before promotion.
+        // Never promote an incomplete .staging directory.
+        let backupMarker = ".dawproj.backup-"
+        let candidates: [URL] = entries.compactMap { entry in
+            let filename = entry.lastPathComponent
+            if entry.pathExtension.lowercased() == ProjectFileManager.projectExtension,
+               UUID(uuidString: entry.deletingPathExtension().lastPathComponent) != nil {
+                return entry
+            }
+            guard filename.hasPrefix("."),
+                  let marker = filename.range(of: backupMarker) else { return nil }
+            let start = filename.index(after: filename.startIndex)
+            let identifier = String(filename[start..<marker.lowerBound])
+            guard UUID(uuidString: identifier) != nil else { return nil }
+            return rootDirectory.appendingPathComponent(identifier + ".dawproj")
+        }
+
         var drafts: [StudioRecoveryDraft] = []
-        for url in entries {
-            guard url.pathExtension.lowercased() == ProjectFileManager.projectExtension,
-                  let id = UUID(uuidString: url.deletingPathExtension().lastPathComponent),
+        for url in Set(candidates) {
+            guard let id = UUID(uuidString: url.deletingPathExtension().lastPathComponent),
                   let metadata = try? await fileManager.loadMetadata(from: url)
             else { continue }
             let date = (try? url.resourceValues(

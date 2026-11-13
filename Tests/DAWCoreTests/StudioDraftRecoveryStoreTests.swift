@@ -44,6 +44,28 @@ final class StudioDraftRecoveryStoreTests: XCTestCase {
         XCTAssertEqual(drafts.map(\.id), [preserved])
     }
 
+    func testHiddenInterruptedSaveBackupIsDiscoveredAndRecovered() async throws {
+        let (root, store) = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sessionID = UUID()
+        try await store.store(project: Project(name: "Recovered second save"), sessionID: sessionID)
+        let canonical = await store.draftURL(for: sessionID)
+        let backup = root.appendingPathComponent(
+            ".\(canonical.lastPathComponent).backup-\(UUID().uuidString)"
+        )
+        try FileManager.default.moveItem(at: canonical, to: backup)
+
+        // No visible .dawproj remains. The scanner must find the hidden
+        // complete backup, and the loader must promote it safely.
+        let drafts = await store.availableDrafts()
+        XCTAssertEqual(drafts.count, 1)
+        let draft = try XCTUnwrap(drafts.first)
+        let project = try await store.load(draft)
+        XCTAssertEqual(project.name, "Recovered second save")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: canonical.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: backup.path))
+    }
+
     func testDamagedDraftIsNotAutomaticallyErased() async throws {
         let (root, store) = try fixture()
         defer { try? FileManager.default.removeItem(at: root) }
