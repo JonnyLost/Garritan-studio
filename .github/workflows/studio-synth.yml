@@ -44,7 +44,8 @@ jobs:
             DAWCore/Sources/DAWCore/Audio/StudioSynthModulationWorker.swift \
             DAWUI/Sources/DAWUI/Views/StudioSynthModulationView.swift \
             Tests/DAWCoreTests/StudioSynthModulationTests.swift \
-            Tests/DAWCoreTests/StudioSynthMIDILearnTests.swift
+            Tests/DAWCoreTests/StudioSynthMIDILearnTests.swift \
+            Tests/DAWCoreTests/StudioAdditiveTests.swift
       - name: Compile and execute shared modulation core on Linux
         run: |
           # Debug assertions must stay active for these executable checks.
