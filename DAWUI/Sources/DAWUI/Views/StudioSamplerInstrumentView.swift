@@ -40,7 +40,10 @@ public struct StudioSamplerInstrumentView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            if editMapping {
+            if editMapping || patch?.isEmpty == true {
+                // Empty instruments start in the mapping workspace so Add
+                // Samples is immediately available without a file picker
+                // appearing before the sampler interface itself.
                 StudioSamplerMapView(viewModel: viewModel, trackID: trackID)
             } else if let patch {
                 ScrollView {
@@ -108,13 +111,19 @@ public struct StudioSamplerInstrumentView: View {
             }
             .pickerStyle(.menu)
             .frame(width: 200)
-            Button {
-                editMapping.toggle()
-            } label: {
-                Label(editMapping ? "Performance" : "Edit Mapping",
-                      systemImage: editMapping ? "slider.horizontal.3" : "pianokeys")
+            if patch?.isEmpty == true {
+                Label("Ready to add samples", systemImage: "plus.square.dashed")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Button {
+                    editMapping.toggle()
+                } label: {
+                    Label(editMapping ? "Performance" : "Edit Mapping",
+                          systemImage: editMapping ? "slider.horizontal.3" : "pianokeys")
+                }
+                .buttonStyle(.borderedProminent)
             }
-            .buttonStyle(.borderedProminent)
         }
         .padding(14)
     }
