@@ -29,6 +29,11 @@ public struct StudioSamplerZone: Codable, Equatable, Sendable {
     public var roundRobinIndex: UInt8?
     /// Release triggers play on MIDI note-off, independently of the note-on sample.
     public var isReleaseTrigger: Bool?
+    /// 0...3 identifies a coherent recorded microphone position. Unset is main mic.
+    public var microphoneID: UInt8?
+    /// Target rootNote identifies the destination pitch. If present, this
+    /// one-shot recording is played ONLY on overlapping from→target legato.
+    public var legatoFromNote: UInt8?
 
     public var hasSustainLoop: Bool {
         loopStartFrame != nil && loopEndFrame != nil
@@ -54,7 +59,11 @@ public struct StudioSamplerZone: Codable, Equatable, Sendable {
          StudioSamplerSampleLibrary.validManagedFileName(managedFileName!)) &&
         validLoop && validTrim &&
         (articulationID ?? 0) <= 15 && (roundRobinIndex ?? 0) < 8 &&
-        (isReleaseTrigger != true || !hasSustainLoop) && validFades
+        (isReleaseTrigger != true || !hasSustainLoop) &&
+        (microphoneID ?? 0) < 4 &&
+        (legatoFromNote == nil || (legatoFromNote! <= 127 &&
+            legatoFromNote! != rootNote && !hasSustainLoop &&
+            isReleaseTrigger != true)) && validFades
     }
 
     public var validTrim: Bool {
@@ -157,6 +166,31 @@ public enum StudioSamplerInstrumentKind: String, CaseIterable, Codable, Sendable
     }
 }
 
+/// A coherent microphone set is selected at note-on. Gain/pan may change
+/// while held notes sound; sample waveforms are never modified.
+public struct StudioSamplerMicrophone: Codable, Equatable, Sendable, Identifiable {
+    public var id: UInt8
+    public var name: String
+    public var gain: Float
+    public var pan: Float
+    public var isMuted: Bool
+
+    public init(id: UInt8, name: String, gain: Float = 1,
+                pan: Float = 0, isMuted: Bool = false) {
+        self.id = id
+        self.name = name
+        self.gain = gain
+        self.pan = pan
+        self.isMuted = isMuted
+    }
+
+    public var isValid: Bool {
+        id < 4 && !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        name.count <= 48 && gain.isFinite && (0...2).contains(gain) &&
+        pan.isFinite && (-1...1).contains(pan)
+    }
+}
+
 /// Versioned, editable mapping of source audio to MIDI note/velocity ranges.
 /// Milestone 1 selects one matching zone per note, favoring the nearest root.
 /// Layer blending and streamed sample references will extend this format.
@@ -178,6 +212,14 @@ public struct StudioSamplerPatch: Codable, Equatable, Sendable {
     public var defaultKeyswitchNote: UInt8?
     /// Restored selection when opening the saved instrument.
     public var selectedArticulationID: UInt8?
+    /// Optional legacy-safe controls; 0 vibrato, 127 full breath by default.
+    public var vibratoCC21: UInt8?
+    public var breathCC2: UInt8?
+    /// Legato only acts when a second pitch overlaps a held note on its channel.
+    public var legatoEnabled: Bool?
+    /// Outgoing and incoming sustain crossfade, even when no transition exists.
+    public var legatoCrossfadeMilliseconds: Float?
+    public var microphones: [StudioSamplerMicrophone]?
 
     public var presentation: StudioSamplerInstrumentKind { instrumentKind ?? .general }
     /// An empty sampler remains a saved instrument choice while the user
@@ -197,7 +239,21 @@ public struct StudioSamplerPatch: Codable, Equatable, Sendable {
         zones.allSatisfy(\.isValid) &&
         (dynamicsCC1 == nil || dynamicsCC1! <= 127) &&
         (expressionCC11 == nil || expressionCC11! <= 127) &&
-        (envelope?.isValid ?? true) && validArticulations
+        (envelope?.isValid ?? true) &&
+        (legatoCrossfadeMilliseconds == nil ||
+         (legatoCrossfadeMilliseconds!.isFinite &&
+          (5...250).contains(legatoCrossfadeMilliseconds!))) &&
+        validMicrophones && validArticulations
+    }
+
+    public var validMicrophones: Bool {
+        let groups = microphones ?? []
+        return groups.count <= 4 && groups.allSatisfy(\.isValid) &&
+            Set(groups.map(\.id)).count == groups.count &&
+            zones.allSatisfy { zone in
+                (zone.microphoneID ?? 0) == 0 ||
+                    groups.contains(where: { $0.id == zone.microphoneID })
+            }
     }
 
     public var validArticulations: Bool {
