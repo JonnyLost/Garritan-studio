@@ -75,7 +75,7 @@ final class StudioSynthMIDILearnTests: XCTestCase {
         mapping.channel = 16
         XCTAssertFalse(mapping.validate(layers: patch.layers))
         mapping.channel = nil
-        mapping.minimum = -.01
+        mapping.minimum = -0.01
         XCTAssertFalse(mapping.validate(layers: patch.layers))
         mapping.minimum = 0
         mapping.maximum = .nan
