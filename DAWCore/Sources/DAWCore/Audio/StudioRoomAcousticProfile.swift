@@ -25,17 +25,26 @@ public struct StudioRoomAcousticProfile: Codable, Equatable, Sendable, Identifia
     /// Six octave-band RT targets only for designed rooms. Existing presets
     /// retain their original three-band DSP mode.
     public var sixBandRT60: [Float]?
+    /// Optional designer-only change to FDN delay spacing. Nil = factory timing.
+    public var lateDelayScale: Float?
+    /// Optional designer-only diffuse wall absorption coloration in early taps.
+    /// Nil = original unfiltered factory reflections.
+    public var earlyReflectionHighCutHz: Float?
     public var earlyReflections: [StudioEarlyReflection]
 
     public init(id: String, name: String, bassRT60: Float, midRT60: Float,
                 trebleRT60: Float, earlyReflections: [StudioEarlyReflection],
-                sixBandRT60: [Float]? = nil) {
+                sixBandRT60: [Float]? = nil,
+                lateDelayScale: Float? = nil,
+                earlyReflectionHighCutHz: Float? = nil) {
         self.id = id
         self.name = name
         self.bassRT60 = bassRT60
         self.midRT60 = midRT60
         self.trebleRT60 = trebleRT60
         self.sixBandRT60 = sixBandRT60
+        self.lateDelayScale = lateDelayScale
+        self.earlyReflectionHighCutHz = earlyReflectionHighCutHz
         self.earlyReflections = earlyReflections
     }
 
