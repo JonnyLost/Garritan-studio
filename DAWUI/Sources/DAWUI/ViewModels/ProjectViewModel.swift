@@ -256,6 +256,10 @@ public final class ProjectViewModel: ObservableObject {
             do {
                 print("Starting audio engine...")
                 // Restore the chosen native room before preparing track instruments.
+                // Previous projects default to the original close-microphone balance.
+                audioEngine.setVirtualMicrophone(
+                    project.dawState.virtualMicrophoneSettings ?? StudioVirtualMicrophoneSettings()
+                )
                 // A legacy project with no saved profile keeps the tested Apple hall.
                 if let design = project.dawState.acousticRoomDesign {
                     try audioEngine.configureDesignedRoom(design)
@@ -599,6 +603,16 @@ public final class ProjectViewModel: ObservableObject {
 
     public func setConcertHallOverallReverb(_ level: Float) {
         audioEngine.setConcertHallOverallReverb(level)
+    }
+
+    /// Virtual microphone changes use AU parameters and mixer gains, so the
+    /// listener can be moved without rebuilding the AVAudioEngine graph.
+    public func setVirtualMicrophone(_ settings: StudioVirtualMicrophoneSettings) {
+        let safe = StudioVirtualMicrophoneSettings(
+            perspective: settings.perspective, stereoWidth: settings.safeWidth
+        )
+        audioEngine.setVirtualMicrophone(safe)
+        project.dawState.virtualMicrophoneSettings = safe
     }
 
     /// Apply current room geometry/materials to our native FDN and source
