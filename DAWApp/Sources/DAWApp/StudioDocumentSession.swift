@@ -81,18 +81,14 @@ final class AppState: ObservableObject {
         windowTitle = hasUnsavedChanges ? "\(name) — Edited" : name
     }
 
-    /// Pull the live view model's plug-in state and DAW layout synchronously.
-    /// NotificationCenter posts immediately to the active MainWindowView.
-    /// The save ticket is taken AFTER the capture, so any mutations caused by
-    /// collecting AU state are included in the saved revision.
+    /// Prepare layout and Audio Unit state via a project-scoped typed callback.
+    /// Capture the revision after preparation so snapshot-only mutations are
+    /// not misclassified as new user edits.
     private func captureProjectSnapshot() -> StudioAutosaveSnapshot {
         isCapturingSnapshot = true
         defer { isCapturingSnapshot = false }
-        NotificationCenter.default.post(name: .savePluginStates, object: nil)
-
-        // Plugin state gathering still notifies the composing view; the
-        // document snapshot itself is now a typed project-scoped callback.
-        let project = snapshotBridge.snapshot(for: currentProject.id) ?? currentProject
+        let project = snapshotBridge.preparedSnapshot(for: currentProject.id)
+            ?? currentProject
         return StudioAutosaveSnapshot(project: project, ticket: revision.saveTicket())
     }
 
@@ -263,8 +259,10 @@ final class AppState: ObservableObject {
     func restorePluginsIfReady(for readyProjectID: UUID) {
         guard pendingPluginRestoreID == readyProjectID,
               currentProject.id == readyProjectID else { return }
+        // If the view is not yet registered, preserve the pending restore
+        // instead of silently dropping the instrument state.
+        guard snapshotBridge.restorePlugins(for: readyProjectID) else { return }
         pendingPluginRestoreID = nil
-        snapshotBridge.restorePlugins(for: readyProjectID)
     }
 
     func newProject() {

@@ -8,6 +8,7 @@ import DAWCore
 public final class StudioProjectSnapshotBridge {
     private var registeredProjectID: UUID?
     private var snapshotProvider: (@MainActor () -> Project?)?
+    private var prepareForSaveProvider: (@MainActor () -> Void)?
     private var clearPluginProvider: (@MainActor () -> Void)?
     private var restorePluginProvider: (@MainActor () -> Void)?
 
@@ -16,11 +17,13 @@ public final class StudioProjectSnapshotBridge {
     public func register(
         projectID: UUID,
         provider: @escaping @MainActor () -> Project?,
+        prepareForSave: (@MainActor () -> Void)? = nil,
         clearPlugins: (@MainActor () -> Void)? = nil,
         restorePlugins: (@MainActor () -> Void)? = nil
     ) {
         registeredProjectID = projectID
         snapshotProvider = provider
+        prepareForSaveProvider = prepareForSave
         clearPluginProvider = clearPlugins
         restorePluginProvider = restorePlugins
     }
@@ -29,6 +32,7 @@ public final class StudioProjectSnapshotBridge {
         guard registeredProjectID == projectID else { return }
         registeredProjectID = nil
         snapshotProvider = nil
+        prepareForSaveProvider = nil
         clearPluginProvider = nil
         restorePluginProvider = nil
     }
@@ -48,6 +52,15 @@ public final class StudioProjectSnapshotBridge {
               let restorePluginProvider else { return false }
         restorePluginProvider()
         return true
+    }
+
+    /// Prepare the view's layout and Audio Unit state, then read its project
+    /// synchronously. No global broadcast or fixed restoration delay is used.
+    /// Invalid project IDs have no side effects on the active composing view.
+    public func preparedSnapshot(for projectID: UUID) -> Project? {
+        guard registeredProjectID == projectID else { return nil }
+        prepareForSaveProvider?()
+        return snapshot(for: projectID)
     }
 
     public func snapshot(for projectID: UUID) -> Project? {

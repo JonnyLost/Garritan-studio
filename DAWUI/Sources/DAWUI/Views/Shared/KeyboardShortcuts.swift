@@ -20,14 +20,6 @@ public extension Notification.Name {
     static let zoomOut = Notification.Name("zoomOut")
     static let projectDidChange = Notification.Name("projectDidChange")
     
-    // Plugin state management
-    static let savePluginStates = Notification.Name("savePluginStates")
-    static let clearAllPlugins = Notification.Name("clearAllPlugins")
-    static let restorePluginStates = Notification.Name("restorePluginStates")
-    
-    // Request current project from viewModel
-    static let requestProjectForSave = Notification.Name("requestProjectForSave")
-    static let projectDataForSave = Notification.Name("projectDataForSave")
 }
 
 // MARK: - Keyboard Handler

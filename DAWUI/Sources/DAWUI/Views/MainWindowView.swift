@@ -271,6 +271,10 @@ public struct MainWindowView: View {
             snapshotBridge?.register(
                 projectID: viewModel.project.id,
                 provider: { [weak viewModel] in viewModel?.project },
+                prepareForSave: { [weak viewModel] in
+                    syncDAWState()
+                    viewModel?.saveAllPluginStates()
+                },
                 clearPlugins: { [weak viewModel] in
                     viewModel?.clearAllPlugins()
                 },
@@ -313,11 +317,6 @@ public struct MainWindowView: View {
         }
         .onChange(of: showVRack) { _, newValue in
             syncDAWState()
-        }
-        // Handle plugin state notifications
-        .onReceive(NotificationCenter.default.publisher(for: .savePluginStates)) { _ in
-            syncDAWState()
-            viewModel.saveAllPluginStates()
         }
     }
     

@@ -26,6 +26,40 @@ final class StudioProjectSnapshotBridgeTests: XCTestCase {
         XCTAssertNil(bridge.snapshot(for: newer.id))
     }
 
+    func testPreparingSnapshotRunsOnlyForActiveProject() {
+        let bridge = StudioProjectSnapshotBridge()
+        let active = Project(name: "Active")
+        let old = Project(name: "Old")
+        var preparationCount = 0
+        bridge.register(
+            projectID: active.id,
+            provider: { active },
+            prepareForSave: { preparationCount += 1 }
+        )
+        XCTAssertNil(bridge.preparedSnapshot(for: old.id))
+        XCTAssertEqual(preparationCount, 0)
+        XCTAssertEqual(bridge.preparedSnapshot(for: active.id)?.id, active.id)
+        XCTAssertEqual(preparationCount, 1)
+        bridge.unregister(projectID: old.id)
+        XCTAssertEqual(bridge.preparedSnapshot(for: active.id)?.id, active.id)
+        XCTAssertEqual(preparationCount, 2)
+        bridge.unregister(projectID: active.id)
+        XCTAssertNil(bridge.preparedSnapshot(for: active.id))
+        XCTAssertEqual(preparationCount, 2)
+    }
+
+    func testPreparedSnapshotRejectsMismatchedProject() {
+        let bridge = StudioProjectSnapshotBridge()
+        let active = Project(name: "Active")
+        let stale = Project(name: "Stale")
+        bridge.register(
+            projectID: active.id,
+            provider: { stale },
+            prepareForSave: {}
+        )
+        XCTAssertNil(bridge.preparedSnapshot(for: active.id))
+    }
+
     func testPluginLifecycleCommandsAreScopedToActiveSession() {
         let bridge = StudioProjectSnapshotBridge()
         let old = Project(name: "Old")
