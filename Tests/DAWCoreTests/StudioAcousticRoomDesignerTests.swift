@@ -3,6 +3,43 @@ import XCTest
 @testable import DAWCore
 
 final class StudioAcousticRoomDesignerTests: XCTestCase {
+    func testCalibrationSuiteCoversDistinctRoomTypesAndVolumes() {
+        let suite = StudioAcousticCalibrationScenario.contrastingRooms
+        XCTAssertEqual(suite.count, 3)
+        XCTAssertEqual(Set(suite.map(\.id)).count, suite.count)
+        XCTAssertEqual(suite.map(\.id),
+                       ["small-treated", "medium-wood", "large-reflective"])
+
+        let small = suite[0].design
+        let medium = suite[1].design
+        let large = suite[2].design
+
+        XCTAssertLessThan(small.volumeCubicMeters, medium.volumeCubicMeters)
+        XCTAssertLessThan(medium.volumeCubicMeters, large.volumeCubicMeters)
+        XCTAssertLessThan(small.predictedRT60[3], medium.predictedRT60[3])
+        XCTAssertLessThan(medium.predictedRT60[3], large.predictedRT60[3])
+        XCTAssertGreaterThan(small.treatedWallFraction, medium.treatedWallFraction)
+        XCTAssertEqual(large.treatedWallFraction, 0)
+        XCTAssertEqual(small.makeProfile().sixBandRT60?.count, 6)
+        XCTAssertEqual(medium.makeProfile().sixBandRT60?.count, 6)
+        XCTAssertEqual(large.makeProfile().sixBandRT60?.count, 6)
+    }
+
+    func testCalibrationFixturesAreCodableAndDoNotMutateDefaults() throws {
+        let base = StudioAcousticCalibrationScenario.defaultDesign.design
+        XCTAssertEqual(base, StudioAcousticRoomDesign())
+        for scenario in StudioAcousticCalibrationScenario.contrastingRooms {
+            let data = try JSONEncoder().encode(scenario.design)
+            let decoded = try JSONDecoder().decode(StudioAcousticRoomDesign.self, from: data)
+            XCTAssertEqual(decoded, scenario.design)
+            XCTAssertTrue(decoded.predictedRT60.allSatisfy { $0.isFinite && $0 > 0 })
+        }
+        XCTAssertEqual(StudioRoomAcousticProfile.starterProfiles.count, 4)
+        XCTAssertTrue(StudioRoomAcousticProfile.starterProfiles.allSatisfy {
+            $0.sixBandRT60 == nil && $0.lateDelayScale == nil
+        })
+    }
+
     func testRoomGeometryAndSurfaceAreas() {
         let room = StudioAcousticRoomDesign(lengthMeters: 10,
                                             widthMeters: 8, heightMeters: 4)
