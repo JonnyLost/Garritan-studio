@@ -186,6 +186,11 @@ let package = Package(
             swiftSettings: studioCloudAuthEnabled ? [] : [.define("STUDIO_LOCAL_AUTH")]
         ),
         .testTarget(
+            name: "StudioSessionBridgeTests",
+            dependencies: ["DAWUI", "DAWCore"],
+            path: "Tests/StudioSessionBridgeTests"
+        ),
+        .testTarget(
             name: "StudioIdentityTests",
             dependencies: ["StudioIdentity"],
             path: "Tests/StudioIdentityTests"
