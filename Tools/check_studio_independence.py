@@ -51,7 +51,7 @@ require("StudioAI" in ui_deps, "DAWUI must explicitly import optional AI service
 core_root = ROOT / "DAWCore" / "Sources" / "DAWCore"
 for source in core_root.rglob("*.swift"):
     contents = source.read_text(encoding="utf-8")
-    require(re.search(r"(?m)^\\s*import\\s+StudioAI(?:\\s|$)", contents) is None,
+    require(re.search(r"(?m)^\s*import\s+StudioAI(?:\s|$)", contents) is None,
             f"StudioAI import in DAWCore: {source.relative_to(ROOT)}")
     require(
         re.search(r"(?m)^\s*import\s+Supabase(?:\s|$)", contents) is None,
