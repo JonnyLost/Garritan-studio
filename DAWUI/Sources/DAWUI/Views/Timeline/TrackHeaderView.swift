@@ -340,6 +340,7 @@ struct InstrumentSlotButton: View {
     @State private var showStudioAnalogPanel = false
     @State private var showStudioFMPanel = false
     @State private var showStudioSynthPanel = false
+    @State private var showStudioSamplerPanel = false
     
     var body: some View {
         Button(action: {
@@ -349,7 +350,11 @@ struct InstrumentSlotButton: View {
                 Image(systemName: "pianokeys")
                     .font(.system(size: 9))
                 
-                if track.studioSynthEnabled == true {
+                if track.studioSamplerPatch != nil {
+                    Text("Studio Sampler")
+                        .font(.system(size: 10, weight: .semibold))
+                        .lineLimit(1)
+                } else if track.studioSynthEnabled == true {
                     Text("Studio Synth")
                         .font(.system(size: 10, weight: .semibold))
                         .lineLimit(1)
@@ -373,12 +378,17 @@ struct InstrumentSlotButton: View {
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background((track.instrumentSlot?.pluginID != nil || track.studioAnalogEnabled == true || track.studioFMEnabled == true || track.studioSynthEnabled == true) ? Color.purple.opacity(0.3) : Color.gray.opacity(0.2))
+            .background((track.instrumentSlot?.pluginID != nil || track.studioAnalogEnabled == true || track.studioFMEnabled == true || track.studioSynthEnabled == true || track.studioSamplerPatch != nil) ? Color.purple.opacity(0.3) : Color.gray.opacity(0.2))
             .cornerRadius(4)
         }
         .buttonStyle(.plain)
         .contextMenu {
-            if track.studioSynthEnabled == true {
+            if track.studioSamplerPatch != nil {
+                Button("Browse / Change Instrument…") { showBrowser = true }
+                Button("Open Native Sampler…") { showStudioSamplerPanel = true }
+                Divider()
+                Button("Remove Studio Sampler", role: .destructive) { removeInstrument() }
+            } else if track.studioSynthEnabled == true {
                 Button("Browse / Change Instrument...") { showBrowser = true }
                 Button("Open Studio Synth...") { showStudioSynthPanel = true }
                 Divider()
@@ -414,6 +424,10 @@ struct InstrumentSlotButton: View {
             StudioSynthPanelView(viewModel: viewModel, trackID: track.id)
                 .frame(minWidth: 920, minHeight: 650)
         }
+        .sheet(isPresented: $showStudioSamplerPanel) {
+            StudioSamplerInstrumentView(viewModel: viewModel, trackID: track.id)
+                .frame(minWidth: 930, minHeight: 600)
+        }
     }
     
     private func openInstrumentUI() {
@@ -432,6 +446,7 @@ struct InstrumentSlotButton: View {
         updatedTrack.studioAnalogEnabled = false
         updatedTrack.studioFMEnabled = false
         updatedTrack.studioSynthEnabled = false
+        updatedTrack.studioSamplerPatch = nil
         viewModel.updateTrack(updatedTrack, description: "Remove Instrument")
         viewModel.unloadTrackInstrument(for: track.id)
     }
