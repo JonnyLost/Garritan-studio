@@ -127,15 +127,9 @@ public actor ProjectFileManager {
             // Only a real file inside the saved "Audio Files" folder may
             // satisfy this fallback. An empty relativePath previously resolved
             // to the .dawproj DIRECTORY itself and was copied as a .wav.
-            let relativeComponents = audioRef.relativePath.split(separator: "/").map(String.init)
-            let isPackagedAudioPath = relativeComponents.count >= 2
-                && relativeComponents.first == Self.audioFolderName
-                && !relativeComponents.contains("..")
-                && !relativeComponents.contains(".")
-                && !audioRef.relativePath.hasPrefix("/")
-            let existingPackagedFile = isPackagedAudioPath
-                ? packageURL.appendingPathComponent(audioRef.relativePath)
-                : nil
+            let existingPackagedFile = StudioProjectPackagePaths.packagedAudioURL(
+                relativePath: audioRef.relativePath, inside: packageURL
+            )
             let originalSource = findAudioFile(for: audioRef)
             let sourceURL = originalSource.flatMap { Self.isRegularFile($0) ? $0 : nil }
                 ?? existingPackagedFile.flatMap { Self.isRegularFile($0) ? $0 : nil }
@@ -424,10 +418,14 @@ public actor ProjectFileManager {
             // Update audio file paths to be absolute (resolved against package)
             for i in 0..<project.audioFiles.count {
                 let relativePath = project.audioFiles[i].relativePath
-                let absolutePath = packageURL.appendingPathComponent(relativePath).path
-                print("[ProjectFileManager] Audio file \(i): relative='\(relativePath)' -> absolute='\(absolutePath)'")
-                print("[ProjectFileManager]   File exists: \(FileManager.default.fileExists(atPath: absolutePath))")
-                project.audioFiles[i].originalPath = absolutePath
+                guard let safeURL = StudioProjectPackagePaths.packagedAudioURL(
+                    relativePath: relativePath, inside: packageURL
+                ) else {
+                    // Older imported sessions may still contain external file
+                    // paths. Never expand "../" or symlinks outside the package.
+                    continue
+                }
+                project.audioFiles[i].originalPath = safeURL.path
             }
             
             // Update clip references too
@@ -435,11 +433,11 @@ public actor ProjectFileManager {
                 for clipIndex in 0..<project.tracks[trackIndex].clips.count {
                     if case .audio(var audioData) = project.tracks[trackIndex].clips[clipIndex].content {
                         let relativePath = audioData.fileReference.relativePath
-                        let absolutePath = packageURL.appendingPathComponent(relativePath).path
-                        print("[ProjectFileManager] Clip '\(project.tracks[trackIndex].clips[clipIndex].name)': relative='\(relativePath)'")
-                        print("[ProjectFileManager]   -> absolute='\(absolutePath)'")
-                        print("[ProjectFileManager]   File exists: \(FileManager.default.fileExists(atPath: absolutePath))")
-                        audioData.fileReference.originalPath = absolutePath
+                        if let safeURL = StudioProjectPackagePaths.packagedAudioURL(
+                            relativePath: relativePath, inside: packageURL
+                        ) {
+                            audioData.fileReference.originalPath = safeURL.path
+                        }
                         project.tracks[trackIndex].clips[clipIndex].content = .audio(audioData)
                     }
                 }

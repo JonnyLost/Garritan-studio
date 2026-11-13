@@ -217,12 +217,20 @@ final class AppState: ObservableObject {
 
             revision.replaceSession()
             currentProject = loadedProject
-            currentProjectURL = url.standardizedFileURL
-            hasUnsavedChanges = false
+            // Legacy single-JSON files remain readable, but are not quietly
+            // overwritten or converted during autosave. Save asks for .dawproj.
+            let isPackage = url.pathExtension.lowercased() == ProjectFileManager.projectExtension
+            currentProjectURL = isPackage ? url.standardizedFileURL : nil
+            if !isPackage {
+                revision.markEdited()
+            }
+            hasUnsavedChanges = revision.hasUnsavedChanges
             projectID = UUID()
             pendingPluginRestoreID = loadedProject.id
             recentProjectsManager.addRecentProject(url)
-            autosaveManager.startAutosave(for: url)
+            if let currentProjectURL {
+                autosaveManager.startAutosave(for: currentProjectURL)
+            }
             updateWindowTitle()
             print("[StudioSession] Opened project: \(url.path)")
             // Instrument restoration is triggered when the new view's audio
