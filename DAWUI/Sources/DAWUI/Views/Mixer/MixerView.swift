@@ -174,11 +174,12 @@ struct ChannelStripView: View {
                                 viewModel.openTrackEffectUI(track.id, slotIndex: index)
                             } : nil
                         )
+                        // A new insert is only added after the existing
+                        // contiguous chain, never into a gap in the AU graph.
                         .disabled(slot?.pluginID == nil &&
-                                  index > 0 &&
-                                  !track.pluginSlots.prefix(index).allSatisfy {
+                                  track.pluginSlots.prefix(index).filter {
                                       $0.pluginID != nil
-                                  })
+                                  }.count != index)
                     }
                 }
                 .padding(.vertical, 4)
