@@ -133,6 +133,7 @@ public actor ProjectFileManager {
             let originalSource = findAudioFile(for: audioRef)
             let sourceURL = originalSource.flatMap { Self.isRegularFile($0) ? $0 : nil }
                 ?? existingPackagedFile.flatMap { Self.isRegularFile($0) ? $0 : nil }
+                ?? Self.previouslySavedAudioFile(for: audioRef.fileID, in: packageURL)
             guard let sourceURL else {
                 // Never silently replace a valid project with missing audio
                 // or a directory masquerading as an audio file.
@@ -217,6 +218,26 @@ public actor ProjectFileManager {
         print("[ProjectFileManager] Saved project to: \(packageURL.path)")
     }
     
+    /// An in-memory session can still have the original external audio path
+    /// after Save. On a subsequent quick-save, the external source may have
+    /// been removed even though the last complete .dawproj contains its data.
+    /// Recover by the stable audio-file UUID rather than losing a good take.
+    private static func previouslySavedAudioFile(for fileID: UUID, in package: URL) -> URL? {
+        let audioFolder = package.appendingPathComponent(audioFolderName, isDirectory: true)
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: audioFolder, includingPropertiesForKeys: nil
+        ) else { return nil }
+        let expectedPrefix = fileID.uuidString + "."
+        for file in files where file.lastPathComponent.hasPrefix(expectedPrefix) {
+            guard let safeURL = StudioProjectPackagePaths.packagedAudioURL(
+                relativePath: "\(audioFolderName)/\(file.lastPathComponent)",
+                inside: package
+            ), isRegularFile(safeURL) else { continue }
+            return safeURL
+        }
+        return nil
+    }
+
     /// Reject package directories and other non-audio sources before copying.
     /// FileManager.fileExists alone returns true for directories.
     private static func isRegularFile(_ url: URL) -> Bool {
