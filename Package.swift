@@ -15,6 +15,7 @@ let package = Package(
         .library(name: "StudioWavetableDSP", targets: ["StudioWavetableDSP"]),
         .library(name: "StudioAdditiveDSP", targets: ["StudioAdditiveDSP"]),
         .library(name: "StudioGranularDSP", targets: ["StudioGranularDSP"]),
+        .library(name: "StudioPhysicalDSP", targets: ["StudioPhysicalDSP"]),
         .library(name: "DAWUI", targets: ["DAWUI"]),
         .library(name: "VST3Bridge", targets: ["VST3Bridge"]),
         .executable(name: "DAWApp", targets: ["DAWApp"])
@@ -64,6 +65,15 @@ let package = Package(
             name: "StudioGranularDSP",
             path: "StudioGranularDSP",
             sources: ["src/StudioGranularDSP.cpp"],
+            publicHeadersPath: "include",
+            cxxSettings: [.unsafeFlags(["-std=c++17"])]
+        ),
+
+        // MARK: - Native plucked / struck string waveguides and body modes
+        .target(
+            name: "StudioPhysicalDSP",
+            path: "StudioPhysicalDSP",
+            sources: ["src/StudioPhysicalDSP.cpp"],
             publicHeadersPath: "include",
             cxxSettings: [.unsafeFlags(["-std=c++17"])]
         ),
@@ -149,6 +159,11 @@ let package = Package(
             name: "StudioWavetableDSPTests",
             dependencies: ["StudioWavetableDSP"],
             path: "Tests/StudioWavetableDSPTests"
+        ),
+        .testTarget(
+            name: "StudioPhysicalDSPTests",
+            dependencies: ["StudioPhysicalDSP"],
+            path: "Tests/StudioPhysicalDSPTests"
         ),
         .testTarget(
             name: "StudioAnalogDSPTests",
