@@ -45,6 +45,8 @@ struct Sample {
     uint8_t articulation = 0;
     uint8_t roundRobin = 0;
     bool releaseTrigger = false;
+    uint8_t microphone = 0;
+    int16_t legatoFrom = -1;
     bool streamed = false;
     uint32_t attackStart = 0; // first decoded source frame in left/right vectors
     uint32_t fullFrames = 0; // source recording may be much larger than attack
@@ -79,6 +81,9 @@ struct Voice {
     int stageFrames = 0;
     bool active = false;
     bool releaseTrigger = false;
+    bool transitionVoice = false;
+    int legatoFadeFrames = 0;
+    int legatoFadeProgress = 0;
     uint32_t zoneIndex = 0;
     float lastStreamL = 0.f;
     float lastStreamR = 0.f;
@@ -91,6 +96,7 @@ struct HeldNote {
     uint8_t articulation = 0;
     uint8_t roundRobin = 0;
     uint64_t serial = 0;
+    bool transitionedAway = false;
 };
 
 struct RetiringVoice {
@@ -99,13 +105,17 @@ struct RetiringVoice {
     float gain = 0.f;
 };
 
-enum class CommandKind : uint8_t { on, off, allOff, controller, crossfade, envelope, articulation };
+enum class CommandKind : uint8_t {
+    on, off, allOff, controller, crossfade, envelope, articulation, microphone, legato
+};
 struct Command {
     CommandKind kind;
     uint8_t note;
     uint8_t velocity;
     uint8_t channel;
     ADSR adsr;
+    float value1 = 0.f;
+    float value2 = 0.f;
 
     Command(CommandKind kindValue = CommandKind::allOff, uint8_t noteValue = 0,
             uint8_t velocityValue = 0, uint8_t channelValue = 0,
@@ -147,6 +157,14 @@ struct SSSampler {
         samples.reserve(kMaxZones); // stable Sample* pointers throughout render
         smoothCC1.fill(127.f);
         smoothCC11.fill(127.f);
+        smoothCC2.fill(127.f);
+        targetCC2.fill(127.f);
+        smoothCC21.fill(0.f);
+        targetCC21.fill(0.f);
+        micGain.fill(1.f);
+        targetMicGain.fill(1.f);
+        micPan.fill(0.f);
+        targetMicPan.fill(0.f);
         targetCC1.fill(127.f);
         targetCC11.fill(127.f);
         keyswitchArticulations.fill(255); // 255 denotes ordinary musical note
@@ -176,6 +194,17 @@ struct SSSampler {
     std::array<std::array<std::array<uint8_t, 128>, 16>, 16> roundRobinTurns{};
     ADSR activeADSR{};
     bool cc1Crossfade = false; // mutated only while consuming RT commands
+    bool legatoEnabled = false;
+    int legatoFadeFrames = 1764; // default 40ms at 44.1 kHz
+    std::array<float, 4> micGain{};
+    std::array<float, 4> micPan{};
+    std::array<float, 4> targetMicGain{};
+    std::array<float, 4> targetMicPan{};
+    std::array<float, 16> smoothCC2{};
+    std::array<float, 16> targetCC2{};
+    std::array<float, 16> smoothCC21{};
+    std::array<float, 16> targetCC21{};
+    std::array<double, 16> vibratoPhase{};
     std::array<float, 16> smoothCC1{};
     std::array<float, 16> smoothCC11{};
     std::array<float, 16> targetCC1{};
@@ -322,11 +351,13 @@ struct SSSampler {
         return std::max(minimumFrames, static_cast<int>(requested));
     }
 
-    void startRelease(Voice& voice) {
+    void startRelease(Voice& voice, int overrideFrames = 0) {
         if (!voice.active || voice.stage == EnvelopeStage::release ||
             voice.stage == EnvelopeStage::done) return;
         voice.stage = EnvelopeStage::release;
-        voice.stageFrames = framesForSeconds(voice.adsr.release, kFadeFrames);
+        voice.stageFrames = overrideFrames > 0
+            ? std::max(kFadeFrames, overrideFrames)
+            : framesForSeconds(voice.adsr.release, kFadeFrames);
         voice.envelopeDelta = -voice.envelopeLevel / float(voice.stageFrames);
     }
 
@@ -392,7 +423,8 @@ struct SSSampler {
                     voice.noteSerial == slot->serial)
                     startRelease(voice);
         }
-        *slot = HeldNote{true, velocity, articulation, variation, ++nextNoteSerial};
+        *slot = HeldNote{true, velocity, articulation, variation,
+                         ++nextNoteSerial, false};
         return slot->serial;
     }
 
@@ -415,7 +447,8 @@ struct SSSampler {
 
     void startVoice(const Sample *selected, uint8_t note,
                     uint8_t velocity, uint8_t channel, uint64_t noteSerial,
-                    bool releaseSample = false) {
+                    bool releaseSample = false, bool transition = false,
+                    int legatoFade = 0) {
         Voice *chosen = nullptr;
         for (auto& voice : voices) {
             if (!voice.active) { chosen = &voice; break; }
@@ -450,6 +483,8 @@ struct SSSampler {
             if (&sample == selected || sample.root != selected->root ||
                 sample.articulation != selected->articulation ||
                 sample.releaseTrigger != selected->releaseTrigger ||
+                sample.legatoFrom != selected->legatoFrom ||
+                sample.microphone != selected->microphone ||
                 note < sample.low || note > sample.high) continue;
             const float other = (float(sample.minVelocity) +
                                  float(sample.maxVelocity)) * 0.5f;
@@ -462,6 +497,9 @@ struct SSSampler {
             ? ADSR{float(kFadeFrames / outputRate), 0.f, 1.f, 0.f}
             : activeADSR;
         chosen->releaseTrigger = releaseSample;
+        chosen->transitionVoice = transition;
+        chosen->legatoFadeFrames = legatoFade;
+        chosen->legatoFadeProgress = 0;
         chosen->stage = EnvelopeStage::attack;
         chosen->envelopeLevel = 0.f;
         chosen->stageFrames = framesForSeconds(chosen->adsr.attack, kFadeFrames);
@@ -477,7 +515,9 @@ struct SSSampler {
                              uint8_t articulation, const Sample& selected) {
         std::array<bool, 8> available{};
         for (const auto& zone : samples) {
-            if (zone.releaseTrigger || zone.articulation != articulation ||
+            if (zone.releaseTrigger || zone.legatoFrom >= 0 ||
+                zone.microphone != selected.microphone ||
+                zone.articulation != articulation ||
                 zone.root != selected.root || note < zone.low || note > zone.high)
                 continue;
             if (!cc1Crossfade &&
@@ -621,7 +661,7 @@ struct SSSampler {
                 nearest = distance;
             }
         }
-        if (!release) return;
+        if (!release || held.transitionedAway) return;
         for (const auto& zone : samples) {
             if (zone.releaseTrigger && zone.articulation == held.articulation &&
                 zone.root == release->root &&
@@ -654,7 +694,9 @@ struct SSSampler {
                 break;
             case CommandKind::controller:
                 if (command.note == 1) targetCC1[command.channel] = command.velocity;
+                if (command.note == 2) targetCC2[command.channel] = command.velocity;
                 if (command.note == 11) targetCC11[command.channel] = command.velocity;
+                if (command.note == 21) targetCC21[command.channel] = command.velocity;
                 if (command.note == 120 || command.note == 123) {
                     for (auto& group : heldNotes[command.channel])
                         for (auto& held : group) held.down = false;
@@ -671,6 +713,14 @@ struct SSSampler {
                 break;
             case CommandKind::articulation:
                 selectedArticulations[command.channel] = command.note;
+                break;
+            case CommandKind::microphone:
+                targetMicGain[command.note] = command.value1;
+                targetMicPan[command.note] = command.value2;
+                break;
+            case CommandKind::legato:
+                legatoEnabled = command.velocity != 0;
+                legatoFadeFrames = framesForSeconds(command.value1 * 0.001f, kFadeFrames);
                 break;
             }
             read = (read + 1) % kCommandCapacity;
@@ -944,6 +994,20 @@ int32_t ss_zone_count(const SSSampler *sampler) {
     return sampler ? static_cast<int32_t>(sampler->samples.size()) : 0;
 }
 
+int32_t ss_configure_zone_performance(SSSampler *sampler, int32_t zone_index,
+                                      uint8_t microphone_id, int32_t from_note) {
+    if (!sampler || zone_index < 0 ||
+        size_t(zone_index) >= sampler->samples.size() ||
+        microphone_id >= 4 || from_note < -1 || from_note > 127) return 0;
+    Sample& zone = sampler->samples[size_t(zone_index)];
+    if (from_note >= 0 &&
+        (zone.releaseTrigger || zone.loopEnd != 0 || zone.root == from_note))
+        return 0;
+    zone.microphone = microphone_id;
+    zone.legatoFrom = int16_t(from_note);
+    return 1;
+}
+
 int32_t ss_configure_keyswitches(SSSampler *sampler,
                                 const uint8_t *notes,
                                 const uint8_t *articulation_ids,
@@ -988,9 +1052,29 @@ int32_t ss_all_notes_off(SSSampler *sampler) {
 int32_t ss_control_change(SSSampler *sampler, uint8_t controller,
                           uint8_t value, uint8_t channel) {
     if (!sampler || controller > 127 || value > 127 || channel > 15) return 0;
-    if (controller != 1 && controller != 11 &&
+    if (controller != 1 && controller != 2 &&
+        controller != 11 && controller != 21 &&
         controller != 120 && controller != 123) return 0;
     return sampler->enqueue({CommandKind::controller, controller, value, channel}) ? 1 : 0;
+}
+
+int32_t ss_set_microphone_mix(SSSampler *sampler, uint8_t microphone_id,
+                              float gain, float pan) {
+    if (!sampler || microphone_id >= 4 || !std::isfinite(gain) ||
+        !std::isfinite(pan) || gain < 0 || gain > 2 ||
+        pan < -1 || pan > 1) return 0;
+    Command command{CommandKind::microphone, microphone_id, 0, 0};
+    command.value1 = gain;
+    command.value2 = pan;
+    return sampler->enqueue(command) ? 1 : 0;
+}
+
+int32_t ss_set_legato_mode(SSSampler *sampler, int32_t enabled, float fade_ms) {
+    if (!sampler || !std::isfinite(fade_ms) ||
+        fade_ms < 5 || fade_ms > 250) return 0;
+    Command command{CommandKind::legato, 0, uint8_t(enabled != 0), 0};
+    command.value1 = fade_ms;
+    return sampler->enqueue(command) ? 1 : 0;
 }
 
 int32_t ss_set_cc1_crossfade(SSSampler *sampler, int32_t enabled) {
@@ -1032,6 +1116,20 @@ void ss_render(SSSampler *sampler, float *left, float *right, int32_t frames) {
                 (sampler->targetCC1[channel] - sampler->smoothCC1[channel]) * smoothing;
             sampler->smoothCC11[channel] +=
                 (sampler->targetCC11[channel] - sampler->smoothCC11[channel]) * smoothing;
+            sampler->smoothCC2[channel] +=
+                (sampler->targetCC2[channel] - sampler->smoothCC2[channel]) * smoothing;
+            sampler->smoothCC21[channel] +=
+                (sampler->targetCC21[channel] - sampler->smoothCC21[channel]) * smoothing;
+            sampler->vibratoPhase[channel] += 2.0 * 3.141592653589793 * 5.0 /
+                sampler->outputRate;
+            if (sampler->vibratoPhase[channel] > 6.283185307179586)
+                sampler->vibratoPhase[channel] -= 6.283185307179586;
+        }
+        for (int mic = 0; mic < 4; ++mic) {
+            sampler->micGain[mic] +=
+                (sampler->targetMicGain[mic] - sampler->micGain[mic]) * smoothing;
+            sampler->micPan[mic] +=
+                (sampler->targetMicPan[mic] - sampler->micPan[mic]) * smoothing;
         }
         float leftSum = 0;
         float rightSum = 0;
@@ -1058,8 +1156,14 @@ void ss_render(SSSampler *sampler, float *left, float *right, int32_t frames) {
             sampler->nextEnvelopeFrame(voice);
             if (!voice.active) continue;
             const float expression = sampler->smoothCC11[voice.channel] / 127.f;
+            const float breath = sampler->smoothCC2[voice.channel] / 127.f;
             const float dynamics = sampler->smoothCC1[voice.channel];
-            float amplitude = voice.gain * expression;
+            float amplitude = voice.gain * expression * breath;
+            if (voice.legatoFadeFrames > 0 &&
+                voice.legatoFadeProgress < voice.legatoFadeFrames) {
+                amplitude *= float(++voice.legatoFadeProgress) /
+                    float(voice.legatoFadeFrames);
+            }
             if (sampler->cc1Crossfade && !voice.releaseTrigger) {
                 amplitude *= sampler->dynamicWeight(voice, dynamics);
             } else {
@@ -1079,6 +1183,12 @@ void ss_render(SSSampler *sampler, float *left, float *right, int32_t frames) {
                 amplitude *= std::min(1.f, std::max(0.f,
                     float((double(sample->playbackEnd) - voice.position) /
                           double(sample->fadeOut))));
+            }
+            if (voice.transitionVoice) {
+                // Never loop a transition; fade its recorded tail smoothly.
+                const double framesLeft = double(sample->playbackEnd) - voice.position;
+                amplitude *= std::min(1.f, std::max(0.f,
+                    float(framesLeft / double(kFadeFrames))));
             }
             float sampleL = 0.f, sampleR = 0.f;
             bool available = sampler->streamLinear(voice, voice.position,
@@ -1122,9 +1232,18 @@ void ss_render(SSSampler *sampler, float *left, float *right, int32_t frames) {
                 sampleL *= voice.streamGain;
                 sampleR *= voice.streamGain;
             }
-            leftSum += sampleL * amplitude;
-            rightSum += sampleR * amplitude;
-            voice.position += voice.increment;
+            const int mic = sample->microphone;
+            const float pan = sampler->micPan[mic];
+            const float gain = sampler->micGain[mic];
+            leftSum += sampleL * amplitude * gain *
+                std::cos(std::max(0.f, pan) * kHalfPi);
+            rightSum += sampleR * amplitude * gain *
+                std::cos(std::max(0.f, -pan) * kHalfPi);
+            const float depth = sampler->smoothCC21[voice.channel] / 127.f;
+            const float rate = voice.releaseTrigger || voice.transitionVoice ? 1.f :
+                (1.f + depth * 0.0202f *
+                 std::sin(float(sampler->vibratoPhase[voice.channel])));
+            voice.position += voice.increment * rate;
         }
         // De-click stolen voices using a pool allocated at ss_create().
         // The old sample survives for exactly 64 more output frames,
@@ -1181,8 +1300,11 @@ void ss_render(SSSampler *sampler, float *left, float *right, int32_t frames) {
                 sampleL = sampleL * from + readLinear(sample->left, incoming) * to;
                 sampleR = sampleR * from + readLinear(sample->right, incoming) * to;
             }
-            leftSum += sampleL * gain;
-            rightSum += sampleR * gain;
+            const int mic = sample->microphone;
+            leftSum += sampleL * gain * sampler->micGain[mic] *
+                std::cos(std::max(0.f, sampler->micPan[mic]) * kHalfPi);
+            rightSum += sampleR * gain * sampler->micGain[mic] *
+                std::cos(std::max(0.f, -sampler->micPan[mic]) * kHalfPi);
             old.position += old.increment;
             --tail.framesLeft;
         }
