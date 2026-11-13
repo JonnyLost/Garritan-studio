@@ -78,7 +78,7 @@ jobs:
                   result = "n/a (insufficient range)" if measured is None else f"{measured:.2f}s ({error:+.1f}%)"
                   print(f"  {band['centerHz']:>5.0f} Hz | target {band['intendedRT60Seconds']:.2f}s | T20 {result}")
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
-              out.write("\\n".join(summary) + "\\n")
+              out.write("\n".join(summary) + "\n")
           PY
 
       - name: Archive room calibration report
