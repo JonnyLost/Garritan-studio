@@ -433,11 +433,11 @@ public struct StudioSamplerInstrumentView: View {
 
     private func microphoneMixer(_ patch: StudioSamplerPatch) -> some View {
         let referenced = Set(patch.zones.map { $0.microphoneID ?? 0 })
-        let groups = (patch.microphones ?? []).isEmpty
-            ? [StudioSamplerMicrophone(id: 0, name: "Main")]
-            : (patch.microphones ?? [])
-                .filter { referenced.contains($0.id) }
-                .sorted { $0.id < $1.id }
+        let profileNames = ["Close / Default", "Main / Tree", "Room", "Spot"]
+        let groups = referenced.sorted().map { id in
+            (patch.microphones ?? []).first(where: { $0.id == id }) ??
+                StudioSamplerMicrophone(id: id, name: profileNames[Int(id)])
+        }
         return VStack(alignment: .leading, spacing: 12) {
             Label("Recorded Microphone Mix", systemImage: "mic")
                 .font(.subheadline.weight(.semibold))
