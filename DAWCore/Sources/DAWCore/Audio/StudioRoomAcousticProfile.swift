@@ -106,6 +106,9 @@ public struct StudioRoomAcousticProfile: Codable, Equatable, Sendable, Identifia
 
     /// The custom slot always follows the four historic factory profiles.
     /// All AU parameter indices refer to this stable order.
+    public static let customProfileIndex = starterProfiles.count
+    public static let playableProfileCount = starterProfiles.count + 1
+
     public static var playableProfiles: [StudioRoomAcousticProfile] {
         starterProfiles + [StudioAcousticRoomDesign().makeProfile()]
     }
@@ -116,6 +119,7 @@ public struct StudioRoomAcousticProfile: Codable, Equatable, Sendable, Identifia
     }
 
     public static func index(forID id: String) -> Int? {
-        playableProfiles.firstIndex(where: { $0.id == id })
+        if id == StudioAcousticRoomDesign.profileID { return customProfileIndex }
+        return starterProfiles.firstIndex(where: { $0.id == id })
     }
 }
