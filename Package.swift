@@ -14,6 +14,7 @@ let package = Package(
         .library(name: "StudioFMDSP", targets: ["StudioFMDSP"]),
         .library(name: "StudioWavetableDSP", targets: ["StudioWavetableDSP"]),
         .library(name: "StudioAdditiveDSP", targets: ["StudioAdditiveDSP"]),
+        .library(name: "StudioGranularDSP", targets: ["StudioGranularDSP"]),
         .library(name: "DAWUI", targets: ["DAWUI"]),
         .library(name: "VST3Bridge", targets: ["VST3Bridge"]),
         .executable(name: "DAWApp", targets: ["DAWApp"])
@@ -58,6 +59,15 @@ let package = Package(
             cxxSettings: [.unsafeFlags(["-std=c++17"])]
         ),
 
+        // MARK: - Original real-time grain-cloud renderer
+        .target(
+            name: "StudioGranularDSP",
+            path: "StudioGranularDSP",
+            sources: ["src/StudioGranularDSP.cpp"],
+            publicHeadersPath: "include",
+            cxxSettings: [.unsafeFlags(["-std=c++17"])]
+        ),
+
         // MARK: - Real-time callback primitives (C11 atomics)
         .target(
             name: "DAWRealtime",
@@ -75,6 +85,7 @@ let package = Package(
                 "StudioFMDSP",
                 "StudioWavetableDSP",
                 "StudioAdditiveDSP",
+                "StudioGranularDSP",
                 .product(name: "Supabase", package: "supabase-swift")
             ],
             path: "DAWCore/Sources/DAWCore",
