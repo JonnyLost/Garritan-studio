@@ -12,6 +12,16 @@ public actor ProjectFileManager {
     // MARK: - Constants
     
     public static let projectExtension = "dawproj"
+
+    /// A single URL normalization contract for Save, Save As and project history.
+    /// Kept separate from disk serialization to preserve the legacy .dawproj format.
+    public static func normalizedProjectURL(_ url: URL) -> URL {
+        let standardized = url.standardizedFileURL
+        guard standardized.pathExtension.lowercased() != projectExtension else {
+            return standardized
+        }
+        return standardized.deletingPathExtension().appendingPathExtension(projectExtension)
+    }
     
     // Package subdirectories
     private static let audioFolderName = "Audio Files"
@@ -49,10 +59,7 @@ public actor ProjectFileManager {
         let fm = FileManager.default
         
         // Ensure URL has correct extension
-        var packageURL = url
-        if packageURL.pathExtension != Self.projectExtension {
-            packageURL = url.deletingPathExtension().appendingPathExtension(Self.projectExtension)
-        }
+        let packageURL = Self.normalizedProjectURL(url)
         
         // Assemble a complete replacement beside the original package. Never
         // delete the user's last successful save before all files are ready.
@@ -442,6 +449,9 @@ public actor ProjectFileManager {
             print("[ProjectFileManager] Loaded project from: \(url.path)")
             return project
             
+        } catch let persistenceError as PersistenceError {
+            // Never reinterpret a newer, unsupported version as an old file.
+            throw persistenceError
         } catch {
             // Try loading as plain Project (legacy format)
             print("[ProjectFileManager] Trying legacy format...")
@@ -486,13 +496,24 @@ public actor ProjectFileManager {
             }
         }
         
-        let meta = try decoder.decode(MetadataOnly.self, from: data)
-        
+        if let meta = try? decoder.decode(MetadataOnly.self, from: data) {
+            return ProjectMetadataInfo(
+                id: meta.project.id,
+                name: meta.project.name,
+                createdAt: meta.project.createdAt,
+                modifiedAt: meta.project.modifiedAt,
+                fileURL: url
+            )
+        }
+
+        // Historical single-file exports contain a bare Project, not a
+        // ProjectFile envelope. These must also appear in Open Recent.
+        let legacy = try decoder.decode(Project.self, from: data)
         return ProjectMetadataInfo(
-            id: meta.project.id,
-            name: meta.project.name,
-            createdAt: meta.project.createdAt,
-            modifiedAt: meta.project.modifiedAt,
+            id: legacy.id,
+            name: legacy.name,
+            createdAt: legacy.createdAt,
+            modifiedAt: legacy.modifiedAt,
             fileURL: url
         )
     }
@@ -500,6 +521,14 @@ public actor ProjectFileManager {
     // MARK: - Migration
     
     private func migrateIfNeeded(_ project: Project, fromVersion: Int) throws -> Project {
+        guard fromVersion <= Project.currentFormatVersion else {
+            throw PersistenceError.invalidFormat(
+                "Project format version \(fromVersion) is newer than this Studio build supports (\(Project.currentFormatVersion))."
+            )
+        }
+        guard fromVersion >= 0 else {
+            throw PersistenceError.invalidFormat("Negative project format version \(fromVersion).")
+        }
         var migratedProject = project
         
         // Apply migrations in order
@@ -660,7 +689,8 @@ public final class RecentProjectsManager: ObservableObject {
     
     private let maxRecentProjects = 10
     private let userDefaultsKey = "DAWRecentProjects"
-    
+    private var loadGeneration: UInt64 = 0
+
     public init() {
         loadRecentProjects()
     }
@@ -691,13 +721,16 @@ public final class RecentProjectsManager: ObservableObject {
     }
     
     public func clearRecentProjects() {
+        loadGeneration &+= 1
         UserDefaults.standard.removeObject(forKey: userDefaultsKey)
         recentProjects = []
     }
     
     private func loadRecentProjects() {
+        loadGeneration &+= 1
+        let generation = loadGeneration
         let urls = loadRecentURLs()
-        
+
         Task {
             var projects: [ProjectMetadataInfo] = []
             let fileManager = ProjectFileManager()
@@ -708,9 +741,10 @@ public final class RecentProjectsManager: ObservableObject {
                 }
             }
             
-            await MainActor.run {
-                self.recentProjects = projects
-            }
+            // An earlier asynchronous metadata read must never restore a
+            // cleared/reordered recent-projects list.
+            guard generation == self.loadGeneration else { return }
+            self.recentProjects = projects
         }
     }
     
