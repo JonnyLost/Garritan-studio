@@ -65,7 +65,7 @@ public struct StudioSamplerMapView: View {
 
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 10) {
-                    if let patch = draft {
+                    if let patch = draft, !patch.zones.isEmpty {
                         HStack(spacing: 8) {
                     Text("Velocity 127")
                     Picker("Selected zone", selection: $selectedIndex) {
@@ -142,10 +142,11 @@ public struct StudioSamplerMapView: View {
                 VStack(spacing: 12) {
                     Image(systemName: "waveform")
                         .font(.system(size: 42)).foregroundColor(.secondary)
-                    Text("No sampler instrument loaded").font(.headline)
-                    Text("Add WAV, AIFF, or other supported audio files to create a keyboard map.")
+                    Text("Studio Sampler is ready").font(.headline)
+                    Text("Start with an empty instrument, then add WAV, AIFF, or other supported recordings. Studio will map them across the keyboard.")
                         .font(.callout).foregroundColor(.secondary)
-                    Button("Import Samples…") { showImporter = true }
+                        .multilineTextAlignment(.center)
+                    Button("Add Samples…") { showImporter = true }
                         .buttonStyle(.borderedProminent)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
