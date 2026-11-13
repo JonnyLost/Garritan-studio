@@ -33,6 +33,11 @@ float sgr_get_parameter(const SGRSynth* synth, int32_t id);
 int32_t sgr_select_factory_source_stopped(SGRSynth* synth, int32_t sourceID);
 int32_t sgr_load_pcm_stopped(SGRSynth* synth, const float* mono,
                              int32_t frames, double sourceSampleRate);
+/* Retain a shared immutable planar PCM source and consume its precomputed mono
+ * mix, rather than allocating another 524288-frame copy. The handle remains
+ * alive until the source is changed or synth is destroyed. Configure stopped. */
+typedef struct SSSharedPCM SSSharedPCM;
+int32_t sgr_load_shared_pcm_stopped(SGRSynth* synth, SSSharedPCM* pcm);
 int32_t sgr_source_frames(const SGRSynth* synth);
 int32_t sgr_midi_event(SGRSynth* synth, uint8_t status, uint8_t data1,
                        uint8_t data2, uint32_t frameOffset);
