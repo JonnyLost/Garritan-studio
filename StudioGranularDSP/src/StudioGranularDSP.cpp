@@ -1,4 +1,5 @@
 #include "StudioGranularDSP.h"
+#include "StudioSharedPCM.h"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -104,6 +105,7 @@ struct SGRSynth {
     double sampleRate;
     int polyphony;
     std::vector<float> source; // allocated only while rendering is stopped
+    SSSharedPCM* sharedSource=nullptr; // retained for callback lifetime
     double sourceRate=44100;
     std::array<std::atomic<float>,SGR_PARAMETER_COUNT> parameters{};
     std::array<Voice,kVoices> voices{};
@@ -121,6 +123,7 @@ struct SGRSynth {
             parameters[i].store(kDefaults[i],std::memory_order_relaxed);
         bend.fill(8192);
     }
+    ~SGRSynth() {sspcm_release(sharedSource);}
     void clear() noexcept {
         pendingCount=0;
         sustain.fill(false);bend.fill(8192);wheel.fill(0);
@@ -230,6 +233,8 @@ int32_t sgr_select_factory_source_stopped(SGRSynth* s,int32_t sourceID){
         samples[size_t(i)]=x;
     }
     s->source.swap(samples);
+    sspcm_release(s->sharedSource);
+    s->sharedSource=nullptr;
     s->sourceRate=s->sampleRate;
     return 1;
 }
@@ -246,11 +251,27 @@ int32_t sgr_load_pcm_stopped(SGRSynth* s,const float* audio,
         }
     } catch(...){return 0;}
     s->source.swap(copy);
+    sspcm_release(s->sharedSource);
+    s->sharedSource=nullptr;
     s->sourceRate=sourceRate;
     return 1;
 }
+int32_t sgr_load_shared_pcm_stopped(SGRSynth* s,SSSharedPCM* asset) {
+    if(!s || !asset || sspcm_frames(asset)<128 ||
+       sspcm_frames(asset)>SGR_MAX_SOURCE_FRAMES ||
+       !sspcm_mono(asset) || !std::isfinite(sspcm_sample_rate(asset)))
+        return 0;
+    // Only called when callback is stopped and drained. Native refcount
+    // operations do not occur in the audio thread.
+    SSSharedPCM* retained=sspcm_retain(asset);
+    sspcm_release(s->sharedSource);
+    s->sharedSource=retained;
+    std::vector<float>().swap(s->source);
+    s->sourceRate=sspcm_sample_rate(asset);
+    return 1;
+}
 int32_t sgr_source_frames(const SGRSynth* s){
-    return s ? int32_t(s->source.size()) : 0;
+    return s ? int32_t(s->sharedSource ? sspcm_frames(s->sharedSource) : s->source.size()) : 0;
 }
 int32_t sgr_midi_event(SGRSynth* s,uint8_t status,uint8_t d1,
                        uint8_t d2,uint32_t offset){
@@ -292,7 +313,10 @@ void sgr_render(SGRSynth* s,float* left,float* right,int32_t frames){
             s->pending[pos]=incoming;
         }
     }
-    const size_t sourceFrames=s->source.size();
+    const size_t sourceFrames=s->sharedSource ?
+        sspcm_frames(s->sharedSource) : s->source.size();
+    const float* const source=s->sharedSource ?
+        sspcm_mono(s->sharedSource) : s->source.data();
     if(sourceFrames<128) {
         std::fill_n(left,frames,0.f);std::fill_n(right,frames,0.f);
         return;
@@ -373,8 +397,8 @@ void sgr_render(SGRSynth* s,float* left,float* right,int32_t frames){
                 const size_t a=size_t(pos);
                 const size_t b=(a+1)%sourceFrames;
                 const float fraction=float(pos-double(a));
-                const float sample=s->source[a]+
-                    (s->source[b]-s->source[a])*fraction;
+                const float sample=source[a]+
+                    (source[b]-source[a])*fraction;
                 const float output=sample*window;
                 voiceL+=output*grain.left;
                 voiceR+=output*grain.right;
