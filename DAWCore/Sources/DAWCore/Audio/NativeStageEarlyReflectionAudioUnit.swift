@@ -10,6 +10,10 @@ public final class NativeStageEarlyReflectionAudioUnit: AUAudioUnit {
     private var inputs: AUAudioUnitBusArray!
     private var outputs: AUAudioUnitBusArray!
     private var processor: NativeStageEarlyReflectionProcessor?
+    private var designedProfile = StudioAcousticRoomDesign().makeProfile()
+    private var availableProfiles: [StudioRoomAcousticProfile] {
+        StudioRoomAcousticProfile.starterProfiles + [designedProfile]
+    }
 
     private var roomParameter: AUParameter!
     private var panParameter: AUParameter!
@@ -54,10 +58,10 @@ public final class NativeStageEarlyReflectionAudioUnit: AUAudioUnit {
         outputs = AUAudioUnitBusArray(audioUnit: self, busType: .output, busses: [outputBus])
         roomParameter = AUParameterTree.createParameter(
             withIdentifier: "room", name: "Room Profile", address: Self.roomAddress,
-            min: 0, max: AUValue(StudioRoomAcousticProfile.starterProfiles.count - 1),
+            min: 0, max: AUValue(StudioRoomAcousticProfile.playableProfiles.count - 1),
             unit: .indexed, unitName: nil,
             flags: [.flag_IsReadable, .flag_IsWritable],
-            valueStrings: StudioRoomAcousticProfile.starterProfiles.map(\.name),
+            valueStrings: StudioRoomAcousticProfile.playableProfiles.map(\.name),
             dependentParameters: nil
         )
         panParameter = AUParameterTree.createParameter(
@@ -81,6 +85,17 @@ public final class NativeStageEarlyReflectionAudioUnit: AUAudioUnit {
         zoneParameter.value = 2
     }
 
+    /// Apply only with engine stopped; render thread never resizes taps.
+    public func configureDesignedRoom(_ design: StudioAcousticRoomDesign) {
+        designedProfile = design.makeProfile()
+        if renderResourcesAllocated {
+            processor = NativeStageEarlyReflectionProcessor(
+                sampleRate: outputBus.format.sampleRate,
+                profiles: availableProfiles
+            )
+        }
+    }
+
     public override func allocateRenderResources() throws {
         try super.allocateRenderResources()
         let format = outputBus.format
@@ -91,7 +106,9 @@ public final class NativeStageEarlyReflectionAudioUnit: AUAudioUnit {
             throw NSError(domain: NSOSStatusErrorDomain,
                           code: Int(kAudioUnitErr_FormatNotSupported))
         }
-        processor = NativeStageEarlyReflectionProcessor(sampleRate: format.sampleRate)
+        processor = NativeStageEarlyReflectionProcessor(
+            sampleRate: format.sampleRate, profiles: availableProfiles
+        )
     }
 
     public override func deallocateRenderResources() {
@@ -113,7 +130,7 @@ public final class NativeStageEarlyReflectionAudioUnit: AUAudioUnit {
 
             let requested = roomParameter.value
             let selected = requested.isFinite ?
-                min(StudioRoomAcousticProfile.starterProfiles.count - 1,
+                min(StudioRoomAcousticProfile.playableProfiles.count - 1,
                     max(0, Int(requested.rounded()))) : 0
             let requestedZone = zoneParameter.value
             let depth = requestedZone.isFinite ?
