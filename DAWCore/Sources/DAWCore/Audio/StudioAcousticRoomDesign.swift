@@ -164,6 +164,28 @@ public struct StudioAcousticRoomDesign: Codable, Equatable, Sendable {
                 rightGain: reflectivity * r
             )
         }
+        // Only the custom native room changes network spacing. The octave
+        // decay formula alone cannot produce room-size-dependent modal density.
+        // Cube-root-of-volume approximates characteristic acoustic distance;
+        // bounded scale prevents disproportionate memory use on a MacBook.
+        let volumeScale = Float(
+            max(0.72, min(1.75, pow(volumeCubicMeters / 1_728.0, 1.0 / 3.0)))
+        )
+
+        // Mean high-frequency absorption darkens the early reflection field,
+        // while preserving the distinct amplitudes/timing of each image tap.
+        // Generic coefficient estimates: not a physical boundary solver.
+        let highBand = 5
+        let averageHighAbsorption = (
+            floorArea * floorMaterial.octaveAbsorption[highBand] +
+            floorArea * ceilingMaterial.octaveAbsorption[highBand] +
+            wallArea * ((1 - covered) * wallMaterial.octaveAbsorption[highBand] +
+                         covered * wallTreatmentMaterial.octaveAbsorption[highBand])
+        ) / totalArea
+        let reflectionHighCutHz = Float(
+            max(1_400, min(16_000, 15_500 - 13_500 * averageHighAbsorption))
+        )
+
         // Studio's FDN is intentionally limited to 0.2...15 s. The UI shows
         // the unbounded formula result; only the synthesizer clamps the target.
         let target = rt.map { Float(max(0.2, min(15, $0))) }
@@ -173,7 +195,9 @@ public struct StudioAcousticRoomDesign: Codable, Equatable, Sendable {
                 ? "Custom Acoustic Room" : name,
             bassRT60: target[1], midRT60: target[2], trebleRT60: target[4],
             earlyReflections: taps,
-            sixBandRT60: target
+            sixBandRT60: target,
+            lateDelayScale: volumeScale,
+            earlyReflectionHighCutHz: reflectionHighCutHz
         )
     }
 }
