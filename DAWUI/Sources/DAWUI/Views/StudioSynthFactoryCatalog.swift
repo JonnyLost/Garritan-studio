@@ -15,6 +15,41 @@ struct StudioSynthFactorySound: Identifiable {
     var instrumentPath: String {
         "Synth/\(engineName)/\(category)/\(name)"
     }
+
+    /// Factory templates are immutable. Each selected track gets fresh layer,
+    /// modulation-route and MIDI-learn identities, with all referenced layer
+    /// IDs retargeted together. No two tracks share editable voice identity.
+    func instantiatePatch() -> StudioSynthPatch {
+        var instance = patch
+        var layerIDs: [UUID: UUID] = [:]
+        for index in instance.layers.indices {
+            let oldID = instance.layers[index].id
+            let newID = UUID()
+            instance.layers[index].id = newID
+            layerIDs[oldID] = newID
+        }
+        if var modulation = instance.modulation {
+            for index in modulation.routes.indices {
+                let oldID = modulation.routes[index].layerID
+                modulation.routes[index].layerID = layerIDs[oldID] ?? oldID
+                modulation.routes[index].id = UUID()
+            }
+            instance.modulation = modulation
+        }
+        if var midiControls = instance.midiControls {
+            for index in midiControls.mappings.indices {
+                var mapping = midiControls.mappings[index]
+                mapping.id = UUID()
+                if case .parameter(let oldID, let destination) = mapping.target,
+                   let newID = layerIDs[oldID] {
+                    mapping.target = .parameter(layerID: newID, destination: destination)
+                }
+                midiControls.mappings[index] = mapping
+            }
+            instance.midiControls = midiControls
+        }
+        return instance
+    }
 }
 
 enum StudioSynthFactoryCatalog {
