@@ -44,22 +44,41 @@ jobs:
       - name: Build optimized application
         run: swift build -c release --product DAWApp
 
-      # Offline impulse-analysis only. No external room audio is bundled.
-      - name: Measure five native rooms in six octave bands
+      # Offline only. The three contrasting synthetic room definitions
+      # and a separate default-room holdout never change the running DAW.
+      - name: Measure contrasting custom rooms in six octave bands
         run: |
-          swift run -c release RoomAcousticCalibration --seconds 6 > native-room-calibration.json
+          swift run -c release RoomAcousticCalibration --seconds 12 --suite > native-room-calibration.json
           python3 - <<'PY'
-          import json
+          import json, os
           report = json.load(open("native-room-calibration.json"))
-          assert report["profileCount"] == 5, "Expected four factory rooms and one custom design"
+          assert report["scenarioSuiteEnabled"] is True
+          assert report["profileCount"] == 8, "Expected four factory plus four custom designs"
+          scenarios = {r["scenarioID"]: r for r in report["rooms"]}
+          expected = {"small-treated", "medium-wood", "large-reflective", "default-holdout"}
+          assert expected.issubset(scenarios)
+          summary = ["## Six-band acoustic calibration suite", "",
+                     "Synthetic Studio DSP only. T20, not measured venue acoustics.",
+                     "", "| Scenario | Valid T20 bands | Mean absolute error | Worst absolute error |",
+                     "|---|---:|---:|---:|"]
           for room in report["rooms"]:
-              assert len(room["bands"]) == 6, f"Missing octave bands for {room['roomID']}"
-              print(f"\\n{room['roomName']} — {room['targetProvenance']}")
+              assert len(room["bands"]) == 6, f"Missing octave bands for {room['scenarioID']}"
+              observed = room["validT20Bands"]
+              mae = room["meanAbsoluteT20ErrorPercent"]
+              worst = room["maximumAbsoluteT20ErrorPercent"]
+              assert 0 <= observed <= 6
+              if observed:
+                  assert mae is not None and worst is not None
+              fmt = lambda x: "n/a" if x is None else f"{x:.1f}%"
+              summary.append(f"| {room['scenarioID']} | {observed}/6 | {fmt(mae)} | {fmt(worst)} |")
+              print(f"\\n{room['scenarioID']} — {room['targetProvenance']}")
               for band in room["bands"]:
                   measured = band.get("measuredT20Seconds")
                   error = band.get("t20ErrorPercent")
                   result = "n/a (insufficient range)" if measured is None else f"{measured:.2f}s ({error:+.1f}%)"
                   print(f"  {band['centerHz']:>5.0f} Hz | target {band['intendedRT60Seconds']:.2f}s | T20 {result}")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
+              out.write("\\n".join(summary) + "\\n")
           PY
 
       - name: Archive room calibration report
