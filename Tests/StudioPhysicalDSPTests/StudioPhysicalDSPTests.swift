@@ -124,7 +124,7 @@ final class StudioPhysicalDSPTests: XCTestCase {
     func testVoiceStealingAndPitchBendRemainFinite() {
         let synth = makeSynth()
         defer { spm_destroy(synth) }
-        for note: UInt8 in 48...72 {
+        for note in UInt8(48)...UInt8(72) {
             XCTAssertEqual(spm_note_on(synth, note, 100), 1)
         }
         _ = render(synth, count: 2_048)
