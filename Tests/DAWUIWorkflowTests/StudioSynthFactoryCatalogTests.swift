@@ -44,13 +44,26 @@ final class StudioSynthFactoryCatalogTests: XCTestCase {
         }
     }
 
+    func testHybridFactoryModulationRoutesFollowFreshLayerIdentities() {
+        for sound in StudioSynthFactoryCatalog.sounds where sound.engineName == "Hybrid" {
+            let instance = sound.instantiatePatch()
+            XCTAssertTrue(instance.validate(), "Invalid instantiated Hybrid: \(sound.id)")
+            for route in instance.modulation?.routes ?? [] {
+                XCTAssertTrue(instance.layers.contains { $0.id == route.layerID },
+                              "Dangling modulation route: \(sound.id)")
+            }
+        }
+    }
+
     func testFactoryPatchIsCopiedIntoTrackWithoutSharedIdentity() {
         guard let sound = StudioSynthFactoryCatalog.sounds.first else {
             XCTFail("No factory sounds")
             return
         }
-        let first = sound.patch
-        let second = sound.patch
+        let first = sound.instantiatePatch()
+        let second = sound.instantiatePatch()
+        XCTAssertTrue(first.validate())
+        XCTAssertTrue(second.validate())
         XCTAssertNotEqual(first.layers.first?.id, second.layers.first?.id,
                           "Each factory selection must create its own voice-layer identity")
     }
