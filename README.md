@@ -73,6 +73,9 @@ The `architecture/studio-independence` branch has regression checks covering
 project envelopes, older standalone JSON project opening, app metadata and
 module dependency boundaries. Its macOS CI runs builds and tests.
 
+See [Unsaved Session Recovery and Lifecycle Handoff](docs/STUDIO_SESSION_RECOVERY_AND_LIFECYCLE_MILESTONE.md)
+for native draft recovery, safe Close/Quit, snapshot bridge and testing gates.
+
 ## Provenance and licensing review
 
 Studio evolved from an earlier codebase called *Musio Create*; the transition
