@@ -49,6 +49,26 @@ struct StudioSynthMIDILearnView: View {
         _ = viewModel.setStudioSynthMIDIControls(updated, for: trackID)
     }
 
+    /// Manual assignment makes the entire feature usable with MIDI clips
+    /// and Studio's own test CC messages, even without a hardware controller.
+    private func addManual(_ target: StudioSynthMIDIControlTarget) {
+        guard target.validate(layers: patch.layers),
+              controls.mappings.count < 32,
+              !controls.mappings.contains(where: { $0.target == target }) else {
+            return
+        }
+        var updated = controls
+        updated.mappings.append(StudioSynthMIDIControlMapping(
+            controller: 74, target: target))
+        _ = viewModel.setStudioSynthMIDIControls(updated, for: trackID)
+    }
+
+    private func audition(_ mapping: StudioSynthMIDIControlMapping,
+                          value: UInt8) {
+        viewModel.playbackEngine.instrument(for: trackID)?.sendController(
+            mapping.controller, value: value, channel: mapping.channel ?? 0)
+    }
+
     private func mappingEditor(_ mapping: StudioSynthMIDIControlMapping)
         -> some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -63,9 +83,26 @@ struct StudioSynthMIDILearnView: View {
                     .font(.subheadline.weight(.medium))
                     .lineLimit(1)
                 Spacer()
-                Text("CC \(mapping.controller)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.cyan)
+                Menu {
+                    ForEach(0..<4, id: \.self) { band in
+                        let first = [1, 33, 65, 97][band]
+                        let last = [31, 63, 96, 119][band]
+                        Menu("CC \(first)–\(last)") {
+                            ForEach(first...last, id: \.self) { number in
+                                Button("CC \(number)") {
+                                    change(mapping.id) {
+                                        $0.controller = UInt8(number)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    Text("CC \(mapping.controller)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.cyan)
+                }
+                .help("Select a MIDI CC number manually")
                 Picker("Channel", selection: Binding<Int>(
                     get: { mapping.channel.map { Int($0) + 1 } ?? 0 },
                     set: { value in
@@ -90,6 +127,20 @@ struct StudioSynthMIDILearnView: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Remove this MIDI CC assignment")
+            }
+            HStack(spacing: 8) {
+                Text("Test CC")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Button("0") { audition(mapping, value: 0) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                Button("127") { audition(mapping, value: 127) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                Text("Hold a synth note while testing a controller sweep.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
             HStack(spacing: 10) {
                 Text("Min").frame(width: 34, alignment: .leading)
@@ -151,6 +202,30 @@ struct StudioSynthMIDILearnView: View {
                         Label("Learn Macro 1", systemImage: "dot.radiowaves.left.and.right")
                     }
                     .buttonStyle(.bordered)
+                    Menu {
+                        Button("Shared Macro 1") { addManual(.macro1) }
+                            .disabled(controls.mappings.contains {
+                                $0.target == .macro1
+                            })
+                        ForEach(patch.layers.filter(\.enabled)) { layer in
+                            Menu(layer.name) {
+                                ForEach(StudioSynthModDestination.available(
+                                    for: layer.engine), id: \.self) { destination in
+                                    let target = StudioSynthMIDIControlTarget.parameter(
+                                        layerID: layer.id, destination: destination)
+                                    Button(destination.title) {
+                                        addManual(target)
+                                    }
+                                    .disabled(controls.mappings.contains {
+                                        $0.target == target
+                                    })
+                                }
+                            }
+                        }
+                    } label: {
+                        Label("Add Assignment", systemImage: "plus")
+                    }
+                    .disabled(controls.mappings.count >= 32)
                     Spacer()
                     if let learning {
                         Text("Learning: \(title(for: learning.target)) — move a MIDI control")
@@ -164,7 +239,7 @@ struct StudioSynthMIDILearnView: View {
                 }
 
                 if controls.mappings.isEmpty {
-                    Text("No MIDI CC assignments. Learn Macro 1 or use a parameter's context menu.")
+                    Text("No assignments. Right-click a synth slider to learn, or choose Add Assignment to configure CCs without hardware.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
@@ -172,7 +247,7 @@ struct StudioSynthMIDILearnView: View {
                         mappingEditor(mapping)
                     }
                 }
-                Text("Min and Max set the MIDI CC sweep range. Set Min higher than Max to reverse it. Assignments are saved with the project; current controller movements do not overwrite the original sound.")
+                Text("Min and Max set the sweep. Min above Max reverses it. Macro 1 needs a shared modulation route to change the sound. Mappings are saved with the project; incoming controller values do not overwrite the original patch.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
