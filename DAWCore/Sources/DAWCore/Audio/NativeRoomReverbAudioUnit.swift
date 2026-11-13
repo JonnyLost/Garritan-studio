@@ -58,7 +58,7 @@ public final class NativeRoomReverbAudioUnit: AUAudioUnit {
             withIdentifier: "room",
             name: "Room Profile",
             address: Self.roomParameterAddress,
-            min: 0, max: AUValue(StudioRoomAcousticProfile.playableProfiles.count - 1),
+            min: 0, max: AUValue(StudioRoomAcousticProfile.playableProfileCount - 1),
             unit: .indexed, unitName: nil,
             flags: [.flag_IsReadable, .flag_IsWritable],
             valueStrings: StudioRoomAcousticProfile.playableProfiles.map(\.name),
@@ -117,7 +117,7 @@ public final class NativeRoomReverbAudioUnit: AUAudioUnit {
             // and all room taps were prepared in allocateRenderResources().
             let requested = roomParameter.value
             let index = requested.isFinite ? min(
-                StudioRoomAcousticProfile.playableProfiles.count - 1,
+                StudioRoomAcousticProfile.playableProfileCount - 1,
                 max(0, Int(requested.rounded()))
             ) : 0
             processor.selectProfile(at: index)
