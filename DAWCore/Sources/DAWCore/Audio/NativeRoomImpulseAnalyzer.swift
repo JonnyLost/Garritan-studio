@@ -123,7 +123,7 @@ public enum NativeRoomImpulseAnalyzer {
         let c80: Double? = early > 0 && late > 0 ? 10 * log10(early / late) : nil
         return NativeRoomCalibrationResult(
             roomID: roomID, sampleRate: sampleRate,
-            durationSeconds: Double(mono.count) / sampleRate,
+            durationSeconds: Double(left.count) / sampleRate,
             bands: bands, wetOnlyC80dB: c80
         )
     }
