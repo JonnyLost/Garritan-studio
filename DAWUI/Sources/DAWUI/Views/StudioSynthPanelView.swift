@@ -126,6 +126,7 @@ public struct StudioSynthPanelView: View {
                     layerOverview
 
                     StudioSynthModulationView(viewModel: viewModel, trackID: trackID)
+                    StudioSynthMIDILearnView(viewModel: viewModel, trackID: trackID)
 
                     if let layer = selectedLayer {
                         VStack(alignment: .leading, spacing: 12) {
@@ -197,6 +198,9 @@ public struct StudioSynthPanelView: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .frame(minWidth: 800, minHeight: 580)
+        .onDisappear {
+            viewModel.cancelStudioSynthMIDILearn(for: trackID)
+        }
     }
 
     private var layerOverview: some View {
@@ -343,6 +347,31 @@ public struct StudioSynthPanelView: View {
         replace(with: changed)
     }
 
+    /// The native DSP parameter list determines which controls support
+    /// continuous MIDI Learn; discrete waveform and algorithm pickers are
+    /// deliberately excluded from arbitrary 7-bit CC sweeps.
+    @ViewBuilder
+    private func midiLearnActions(layerID: UUID,
+                                  destination: StudioSynthModDestination) -> some View {
+        if destination.isContinuouslyModulatable {
+            let target = StudioSynthMIDIControlTarget.parameter(
+                layerID: layerID, destination: destination)
+            Button("Learn MIDI CC") {
+                _ = viewModel.beginStudioSynthMIDILearn(
+                    for: trackID, target: target)
+            }
+            if patch.midiControls?.mappings.contains(where: {
+                $0.target == target
+            }) == true {
+                Button("Remove MIDI CC Assignment", role: .destructive) {
+                    var changed = patch.midiControls ?? StudioSynthMIDIControlSettings()
+                    changed.mappings.removeAll { $0.target == target }
+                    _ = viewModel.setStudioSynthMIDIControls(changed, for: trackID)
+                }
+            }
+        }
+    }
+
     private func wavetableValue(_ parameter: StudioWavetableParameter,
                                 layerID: UUID) -> Float {
         currentLayer(layerID)?.wavetablePatch?.value(for: parameter)
@@ -370,6 +399,9 @@ public struct StudioSynthPanelView: View {
             Text(parameter.displayValue(value))
                 .font(.caption.monospacedDigit())
                 .frame(width: 74, alignment: .trailing)
+        }
+        .contextMenu {
+            midiLearnActions(layerID: layerID, destination: .wavetable(parameter))
         }
     }
 
@@ -506,6 +538,10 @@ public struct StudioSynthPanelView: View {
                             .font(.caption.monospacedDigit())
                             .frame(width: 80, alignment: .trailing)
                     }
+                    .contextMenu {
+                        midiLearnActions(layerID: layer.id,
+                                         destination: .analog(parameter))
+                    }
                 }
             }
         }
@@ -563,6 +599,10 @@ public struct StudioSynthPanelView: View {
                         Text(parameter.displayValue(value))
                             .font(.caption.monospacedDigit())
                             .frame(width: 85, alignment: .trailing)
+                    }
+                    .contextMenu {
+                        midiLearnActions(layerID: layer.id,
+                                         destination: .fm(parameter))
                     }
                 }
             }
