@@ -66,3 +66,9 @@ For every implementation stage: Swift build and unit tests on macOS CI; project 
 ## Current audit limitations
 
 This initial register is grounded in Package.swift, README.md and sampled beginnings of DAWApp.swift, AudioEngine.swift and PlaybackEngine.swift. It does **not** establish complete source ownership, license clearance, full repository file inventory, or Mac runtime performance. Expand this register before deleting or rewriting implementations.
+
+## Implementation checkpoint: application identity boundary
+
+Commit `6871416e503a573d6fa5a9bdc135b83364e052c8` introduces `StudioApplicationIdentity` in `DAWApp.swift`. The process name, main window title and appearance settings heading now use the working product name **Studio**. The exported UTType continues to use `com.musio.create.project`, intentionally preserving legacy project recognition. Existing `.dawproj` paths, SwiftPM package name, executable target, preferences keys, theme names and serialized content are unchanged.
+
+This is a narrow identity change, **not** a declaration of independent code ownership or a project-format migration. Mac build, file round-trip and launch behavior have not yet been verified. Follow-up: enumerate every persisted identifier and legacy branding occurrence before changing further labels, and add compatibility regression coverage before changing file-format metadata.
