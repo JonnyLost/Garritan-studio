@@ -4,6 +4,12 @@ import Combine
 import AVFoundation
 import DAWCore
 
+/// Temporary UI state only; never written to a project or synthesizer patch.
+public struct StudioSynthMIDILearnRequest: Equatable {
+    public let trackID: TrackID
+    public let target: StudioSynthMIDIControlTarget
+}
+
 // MARK: - Project View Model
 
 /// Main view model coordinating all DAW state and operations
@@ -26,6 +32,7 @@ public final class ProjectViewModel: ObservableObject {
     @Published public private(set) var selectedTrackID: TrackID?
     @Published public private(set) var selectedClipIDs: Set<ClipID> = []
     @Published public private(set) var isModified: Bool = false
+    @Published public private(set) var studioSynthMIDILearnRequest: StudioSynthMIDILearnRequest?
     
     /// Transient MIDI drag destination; nil for invalid or inactive drops.
     @Published public var midiDragTargetID: TrackID?
@@ -168,6 +175,30 @@ public final class ProjectViewModel: ObservableObject {
     }
     
     private func handleLiveMIDIEvent(_ event: IncomingMIDIEvent) {
+        // Capture only a physical/virtual CoreMIDI CC from the normal input
+        // stream. A learned assignment does not depend on the track being
+        // record-armed, but normal MIDI playthrough still follows arm state.
+        if let learning = studioSynthMIDILearnRequest,
+           case .controlChange(let number, _) = event.type,
+           StudioSynthMIDIControlMapping.supportsController(number) {
+            var controls = project.track(withID: learning.trackID)?
+                .studioSynthPatch?.midiControls ?? StudioSynthMIDIControlSettings()
+            // Learning again replaces one destination's CC but retains its
+            // chosen output range and avoids duplicate destination ownership.
+            if let index = controls.mappings.firstIndex(where: {
+                $0.target == learning.target
+            }) {
+                controls.mappings[index].controller = number
+                controls.mappings[index].enabled = true
+            } else {
+                controls.mappings.append(StudioSynthMIDIControlMapping(
+                    controller: number, target: learning.target))
+            }
+            if setStudioSynthMIDIControls(controls, for: learning.trackID) {
+                studioSynthMIDILearnRequest = nil
+                print("[Studio Synth MIDI Learn] Assigned CC\(number) to \(learning.target)")
+            }
+        }
         // Show MIDI activity
         midiActivity = true
         midiActivityTimer?.invalidate()
@@ -474,6 +505,7 @@ public final class ProjectViewModel: ObservableObject {
         track.garritanProgramID = nil
         track.studioAnalogEnabled = true
         track.studioFMEnabled = false
+        track.studioSynthEnabled = false
         updateTrack(track, description: "Load Studio Analog")
     }
 
@@ -497,7 +529,270 @@ public final class ProjectViewModel: ObservableObject {
         track.garritanProgramID = nil
         track.studioAnalogEnabled = false
         track.studioFMEnabled = true
+        track.studioSynthEnabled = false
         updateTrack(track, description: "Load Studio FM")
+    }
+
+    /// Loads the unified native instrument. Legacy native instruments are
+    /// preserved as independent compatible project formats.
+    public func loadStudioSynth(for trackID: TrackID,
+                                patch: StudioSynthPatch = StudioSynthPatch()) throws {
+        guard var track = project.track(withID: trackID),
+              track.type == .midi || track.type == .instrument else {
+            throw PlaybackError.trackNotFound(trackID)
+        }
+        let previousPluginID: UUID?
+        if let instrument = playbackEngine.instrument(for: trackID),
+           case .auInstrument(_, let id) = instrument {
+            previousPluginID = id
+        } else {
+            previousPluginID = nil
+        }
+        try playbackEngine.loadStudioSynth(for: trackID, patch: patch)
+        if let previousPluginID { pluginHost.unloadPlugin(id: previousPluginID) }
+        track.instrumentSlot = nil
+        track.garritanProgramID = nil
+        track.studioAnalogEnabled = false
+        track.studioFMEnabled = false
+        track.studioSynthEnabled = true
+        track.studioSynthPatch = patch
+        updateTrack(track, description: "Load Studio Synth")
+    }
+
+    /// Topology changes happen on the main/control thread while the graph is
+    /// stopped. This is not called from a MIDI callback or slider drag.
+    public func updateStudioSynthPatch(_ patch: StudioSynthPatch,
+                                       for trackID: TrackID) throws {
+        guard patch.validate(),
+              let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioSynthEnabled == true else {
+            throw StudioSynthError.invalidPatch
+        }
+        try playbackEngine.loadStudioSynth(for: trackID, patch: patch)
+        project.tracks[index].studioSynthPatch = patch
+    }
+
+    /// Apply routing/settings in place, without stopping the audio graph or
+    /// silencing notes. The pure settings model must validate against the
+    /// specific layer engine and its continuously variable parameters.
+    @discardableResult
+    public func setStudioSynthModulation(_ settings: StudioSynthModulationSettings,
+                                         for trackID: TrackID) -> Bool {
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioSynthEnabled == true,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSynth(let synth) = instrument,
+              var patch = project.tracks[index].studioSynthPatch else { return false }
+        patch.modulation = settings
+        guard patch.validate(), synth.setModulation(settings) else { return false }
+        project.tracks[index].studioSynthPatch = patch
+        return true
+    }
+
+    /// Arm a single target for the next incoming MIDI CC. The audio graph
+    /// and all existing controller assignments remain untouched until a
+    /// supported controller is actually received.
+    @discardableResult
+    public func beginStudioSynthMIDILearn(
+        for trackID: TrackID, target: StudioSynthMIDIControlTarget
+    ) -> Bool {
+        guard let track = project.track(withID: trackID),
+              track.studioSynthEnabled == true,
+              let patch = track.studioSynthPatch,
+              target.validate(layers: patch.layers),
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSynth = instrument else { return false }
+        studioSynthMIDILearnRequest = StudioSynthMIDILearnRequest(
+            trackID: trackID, target: target)
+        return true
+    }
+
+    public func cancelStudioSynthMIDILearn(for trackID: TrackID) {
+        if studioSynthMIDILearnRequest?.trackID == trackID {
+            studioSynthMIDILearnRequest = nil
+        }
+    }
+
+    /// Live updates are applied to the existing control worker and persisted
+    /// in the project, not implemented with an AU host or a new audio graph.
+    @discardableResult
+    public func setStudioSynthMIDIControls(
+        _ controls: StudioSynthMIDIControlSettings, for trackID: TrackID
+    ) -> Bool {
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioSynthEnabled == true,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSynth(let synth) = instrument,
+              var patch = project.tracks[index].studioSynthPatch else {
+            return false
+        }
+        patch.midiControls = controls
+        guard patch.validate(), synth.setMIDIControls(controls) else { return false }
+        project.tracks[index].studioSynthPatch = patch
+        return true
+    }
+
+    public func setStudioSynthLayerMix(for trackID: TrackID, layerID: UUID,
+                                       gain: Float, pan: Float) {
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioSynthEnabled == true,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSynth(let synth) = instrument,
+              synth.setMix(id: layerID, gain: gain, pan: pan),
+              var patch = project.tracks[index].studioSynthPatch,
+              let layerIndex = patch.layers.firstIndex(where: { $0.id == layerID }) else {
+            return
+        }
+        patch.layers[layerIndex].gain = gain
+        patch.layers[layerIndex].pan = pan
+        project.tracks[index].studioSynthPatch = patch
+    }
+
+    public func setStudioSynthAnalogParameter(_ parameter: StudioAnalogParameter,
+                                              value: Float, for trackID: TrackID,
+                                              layerID: UUID) {
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioSynthEnabled == true,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSynth(let synth) = instrument,
+              var patch = project.tracks[index].studioSynthPatch,
+              let layerIndex = patch.layers.firstIndex(where: { $0.id == layerID }),
+              parameter.valid(value) else {
+            return
+        }
+        // Muted layers have no DSP instance. Still save their edits so they
+        // are ready when the layer is enabled again.
+        if patch.layers[layerIndex].enabled &&
+           !synth.setAnalogParameter(id: layerID, parameter: parameter, value: value) { return }
+        var analog = patch.layers[layerIndex].analogPatch ?? StudioAnalogPatch()
+        analog.set(value, for: parameter)
+        patch.layers[layerIndex].analogPatch = analog
+        project.tracks[index].studioSynthPatch = patch
+    }
+
+    public func setStudioSynthFMParameter(_ parameter: StudioFMParameter,
+                                          value: Float, for trackID: TrackID,
+                                          layerID: UUID) {
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioSynthEnabled == true,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSynth(let synth) = instrument,
+              var patch = project.tracks[index].studioSynthPatch,
+              let layerIndex = patch.layers.firstIndex(where: { $0.id == layerID }),
+              parameter.valid(value) else {
+            return
+        }
+        // Muted layers have no DSP instance. Still save their edits so they
+        // are ready when the layer is enabled again.
+        if patch.layers[layerIndex].enabled &&
+           !synth.setFMParameter(id: layerID, parameter: parameter, value: value) { return }
+        var fm = patch.layers[layerIndex].fmPatch ?? StudioFMPatch()
+        fm.set(value, for: parameter)
+        patch.layers[layerIndex].fmPatch = fm
+        project.tracks[index].studioSynthPatch = patch
+    }
+
+    /// A live wavetable edit updates only the requested layer's atomic DSP
+    /// parameter and embeds the exact value in the native project patch.
+    public func setStudioSynthWavetableParameter(
+        _ parameter: StudioWavetableParameter, value: Float,
+        for trackID: TrackID, layerID: UUID
+    ) {
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioSynthEnabled == true,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSynth(let synth) = instrument,
+              var patch = project.tracks[index].studioSynthPatch,
+              let layerIndex = patch.layers.firstIndex(where: { $0.id == layerID }),
+              parameter.valid(value) else {
+            return
+        }
+        // Muted layers have no DSP instance. Still save their edits so they
+        // are ready when the layer is enabled again.
+        if patch.layers[layerIndex].enabled &&
+           !synth.setWavetableParameter(id: layerID, parameter: parameter, value: value) { return }
+        var sound = patch.layers[layerIndex].wavetablePatch ?? StudioWavetablePatch()
+        sound.set(value, for: parameter)
+        patch.layers[layerIndex].wavetablePatch = sound
+        project.tracks[index].studioSynthPatch = patch
+    }
+
+    /// Harmonic edits update the native additive voice engine immediately;
+    /// every parameter is saved in the project without graph reconstruction.
+    public func setStudioSynthAdditiveParameter(
+        _ parameter: StudioAdditiveParameter, value: Float,
+        for trackID: TrackID, layerID: UUID
+    ) {
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioSynthEnabled == true,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSynth(let synth) = instrument,
+              var patch = project.tracks[index].studioSynthPatch,
+              let layerIndex = patch.layers.firstIndex(where: { $0.id == layerID }),
+              patch.layers[layerIndex].engine == .additive,
+              parameter.valid(value) else { return }
+        if patch.layers[layerIndex].enabled &&
+            !synth.setAdditiveParameter(id: layerID, parameter: parameter, value: value) {
+            return
+        }
+        var additive = patch.layers[layerIndex].additivePatch ?? StudioAdditivePatch()
+        additive.set(value, for: parameter)
+        patch.layers[layerIndex].additivePatch = additive
+        project.tracks[index].studioSynthPatch = patch
+    }
+
+    /// Grain parameter edits are atomic, and the original sound patch persists.
+    /// Audio-file source changes use updateStudioSynthPatch while stopped;
+    /// never copy or decode sample bytes on the audio render thread.
+    public func setStudioSynthGranularParameter(
+        _ parameter: StudioGranularParameter, value: Float,
+        for trackID: TrackID, layerID: UUID
+    ) {
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioSynthEnabled == true,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSynth(let synth) = instrument,
+              var patch = project.tracks[index].studioSynthPatch,
+              let layerIndex = patch.layers.firstIndex(where: { $0.id == layerID }),
+              patch.layers[layerIndex].engine == .granular,
+              parameter.valid(value) else { return }
+        if patch.layers[layerIndex].enabled &&
+            !synth.setGranularParameter(id: layerID,
+                                       parameter: parameter, value: value) {
+            return
+        }
+        var granular = patch.layers[layerIndex].granularPatch ??
+            StudioGranularPatch()
+        granular.set(value, for: parameter)
+        patch.layers[layerIndex].granularPatch = granular
+        project.tracks[index].studioSynthPatch = patch
+    }
+
+    /// Save physical-model controls in the project and write atomically to
+    /// the active C++ renderer without rebuilding the audio graph. Muted
+    /// layers retain their edits for the next activation.
+    public func setStudioSynthPhysicalParameter(
+        _ parameter: StudioPhysicalParameter, value: Float,
+        for trackID: TrackID, layerID: UUID
+    ) {
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioSynthEnabled == true,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSynth(let synth) = instrument,
+              var patch = project.tracks[index].studioSynthPatch,
+              let layerIndex = patch.layers.firstIndex(where: { $0.id == layerID }),
+              patch.layers[layerIndex].engine == .physical,
+              parameter.valid(value) else { return }
+        if patch.layers[layerIndex].enabled &&
+            !synth.setPhysicalParameter(id: layerID,
+                                        parameter: parameter, value: value) {
+            return
+        }
+        var physical = patch.layers[layerIndex].physicalPatch ??
+            StudioPhysicalPatch()
+        physical.set(value, for: parameter)
+        patch.layers[layerIndex].physicalPatch = physical
+        project.tracks[index].studioSynthPatch = patch
     }
 
     /// Live FM control updates are atomic in the DSP and persist on the track.

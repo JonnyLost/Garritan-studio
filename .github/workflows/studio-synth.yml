@@ -1,0 +1,139 @@
+name: Studio Synth native validation
+
+on:
+  push:
+    branches:
+      - feature/studio-synth
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-synth
+  cancel-in-progress: true
+
+jobs:
+  analog-and-fm-dsp:
+    name: Native Analog and FM DSP / AddressSanitizer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse shared engine Swift code on Linux
+        run: |
+          swiftc -frontend -parse \
+            DAWCore/Sources/DAWCore/Audio/StudioSynthPatch.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioAdditivePatch.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioAdditivePresets.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioSynthHybridPresets.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioAdditiveInstrument.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioGranularPatch.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioPhysicalPatch.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioPhysicalPresets.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioPhysicalInstrument.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioGranularPresets.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioGranularInstrument.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioSynthMIDIControls.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioSynthInstrument.swift \
+            DAWCore/Sources/DAWCore/Models/Track.swift \
+            DAWCore/Sources/DAWCore/Audio/PlaybackEngine.swift \
+            DAWUI/Sources/DAWUI/ViewModels/ProjectViewModel.swift \
+            DAWUI/Sources/DAWUI/Views/StudioSynthPanelView.swift \
+            DAWUI/Sources/DAWUI/Views/StudioGranularEditorView.swift \
+            DAWUI/Sources/DAWUI/Views/StudioSynthMIDILearnView.swift \
+            DAWUI/Sources/DAWUI/Views/Timeline/TrackHeaderView.swift \
+            Tests/DAWCoreTests/StudioSynthTests.swift \
+            Tests/DAWCoreTests/StudioPhysicalIntegrationTests.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioWavetablePatch.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioWavetableInstrument.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioWavetablePresets.swift \
+            DAWUI/Sources/DAWUI/Views/StudioWavetableWaveformPreview.swift \
+            Tests/StudioWavetableDSPTests/StudioWavetableDSPTests.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioSynthModulation.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioSynthModulationWorker.swift \
+            DAWUI/Sources/DAWUI/Views/StudioSynthModulationView.swift \
+            Tests/DAWCoreTests/StudioSynthModulationTests.swift \
+            Tests/DAWCoreTests/StudioSynthMIDILearnTests.swift \
+            Tests/DAWCoreTests/StudioAdditiveTests.swift \
+            Tests/DAWCoreTests/StudioGranularTests.swift
+      - name: Compile and execute shared modulation core on Linux
+        run: |
+          # Debug assertions must stay active for these executable checks.
+          swiftc -swift-version 5 \
+            DAWCore/Sources/DAWCore/Audio/StudioAnalogRouting.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioAnalogPatch.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioFMPatch.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioWavetablePatch.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioSynthModulation.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioSynthPatch.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioAdditivePatch.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioGranularPatch.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioPhysicalPatch.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioSynthMIDIControls.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioSynthModulationWorker.swift \
+            Tests/StudioSynthModulationStandalone/main.swift \
+            -o /tmp/studio-synth-modulation
+          /tmp/studio-synth-modulation
+      - name: Original analog DSP
+        run: |
+          clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I StudioAnalogDSP/include \
+            StudioAnalogDSP/src/StudioAnalogDSP.cpp \
+            Tests/StudioAnalogDSPStandalone/main.cpp \
+            -o /tmp/studio-analog-synth
+          ASAN_OPTIONS=detect_leaks=1 /tmp/studio-analog-synth
+      - name: Original Wavetable DSP
+        run: |
+          clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I StudioWavetableDSP/include \
+            StudioWavetableDSP/src/StudioWavetableDSP.cpp \
+            Tests/StudioWavetableDSPStandalone/main.cpp \
+            -o /tmp/studio-wavetable-synth
+          ASAN_OPTIONS=detect_leaks=1 /tmp/studio-wavetable-synth
+      - name: Original Additive DSP and voice release tests
+        run: |
+          clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I StudioAdditiveDSP/include \
+            StudioAdditiveDSP/src/StudioAdditiveDSP.cpp \
+            Tests/StudioAdditiveDSPStandalone/main.cpp \
+            -o /tmp/studio-additive-synth
+          ASAN_OPTIONS=detect_leaks=1 /tmp/studio-additive-synth
+      - name: Original Granular DSP and bounded source tests
+        run: |
+          clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I StudioGranularDSP/include \
+            StudioGranularDSP/src/StudioGranularDSP.cpp \
+            Tests/StudioGranularDSPStandalone/main.cpp \
+            -o /tmp/studio-granular-synth
+          ASAN_OPTIONS=detect_leaks=1 /tmp/studio-granular-synth
+      - name: Native Physical Modeling DSP / AddressSanitizer
+        run: |
+          clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I StudioPhysicalDSP/include \
+            StudioPhysicalDSP/src/StudioPhysicalDSP.cpp \
+            Tests/StudioPhysicalDSPStandalone/main.cpp \
+            -o /tmp/studio-physical-synth
+          ASAN_OPTIONS=detect_leaks=1 /tmp/studio-physical-synth
+      - name: Original FM DSP
+        run: |
+          clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I StudioFMDSP/include \
+            StudioFMDSP/src/StudioFMDSP.cpp \
+            Tests/StudioFMDSPStandalone/main.cpp \
+            -o /tmp/studio-fm-synth
+          ASAN_OPTIONS=detect_leaks=1 /tmp/studio-fm-synth
+
+  macos-regression:
+    name: macOS Swift build, regression tests and release app
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve packages
+        run: swift package resolve
+      - name: Build all targets
+        run: swift build
+      - name: Run DAW and native synth tests
+        run: swift test --parallel
+      - name: Build optimized DAWApp
+        run: swift build -c release --product DAWApp
