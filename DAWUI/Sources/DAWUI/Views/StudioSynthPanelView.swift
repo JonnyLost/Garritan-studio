@@ -95,6 +95,21 @@ public struct StudioSynthPanelView: View {
                     Button("New Analog + FM Hybrid") {
                         replace(with: StudioSynthPatch())
                     }
+                    Divider()
+                    Menu("Hybrid Factory Sounds") {
+                        ForEach(["Cinematic", "Pads", "Keys", "Bass", "Textures"],
+                                id: \.self) { family in
+                            Menu(family) {
+                                ForEach(StudioSynthHybridFactoryLibrary.presets.filter {
+                                    $0.family == family
+                                }) { preset in
+                                    Button(preset.name) {
+                                        replace(with: preset.patch)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 } label: {
                     Label("New Sound", systemImage: "doc.badge.plus")
                 }
