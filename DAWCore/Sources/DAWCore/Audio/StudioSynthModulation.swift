@@ -65,10 +65,20 @@ public enum StudioSynthModDestination: Codable, Hashable, Sendable {
                     .fm(.velocityBrightness)]
         case .additive:
             return [.additive(.outputGain), .additive(.spectralTilt),
-                    .additive(.spectralEvolution),
-                    .additive(.evolutionTime)] +
+                    .additive(.spectralEvolution), .additive(.evolutionTime),
+                    .additive(.motionRate), .additive(.motionDepth),
+                    .additive(.motionSpread), .additive(.motionShape),
+                    .additive(.partialEnvelopeMix)] +
                     (0..<16).compactMap {
                         StudioAdditiveParameter.partial($0).map(Self.additive)
+                    } +
+                    (0..<16).compactMap {
+                        StudioAdditiveParameter.harmonic($0, control: .motion)
+                            .map(Self.additive)
+                    } +
+                    (0..<16).compactMap {
+                        StudioAdditiveParameter.harmonic($0, control: .sustain)
+                            .map(Self.additive)
                     }
         case .wavetable:
             return [.wavetable(.osc1Position), .wavetable(.osc2Position),
