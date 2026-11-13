@@ -717,6 +717,30 @@ public final class ProjectViewModel: ObservableObject {
         project.tracks[index].studioSynthPatch = patch
     }
 
+    /// Harmonic edits update the native additive voice engine immediately;
+    /// every parameter is saved in the project without graph reconstruction.
+    public func setStudioSynthAdditiveParameter(
+        _ parameter: StudioAdditiveParameter, value: Float,
+        for trackID: TrackID, layerID: UUID
+    ) {
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioSynthEnabled == true,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSynth(let synth) = instrument,
+              var patch = project.tracks[index].studioSynthPatch,
+              let layerIndex = patch.layers.firstIndex(where: { $0.id == layerID }),
+              patch.layers[layerIndex].engine == .additive,
+              parameter.valid(value) else { return }
+        if patch.layers[layerIndex].enabled &&
+            !synth.setAdditiveParameter(id: layerID, parameter: parameter, value: value) {
+            return
+        }
+        var additive = patch.layers[layerIndex].additivePatch ?? StudioAdditivePatch()
+        additive.set(value, for: parameter)
+        patch.layers[layerIndex].additivePatch = additive
+        project.tracks[index].studioSynthPatch = patch
+    }
+
     /// Live FM control updates are atomic in the DSP and persist on the track.
     /// Do not add an undo transaction for every slider substep.
     public func studioFMValue(_ parameter: StudioFMParameter, for trackID: TrackID) -> Float {
