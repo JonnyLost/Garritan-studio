@@ -93,6 +93,9 @@ public struct StudioSynthPanelView: View {
                     Button("New Additive Instrument") {
                         replace(with: StudioSynthPatch.individual(.additive))
                     }
+                    Button("New Granular Instrument") {
+                        replace(with: StudioSynthPatch.individual(.granular))
+                    }
                     Button("New Analog + FM Hybrid") {
                         replace(with: StudioSynthPatch())
                     }
@@ -119,6 +122,7 @@ public struct StudioSynthPanelView: View {
                     Button("FM Layer") { addLayer(.fm) }
                     Button("Wavetable Layer") { addLayer(.wavetable) }
                     Button("Additive Layer") { addLayer(.additive) }
+                    Button("Granular Layer") { addLayer(.granular) }
                 } label: {
                     Label("Add Layer", systemImage: "plus")
                 }
@@ -187,6 +191,25 @@ public struct StudioSynthPanelView: View {
                                         Label("Wavetable Factory Sounds",
                                               systemImage: "waveform.path.ecg.rectangle")
                                     }
+                                } else if layer.engine == .granular {
+                                    Menu {
+                                        ForEach(["Pads", "Textures", "Keys", "Leads",
+                                                 "Bass"], id: \.self) { family in
+                                            Menu(family) {
+                                                ForEach(StudioGranularFactoryLibrary.presets.filter {
+                                                    $0.family == family
+                                                }) { preset in
+                                                    Button(preset.name) {
+                                                        loadGranularPreset(
+                                                            preset.patch, layerID: layer.id)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } label: {
+                                        Label("Granular Factory Sounds",
+                                              systemImage: "circle.hexagongrid")
+                                    }
                                 } else if layer.engine == .additive {
                                     Menu {
                                         ForEach(["Keys", "Winds", "Pads", "Bass",
@@ -225,6 +248,13 @@ public struct StudioSynthPanelView: View {
                                 wavetableEditor(layer)
                             } else if layer.engine == .additive {
                                 additiveEditor(layer)
+                            } else if layer.engine == .granular {
+                                StudioGranularEditorView(
+                                    viewModel:viewModel,trackID:trackID,
+                                    layerID:layer.id,
+                                    onChangeSource:{ updated in
+                                        loadGranularPreset(updated,layerID:layer.id)
+                                    })
                             } else {
                                 fmEditor(layer)
                             }
@@ -394,6 +424,14 @@ public struct StudioSynthPanelView: View {
         }
         changed.layers[index].additivePatch = preset
         replace(with: changed)
+    }
+
+    private func loadGranularPreset(_ preset: StudioGranularPatch, layerID: UUID) {
+        var changed=patch
+        guard let index=changed.layers.firstIndex(where: { $0.id == layerID }),
+              changed.layers[index].engine == .granular else { return }
+        changed.layers[index].granularPatch=preset
+        replace(with:changed)
     }
 
     private func loadFMPreset(_ preset: StudioFMPatch, layerID: UUID) {
