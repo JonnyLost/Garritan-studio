@@ -23,7 +23,12 @@ internal final class StudioSynthModulationWorker {
 
     // All mutable fields below are owned exclusively by queue.
     private var settings: StudioSynthModulationSettings
+    private var controls: StudioSynthMIDIControlSettings
     private var baselines: [Key: Float] = [:]
+    // MIDI CC changes a performance value rather than the saved patch's
+    // original knob setting. Removing a mapping restores that original base.
+    private var controllerBases: [Key: Float] = [:]
+    private var macroOverride: Float?
     private var clock: DispatchSourceTimer?
     private var clockIntervalUs: Int?
     private var elapsed = 0.0
@@ -37,10 +42,13 @@ internal final class StudioSynthModulationWorker {
     private var sustained = [Bool](repeating: false, count: 16 * 128)
     private var pedal = [Bool](repeating: false, count: 16)
 
-    init(settings: StudioSynthModulationSettings, tempo: Double = 120,
+    init(settings: StudioSynthModulationSettings,
+         midiControls: StudioSynthMIDIControlSettings = StudioSynthMIDIControlSettings(),
+         tempo: Double = 120,
          read: @escaping (UUID, StudioSynthModDestination) -> Float?,
          write: @escaping (UUID, StudioSynthModDestination, Float) -> Bool) {
         self.settings = settings
+        self.controls = midiControls
         self.tempo = tempo.isFinite && tempo > 0 ? tempo : 120
         self.read = read
         self.write = write
@@ -57,6 +65,18 @@ internal final class StudioSynthModulationWorker {
 
     func update(_ settings: StudioSynthModulationSettings) {
         queue.sync { self.install(settings, restoringOldRoutes: true) }
+    }
+
+    /// Controller assignments update without destroying the sound graph or
+    /// restarting notes. The same queue owns CC values and modulation bases.
+    func updateMIDIControls(_ newer: StudioSynthMIDIControlSettings) {
+        queue.sync {
+            let oldKeys = self.activeKeys()
+            let oldMapped = self.mappedKeys()
+            self.controls = newer
+            self.reconcile(previous: oldKeys, oldMapped: oldMapped,
+                           restoringOldRoutes: true)
+        }
     }
 
     /// Queue-confined tempo changes preserve integrated beat position instead
@@ -82,6 +102,9 @@ internal final class StudioSynthModulationWorker {
             let key = Key(layer: layer, destination: destination)
             if activeKeys().contains(key) {
                 baselines[key] = value
+                // An explicit manual knob change takes precedence until the
+                // next incoming mapped MIDI CC.
+                controllerBases.removeValue(forKey: key)
                 applyCurrentValues()
                 return true
             }
@@ -114,34 +137,58 @@ internal final class StudioSynthModulationWorker {
         }
     }
 
+    private func mappedKeys() -> Set<Key> {
+        Set(controls.mappings.compactMap { mapping -> Key? in
+            guard mapping.enabled,
+                  case .parameter(let id, let destination) = mapping.target else {
+                return nil
+            }
+            return Key(layer: id, destination: destination)
+        })
+    }
+
     private func activeKeys() -> Set<Key> {
-        Set(settings.routes.filter(\.enabled).map {
+        let modulated = Set(settings.routes.filter(\.enabled).map {
             Key(layer: $0.layerID, destination: $0.destination)
         })
+        return modulated.union(mappedKeys())
     }
 
     private func install(_ newer: StudioSynthModulationSettings,
                          restoringOldRoutes: Bool) {
         let previous = activeKeys()
+        let oldMapped = mappedKeys()
         settings = newer
-        let next = activeKeys()
+        reconcile(previous: previous, oldMapped: oldMapped,
+                  restoringOldRoutes: restoringOldRoutes)
+    }
 
+    private func reconcile(previous: Set<Key>, oldMapped: Set<Key>,
+                           restoringOldRoutes: Bool) {
+        let next = activeKeys()
+        for key in oldMapped.subtracting(mappedKeys()) {
+            controllerBases.removeValue(forKey: key)
+        }
+        if !controls.mappings.contains(where: {
+            $0.enabled && $0.target == .macro1
+        }) {
+            macroOverride = nil
+        }
         if restoringOldRoutes {
             for key in previous.subtracting(next) {
                 if let value = baselines[key] {
                     _ = write(key.layer, key.destination, value)
                 }
+                baselines.removeValue(forKey: key)
+                controllerBases.removeValue(forKey: key)
             }
         }
-
-        for key in next {
-            if baselines[key] == nil {
-                baselines[key] = read(key.layer, key.destination)
-                    ?? key.destination.defaultValue
-            }
+        for key in next where baselines[key] == nil {
+            baselines[key] = read(key.layer, key.destination)
+                ?? key.destination.defaultValue
         }
 
-        if newer.hasEnabledRoutes {
+        if settings.hasEnabledRoutes {
             scheduleClockIfNeeded()
         } else {
             clock?.cancel()
@@ -197,23 +244,30 @@ internal final class StudioSynthModulationWorker {
     }
 
     private func applyCurrentValues() {
-        guard settings.hasEnabledRoutes else { return }
+        guard settings.hasEnabledRoutes || controls.hasEnabledMappings else {
+            return
+        }
 
-        // Accumulate all sources targeting the same parameter before writing
-        // exactly once. No per-route last-writer-wins overwrite, and every
-        // result is clamped within that engine's valid parameter range.
+        // A CC-controlled macro supplies the modulation matrix's Macro 1
+        // source without modifying the persisted Macro 1 knob value.
+        var effectiveSettings = settings
+        if let macroOverride { effectiveSettings.macro1 = macroOverride }
         var offsets: [Key: Float] = [:]
         for route in settings.routes where route.enabled {
             let key = Key(layer: route.layerID, destination: route.destination)
             let signal = StudioSynthModulationMath.signal(
-                route.source, seconds: elapsed, settings: settings,
+                route.source, seconds: elapsed, settings: effectiveSettings,
                 envelope: envelope.value, wheel: wheel,
                 bpm: tempo, beats: elapsedBeats)
             offsets[key, default: 0] += route.depth * signal
         }
-        for (key, amount) in offsets {
-            let base = baselines[key] ?? key.destination.defaultValue
-            let effective = key.destination.apply(base: base, normalizedOffset: amount)
+        // Sum modulation after the MIDI-controlled base value. A single CC
+        // can drive several layer parameters, with no "last writer wins" race.
+        for key in activeKeys() {
+            let base = controllerBases[key] ?? baselines[key]
+                ?? key.destination.defaultValue
+            let effective = key.destination.apply(
+                base: base, normalizedOffset: offsets[key] ?? 0)
             _ = write(key.layer, key.destination, effective)
         }
     }
@@ -230,6 +284,19 @@ internal final class StudioSynthModulationWorker {
             sustained[index] = pedal[channel]
             releaseIfNoNotes()
         } else if group == 0xB0 {
+            // MIDI Learn is evaluated on the existing control worker and
+            // never from an AVAudioSourceNode render callback.
+            for mapping in controls.mappings where
+                mapping.matches(controller: data1, channel: UInt8(channel)) {
+                guard let position = mapping.position(for: data2) else { continue }
+                switch mapping.target {
+                case .macro1:
+                    macroOverride = position
+                case .parameter(let id, let destination):
+                    controllerBases[Key(layer: id, destination: destination)] =
+                        destination.value(at: Double(position))
+                }
+            }
             switch data1 {
             case 1:
                 wheel = Float(data2) / 127
