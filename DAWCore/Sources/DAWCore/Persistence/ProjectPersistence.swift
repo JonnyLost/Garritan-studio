@@ -532,12 +532,11 @@ public actor ProjectFileManager {
     }
     
     private func exportAsMIDI(project: Project, to url: URL) async throws {
-        // A header by itself is not a valid Standard MIDI File. Until the
-        // MIDI track/chunk writer is implemented, fail explicitly rather than
-        // exporting an unreadable file that appears to have succeeded.
-        throw PersistenceError.invalidFormat(
-            "Standard MIDI export is not implemented yet; no file was created."
-        )
+        // Build the entire validated file before touching the destination.
+        // An invalid event or unsupported tempo ramp must never replace a
+        // previously exported MIDI file with a partial result.
+        let data = try StandardMIDIFileExporter.encode(project: project)
+        try data.write(to: url, options: .atomic)
     }
 }
 
