@@ -44,9 +44,23 @@ jobs:
       - name: Build optimized application
         run: swift build -c release --product DAWApp
 
-      # Offline impulse-analysis only. Does not route audio through Studio.
-      - name: Measure four native room responses
-        run: swift run -c release RoomAcousticCalibration --seconds 5 > native-room-calibration.json
+      # Offline impulse-analysis only. No external room audio is bundled.
+      - name: Measure five native rooms in six octave bands
+        run: |
+          swift run -c release RoomAcousticCalibration --seconds 6 > native-room-calibration.json
+          python3 - <<'PY'
+          import json
+          report = json.load(open("native-room-calibration.json"))
+          assert report["profileCount"] == 5, "Expected four factory rooms and one custom design"
+          for room in report["rooms"]:
+              assert len(room["bands"]) == 6, f"Missing octave bands for {room['roomID']}"
+              print(f"\\n{room['roomName']} — {room['targetProvenance']}")
+              for band in room["bands"]:
+                  measured = band.get("measuredT20Seconds")
+                  error = band.get("t20ErrorPercent")
+                  result = "n/a (insufficient range)" if measured is None else f"{measured:.2f}s ({error:+.1f}%)"
+                  print(f"  {band['centerHz']:>5.0f} Hz | target {band['intendedRT60Seconds']:.2f}s | T20 {result}")
+          PY
 
       - name: Archive room calibration report
         if: always()
