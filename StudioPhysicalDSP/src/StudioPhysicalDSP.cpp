@@ -13,7 +13,8 @@ constexpr int kDelayCapacity = 16384; // Supports A0 at 384 kHz with margin.
 constexpr uint32_t kQueueCapacity = 512;
 constexpr double kTau = 6.28318530717958647692;
 constexpr std::array<float, SPM_PARAMETER_COUNT> kDefaults{{
-    0.f, 0.55f, 0.7f, 0.25f, 0.25f, 0.2f, 0.5f
+    0.f, 0.55f, 0.7f, 0.25f, 0.25f, 0.2f, 0.5f,
+    0.45f, 0.15f, 0.5f
 }};
 
 bool valid(int id, float value) noexcept {
@@ -78,19 +79,20 @@ struct Mode {
 struct Voice {
     std::array<float,kDelayCapacity> delay{};
     int write=0,whole=2;
-    float fraction=0,filter=0;
+    float fraction=0,filter=0,dispersion=0;
     uint64_t age=0,sequence=0;
     uint32_t random=1;
     uint8_t note=0,channel=0;
     bool active=false,held=false,releasing=false;
     float velocity=0,env=0,releaseStep=0;
     float burst=1.f,burstDecay=1.f;
+    float contact=0.25f,hardness=0.45f,stiffness=0.15f;
     int model=0;
     Mode wood{},metal{};
 
     void stop() noexcept {
         active=held=releasing=false;
-        env=filter=0;age=0;write=0;
+        env=filter=dispersion=0;age=0;write=0;
     }
     void tune(double rate, uint16_t pitchBend) noexcept {
         const double semitones = double(int(note)-69) +
@@ -103,17 +105,23 @@ struct Voice {
         fraction=float(length-double(whole));
     }
     void start(uint8_t n,uint8_t vel,uint8_t ch,uint64_t order,
-               double rate,uint16_t pitchBend,int kind) noexcept {
+               double rate,uint16_t pitchBend,
+               const std::array<float,SPM_PARAMETER_COUNT>& p) noexcept {
         stop();
         active=held=true;note=n;channel=ch;sequence=order;
         velocity=float(vel)/127.f;
-        model=kind;
+        model=int(p[SPM_PARAM_MODEL]);
+        contact=p[SPM_PARAM_POSITION];
+        hardness=p[SPM_PARAM_PICK_HARDNESS];
+        stiffness=p[SPM_PARAM_STIFFNESS];
         random=0x9E3779B9u ^ (uint32_t(n)<<16) ^ uint32_t(order);
         if(!random) random=1;
         tune(rate,pitchBend);
-        burst=1.f; burstDecay=float(std::exp(-24.0/double(whole+1)));
-        wood.configure(rate,190.,0.09);
-        metal.configure(rate,460.,0.04);
+        burst=1.f;
+        burstDecay=float(std::exp(-(12.0+32.0*hardness)/double(whole+1)));
+        const double bodyScale=std::exp2((0.5-double(p[SPM_PARAM_BODY_SIZE]))*1.5);
+        wood.configure(rate,190.*bodyScale,0.09);
+        metal.configure(rate,460.*bodyScale,0.04);
     }
     void release(double rate, float seconds) noexcept {
         held=false;
@@ -135,19 +143,25 @@ struct Voice {
                 (delay[size_t(b)]-delay[size_t(a)])*fraction;
         }
         const float brightness=p[SPM_PARAM_BRIGHTNESS];
-        filter += (0.12f + brightness*0.78f)*(delayed-filter);
+        // A small allpass-like bridge dispersion stage adds controllable
+        // string stiffness without unstable feedback or extra allocations.
+        const float dispersed=delayed + stiffness*(dispersion-delayed);
+        dispersion=delayed;
+        filter += (0.12f + brightness*0.78f)*(dispersed-filter);
         const float retained=0.992f + 0.0077f*p[SPM_PARAM_DAMPING];
         float excitation=0;
         if(age<=uint64_t(whole+1)) {
             const float phase=float(age)/float(whole+1);
             if(model==0) {
-                const float pos=p[SPM_PARAM_POSITION];
-                const float triangle = phase<pos ? phase/pos :
-                    (1.f-phase)/(1.f-pos);
-                excitation=(2.f*triangle-1.f)*0.48f +
-                    randomBipolar(random)*brightness*0.045f;
+                const float triangle = phase<contact ? phase/contact :
+                    (1.f-phase)/(1.f-contact);
+                const float finger=2.f*triangle-1.f;
+                const float noise=randomBipolar(random)*brightness*hardness;
+                excitation=finger*(0.45f-0.12f*hardness)+
+                    noise*(0.01f+0.09f*hardness);
             } else {
-                excitation=randomBipolar(random)*brightness*burst*0.8f;
+                const float hammer=0.4f+0.6f*hardness;
+                excitation=randomBipolar(random)*brightness*burst*hammer;
                 burst*=burstDecay;
             }
         }
@@ -246,8 +260,7 @@ struct SPMSynth {
             for(int i=1;i<polyphony;++i)
                 if(voices[i].sequence<chosen->sequence)chosen=&voices[i];
         }
-        chosen->start(e.data1,e.data2,ch,++sequence,rate,bend[ch],
-                      int(p[SPM_PARAM_MODEL]));
+        chosen->start(e.data1,e.data2,ch,++sequence,rate,bend[ch],p);
     }
 };
 
