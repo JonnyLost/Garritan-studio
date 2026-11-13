@@ -136,8 +136,10 @@ final class StudioAdditiveTests: XCTestCase {
         let flagship = try XCTUnwrap(presets.first(where: {
             $0.name == "Fourfold Spectrum"
         }))
+        // The flagship intentionally uses four layers. Granular is the fifth
+        // selectable engine, not an additional mandatory layer.
         XCTAssertEqual(Set(flagship.patch.layers.map(\.engine)),
-                       Set(StudioSynthEngine.allCases))
+                       Set([StudioSynthEngine.analog, .fm, .wavetable, .additive]))
     }
 
     func testIndependentHarmonicParameterLayoutAndValidation() throws {
