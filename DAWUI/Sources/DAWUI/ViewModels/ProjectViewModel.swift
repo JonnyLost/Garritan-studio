@@ -257,6 +257,9 @@ public final class ProjectViewModel: ObservableObject {
                 print("Starting audio engine...")
                 // Restore the chosen native room before preparing track instruments.
                 // A legacy project with no saved profile keeps the tested Apple hall.
+                if let design = project.dawState.acousticRoomDesign {
+                    try audioEngine.configureDesignedRoom(design)
+                }
                 if let id = project.dawState.acousticRoomProfileID,
                    StudioRoomAcousticProfile.index(forID: id) != nil {
                     do {
@@ -598,6 +601,29 @@ public final class ProjectViewModel: ObservableObject {
         audioEngine.setConcertHallOverallReverb(level)
     }
 
+    /// Apply current room geometry/materials to our native FDN and source
+    /// reflections. The button is disabled during transport activity.
+    /// Save the new design only after the audio engine accepted it.
+    public func applyAcousticRoomDesign(_ design: StudioAcousticRoomDesign) {
+        guard isEngineReady,
+              !transportState.isPlaying, !transportState.isRecording,
+              !isRecording else { return }
+        do {
+            if !audioEngine.usesNativeConcertHallReverb {
+                try audioEngine.setNativeConcertHallReverbEnabled(true)
+            }
+            try audioEngine.configureDesignedRoom(design)
+            guard audioEngine.selectNativeRoomProfile(id: StudioAcousticRoomDesign.profileID)
+            else { return }
+            acousticRoomSelectionError = nil
+            project.dawState.acousticRoomDesign = design
+            project.dawState.acousticRoomProfileID = StudioAcousticRoomDesign.profileID
+        } catch {
+            acousticRoomSelectionError =
+                "Could not apply custom room: \(error.localizedDescription)"
+        }
+    }
+
     /// Legacy Apple hall or one of the modeled spaces. Project persistence uses
     /// the stable room ID, not the Audio Unit's numeric parameter index.
     /// Graph rebuilds only occur when changing between Apple and native engines;
@@ -606,6 +632,10 @@ public final class ProjectViewModel: ObservableObject {
         guard isEngineReady,
               !transportState.isPlaying, !transportState.isRecording,
               !isRecording else { return }
+        if id == StudioAcousticRoomDesign.profileID {
+            applyAcousticRoomDesign(project.dawState.acousticRoomDesign ?? StudioAcousticRoomDesign())
+            return
+        }
         let isLegacy = id == "apple-medium-hall"
         guard isLegacy || StudioRoomAcousticProfile.index(forID: id) != nil else { return }
         do {
