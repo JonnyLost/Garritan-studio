@@ -72,3 +72,33 @@ This initial register is grounded in Package.swift, README.md and sampled beginn
 Commit `6871416e503a573d6fa5a9bdc135b83364e052c8` introduces `StudioApplicationIdentity` in `DAWApp.swift`. The process name, main window title and appearance settings heading now use the working product name **Studio**. The exported UTType continues to use `com.musio.create.project`, intentionally preserving legacy project recognition. Existing `.dawproj` paths, SwiftPM package name, executable target, preferences keys, theme names and serialized content are unchanged.
 
 This is a narrow identity change, **not** a declaration of independent code ownership or a project-format migration. Mac build, file round-trip and launch behavior have not yet been verified. Follow-up: enumerate every persisted identifier and legacy branding occurrence before changing further labels, and add compatibility regression coverage before changing file-format metadata.
+
+## Expanded source inspection: persistence and cloud boundary
+
+Inspected on the architecture branch:
+
+- `DAWCore/Sources/DAWCore/Persistence/ProjectPersistence.swift`: `ProjectFileManager` is a Foundation-based actor. `projectExtension = "dawproj"`; package contains `project.json`, `Audio Files`, and `Plugin States`. The JSON envelope contains `version`, `project`, `audioFileManifest`, and `pluginStates`. The save path stages a replacement and retains the prior package until promotion; existing plugin states are read from the previous package. **Do not alter these field names or paths during branding work.**
+- `DAWCore/Sources/DAWCore/Auth/SupabaseAuthService.swift`: the sole directly inspected source importing `Supabase`. Its settings keys are `com.musio.supabase.url` and `com.musio.supabase.anonkey`. These are *persisted preference keys* and must not be renamed without a migration. Auth is optional when unconfigured; the service reports missing credentials and returns without a client.
+- `DAWCore/Sources/DAWCore/AI/DAWChatService.swift`: optional remote assistant uses a Supabase Edge Function HTTP proxy if configured, or a direct Anthropic API key; its AI prompt used inherited Musio product wording, updated to Studio in commit `d6eed127da54f51e788fafbdbd5509a6983b1b4b`. This file does not itself import the Supabase SDK.
+- `Package.swift`: `DAWCore` currently depends on the Supabase package. A safe extraction requires checking all references to `SupabaseAuthService`, `AuthUser`, `AuthProvider`, `AuthError`, and `AppleSignInHelper` in application and UI sources, then moving only the service behind a dedicated optional module with compatible API access.
+
+### Compatibility inventory (verified examples)
+
+| Identifier | Purpose | Decision |
+| --- | --- | --- |
+| `com.musio.create.project` | Exported project UTType | Retain until project-open migration is tested |
+| `.dawproj` | Project package extension | Retain |
+| `project.json` | Project package manifest | Retain |
+| `Audio Files`, `Plugin States` | Project package folders | Retain |
+| `com.musio.supabase.url`, `com.musio.supabase.anonkey` | Existing authentication preferences | Retain until explicit migration |
+| `MusioCreate` | SwiftPM package name | Retain until independent build/CI verification |
+| `DAWApp` | Executable target | Retain for current build command |
+
+### Next implementation gate
+
+1. Enumerate callers of auth types in `DAWUI` and `DAWApp`, plus any other `import Supabase` sources.
+2. Establish an optional auth target boundary with no auth dependency in real-time audio, transport, or persistence; retain existing public API behavior.
+3. Confirm macOS CI build and tests before removing the SDK from `DAWCore`.
+4. Do not remove cloud/AI features merely because Studio is designed to operate offline; keep them optional unless the product owner chooses otherwise.
+
+**Verification status:** source inspection and GitHub commits only; no macOS build or runtime test executed in this checkpoint. This is not a full-repository license or provenance audit.
