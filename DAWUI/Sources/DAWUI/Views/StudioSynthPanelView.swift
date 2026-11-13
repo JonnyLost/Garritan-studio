@@ -269,6 +269,14 @@ public struct StudioSynthPanelView: View {
                     Button(role: .destructive) {
                         var changed = patch
                         changed.layers.removeAll { $0.id == layer.id }
+                        // A deleted layer cannot retain modulation or MIDI
+                        // Learn destinations; prune them with the layer.
+                        changed.modulation?.routes.removeAll {
+                            $0.layerID == layer.id
+                        }
+                        changed.midiControls?.mappings.removeAll {
+                            $0.target.layerID == layer.id
+                        }
                         if changed.validate() {
                             selectedLayerID = changed.layers.first?.id
                             replace(with: changed)
