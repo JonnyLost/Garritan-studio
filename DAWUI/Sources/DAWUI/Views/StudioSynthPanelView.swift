@@ -671,7 +671,7 @@ public struct StudioSynthPanelView: View {
                                 .frame(height: max(3, CGFloat(harmonics[index]) * 125))
                             Text("\(index + 1)")
                                 .font(.system(size: 9, design: .monospaced))
-                                .foregroundStyle(index == selected ? .orange : .secondary)
+                                .foregroundStyle(index == selected ? Color.orange : Color.secondary)
                         }
                         .frame(maxWidth: .infinity)
                         .contentShape(Rectangle())
