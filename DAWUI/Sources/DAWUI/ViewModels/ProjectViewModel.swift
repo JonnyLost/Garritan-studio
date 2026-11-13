@@ -556,14 +556,57 @@ public final class ProjectViewModel: ObservableObject {
     @discardableResult
     public func setStudioSamplerController(_ controller: UInt8, value: UInt8,
                                             for trackID: TrackID) -> Bool {
-        guard controller == 1 || controller == 11,
+        guard [UInt8(1), 2, 11, 21].contains(controller),
               let index = project.tracks.firstIndex(where: { $0.id == trackID }),
               var patch = project.tracks[index].studioSamplerPatch,
               let instrument = playbackEngine.instrument(for: trackID),
               case .studioSampler(let sampler) = instrument,
               sampler.controller(controller, value: value, channel: 0) else { return false }
-        if controller == 1 { patch.dynamicsCC1 = value }
-        else { patch.expressionCC11 = value }
+        switch controller {
+        case 1: patch.dynamicsCC1 = value
+        case 2: patch.breathCC2 = value
+        case 11: patch.expressionCC11 = value
+        case 21: patch.vibratoCC21 = value
+        default: break
+        }
+        project.tracks[index].studioSamplerPatch = patch
+        return true
+    }
+
+    /// Runtime microphone changes are persisted but do not reload samples.
+    @discardableResult
+    public func setStudioSamplerMicrophone(_ microphone: StudioSamplerMicrophone,
+                                           for trackID: TrackID) -> Bool {
+        guard microphone.isValid,
+              let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              var patch = project.tracks[index].studioSamplerPatch,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSampler(let sampler) = instrument else { return false }
+        var groups = patch.microphones ?? []
+        if let existing = groups.firstIndex(where: { $0.id == microphone.id }) {
+            groups[existing] = microphone
+        } else {
+            groups.append(microphone)
+        }
+        patch.microphones = groups
+        guard patch.isValid, sampler.setMicrophone(microphone) else { return false }
+        project.tracks[index].studioSamplerPatch = patch
+        return true
+    }
+
+    @discardableResult
+    public func setStudioSamplerLegato(enabled: Bool,
+                                       fadeMilliseconds: Float,
+                                       for trackID: TrackID) -> Bool {
+        guard fadeMilliseconds.isFinite && (5...250).contains(fadeMilliseconds),
+              let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              var patch = project.tracks[index].studioSamplerPatch,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioSampler(let sampler) = instrument,
+              sampler.setLegato(enabled: enabled,
+                                fadeMilliseconds: fadeMilliseconds) else { return false }
+        patch.legatoEnabled = enabled
+        patch.legatoCrossfadeMilliseconds = fadeMilliseconds
         project.tracks[index].studioSamplerPatch = patch
         return true
     }
