@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import SwiftUI
 import DAWCore
+import DAWUI
 
 /// Native Studio document controller, independent of the inherited app's
 /// login and AI features. All mutable session state is confined to MainActor.

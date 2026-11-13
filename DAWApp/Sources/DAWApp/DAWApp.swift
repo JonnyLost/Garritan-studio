@@ -18,6 +18,8 @@ extension UTType {
 @main
 struct DAWApp: App {
     @StateObject private var appState = AppState()
+    @NSApplicationDelegateAdaptor(StudioApplicationLifecycle.self) private var lifecycle
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         // The development executable is named DAWApp for compatibility with
@@ -36,6 +38,8 @@ struct DAWApp: App {
                     snapshotBridge: appState.snapshotBridge
                 )
                 .onAppear {
+                    lifecycle.appState = appState
+                    appState.offerRecoveryOnLaunch()
                     DispatchQueue.main.async {
                         NSApplication.shared.activate(ignoringOtherApps: true)
                     }
@@ -51,6 +55,11 @@ struct DAWApp: App {
                     }
                 } message: {
                     Text(appState.projectErrorMessage ?? "")
+                }
+                .onChange(of: scenePhase) { _, phase in
+                    if phase != .active {
+                        appState.preserveUntitledWhenInactive()
+                    }
                 }
                 .id(appState.projectID)  // Force view recreation when project changes
                 .onReceive(NotificationCenter.default.publisher(for: .studioSessionViewReady)) { notification in
