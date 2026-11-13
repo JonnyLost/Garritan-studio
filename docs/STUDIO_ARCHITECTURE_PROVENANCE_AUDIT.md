@@ -3,7 +3,7 @@
 Date: 2026-11-13
 Branch: `architecture/studio-independence`
 Baseline: `integration/studio-complete-mac-test`
-Status: initial source inspection, not a complete authorship or licensing determination.
+Status: code-boundary migration underway; broader authorship, assets and licensing review still incomplete.
 
 ## Goals and safety rules
 
@@ -102,3 +102,90 @@ Inspected on the architecture branch:
 4. Do not remove cloud/AI features merely because Studio is designed to operate offline; keep them optional unless the product owner chooses otherwise.
 
 **Verification status:** source inspection and GitHub commits only; no macOS build or runtime test executed in this checkpoint. This is not a full-repository license or provenance audit.
+
+## November 13 implementation — current branch state (supersedes earlier baseline graph)
+
+The initial graph above describes the **integration baseline**, not the branch
+after the changes below. The active architecture branch now has:
+
+- `DAWApp -> DAWCore, DAWUI, VST3Bridge, StudioIdentity`
+- `DAWUI -> DAWCore, StudioAI, StudioCloudAuth, StudioIdentity`
+- `StudioAI -> DAWCore` (HTTP/API-backed optional AI work; no Core-to-AI edge)
+- `StudioCloudAuth -> Supabase SDK` (optional account sign-in)
+- `DAWCore -> DAWRealtime + four Studio native DSP targets`
+- `VST3Bridge -> VST3BridgeCpp`
+
+Relevant commits:
+- `a0007d45`: move `SupabaseAuthService` to `StudioCloudAuth`; three UI import updates
+- `16362511`: add shared `StudioIdentity`, remove inherited sign-in artwork from the view, update visible app plist strings; preserve bundle/project identifiers; add identity tests
+- `a58ca3d4`: add legacy .dawproj/standalone JSON round-trip tests and macOS architecture checks
+- `1062a514`: move eight AI-service files to `StudioAI`; seven UI import updates; keep shared Project and Data helper extensions in DAWCore
+- `99ec7caa`: prevent placeholder account deletion from falsely claiming remote data removal
+
+### Scope of source-level cross-reference scan
+
+The original 73 Swift files in `DAWCore/Sources/DAWCore` and 44 Swift
+files in `DAWUI/Sources/DAWUI` were scanned for authentication references.
+Only the auth service imported the Supabase SDK; three UI files referenced its
+types. All 64 non-AI Core Swift files were also scanned for AI type usage;
+none referenced the moved AI declarations. Seven UI files were updated for
+the AI module boundary. 25 Swift test files were checked for AI references;
+none needed target dependency migration.
+
+These are **symbol/text cross-reference checks**, not a full semantic review
+of the repository or independent ownership verification.
+
+### Preserved on-disk identifiers
+
+- `com.musio.create.project` (project UTType)
+- `com.musio.create` (historical app bundle ID)
+- `com.musio.supabase.url` and `com.musio.supabase.anonkey` (existing preferences)
+- `MusioCreate/Recordings` (legacy Application Support recording fallback)
+- `.dawproj`, `project.json`, `Audio Files`, `Plugin States`
+- SwiftPM package name `MusioCreate`, executable `DAWApp`
+
+The native product-facing name is provisionally `Studio`. Inherited identifiers
+remain only where compatibility or migration scope requires them.
+
+### Asset and redistribution items to investigate
+
+The repository currently includes `MusioAppIcon.svg`,
+`MusioLogoMark.svg`, `DAWApp/Resources/MusioLogo.svg`,
+`DAWApp/Resources/musio_logo.svg`, multiple app icons, and a tracked
+`DAWApp_arm64` executable (approximately 16 MB). The sign-in screen no
+longer loads the inherited logo, but assets have **not** been deleted,
+verified as independently authored, or cleared for redistribution.
+
+The `VST3BridgeCpp` C++ source explicitly describes the host as a **stub**;
+the Steinberg SDK is not vendored in the inspected tree. Do not claim
+working VST3 hosting or derive licensing conclusions from its comments.
+The repository also includes two Supabase Edge Function source files for
+optional AI proxies, and the AI services can make HTTP requests when used.
+
+The historical README claimed MIT, while no separate LICENSE or NOTICE file
+was present in the inspected Git tree. This is a **documentation and
+provenance gap**, not proof of infringement or proof of unrestricted rights.
+
+### Remaining independence gates
+
+1. Achieve a complete passing macOS CI run **after** the AI module extraction,
+   including debug/release builds and regression tests. Earlier commit
+   `a58ca3d4` passed the debug build, architecture checker and Swift tests;
+   its later release/calibration stages were cancelled by a newer push.
+2. Verify existing Audio Unit/ARIA instruments and project loading on a Mac at
+   the consolidated integration milestone.
+3. Make cloud authentication an optional **build-time** application feature;
+   a default full-app build still resolves Supabase even though DAWCore does not.
+4. Characterize transport and audio clock ownership before altering render
+   scheduling; no audio graph implementation changed in this branch.
+5. Audit original-source attribution, license scope, icons, presets, bundled
+   binaries and `VST3Bridge` provenance before removing historical assets.
+6. Revisit the SwiftPM package name, bundle identifier and recording paths only
+   through a tested compatibility migration.
+7. Review any future account-deletion backend separately; do not pretend a
+   sign-out deletes remote data.
+
+No branch merges have been authorized or performed. Studio remains able to
+build as the existing `DAWApp` target; real-time hardware verification and
+an independently owned replacement for all historical source are **not yet
+established**.
