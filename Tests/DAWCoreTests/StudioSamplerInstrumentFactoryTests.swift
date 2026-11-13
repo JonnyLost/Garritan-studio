@@ -59,7 +59,7 @@ final class StudioSamplerInstrumentFactoryTests: XCTestCase {
             pcmFormat: prepared.processingFormat, frameCapacity: 7_000))
         try prepared.read(into: buffer)
         let mono = try XCTUnwrap(buffer.floatChannelData?[0])
-        XCTAssertEqual(mono[3_000], powf(10, -1 / 20), accuracy: 0.02)
+        XCTAssertEqual(mono[3_000], powf(10.0, -1.0 / 20.0), accuracy: 0.02)
         XCTAssertThrowsError(try StudioSamplerFactoryProcessor.prepare(
             source: source, destination: output))
     }
