@@ -262,8 +262,20 @@ public struct MainWindowView: View {
                 barJumpOverlay
             }
         }
-        .onAppear { 
-            setupInitialState() 
+        .onAppear {
+            setupInitialState()
+            if viewModel.isEngineReady {
+                NotificationCenter.default.post(
+                    name: .studioSessionViewReady, object: viewModel.project.id
+                )
+            }
+        }
+        .onChange(of: viewModel.isEngineReady) { _, isReady in
+            if isReady {
+                NotificationCenter.default.post(
+                    name: .studioSessionViewReady, object: viewModel.project.id
+                )
+            }
         }
         .onDisappear {
             // Stop keyboard monitor when view disappears (e.g., project reload)

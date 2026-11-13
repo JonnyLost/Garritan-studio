@@ -50,3 +50,10 @@ public struct StudioSessionRevision: Sendable {
         savedRevision = 0
     }
 }
+
+/// Posted after the new composing view's audio engine has initialized.
+/// Using a concrete project UUID prevents delayed old-window events from
+/// restoring instruments into a different session.
+public extension Notification.Name {
+    static let studioSessionViewReady = Notification.Name("studioSessionViewReady")
+}

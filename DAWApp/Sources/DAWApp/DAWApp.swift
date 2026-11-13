@@ -38,13 +38,28 @@ struct DAWApp: App {
                     }
                 }
                 .environmentObject(appState)
+                .navigationTitle(appState.windowTitle)
+                .alert("Studio Project", isPresented: Binding(
+                    get: { appState.projectErrorMessage != nil },
+                    set: { if !$0 { appState.projectErrorMessage = nil } }
+                )) {
+                    Button("OK", role: .cancel) {
+                        appState.projectErrorMessage = nil
+                    }
+                } message: {
+                    Text(appState.projectErrorMessage ?? "")
+                }
                 .id(appState.projectID)  // Force view recreation when project changes
+                .onReceive(NotificationCenter.default.publisher(for: .studioSessionViewReady)) { notification in
+                    if let projectID = notification.object as? UUID {
+                        appState.restorePluginsIfReady(for: projectID)
+                    }
+                }
                 .onReceive(NotificationCenter.default.publisher(for: .projectDidChange)) { notification in
                     // Sync project from viewModel back to appState
                     if let project = notification.object as? Project {
-                        appState.currentProject = project
+                        appState.updateProject(project)
                     }
-                    appState.markUnsavedChanges()
                 }
             }
         }
@@ -196,195 +211,7 @@ struct DAWApp: App {
     }
 }
 
-// MARK: - App State
-
-@MainActor
-class AppState: ObservableObject {
-    @Published var currentProject: Project
-    @Published var currentProjectURL: URL?
-    @Published var hasUnsavedChanges: Bool = false
-    @Published var windowTitle: String = "Untitled Project"
-    @Published var projectID: UUID = UUID()  // Changes when project is loaded/created to force view refresh
-    
-    let recentProjectsManager = RecentProjectsManager()
-    let autosaveManager = AutosaveManager()
-    private let fileManager = ProjectFileManager()
-    
-    init() {
-        self.currentProject = ProjectFactory.createNewProject()
-        setupAutosave()
-    }
-    
-    private func setupAutosave() {
-        autosaveManager.configure { [weak self] in
-            self?.currentProject ?? ProjectFactory.createNewProject()
-        }
-    }
-    
-    func updateProject(_ project: Project) {
-        currentProject = project
-        markUnsavedChanges()
-    }
-    
-    func markUnsavedChanges() {
-        hasUnsavedChanges = true
-        autosaveManager.markUnsavedChanges()
-        updateWindowTitle()
-    }
-    
-    private func updateWindowTitle() {
-        let name = currentProjectURL?.deletingPathExtension().lastPathComponent ?? currentProject.name
-        windowTitle = hasUnsavedChanges ? "\(name) — Edited" : name
-    }
-    
-    // MARK: - Project Management
-    
-    func openProject() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.dawProject]
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = true  // .dawproj is a package (directory)
-        panel.treatsFilePackagesAsDirectories = false  // But show it as a file
-        
-        panel.begin { [weak self] response in
-            guard response == .OK, let url = panel.url else { return }
-            Task {
-                await self?.openProject(at: url)
-            }
-        }
-    }
-    
-    func openProject(at url: URL) async {
-        do {
-            // Decode and validate the next project BEFORE tearing down the
-            // current session. A missing/corrupt file must not silence the
-            // existing instruments or stop its autosave.
-            let loadedProject = try await fileManager.load(from: url)
-
-            autosaveManager.stopAutosave()
-            NotificationCenter.default.post(name: .clearAllPlugins, object: nil)
-
-            // Allow the old graph to release its hosted instruments.
-            try? await Task.sleep(nanoseconds: 100_000_000)
-
-            currentProject = loadedProject
-            currentProjectURL = url
-            hasUnsavedChanges = false
-            projectID = UUID()  // Force view refresh with new project
-            recentProjectsManager.addRecentProject(url)
-            autosaveManager.startAutosave(for: url)
-            updateWindowTitle()
-            
-            // Give the view time to recreate, then restore plugin states
-            try? await Task.sleep(nanoseconds: 500_000_000)
-            NotificationCenter.default.post(name: .restorePluginStates, object: nil)
-            
-            print("[AppState] Opened project: \(url.path)")
-        } catch {
-            print("[AppState] Failed to open project: \(error)")
-            // TODO: Show alert
-        }
-    }
-    
-    private var projectForSave: Project?
-    private var saveCompletion: ((Project) -> Void)?
-    
-    /// Get the current project with all plugin states saved
-    private func getProjectWithPluginStates() async -> Project {
-        // Tell viewModel to save plugin states and return the project
-        NotificationCenter.default.post(name: .savePluginStates, object: nil)
-        
-        // Small delay to let the states be saved
-        try? await Task.sleep(nanoseconds: 100_000_000)
-        
-        // Request the updated project
-        var receivedProject: Project?
-        let observer = NotificationCenter.default.addObserver(
-            forName: .projectDataForSave,
-            object: nil,
-            queue: .main
-        ) { notification in
-            receivedProject = notification.object as? Project
-        }
-        
-        NotificationCenter.default.post(name: .requestProjectForSave, object: nil)
-        
-        // Wait a bit for the response
-        try? await Task.sleep(nanoseconds: 100_000_000)
-        NotificationCenter.default.removeObserver(observer)
-        
-        return receivedProject ?? currentProject
-    }
-    
-    func saveProject() {
-        if let url = currentProjectURL {
-            Task {
-                do {
-                    let projectToSave = await getProjectWithPluginStates()
-                    try await fileManager.saveQuick(project: projectToSave, to: url)
-                    await MainActor.run {
-                        hasUnsavedChanges = false
-                        updateWindowTitle()
-                    }
-                    print("[AppState] Saved project: \(url.path)")
-                } catch {
-                    print("[AppState] Failed to save: \(error)")
-                }
-            }
-        } else {
-            saveProjectAs()
-        }
-    }
-    
-    func saveProjectAs() {
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.dawProject]
-        panel.nameFieldStringValue = currentProject.name
-        
-        panel.begin { [weak self] response in
-            guard let self = self, response == .OK, let url = panel.url else { return }
-            
-            Task {
-                do {
-                    // Get project with plugin states
-                    let projectToSave = await self.getProjectWithPluginStates()
-                    
-                    try await self.fileManager.save(project: projectToSave, to: url)
-                    await MainActor.run {
-                        // Update URL - ensure it has correct extension
-                        var finalURL = url
-                        if finalURL.pathExtension != ProjectFileManager.projectExtension {
-                            finalURL = url.deletingPathExtension().appendingPathExtension(ProjectFileManager.projectExtension)
-                        }
-                        self.currentProjectURL = finalURL
-                        self.currentProject = projectToSave  // Sync with saved version
-                        self.hasUnsavedChanges = false
-                        self.recentProjectsManager.addRecentProject(finalURL)
-                        self.autosaveManager.startAutosave(for: finalURL)
-                        self.updateWindowTitle()
-                    }
-                    print("[AppState] Saved project as: \(url.path)")
-                } catch {
-                    print("[AppState] Failed to save project: \(error)")
-                }
-            }
-        }
-    }
-    
-    func newProject() {
-        // TODO: Prompt to save if needed
-        autosaveManager.stopAutosave()
-        
-        // Clear all existing plugins first
-        NotificationCenter.default.post(name: .clearAllPlugins, object: nil)
-        
-        currentProject = ProjectFactory.createNewProject()
-        currentProjectURL = nil
-        hasUnsavedChanges = false
-        projectID = UUID()  // Force view refresh
-        updateWindowTitle()
-    }
-}
+// Session operations are implemented in StudioDocumentSession.swift.
 
 // MARK: - Notification for Project Changes
 
