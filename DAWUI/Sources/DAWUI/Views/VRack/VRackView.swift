@@ -392,7 +392,7 @@ public struct VRackView: View {
             }
             do {
                 // Native presets embed their entire synthesis patch.
-                try viewModel.loadStudioSynth(for: trackID, patch: sound.patch)
+                try viewModel.loadStudioSynth(for: trackID, patch: sound.instantiatePatch())
                 if var track = viewModel.project.track(withID: trackID) {
                     if track.name.range(
                         of: #"^(?:MIDI|Instrument|Synth) \d+$"#,
