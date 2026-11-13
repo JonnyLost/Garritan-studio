@@ -140,25 +140,18 @@ public final class StudioSamplerInstrument {
                 count = AVAudioFrameCount(totalFrames)
             }
 
-            guard count >= 2,
-                  let buffer = AVAudioPCMBuffer(
-                      pcmFormat: sourceFormat, frameCapacity: count
-                  ) else {
-                throw StudioSamplerError.invalidSample(url)
-            }
-            try file.read(into: buffer, frameCount: count)
-            guard buffer.frameLength == count, let samples = buffer.floatChannelData else {
-                throw StudioSamplerError.invalidSample(url)
-            }
-            let right: UnsafePointer<Float>? = sourceFormat.channelCount == 2
-                ? UnsafePointer(samples[1]) : nil
-
+            // Reuse a single immutable native PCM allocation for every
+            // Sampler zone and Granular layer that references the same file.
+            // Long recordings preserve the existing disk-streaming path.
+            let cached: StudioSharedPCMAsset? = useStreaming ? nil :
+                try StudioSharedSampleCache.shared.acquire(
+                    url: url, maxFrames: Int(count))
             let loaded: Bool
-            if useStreaming {
-                loaded = ss_add_stream_zone(
+            if let cached, cached.frames == Int(totalFrames),
+               cached.sampleRate == sourceFormat.sampleRate {
+                loaded = ss_add_shared_zone_with_variation(
                     sampler, zone.rootNote, zone.lowestNote, zone.highestNote,
-                    zone.lowestVelocity, zone.highestVelocity, sourceFormat.sampleRate,
-                    samples[0], right, UInt32(totalFrames), buffer.frameLength,
+                    zone.lowestVelocity, zone.highestVelocity, cached.handle,
                     playbackStart, playbackEnd,
                     zone.loopStartFrame ?? 0, zone.loopEndFrame ?? 0,
                     zone.loopCrossfadeFrames ?? 0,
@@ -167,17 +160,45 @@ public final class StudioSamplerInstrument {
                     zone.roundRobinIndex ?? 0, zone.isReleaseTrigger == true ? 1 : 0
                 ) == 1
             } else {
-                loaded = ss_add_zone_with_variation(
-                    sampler, zone.rootNote, zone.lowestNote, zone.highestNote,
-                    zone.lowestVelocity, zone.highestVelocity, sourceFormat.sampleRate,
-                    samples[0], right, buffer.frameLength,
-                    playbackStart, playbackEnd,
-                    zone.loopStartFrame ?? 0, zone.loopEndFrame ?? 0,
-                    zone.loopCrossfadeFrames ?? 0,
-                    zone.fadeInFrames ?? 0, zone.fadeOutFrames ?? 0,
-                    zone.articulationID ?? 0,
-                    zone.roundRobinIndex ?? 0, zone.isReleaseTrigger == true ? 1 : 0
-                ) == 1
+                guard count >= 2,
+                      let buffer = AVAudioPCMBuffer(
+                          pcmFormat: sourceFormat, frameCapacity: count
+                      ) else {
+                    throw StudioSamplerError.invalidSample(url)
+                }
+                try file.read(into: buffer, frameCount: count)
+                guard buffer.frameLength == count, let samples = buffer.floatChannelData else {
+                    throw StudioSamplerError.invalidSample(url)
+                }
+                let right: UnsafePointer<Float>? = sourceFormat.channelCount == 2
+                    ? UnsafePointer(samples[1]) : nil
+    
+                if useStreaming {
+                    loaded = ss_add_stream_zone(
+                        sampler, zone.rootNote, zone.lowestNote, zone.highestNote,
+                        zone.lowestVelocity, zone.highestVelocity, sourceFormat.sampleRate,
+                        samples[0], right, UInt32(totalFrames), buffer.frameLength,
+                        playbackStart, playbackEnd,
+                        zone.loopStartFrame ?? 0, zone.loopEndFrame ?? 0,
+                        zone.loopCrossfadeFrames ?? 0,
+                        zone.fadeInFrames ?? 0, zone.fadeOutFrames ?? 0,
+                        zone.articulationID ?? 0,
+                        zone.roundRobinIndex ?? 0, zone.isReleaseTrigger == true ? 1 : 0
+                    ) == 1
+                } else {
+                    loaded = ss_add_zone_with_variation(
+                        sampler, zone.rootNote, zone.lowestNote, zone.highestNote,
+                        zone.lowestVelocity, zone.highestVelocity, sourceFormat.sampleRate,
+                        samples[0], right, buffer.frameLength,
+                        playbackStart, playbackEnd,
+                        zone.loopStartFrame ?? 0, zone.loopEndFrame ?? 0,
+                        zone.loopCrossfadeFrames ?? 0,
+                        zone.fadeInFrames ?? 0, zone.fadeOutFrames ?? 0,
+                        zone.articulationID ?? 0,
+                        zone.roundRobinIndex ?? 0, zone.isReleaseTrigger == true ? 1 : 0
+                    ) == 1
+                }
+    
             }
             guard loaded else { throw StudioSamplerError.couldNotLoadZone(url) }
             // Immutable per-zone metadata applies equally to RAM and
