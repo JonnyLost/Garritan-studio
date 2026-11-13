@@ -23,7 +23,21 @@ typedef struct SADDSynth SADDSynth;
 #define SADD_PARAM_EVOLVE_TIME 7
 #define SADD_PARAM_BEND_RANGE 8
 #define SADD_PARAM_PARTIAL_BASE 9
-#define SADD_PARAMETER_COUNT 25
+/* Append-only parameter layout: existing 0...24 presets remain identical.
+ * Envelope mix=0 keeps legacy global-ADSR playback unchanged.
+ * Full independent partial envelopes engage at mix=1.
+ */
+#define SADD_PARAM_MOTION_RATE 25
+#define SADD_PARAM_MOTION_DEPTH 26
+#define SADD_PARAM_MOTION_SPREAD 27
+#define SADD_PARAM_MOTION_SHAPE 28
+#define SADD_PARAM_PARTIAL_ENVELOPE_MIX 29
+#define SADD_PARAM_PARTIAL_ATTACK_BASE 30
+#define SADD_PARAM_PARTIAL_DECAY_BASE 46
+#define SADD_PARAM_PARTIAL_SUSTAIN_BASE 62
+#define SADD_PARAM_PARTIAL_RELEASE_BASE 78
+#define SADD_PARAM_PARTIAL_MOTION_BASE 94
+#define SADD_PARAMETER_COUNT 110
 
 SADDSynth* sadd_create(double sampleRate, int32_t voices);
 void sadd_destroy(SADDSynth* synth);
