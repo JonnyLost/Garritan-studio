@@ -748,24 +748,21 @@ public struct StudioSamplerMapView: View {
     }
 
     private func importSamples(_ urls: [URL]) {
-        guard !urls.isEmpty else { return }
+        guard !urls.isEmpty, !isImporting else { return }
+        let original = draft
         isImporting = true
         errorMessage = nil
+        saveNotice = nil
         Task { @MainActor in
             defer { isImporting = false }
             do {
-                let files = try await Task.detached(priority: .userInitiated) {
-                    try StudioSamplerSampleLibrary.importFiles(urls)
+                let rebuilt = try await Task.detached(priority: .userInitiated) {
+                    try StudioSamplerSampleLibrary.importMappedFiles(
+                        urls, extending: original)
                 }.value
-                let added = try StudioSamplerMappingBuilder.makePatch(urls: files)
-                if let patch = draft {
-                    let first = patch.zones.count
-                    draft = try StudioSamplerMappingBuilder.append(added, to: patch)
-                    selectedIndex = first
-                } else {
-                    draft = added
-                    selectedIndex = 0
-                }
+                selectedIndex = original?.zones.count ?? 0
+                draft = rebuilt
+                saveNotice = "Imported \(urls.count) recording(s). Review the new mapping, then choose Apply Mapping."
             } catch {
                 errorMessage = error.localizedDescription
             }
