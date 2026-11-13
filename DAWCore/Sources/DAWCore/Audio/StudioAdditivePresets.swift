@@ -25,7 +25,10 @@ public enum StudioAdditiveFactoryLibrary {
         harmonics: [Float], attack: Float = 0.008, decay: Float = 0.28,
         sustain: Float = 0.72, release: Float = 0.3,
         tilt: Float = 0, evolve: Float = 0.45,
-        evolveTime: Float = 1.8, gain: Float = 0.65
+        evolveTime: Float = 1.8, gain: Float = 0.65,
+        independentHarmonics: Bool = false,
+        motionRate: Float = 0.38, motionDepth: Float = 0,
+        motionSpread: Float = 0.35, motionShape: Float = 0
     ) -> StudioAdditivePreset {
         var patch = StudioAdditivePatch()
         for i in 0..<16 {
@@ -40,6 +43,31 @@ public enum StudioAdditiveFactoryLibrary {
         ] {
             patch.set(value,for:p)
         }
+        // The classic bank is backward-compatible. Selected evolving sounds
+        // opt into independent harmonic envelopes and note-local motion.
+        if independentHarmonics {
+            patch.set(1, for:.partialEnvelopeMix)
+            for i in 0..<16 {
+                let fraction=Float(i)/15
+                let values: [(StudioAdditiveHarmonicControl,Float)] = [
+                    (.attack,max(0.001,min(30,attack*(0.3+fraction*1.8)))),
+                    (.decay,max(0.001,min(30,decay*(0.6+fraction*0.7)))),
+                    (.sustain,max(0,min(1,sustain*(1-fraction*0.7)))),
+                    (.release,max(0.001,min(30,release*(0.5+fraction*1.2)))),
+                    (.motion,0.25+fraction*0.75)
+                ]
+                for (control,value) in values {
+                    if let parameter=StudioAdditiveParameter.harmonic(
+                        i, control: control) {
+                        patch.set(value, for:parameter)
+                    }
+                }
+            }
+        }
+        patch.set(motionRate,for:.motionRate)
+        patch.set(motionDepth,for:.motionDepth)
+        patch.set(motionSpread,for:.motionSpread)
+        patch.set(motionShape,for:.motionShape)
         return StudioAdditivePreset(name:name,family:family,
                                     summary:summary,patch:patch)
     }
@@ -54,7 +82,9 @@ public enum StudioAdditiveFactoryLibrary {
         make("Tine Spark","Keys","Soft electric-key-like upper spectrum.",
              harmonics:[0.78,0.29,0.23,0.1,0.08,0.055,0.04],
              attack:0.002,decay:0.5,sustain:0.3,release:0.6,
-             evolve:0.9,evolveTime:0.3),
+             evolve:0.9,evolveTime:0.3,
+             independentHarmonics:true, motionRate:1.1, motionDepth:0.18,
+             motionSpread:0.2),
         make("Hollow Reed","Winds","Odd-biased airy harmonic reed.",
              harmonics:[0.65,0.03,0.52,0.02,0.23,0,0.11,0,0.06],
              attack:0.055,decay:0.25,sustain:0.86,release:0.23,
@@ -70,11 +100,15 @@ public enum StudioAdditiveFactoryLibrary {
         make("Warm String Bed","Pads","Slow, gentle harmonics for layered string textures.",
              harmonics:[0.72,0.29,0.17,0.11,0.08,0.06,0.04,0.03],
              attack:0.65,decay:0.75,sustain:0.82,release:2.4,
-             tilt:-0.25,evolve:0.45,evolveTime:2.8),
+             tilt:-0.25,evolve:0.45,evolveTime:2.8,
+             independentHarmonics:true, motionRate:0.13, motionDepth:0.18,
+             motionSpread:0.35),
         make("Glass Bloom","Pads","Upper harmonics appear and drift across a long chord.",
              harmonics:[0.6,0.08,0.3,0.05,0.27,0.08,0.2,0,0.13,0.04,0.09],
              attack:1.2,decay:1.8,sustain:0.75,release:3.4,
-             tilt:-0.15,evolve:-1.1,evolveTime:3.6),
+             tilt:-0.15,evolve:-1.1,evolveTime:3.6,
+             independentHarmonics:true, motionRate:0.24, motionDepth:0.58,
+             motionSpread:0.82, motionShape:0.2),
         make("Deep Choir Cloud","Pads","Vowel-like spectral bed built entirely from sines.",
              harmonics:[0.42,0.17,0.5,0.16,0.28,0.08,0.17,0.08,0.09,0.04],
              attack:0.8,decay:1.2,sustain:0.9,release:3.2,
@@ -99,15 +133,21 @@ public enum StudioAdditiveFactoryLibrary {
              harmonics:[0.42,0.17,0.28,0.06,0.23,0.04,0.18,0.02,
                         0.13,0.01,0.11,0.02,0.08,0.02,0.07,0.03],
              attack:0.4,decay:0.9,sustain:0.78,release:3.1,
-             tilt:0,evolve:1.65,evolveTime:1.8),
+             tilt:0,evolve:1.65,evolveTime:1.8,
+             independentHarmonics:true, motionRate:0.43, motionDepth:0.42,
+             motionSpread:0.68, motionShape:0.28),
         make("Evolving Hollow","Textures","Slow emergence of low harmonics.",
              harmonics:[0.7,0.05,0.44,0.02,0.21,0.01,0.12,0.01,0.05],
              attack:1.6,decay:1.1,sustain:0.87,release:3.6,
-             tilt:-0.2,evolve:-1.2,evolveTime:3),
+             tilt:-0.2,evolve:-1.2,evolveTime:3,
+             independentHarmonics:true, motionRate:0.08, motionDepth:0.55,
+             motionSpread:0.92, motionShape:0.5),
         make("Digital Prism","Textures","Dense inharmonic-like harmonic shimmer.",
              harmonics:[0.32,0.17,0.4,0.12,0.31,0.15,0.26,0.07,
                         0.22,0.09,0.18,0.06,0.15,0.04,0.12,0.03],
              attack:0.14,decay:0.55,sustain:0.72,release:2.4,
-             tilt:-0.1,evolve:0.9,evolveTime:0.6)
+             tilt:-0.1,evolve:0.9,evolveTime:0.6,
+             independentHarmonics:true, motionRate:1.33, motionDepth:0.67,
+             motionSpread:0.93, motionShape:0.86)
     ]
 }
