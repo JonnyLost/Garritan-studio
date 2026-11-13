@@ -86,6 +86,100 @@ final class NativeStageEarlyReflectionTests: XCTestCase {
     }
 }
 
+final class StudioVirtualMicrophoneTests: XCTestCase {
+    private func render(perspective: Int, width: Float) -> ([Float], [Float]) {
+        let processor = NativeStageEarlyReflectionProcessor(sampleRate: 48_000)
+        processor.update(roomIndex: 0, pan: 0.35, zone: 3,
+                         microphonePerspective: perspective,
+                         microphoneWidth: width)
+        let frames = 10_000
+        var left = [Float](repeating: 0, count: frames)
+        var right = left
+        left[0] = 1
+        right[0] = 1
+        left.withUnsafeMutableBufferPointer { l in
+            right.withUnsafeMutableBufferPointer { r in
+                processor.process(left: l.baseAddress!, right: r.baseAddress!,
+                                  frameCount: l.count)
+            }
+        }
+        return (left, right)
+    }
+
+    private func firstArrival(_ channel: [Float]) -> Int {
+        channel.firstIndex(where: { abs($0) > 0.00001 }) ?? channel.count
+    }
+
+    func testListeningPositionsShiftEarlyReflectionArrival() {
+        let close = render(perspective: 0, width: 1)
+        let mainPair = render(perspective: 1, width: 1)
+        let audience = render(perspective: 2, width: 1)
+        XCTAssertLessThan(firstArrival(close.0), firstArrival(mainPair.0))
+        XCTAssertLessThan(firstArrival(mainPair.0), firstArrival(audience.0))
+    }
+
+    func testZeroWidthCentersStereoReflectionsWithoutChangingRoomSelection() {
+        let mono = render(perspective: 1, width: 0)
+        let wide = render(perspective: 1, width: 1.4)
+        XCTAssertEqual(mono.0, mono.1)
+        XCTAssertNotEqual(wide.0, wide.1)
+        XCTAssertTrue(wide.0.allSatisfy(\.isFinite))
+        XCTAssertTrue(wide.1.allSatisfy(\.isFinite))
+    }
+
+    func testDefaultMicrophonePreservesPreviouslyUsedProcessorOutput() {
+        let a = NativeStageEarlyReflectionProcessor(sampleRate: 48_000)
+        let b = NativeStageEarlyReflectionProcessor(sampleRate: 48_000)
+        a.update(roomIndex: 0, pan: -0.3, zone: 4)
+        b.update(roomIndex: 0, pan: -0.3, zone: 4,
+                 microphonePerspective: 0, microphoneWidth: 1)
+        var la = [Float](repeating: 0, count: 8_000)
+        var ra = la
+        var lb = la
+        var rb = la
+        la[0] = 1; ra[0] = 1; lb[0] = 1; rb[0] = 1
+        la.withUnsafeMutableBufferPointer { l in
+            ra.withUnsafeMutableBufferPointer { r in
+                a.process(left: l.baseAddress!, right: r.baseAddress!, frameCount: l.count)
+            }
+        }
+        lb.withUnsafeMutableBufferPointer { l in
+            rb.withUnsafeMutableBufferPointer { r in
+                b.process(left: l.baseAddress!, right: r.baseAddress!, frameCount: l.count)
+            }
+        }
+        XCTAssertEqual(la, lb)
+        XCTAssertEqual(ra, rb)
+    }
+
+    func testMicrophoneSettingsPersistAndOlderDAWStateDecodes() throws {
+        var state = DAWState()
+        state.virtualMicrophoneSettings = StudioVirtualMicrophoneSettings(
+            perspective: .audience, stereoWidth: 1.25
+        )
+        let data = try JSONEncoder().encode(state)
+        let restored = try JSONDecoder().decode(DAWState.self, from: data)
+        XCTAssertEqual(restored.virtualMicrophoneSettings, state.virtualMicrophoneSettings)
+
+        var legacy = try XCTUnwrap(JSONSerialization.jsonObject(with: data)
+                                   as? [String: Any])
+        legacy.removeValue(forKey: "virtualMicrophoneSettings")
+        let older = try JSONSerialization.data(withJSONObject: legacy)
+        XCTAssertNil(try JSONDecoder().decode(DAWState.self, from: older)
+                        .virtualMicrophoneSettings)
+        XCTAssertEqual(StudioVirtualMicrophoneSettings().perspective, .conductor)
+    }
+
+    func testInvalidMicrophoneParametersAreClamped() {
+        let processor = NativeStageEarlyReflectionProcessor(sampleRate: 24_000)
+        processor.update(roomIndex: 999, pan: 0.1, zone: 5,
+                         microphonePerspective: 200, microphoneWidth: .nan)
+        XCTAssertEqual(processor.microphonePerspectiveIndex, 2)
+        XCTAssertEqual(processor.microphoneStereoWidth, 1)
+        XCTAssertEqual(StudioVirtualMicrophoneSettings(stereoWidth: 3).safeWidth, 1.5)
+    }
+}
+
 final class NativeRoomImpulseAnalyzerTests: XCTestCase {
     func testKnownExponentialDecayT20IsApproximatelyCorrect() {
         let sampleRate = 24_000.0
