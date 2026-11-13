@@ -105,6 +105,8 @@ public final class StudioSynthInstrument {
     // MIDI producers and the SwiftUI editor may run on different queues.
     // Protect the worker reference, never the AVAudioSourceNode callback.
     private let workerReferenceLock = NSLock()
+    // Snapshot for MIDI producer threads; never accessed by audio callbacks.
+    private var activeCCMappings: [StudioSynthMIDIControlMapping] = []
     private var currentModulation: StudioSynthModulationSettings
     private var currentMIDIControls: StudioSynthMIDIControlSettings
     private var tempo: Double
@@ -143,6 +145,7 @@ public final class StudioSynthInstrument {
             })
         workerReferenceLock.lock()
         modulationWorker = worker
+        activeCCMappings = currentMIDIControls.mappings.filter(\.enabled)
         workerReferenceLock.unlock()
     }
 
@@ -155,6 +158,7 @@ public final class StudioSynthInstrument {
             if !needed {
                 workerReferenceLock.lock()
                 modulationWorker = nil
+                activeCCMappings.removeAll()
                 workerReferenceLock.unlock()
             }
         } else if needed {
@@ -206,6 +210,9 @@ public final class StudioSynthInstrument {
         guard controls.validate(layers: patch.layers) else { return false }
         currentMIDIControls = controls
         refreshControlWorker()
+        workerReferenceLock.lock()
+        activeCCMappings = controls.mappings.filter(\.enabled)
+        workerReferenceLock.unlock()
         return true
     }
 
@@ -262,7 +269,17 @@ public final class StudioSynthInstrument {
         // The matrix receives a copy on its own low-priority control worker.
         // No modulation calculations or locks are added to render callbacks.
         controlWorker()?.receiveMIDI(status: status, data1: data1, data2: data2)
-        return accepted
+        // Native DSPs correctly reject otherwise unsupported controllers
+        // such as CC74. MIDI Learn handles those on its control-rate worker,
+        // so the container reports an accepted mapped CC while preserving
+        // rejection semantics for unsupported messages and note events.
+        guard (status & 0xF0) == 0xB0 else { return accepted }
+        workerReferenceLock.lock()
+        let mapped = activeCCMappings.contains {
+            $0.matches(controller: data1, channel: status & 0x0F)
+        }
+        workerReferenceLock.unlock()
+        return accepted || mapped
     }
 
     @discardableResult
