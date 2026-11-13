@@ -28,20 +28,23 @@ private final class StudioSynthRuntimeLayer {
     let wavetable: StudioWavetableInstrument?
     let additive: StudioAdditiveInstrument?
     let granular: StudioGranularInstrument?
+    let physical: StudioPhysicalInstrument?
 
     var source: AVAudioNode {
         if let analog { return analog.audioNode }
         if let fm { return fm.audioNode }
         if let wavetable { return wavetable.audioNode }
         if let additive { return additive.audioNode }
-        return granular!.audioNode
+        if let granular { return granular.audioNode }
+        return physical!.audioNode
     }
     var format: AVAudioFormat {
         if let analog { return analog.format }
         if let fm { return fm.format }
         if let wavetable { return wavetable.format }
         if let additive { return additive.format }
-        return granular!.format
+        if let granular { return granular.format }
+        return physical!.format
     }
 
     init(_ layer: StudioSynthLayer, sampleRate: Double) throws {
@@ -59,6 +62,7 @@ private final class StudioSynthRuntimeLayer {
             wavetable = nil
             additive = nil
             granular = nil
+            physical = nil
         case .fm:
             let synth = try StudioFMInstrument(sampleRate: sampleRate)
             try synth.apply(layer.fmPatch ?? StudioFMPatch())
@@ -67,6 +71,7 @@ private final class StudioSynthRuntimeLayer {
             wavetable = nil
             additive = nil
             granular = nil
+            physical = nil
         case .wavetable:
             let synth = try StudioWavetableInstrument(sampleRate: sampleRate)
             try synth.apply(layer.wavetablePatch ?? StudioWavetablePatch())
@@ -75,6 +80,7 @@ private final class StudioSynthRuntimeLayer {
             wavetable = synth
             additive = nil
             granular = nil
+            physical = nil
         case .additive:
             let synth = try StudioAdditiveInstrument(sampleRate: sampleRate)
             try synth.apply(layer.additivePatch ?? StudioAdditivePatch())
@@ -83,6 +89,7 @@ private final class StudioSynthRuntimeLayer {
             wavetable = nil
             additive = synth
             granular = nil
+            physical = nil
         case .granular:
             let synth = try StudioGranularInstrument(
                 sampleRate: sampleRate,
@@ -92,6 +99,17 @@ private final class StudioSynthRuntimeLayer {
             wavetable = nil
             additive = nil
             granular = synth
+            physical = nil
+        case .physical:
+            let synth = try StudioPhysicalInstrument(
+                sampleRate: sampleRate,
+                patch: layer.physicalPatch ?? StudioPhysicalPatch())
+            analog = nil
+            fm = nil
+            wavetable = nil
+            additive = nil
+            granular = nil
+            physical = synth
         }
         mixer.outputVolume = layer.gain
         mixer.pan = layer.pan
@@ -115,7 +133,11 @@ private final class StudioSynthRuntimeLayer {
             return additive.midiMessage(status: status, data1: data1,
                                         data2: data2, frameOffset: frameOffset)
         }
-        return granular!.midiMessage(status: status, data1: data1,
+        if let granular {
+            return granular.midiMessage(status: status, data1: data1,
+                                        data2: data2, frameOffset: frameOffset)
+        }
+        return physical!.midiMessage(status: status, data1: data1,
                                      data2: data2, frameOffset: frameOffset)
     }
 
@@ -124,7 +146,8 @@ private final class StudioSynthRuntimeLayer {
         if let fm { return fm.allNotesOff() }
         if let wavetable { return wavetable.allNotesOff() }
         if let additive { return additive.allNotesOff() }
-        return granular!.allNotesOff()
+        if let granular { return granular.allNotesOff() }
+        return physical!.allNotesOff()
     }
 }
 
@@ -219,6 +242,8 @@ public final class StudioSynthInstrument {
             return layer.additive?.parameter(param)
         case .granular(let param):
             return layer.granular?.parameter(param)
+        case .physical(let param):
+            return layer.physical?.parameter(param)
         }
     }
 
@@ -237,6 +262,8 @@ public final class StudioSynthInstrument {
             return layer.additive?.setParameter(param, value: value) ?? false
         case .granular(let param):
             return layer.granular?.setParameter(param, value: value) ?? false
+        case .physical(let param):
+            return layer.physical?.setParameter(param, value: value) ?? false
         }
     }
 
@@ -424,6 +451,20 @@ public final class StudioSynthInstrument {
         let destination = StudioSynthModDestination.granular(parameter)
         return controlWorker()?.setBase(layer: id, destination: destination,
                                         value: value) ??
+            writeParameter(id: id, destination: destination, value: value)
+    }
+
+    public func setPhysicalParameter(id: UUID, parameter: StudioPhysicalParameter,
+                                     value: Float) -> Bool {
+        guard parameter.valid(value),
+              runtime.first(where: { $0.id == id })?.physical != nil else {
+            return false
+        }
+        // Discrete model changes remain atomic; cross-layer modulation
+        // only exposes continuously variable physical parameters.
+        let destination = StudioSynthModDestination.physical(parameter)
+        return controlWorker()?.setBase(layer: id, destination: destination,
+                                          value: value) ??
             writeParameter(id: id, destination: destination, value: value)
     }
 
