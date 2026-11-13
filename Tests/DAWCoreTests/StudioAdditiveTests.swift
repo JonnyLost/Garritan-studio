@@ -118,16 +118,24 @@ final class StudioAdditiveTests: XCTestCase {
 
     func testHybridFactoryRecipesAreValidPortableAndMacBookConscious() throws {
         let presets = StudioSynthHybridFactoryLibrary.presets
-        XCTAssertEqual(presets.count, 10)
+        let originalPresets = presets.filter {
+            !$0.patch.layers.contains(where: { $0.engine == .physical })
+        }
+        // Preserve all ten existing additive recipes; two new physical
+        // Hybrid recipes extend, rather than replace, that factory library.
+        XCTAssertEqual(originalPresets.count, 10)
+        XCTAssertEqual(presets.count, 12)
         XCTAssertEqual(Set(presets.map(\.id)).count, presets.count)
         for preset in presets {
             XCTAssertTrue(preset.patch.validate(), preset.name)
             XCTAssertTrue((2...4).contains(preset.patch.layers.count), preset.name)
             XCTAssertTrue(preset.patch.layers.allSatisfy { $0.gain <= 0.45 },
                           "\(preset.name) has an unexpectedly loud layer")
-            XCTAssertTrue(preset.patch.layers.contains(where: {
-                $0.engine == .additive
-            }), "\(preset.name) should showcase the new additive engine")
+            if !preset.patch.layers.contains(where: { $0.engine == .physical }) {
+                XCTAssertTrue(preset.patch.layers.contains(where: {
+                    $0.engine == .additive
+                }), "\(preset.name) should showcase the original additive engine")
+            }
             let encoded = try JSONEncoder().encode(preset.patch)
             XCTAssertEqual(try JSONDecoder().decode(StudioSynthPatch.self,
                                                     from: encoded), preset.patch)
