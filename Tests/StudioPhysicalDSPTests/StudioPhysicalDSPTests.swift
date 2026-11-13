@@ -135,6 +135,56 @@ final class StudioPhysicalDSPTests: XCTestCase {
         XCTAssertTrue(render(synth, count: 128).allSatisfy { $0 == 0 })
     }
 
+    func testBowedModelAcceptsExpressionAndProducesSustainedSound() {
+        let synth = makeSynth()
+        defer { spm_destroy(synth) }
+        XCTAssertEqual(spm_set_parameter(synth, SPM_PARAM_MODEL, 2), 1)
+        XCTAssertEqual(spm_set_parameter(synth, SPM_PARAM_BOW_PRESSURE, 0.9), 1)
+        XCTAssertEqual(spm_set_parameter(synth, SPM_PARAM_BOW_SPEED, 0.9), 1)
+        XCTAssertEqual(spm_set_parameter(synth, SPM_PARAM_BOW_NOISE, 0.2), 1)
+        XCTAssertEqual(spm_note_on(synth, 69, 127), 1)
+        _ = render(synth, count: 22_050)
+        let sustained = render(synth, count: 4_096)
+        XCTAssertGreaterThan(sustained.map { abs($0) }.max() ?? 0, 0.00001)
+        XCTAssertEqual(spm_midi_event(synth, 0xB0, 1, 0, 0), 1)
+        XCTAssertEqual(spm_midi_event(synth, 0xB0, 11, 0, 0), 1)
+        XCTAssertTrue(render(synth, count: 512).allSatisfy { $0 == 0 })
+        XCTAssertEqual(spm_note_off(synth, 69), 1)
+        _ = render(synth, count: 44_100)
+        XCTAssertTrue(render(synth, count: 128).allSatisfy { $0 == 0 })
+    }
+
+    func testBowedPressureAndTextureAffectWaveform() {
+        let a = makeSynth()
+        let b = makeSynth()
+        defer { spm_destroy(a); spm_destroy(b) }
+        for synth in [a, b] {
+            XCTAssertEqual(spm_set_parameter(synth, SPM_PARAM_MODEL, 2), 1)
+            XCTAssertEqual(spm_note_on(synth, 60, 120), 1)
+        }
+        XCTAssertEqual(spm_set_parameter(a, SPM_PARAM_BOW_PRESSURE, 0.1), 1)
+        XCTAssertEqual(spm_set_parameter(b, SPM_PARAM_BOW_PRESSURE, 1), 1)
+        XCTAssertEqual(spm_set_parameter(b, SPM_PARAM_BOW_NOISE, 1), 1)
+        let first = render(a, count: 4_096)
+        let second = render(b, count: 4_096)
+        XCTAssertGreaterThan(zip(first, second).reduce(0.0) {
+            $0 + Double(abs($1.0 - $1.1))
+        }, 0.001)
+    }
+
+    func testBowParametersRejectInvalidValues() {
+        let synth = makeSynth()
+        defer { spm_destroy(synth) }
+        for id in [SPM_PARAM_BOW_PRESSURE, SPM_PARAM_BOW_SPEED,
+                   SPM_PARAM_BOW_NOISE] {
+            XCTAssertEqual(spm_set_parameter(synth, id, 0), 1)
+            XCTAssertEqual(spm_set_parameter(synth, id, 1), 1)
+            XCTAssertEqual(spm_set_parameter(synth, id, -0.01), 0)
+            XCTAssertEqual(spm_set_parameter(synth, id, .nan), 0)
+        }
+        XCTAssertEqual(spm_set_parameter(synth, SPM_PARAM_MODEL, 3), 0)
+    }
+
     func testNoteReleaseSustainAndMultipleSampleRates() {
         let synth = makeSynth()
         defer { spm_destroy(synth) }
