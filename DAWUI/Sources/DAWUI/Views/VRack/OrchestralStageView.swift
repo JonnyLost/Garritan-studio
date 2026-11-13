@@ -8,6 +8,7 @@ struct OrchestralStageView: View {
     @ObservedObject var viewModel: ProjectViewModel
     var expanded: Bool = false
     @State private var dragOrigins: [TrackID: CGPoint] = [:]
+    @State private var showAcousticRoomDesigner = false
     private var selectedLayout: StageLayout {
         StageLayout(rawValue: viewModel.project.dawState.stageLayoutID ?? "") ?? .symphony
     }
@@ -704,7 +705,7 @@ struct OrchestralStageView: View {
                 .foregroundStyle(.secondary)
             Picker("Acoustic Space", selection: acousticRoomBinding) {
                 Text("Apple · Medium Hall (Legacy)").tag("apple-medium-hall")
-                ForEach(StudioRoomAcousticProfile.starterProfiles) { profile in
+                ForEach(StudioRoomAcousticProfile.playableProfiles) { profile in
                     Text(profile.name).tag(profile.id)
                 }
             }
@@ -713,6 +714,12 @@ struct OrchestralStageView: View {
                       viewModel.transportState.isPlaying ||
                       viewModel.transportState.isRecording ||
                       viewModel.isRecording)
+            DisclosureGroup("Design a Custom Acoustic Room",
+                            isExpanded: $showAcousticRoomDesigner) {
+                StudioAcousticRoomDesignerView(viewModel: viewModel)
+                    .padding(.top, 8)
+            }
+            .font(.caption.weight(.medium))
             Text("Native rooms are experimental acoustic interpretations. Change rooms while stopped.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
