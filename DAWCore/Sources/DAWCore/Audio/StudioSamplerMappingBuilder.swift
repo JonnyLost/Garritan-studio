@@ -136,7 +136,7 @@ public enum StudioSamplerMappingBuilder {
             }
         }
         var patch = StudioSamplerPatch(zones: zones)
-        let microphoneIDs = Array(Set(candidates.map(.microphone))).sorted()
+        let microphoneIDs = Array(Set(candidates.map(\.microphone))).sorted()
         if microphoneIDs.contains(where: { $0 > 0 }) {
             let micNames = ["Close", "Main / Tree", "Room", "Spot"]
             patch.microphones = microphoneIDs.map { id in
