@@ -46,11 +46,11 @@ enum StandardMIDIFileExporter {
         }
 
         try append(0, 0, meta(0x03, Array(project.name.utf8.prefix(1024))))
-        try append(0, 1, timeSignatureMessage(project.timeSignature))
-        try append(0, 2, tempoMessage(project.tempo.bpm))
+        try append(0, 1, try timeSignatureMessage(project.timeSignature))
+        try append(0, 2, try tempoMessage(project.tempo.bpm))
 
         for change in project.timeSignatureChanges {
-            try append(change.beatPosition, 3, timeSignatureMessage(change.timeSignature))
+            try append(change.beatPosition, 3, try timeSignatureMessage(change.timeSignature))
         }
         for change in project.tempoChanges {
             guard change.curveType == .step else {
@@ -58,7 +58,7 @@ enum StandardMIDIFileExporter {
                     "MIDI export requires step tempo changes; flatten tempo ramps first"
                 )
             }
-            try append(change.beatPosition, 4, tempoMessage(change.tempo.bpm))
+            try append(change.beatPosition, 4, try tempoMessage(change.tempo.bpm))
         }
         return events
     }
@@ -111,6 +111,9 @@ enum StandardMIDIFileExporter {
                         }
                         let endTick = try checkedTick(absolute + note.duration)
                         let releaseTick = max(startTick + 1, min(endTick, clipEndTick))
+                        guard releaseTick <= maxTick else {
+                            throw PersistenceError.invalidFormat("MIDI note end exceeds exportable range")
+                        }
                         append(startTick, 3, [0x90 | channel, pitch, try dataByte(note.velocity)])
                         append(releaseTick, 1, [0x80 | channel, pitch,
                             try dataByte(note.releaseVelocity ?? 0)])
@@ -179,8 +182,15 @@ enum StandardMIDIFileExporter {
         return value
     }
 
-    private static func tempoMessage(_ bpm: Double) -> [UInt8] {
-        let microseconds = UInt32((60_000_000.0 / bpm).rounded())
+    private static func tempoMessage(_ bpm: Double) throws -> [UInt8] {
+        guard bpm.isFinite && bpm > 0 else {
+            throw PersistenceError.invalidFormat("Tempo must be a finite positive value")
+        }
+        let rawMicroseconds = (60_000_000.0 / bpm).rounded()
+        guard rawMicroseconds >= 1 && rawMicroseconds <= 0xFF_FFFF else {
+            throw PersistenceError.invalidFormat("Tempo cannot be represented in MIDI")
+        }
+        let microseconds = UInt32(rawMicroseconds)
         return meta(0x51, [
             UInt8((microseconds >> 16) & 0xFF),
             UInt8((microseconds >> 8) & 0xFF),
@@ -188,9 +198,13 @@ enum StandardMIDIFileExporter {
         ])
     }
 
-    private static func timeSignatureMessage(_ signature: TimeSignature) -> [UInt8] {
-        // Time signatures are expected to use a power-of-two denominator.
-        let denominator = max(1, signature.denominator)
+    private static func timeSignatureMessage(_ signature: TimeSignature) throws -> [UInt8] {
+        let denominator = signature.denominator
+        guard (1...255).contains(signature.numerator),
+              (1...128).contains(denominator),
+              (denominator & (denominator - 1)) == 0 else {
+            throw PersistenceError.invalidFormat("MIDI time signature requires a valid numerator and power-of-two denominator")
+        }
         let exponent = denominator.trailingZeroBitCount
         return meta(0x58, [
             UInt8(clamping: signature.numerator),
