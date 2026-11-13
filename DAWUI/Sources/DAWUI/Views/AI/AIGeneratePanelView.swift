@@ -1,5 +1,6 @@
 import SwiftUI
 import DAWCore
+import StudioAI
 import AVFoundation
 
 // MARK: - AI Generate Panel View

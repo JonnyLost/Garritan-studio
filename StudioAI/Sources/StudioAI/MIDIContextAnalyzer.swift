@@ -1,4 +1,5 @@
 import Foundation
+import DAWCore
 
 // MARK: - MIDI Context Analyzer
 

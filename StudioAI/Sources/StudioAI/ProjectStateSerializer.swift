@@ -1,4 +1,5 @@
 import Foundation
+import DAWCore
 
 // MARK: - Project State Serializer
 
@@ -179,19 +180,5 @@ public struct ProjectStateSerializer {
     /// Convert dB to linear volume (0-1)
     public static func dbToVolume(_ db: Float) -> Float {
         return pow(10, db / 20)
-    }
-}
-
-// MARK: - Convenience Extensions
-
-extension Project {
-    /// Get a track by name (case-insensitive)
-    public func trackByName(_ name: String) -> Track? {
-        tracks.first { $0.name.lowercased() == name.lowercased() }
-    }
-    
-    /// Get track index by name
-    public func trackIndexByName(_ name: String) -> Int? {
-        tracks.firstIndex { $0.name.lowercased() == name.lowercased() }
     }
 }

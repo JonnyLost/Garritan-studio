@@ -3,6 +3,7 @@ import SwiftUI
 import Combine
 import AVFoundation
 import DAWCore
+import StudioAI
 
 // MARK: - Project View Model
 

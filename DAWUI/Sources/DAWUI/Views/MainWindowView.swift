@@ -1,6 +1,7 @@
 import SwiftUI
 import CoreAudio
 import DAWCore
+import StudioAI
 import StudioCloudAuth
 import UniformTypeIdentifiers
 

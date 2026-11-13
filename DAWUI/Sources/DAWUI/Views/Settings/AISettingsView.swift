@@ -1,5 +1,6 @@
 import SwiftUI
 import DAWCore
+import StudioAI
 
 // MARK: - AI Settings View
 

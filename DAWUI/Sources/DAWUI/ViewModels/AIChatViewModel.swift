@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import DAWCore
+import StudioAI
 import Combine
 
 // MARK: - AI Chat View Model

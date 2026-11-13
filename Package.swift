@@ -11,6 +11,7 @@ let package = Package(
     products: [
         .library(name: "DAWCore", targets: ["DAWCore"]),
         .library(name: "StudioIdentity", targets: ["StudioIdentity"]),
+        .library(name: "StudioAI", targets: ["StudioAI"]),
         .library(name: "StudioCloudAuth", targets: ["StudioCloudAuth"]),
         .library(name: "StudioAnalogDSP", targets: ["StudioAnalogDSP"]),
         .library(name: "StudioSamplerDSP", targets: ["StudioSamplerDSP"]),
@@ -75,6 +76,16 @@ let package = Package(
             path: "StudioIdentity/Sources/StudioIdentity"
         ),
 
+        // MARK: - Optional network/AI composition services (not part of DAWCore)
+        .target(
+            name: "StudioAI",
+            dependencies: ["DAWCore"],
+            path: "StudioAI/Sources/StudioAI",
+            swiftSettings: [
+                .enableExperimentalFeature("StrictConcurrency")
+            ]
+        ),
+
         // MARK: - Optional cloud authentication (never required by the DAW core)
         .target(
             name: "StudioCloudAuth",
@@ -132,7 +143,7 @@ let package = Package(
         // MARK: - SwiftUI Layer
         .target(
             name: "DAWUI",
-            dependencies: ["DAWCore", "StudioCloudAuth", "StudioIdentity"],
+            dependencies: ["DAWCore", "StudioCloudAuth", "StudioIdentity", "StudioAI"],
             path: "DAWUI/Sources/DAWUI",
             resources: [
                 .copy("Resources/GPO5_keyswitch_catalog.json")
