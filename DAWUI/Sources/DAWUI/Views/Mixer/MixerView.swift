@@ -28,8 +28,8 @@ public struct MixerView: View {
                 subtitle: "Instrument channels, levels and master output",
                 symbol: "slider.vertical.3"
             ) {
-                // Display options only; sends are edited in the existing
-                // Orchestral Stage workspace, not in a placeholder mixer panel.
+                // Every track includes an independent, editable Concert Hall
+                // send as well as insert slots. Stage remains the spatial editor.
                 Menu {
                     Toggle("Show Insert Slots", isOn: $showInsertSlots)
                     Toggle("Show Level Meters", isOn: $showMeters)
@@ -159,19 +159,54 @@ struct ChannelStripView: View {
             .padding(.horizontal, 7)
             .padding(.top, 7)
             
-            // Plugin slot
+            // Four initially visible inserts, with additional restored
+            // slots displayed automatically. Only contiguous slots can be
+            // newly populated; this preserves AudioEngine's ordered chain.
             if showInsertSlots {
-                let slot = track.pluginSlots.first
-                PluginSlotView(
-                    slot: slot,
-                    onClick: { onPluginSlotClick(0) },
-                    onOpenEditor: slot?.pluginID != nil ? {
-                        viewModel.openTrackEffectUI(track.id, slotIndex: 0)
-                    } : nil
-                )
+                VStack(spacing: 2) {
+                    ForEach(0..<max(4, track.pluginSlots.count), id: \.self) { index in
+                        let slot: PluginSlot? =
+                            index < track.pluginSlots.count ? track.pluginSlots[index] : nil
+                        PluginSlotView(
+                            slot: slot,
+                            onClick: { onPluginSlotClick(index) },
+                            onOpenEditor: slot?.pluginID != nil ? {
+                                viewModel.openTrackEffectUI(track.id, slotIndex: index)
+                            } : nil
+                        )
+                        .disabled(slot?.pluginID == nil &&
+                                  index > 0 &&
+                                  !track.pluginSlots.prefix(index).allSatisfy {
+                                      $0.pluginID != nil
+                                  })
+                    }
+                }
                 .padding(.vertical, 4)
             }
-            
+
+            // Independent Concert Hall send: 0% dry, 100% stage default,
+            // up to 200% for a deliberately wetter mix. No stage relocation.
+            VStack(spacing: 2) {
+                HStack(spacing: 2) {
+                    Text("HALL")
+                        .font(.system(size: 8, weight: .semibold))
+                    Spacer(minLength: 0)
+                    Text("\(Int(((track.stageWetTrim ?? 1) * 100).rounded()))%")
+                        .font(.system(size: 8, design: .monospaced))
+                }
+                Slider(
+                    value: Binding(
+                        get: { Double(track.stageWetTrim ?? 1) },
+                        set: { viewModel.setTrackStageWetTrim(id: track.id, trim: Float($0)) }
+                    ),
+                    in: 0...2
+                )
+                .controlSize(.mini)
+                .accessibilityLabel("Concert Hall send for \(track.name)")
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+
             // Pan knob
             KnobView(
                 value: Binding(
@@ -230,7 +265,7 @@ struct ChannelStripView: View {
             }
             .padding(.bottom, 6)
         }
-        .frame(width: 94, height: 335)
+        .frame(width: 110, height: 455)
         .background(isSelected ? palette.selectedBackground.opacity(0.6) : palette.panel)
         .overlay {
             RoundedRectangle(cornerRadius: 10)
