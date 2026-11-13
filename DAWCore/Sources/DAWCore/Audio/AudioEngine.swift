@@ -62,6 +62,7 @@ public final class AudioEngine: ObservableObject {
     private let concertHallReverb = AVAudioUnitReverb()
     /// Created only when explicitly enabled; the tested Apple path stays default.
     private var nativeConcertHallReverb: AVAudioUnitEffect?
+    private var designedRoom = StudioAcousticRoomDesign()
     @Published public private(set) var usesNativeConcertHallReverb = false
     @Published public private(set) var selectedNativeRoomProfileID =
         StudioRoomAcousticProfile.abbeyRoadStudioOne.id
@@ -441,6 +442,8 @@ public final class AudioEngine: ObservableObject {
                 audioComponentDescription: NativeRoomReverbAudioUnit.componentDescription
             )
             engine.attach(effect)
+            (effect.auAudioUnit as? NativeRoomReverbAudioUnit)?
+                .configureDesignedRoom(designedRoom)
             nativeConcertHallReverb = effect
         }
 
@@ -494,6 +497,36 @@ public final class AudioEngine: ObservableObject {
         }
     }
 
+    /// Prepare six-band decay and dimension-derived early reflections outside
+    /// the audio callback. Graph topology and legacy Apple reverb are unchanged.
+    /// Render resources are rebuilt only while AVAudioEngine is stopped.
+    public func configureDesignedRoom(_ design: StudioAcousticRoomDesign) throws {
+        let oldDesign = designedRoom
+        let running = engine.isRunning
+        if running { engine.stop() }
+
+        func install(_ settings: StudioAcousticRoomDesign) {
+            (nativeConcertHallReverb?.auAudioUnit as? NativeRoomReverbAudioUnit)?
+                .configureDesignedRoom(settings)
+            for track in trackNodes.values {
+                (track.earlyReflectionNode?.auAudioUnit as?
+                    NativeStageEarlyReflectionAudioUnit)?.configureDesignedRoom(settings)
+            }
+        }
+
+        install(design)
+        do {
+            if running { try engine.start() }
+            designedRoom = design
+            isRunning = engine.isRunning
+        } catch {
+            install(oldDesign)
+            if running { try? engine.start() }
+            isRunning = engine.isRunning
+            throw AudioEngineError.failedToStart(underlying: error)
+        }
+    }
+
     /// Select a prepared native room by stable identifier. Audio Unit parameters
     /// are applied without rebuilding the graph or allocating on the render thread.
     /// Returns false if the room is unknown; does not modify the saved choice.
@@ -522,6 +555,8 @@ public final class AudioEngine: ObservableObject {
         )
         engine.attach(send)
         engine.attach(effect)
+        (effect.auAudioUnit as? NativeStageEarlyReflectionAudioUnit)?
+            .configureDesignedRoom(designedRoom)
         engine.connect(send, to: effect, format: format)
         engine.connect(effect, to: nativeEarlyReflectionMixer, format: format)
         node.installEarlyReflection(send: send, effect: effect)
