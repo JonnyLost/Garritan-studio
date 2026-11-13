@@ -31,7 +31,9 @@ struct DAWApp: App {
 
     var body: some Scene {
         // Main document window
-        WindowGroup(StudioApplicationIdentity.displayName) {
+        // One Studio document controller owns one composing window. Multiple
+        // WindowGroup instances previously shared a mutable session.
+        Window(StudioApplicationIdentity.displayName, id: "studio-main") {
             StudioAppearanceHost {
                 MainWindowView(
                     project: appState.currentProject,
@@ -46,6 +48,7 @@ struct DAWApp: App {
                 }
                 .environmentObject(appState)
                 .navigationTitle(appState.windowTitle)
+                .background(StudioWindowCloseGuard(appState: appState))
                 .alert("Studio Project", isPresented: Binding(
                     get: { appState.projectErrorMessage != nil },
                     set: { if !$0 { appState.projectErrorMessage = nil } }
