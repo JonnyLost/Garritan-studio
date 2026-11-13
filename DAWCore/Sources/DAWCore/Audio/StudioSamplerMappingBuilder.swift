@@ -195,9 +195,13 @@ public enum StudioSamplerMappingBuilder {
             reserved.insert(key)
         }
         var addedZones = imported.zones
-        // If interval recordings were imported separately from already
-        // loaded Legato sustains, move only the unassigned interval zones
-        // onto the existing Legato keyswitch group.
+        for index in addedZones.indices {
+            addedZones[index].articulationID =
+                idMap[addedZones[index].articulationID ?? 0].flatMap { $0 == 0 ? nil : $0 }
+        }
+        // If interval recordings were imported separately from existing
+        // Legato sustains, attach unassigned intervals after imported IDs
+        // have been remapped to stable existing keyswitch IDs.
         let legatoArticulation = articulations.first {
             $0.name.localizedCaseInsensitiveCompare("Legato") == .orderedSame
         }?.id
@@ -213,10 +217,6 @@ public enum StudioSamplerMappingBuilder {
                }) {
                 addedZones[index].articulationID = legatoArticulation
             }
-        }
-        for index in addedZones.indices {
-            addedZones[index].articulationID =
-                idMap[addedZones[index].articulationID ?? 0].flatMap { $0 == 0 ? nil : $0 }
         }
         merged.zones.append(contentsOf: addedZones)
         var microphoneGroups = merged.microphones ?? []
