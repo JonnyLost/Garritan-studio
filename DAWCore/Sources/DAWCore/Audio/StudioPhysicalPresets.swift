@@ -71,7 +71,7 @@ public enum StudioPhysicalFactoryLibrary {
         make("Bronze Chime", family: "Percussion", description: "Dense inharmonic metal ringing.",
              model: .bell, controls: [
                 (.percussionHardness, 0.54), (.percussionDecay, 0.76),
-                (.percussionInharmonicity, 0.73), (.bodySize, 0.8)]),
+                (.percussionInharmonicity, 0.73), (.position, 0.8)]),
         make("Kettle Skin", family: "Percussion", description: "Pitch-following membrane resonance.",
              model: .membrane, controls: [
                 (.percussionHardness, 0.42), (.percussionDecay, 0.72),
