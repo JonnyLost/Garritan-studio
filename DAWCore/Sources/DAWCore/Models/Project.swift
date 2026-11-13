@@ -277,6 +277,8 @@ public struct DAWState: Codable, Sendable {
     /// Optional for backwards compatibility with projects created before the
     /// native Acoustic Room Designer existed.
     public var acousticRoomDesign: StudioAcousticRoomDesign?
+    /// Nil preserves the original close-listening behavior on older projects.
+    public var virtualMicrophoneSettings: StudioVirtualMicrophoneSettings?
     
     // Zoom and scroll
     public var zoomLevel: Double
@@ -307,6 +309,7 @@ public struct DAWState: Codable, Sendable {
         self.stageLayoutID = nil
         self.acousticRoomProfileID = nil
         self.acousticRoomDesign = nil
+        self.virtualMicrophoneSettings = nil
         self.zoomLevel = zoomLevel
         self.horizontalScrollOffset = horizontalScrollOffset
         self.verticalScrollOffset = verticalScrollOffset
