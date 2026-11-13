@@ -308,7 +308,7 @@ public struct MainWindowView: View {
             guard failures.isEmpty else {
                 NotificationCenter.default.post(
                     name: .projectStateCaptureFailed,
-                    object: failures.joined(separator: "\\n")
+                    object: failures.joined(separator: "\n")
                 )
                 return
             }
