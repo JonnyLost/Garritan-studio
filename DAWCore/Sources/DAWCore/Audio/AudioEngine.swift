@@ -497,6 +497,10 @@ public final class AudioEngine: ObservableObject {
             engine.stop()
             route(previous)
             nativeEarlyReflectionMixer.outputVolume = usesNativeConcertHallReverb ? 1 : 0
+            for node in trackNodes.values {
+                node.setVirtualMicrophone(virtualMicrophoneSettings,
+                                          nativeEnabled: usesNativeConcertHallReverb)
+            }
             if wasRunning { try? engine.start() }
             isRunning = engine.isRunning
             throw AudioEngineError.failedToStart(underlying: error)
