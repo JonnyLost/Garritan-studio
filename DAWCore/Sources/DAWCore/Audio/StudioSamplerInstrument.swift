@@ -180,6 +180,14 @@ public final class StudioSamplerInstrument {
                 ) == 1
             }
             guard loaded else { throw StudioSamplerError.couldNotLoadZone(url) }
+            // Immutable per-zone metadata applies equally to RAM and
+            // streamed recordings. No sample data is duplicated here.
+            let configured = ss_configure_zone_performance(
+                sampler, ss_zone_count(sampler) - 1,
+                zone.microphoneID ?? 0,
+                zone.legatoFromNote.map(Int32.init) ?? -1
+            ) == 1
+            guard configured else { throw StudioSamplerError.invalidPatch }
             streamSources.append(useStreaming ? url : nil)
         }
         // Prepare the controller state and crossfade mode before the
@@ -190,8 +198,20 @@ public final class StudioSamplerInstrument {
                           env.sustainLevel, env.releaseSeconds) == 1,
               ss_set_cc1_crossfade(sampler, patch.cc1Crossfade == true ? 1 : 0) == 1,
               ss_control_change(sampler, 1, patch.dynamicsCC1 ?? 127, 0) == 1,
-              ss_control_change(sampler, 11, patch.expressionCC11 ?? 127, 0) == 1 else {
+              ss_control_change(sampler, 11, patch.expressionCC11 ?? 127, 0) == 1,
+              ss_control_change(sampler, 2, patch.breathCC2 ?? 127, 0) == 1,
+              ss_control_change(sampler, 21, patch.vibratoCC21 ?? 0, 0) == 1,
+              ss_set_legato_mode(sampler, patch.legatoEnabled == true ? 1 : 0,
+                                 patch.legatoCrossfadeMilliseconds ?? 40) == 1 else {
             throw StudioSamplerError.invalidConfiguration
+        }
+        for microphone in patch.microphones ?? [] {
+            let actualGain = microphone.isMuted ? 0 : microphone.gain
+            guard ss_set_microphone_mix(
+                sampler, microphone.id, actualGain, microphone.pan
+            ) == 1 else {
+                throw StudioSamplerError.invalidConfiguration
+            }
         }
         // A worker only exists for instruments containing long recordings.
         // The worker owns AVAudioFile instances on its own serial queue.
@@ -270,6 +290,29 @@ public final class StudioSamplerInstrument {
         midiProducerLock.lock()
         defer { midiProducerLock.unlock() }
         return ss_set_cc1_crossfade(renderState.sampler, enabled ? 1 : 0) == 1
+    }
+
+    /// Smoothly change microphone balance on held and new voices without
+    /// rebuilding the render graph or reloading orchestral sample banks.
+    @discardableResult
+    public func setMicrophone(_ microphone: StudioSamplerMicrophone) -> Bool {
+        guard microphone.isValid else { return false }
+        midiProducerLock.lock()
+        defer { midiProducerLock.unlock() }
+        return ss_set_microphone_mix(renderState.sampler, microphone.id,
+                                    microphone.isMuted ? 0 : microphone.gain,
+                                    microphone.pan) == 1
+    }
+
+    @discardableResult
+    public func setLegato(enabled: Bool, fadeMilliseconds: Float) -> Bool {
+        guard fadeMilliseconds.isFinite, (5...250).contains(fadeMilliseconds) else {
+            return false
+        }
+        midiProducerLock.lock()
+        defer { midiProducerLock.unlock() }
+        return ss_set_legato_mode(renderState.sampler, enabled ? 1 : 0,
+                                  fadeMilliseconds) == 1
     }
 
     @discardableResult
