@@ -185,4 +185,44 @@ final class StudioSamplerSampleLibraryTests: XCTestCase {
         XCTAssertEqual(restored, patch)
         XCTAssertNil(restored.zones[0].managedFileName)
     }
+    func testMappedImportPreflightsLimitAndRollsBackArticulationConflicts() throws {
+        let source = try temporaryFolder()
+        let destination = try temporaryFolder()
+        defer {
+            try? FileManager.default.removeItem(at: source)
+            try? FileManager.default.removeItem(at: destination)
+        }
+        let recording = source.appendingPathComponent("Violin_C4_pizz.wav")
+        try Data([1, 2, 3, 4]).write(to: recording)
+        let existingSample = source.appendingPathComponent("original_C4.wav")
+        try Data([9, 8, 7, 6]).write(to: existingSample)
+
+        var existing = StudioSamplerPatch(sampleURL: existingSample)
+        existing.articulations = (1...15).map {
+            StudioSamplerArticulation(id: UInt8($0), name: "Custom \($0)",
+                                     keyswitchNote: UInt8(30 + $0))
+        }
+        existing.defaultKeyswitchNote = 23
+        XCTAssertTrue(existing.isValid)
+
+        XCTAssertThrowsError(
+            try StudioSamplerSampleLibrary.importMappedFiles(
+                [recording], into: destination, extending: existing)
+        )
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(
+            at: destination, includingPropertiesForKeys: nil).count, 0)
+        XCTAssertEqual(try Data(contentsOf: recording), Data([1, 2, 3, 4]))
+
+        let full = StudioSamplerPatch(zones: Array(
+            repeating: StudioSamplerZone(sampleURL: existingSample), count: 128
+        ))
+        XCTAssertTrue(full.isValid)
+        XCTAssertThrowsError(
+            try StudioSamplerSampleLibrary.importMappedFiles(
+                [recording], into: destination, extending: full)
+        )
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(
+            at: destination, includingPropertiesForKeys: nil).count, 0)
+    }
+
 }
