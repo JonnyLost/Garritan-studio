@@ -15,6 +15,7 @@ let package = Package(
         .library(name: "StudioWavetableDSP", targets: ["StudioWavetableDSP"]),
         .library(name: "StudioAdditiveDSP", targets: ["StudioAdditiveDSP"]),
         .library(name: "StudioGranularDSP", targets: ["StudioGranularDSP"]),
+        .library(name: "StudioSamplerDSP", targets: ["StudioSamplerDSP"]),
         .library(name: "StudioPhysicalDSP", targets: ["StudioPhysicalDSP"]),
         .library(name: "DAWUI", targets: ["DAWUI"]),
         .library(name: "VST3Bridge", targets: ["VST3Bridge"]),
@@ -69,6 +70,15 @@ let package = Package(
             cxxSettings: [.unsafeFlags(["-std=c++17"])]
         ),
 
+        // MARK: - Original native multi-zone sampler with RAM/disk streaming
+        .target(
+            name: "StudioSamplerDSP",
+            path: "StudioSamplerDSP",
+            sources: ["src/StudioSamplerDSP.cpp"],
+            publicHeadersPath: "include",
+            cxxSettings: [.unsafeFlags(["-std=c++17"])]
+        ),
+
         // MARK: - Native plucked / struck string waveguides and body modes
         .target(
             name: "StudioPhysicalDSP",
@@ -97,6 +107,7 @@ let package = Package(
                 "StudioAdditiveDSP",
                 "StudioGranularDSP",
                 "StudioPhysicalDSP",
+                "StudioSamplerDSP",
                 .product(name: "Supabase", package: "supabase-swift")
             ],
             path: "DAWCore/Sources/DAWCore",
