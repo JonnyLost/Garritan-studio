@@ -8,7 +8,6 @@ struct OrchestralStageView: View {
     @ObservedObject var viewModel: ProjectViewModel
     var expanded: Bool = false
     @State private var dragOrigins: [TrackID: CGPoint] = [:]
-    @State private var showAcousticRoomDesigner = false
     private var selectedLayout: StageLayout {
         StageLayout(rawValue: viewModel.project.dawState.stageLayoutID ?? "") ?? .symphony
     }
@@ -64,10 +63,9 @@ struct OrchestralStageView: View {
                 }
                 .font(.system(size: 9)).foregroundStyle(.secondary)
 
-                acousticRoomControls
                 selectedTrackControls
 
-                Text("Stage positions and acoustic room choice are saved with the project.")
+                Text("Stage positions are saved with the project. Choose acoustic rooms in the Rooms workspace.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
             .padding(12)
@@ -120,8 +118,6 @@ struct OrchestralStageView: View {
 
                 ScrollView(.vertical) {
                   VStack(alignment: .leading, spacing: 14) {
-                    acousticRoomControls
-                    Divider()
                     StudioSectionHeading("Instrument Position", symbol: "slider.horizontal.3")
                     selectedTrackControls
                     Divider()
@@ -693,49 +689,6 @@ struct OrchestralStageView: View {
             Text("Select a MIDI or instrument track to edit its stage position.")
                 .font(.caption).foregroundStyle(.secondary)
         }
-    }
-
-    /// Acoustic-space selection is separate from orchestra seating layouts.
-    /// The original Concert Hall remains available for existing projects.
-    private var acousticRoomControls: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("ROOM ACOUSTICS")
-                .font(.system(size: 10, weight: .semibold))
-                .tracking(1.2)
-                .foregroundStyle(.secondary)
-            Picker("Acoustic Space", selection: acousticRoomBinding) {
-                Text("Apple · Medium Hall (Legacy)").tag("apple-medium-hall")
-                ForEach(StudioRoomAcousticProfile.playableProfiles) { profile in
-                    Text(profile.name).tag(profile.id)
-                }
-            }
-            .pickerStyle(.menu)
-            .disabled(!viewModel.isEngineReady ||
-                      viewModel.transportState.isPlaying ||
-                      viewModel.transportState.isRecording ||
-                      viewModel.isRecording)
-            DisclosureGroup("Design a Custom Acoustic Room",
-                            isExpanded: $showAcousticRoomDesigner) {
-                StudioAcousticRoomDesignerView(viewModel: viewModel)
-                    .padding(.top, 8)
-            }
-            .font(.caption.weight(.medium))
-            Text("Native rooms are experimental acoustic interpretations. Change rooms while stopped.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            if let error = viewModel.acousticRoomSelectionError {
-                Text(error).font(.caption2).foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
-    private var acousticRoomBinding: Binding<String> {
-        Binding(
-            get: { viewModel.project.dawState.acousticRoomProfileID ?? "apple-medium-hall" },
-            set: { viewModel.selectConcertHallRoom(id: $0) }
-        )
     }
 
     private let stageSendLevels: [Double] = [0, 0.12, 0.20, 0.30, 0.43, 0.58]
