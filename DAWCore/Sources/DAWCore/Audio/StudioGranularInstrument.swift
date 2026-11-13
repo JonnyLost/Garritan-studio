@@ -30,6 +30,9 @@ public final class StudioGranularInstrument {
     public let audioNode: AVAudioSourceNode
     public let format: AVAudioFormat
     private let state: StudioGranularRenderState
+    /// True when native grains directly read the shared Sampler/Granular PCM
+    /// allocation rather than an additional private C++ audio copy.
+    public let isUsingSharedPCM: Bool
     private let midiProducerLock = NSLock()
 
     public init(sampleRate: Double, voices: Int32 = 8,
@@ -47,12 +50,31 @@ public final class StudioGranularInstrument {
         self.format = format
 
         if let path = patch.importedAudioPath {
-            try Self.loadFileStopped(at: URL(fileURLWithPath: path), into: synth)
+            let url = URL(fileURLWithPath: path)
+            let shared: StudioSharedPCMAsset?
+            do {
+                shared = try StudioSharedSampleCache.shared.acquire(
+                    url: url, maxFrames: Int(SGR_MAX_SOURCE_FRAMES))
+            } catch {
+                throw StudioGranularError.cannotReadSource(
+                    error.localizedDescription)
+            }
+            if let shared, shared.frames >= 128 {
+                guard sgr_load_shared_pcm_stopped(synth, shared.handle) != 0 else {
+                    throw StudioGranularError.cannotReadSource(
+                        "The shared PCM source could not be loaded.")
+                }
+                isUsingSharedPCM = true
+            } else {
+                try Self.loadFileStopped(at: url, into: synth)
+                isUsingSharedPCM = false
+            }
         } else {
             guard sgr_select_factory_source_stopped(synth,
                 Int32(patch.source.rawValue)) != 0 else {
                 throw StudioGranularError.invalidConfiguration
             }
+            isUsingSharedPCM = false
         }
         for parameter in StudioGranularParameter.allCases {
             guard sgr_set_parameter(synth, parameter.rawValue,
