@@ -29,6 +29,7 @@ public extension Notification.Name {
     static let requestProjectForSave = Notification.Name("requestProjectForSave")
     static let projectDataForSave = Notification.Name("projectDataForSave")
     static let captureProjectForSave = Notification.Name("captureProjectForSave")
+    static let projectStateCaptureFailed = Notification.Name("projectStateCaptureFailed")
 }
 
 // MARK: - Keyboard Handler
