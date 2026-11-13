@@ -57,7 +57,7 @@ final class StudioSamplerInstrumentPackageTests: XCTestCase {
         XCTAssertEqual(restored.zones[0].trimEndFrame, 128)
         XCTAssertEqual(restored.articulations, patch.articulations)
         XCTAssertEqual(restored.envelope, patch.envelope)
-        XCTAssertEqual(try Data(contentsOf: restored.zones[0].sampleURL),
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: restored.zones[0].filePath)),
                        Data([1, 2, 3, 4, 5, 6]))
     }
 
@@ -114,8 +114,8 @@ final class StudioSamplerInstrumentPackageTests: XCTestCase {
         // A forged manifest cannot use a relative traversal or external file.
         let manifestURL = bundle.appendingPathComponent("manifest.json")
         let original = try String(contentsOf: manifestURL, encoding: .utf8)
-        let changed = original.replacingOccurrences(of: "Samples/000-C4.wav",
-                                                     with: "Samples/../C4.wav")
+        let changed = original.replacingOccurrences(of: "000-C4.wav",
+                                                     with: "../C4.wav")
         XCTAssertNotEqual(original, changed)
         try changed.write(to: manifestURL, atomically: true, encoding: .utf8)
         XCTAssertThrowsError(try StudioSamplerInstrumentPackage.load(
