@@ -81,14 +81,19 @@ public struct StudioSynthPatch: Codable, Equatable, Sendable {
     public var layers: [StudioSynthLayer]
     /// Optional to preserve every original Studio Synth project file.
     public var modulation: StudioSynthModulationSettings?
+    /// MIDI Learn assignments contain only MIDI CC numbers and native targets.
+    /// Missing keys in older project JSON decode as nil without migration.
+    public var midiControls: StudioSynthMIDIControlSettings?
 
     public init(version: Int = 1, layers: [StudioSynthLayer] = [
         StudioSynthLayer(engine: .analog, name: "Analog Foundation"),
         StudioSynthLayer(engine: .fm, name: "FM Attack")
-    ], modulation: StudioSynthModulationSettings? = nil) {
+    ], modulation: StudioSynthModulationSettings? = nil,
+       midiControls: StudioSynthMIDIControlSettings? = nil) {
         self.version = version
         self.layers = layers
         self.modulation = modulation
+        self.midiControls = midiControls
     }
 
     public static func individual(_ engine: StudioSynthEngine) -> StudioSynthPatch {
@@ -102,6 +107,7 @@ public struct StudioSynthPatch: Codable, Equatable, Sendable {
               layers.contains(where: \.enabled),
               Set(layers.map(\.id)).count == layers.count else { return false }
         return layers.allSatisfy { $0.validate() } &&
-            (modulation?.validate(layers: layers) ?? true)
+            (modulation?.validate(layers: layers) ?? true) &&
+            (midiControls?.validate(layers: layers) ?? true)
     }
 }
