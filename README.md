@@ -20,9 +20,8 @@ swift run DAWApp
 ```
 
 The executable target remains `DAWApp` so existing development commands work.
-The SwiftPM package retains its historical `MusioCreate` identifier pending
-a separately verified migration. Product-facing windows and app metadata now say
-**Studio**.
+The SwiftPM package is named **Studio**. Existing executable and target names
+such as `DAWApp` remain compatible with the development workflow.
 
 ## Architecture
 
@@ -35,15 +34,25 @@ a separately verified migration. Product-facing windows and app metadata now say
 | `StudioAnalogDSP`, `StudioFMDSP`, `StudioWavetableDSP`, `StudioSamplerDSP` | Native instrument DSP |
 | `StudioIdentity` | Shared display name and compatibility identifiers |
 | `StudioAI` | Optional online AI/composition services |
-| `StudioCloudAuth` | Optional cloud authentication using Supabase |
+| `StudioCloudAuth` | Native local-only adapter by default; opt-in Supabase compatibility |
 | `VST3Bridge` | Compatibility bridge; the C++ VST3 host is currently a stub |
 | `RoomAcousticCalibration` | Offline room-response diagnostics |
 
-The **DAWCore target has no dependency on the Supabase SDK or StudioAI module**.
-Optional online features are still included in the default UI build, so a
-full SwiftPM dependency resolution may still download Supabase. Removing that
-full-build dependency is a separate future packaging task. Native music
-creation does not require a signed-in account.
+**Standard Studio builds have no external SwiftPM dependencies.** The music
+engine does not depend on `StudioAI` or `StudioCloudAuth`. The normal
+application hides account sign-in and uses a native, no-network auth adapter.
+Optional AI features have separate HTTP clients; they are not required for
+composition, playback, recording, or loading projects.
+
+To explicitly enable the existing Supabase cloud authentication integration:
+
+```bash
+STUDIO_ENABLE_CLOUD_AUTH=1 swift build
+STUDIO_ENABLE_CLOUD_AUTH=1 swift run DAWApp
+```
+
+Without this flag, `swift build` and `swift run DAWApp` never require
+Supabase package resolution or credentials.
 
 External AI services may require credentials and can have provider charges;
 they are not necessary for ordinary Studio composition.
@@ -55,7 +64,9 @@ folders, plugin state, and Audio Unit/ARIA instrument loading compatible.
 
 The file-type identifier `com.musio.create.project`, historical bundle
 identifier `com.musio.create`, and legacy preference/recording paths have
-been **deliberately retained**. These are technical compatibility identifiers,
+been **deliberately retained**. New managed recordings should use
+`Studio/Recordings`; project loading still searches the historical
+`MusioCreate/Recordings` folder without moving or deleting files. These are technical compatibility identifiers,
 not the product's current name. Do not change them without migration tests.
 
 The `architecture/studio-independence` branch has regression checks covering

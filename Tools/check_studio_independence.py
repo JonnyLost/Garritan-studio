@@ -78,8 +78,13 @@ require((ROOT / "StudioCloudAuth" / "Sources" / "StudioCloudAuth" /
 persistence = (core_root / "Persistence" / "ProjectPersistence.swift").read_text()
 require('projectExtension = "dawproj"' in persistence, "legacy project extension changed")
 require('projectFileName = "project.json"' in persistence, "legacy project manifest changed")
-require('MusioCreate/Recordings' in persistence,
-        "legacy managed recording discovery path must remain available")
+recording_locations = (core_root / "Persistence" / "StudioRecordingLocations.swift")
+require(recording_locations.is_file(), "Studio recording locations are missing")
+recording_source = recording_locations.read_text()
+require('Studio/Recordings' in recording_source,
+        "new Studio recording path missing")
+require('MusioCreate/Recordings' in recording_source,
+        "legacy managed recording recovery path missing")
 
 with (ROOT / "DAWApp" / "Resources" / "Info.plist").open("rb") as f:
     info = plistlib.load(f)

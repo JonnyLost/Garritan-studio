@@ -262,12 +262,16 @@ public actor ProjectFileManager {
             return dawRecordingsURL
         }
         
-        // Try Application Support (new permanent location for recordings)
+        // Prefer Studio recordings; retain a read-only fallback for projects
+        // saved before Studio moved away from the inherited application path.
         if let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-            let musioRecordings = appSupport.appendingPathComponent("MusioCreate/Recordings").appendingPathComponent(filename)
-            if fm.fileExists(atPath: musioRecordings.path) {
-                print("[ProjectFileManager]   Found in MusioCreate/Recordings: \(musioRecordings.path)")
-                return musioRecordings
+            for candidate in StudioRecordingLocations.recoveryURLs(
+                forFilename: filename, inApplicationSupport: appSupport
+            ) {
+                if Self.isRegularFile(candidate) {
+                    print("[ProjectFileManager]   Found recording: \(candidate.path)")
+                    return candidate
+                }
             }
         }
         

@@ -177,6 +177,12 @@ let package = Package(
 
         // MARK: - Tests
         .testTarget(
+            name: "StudioCloudAuthTests",
+            dependencies: ["StudioCloudAuth"],
+            path: "Tests/StudioCloudAuthTests",
+            swiftSettings: studioCloudAuthEnabled ? [] : [.define("STUDIO_LOCAL_AUTH")]
+        ),
+        .testTarget(
             name: "StudioIdentityTests",
             dependencies: ["StudioIdentity"],
             path: "Tests/StudioIdentityTests"
