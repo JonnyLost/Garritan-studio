@@ -163,4 +163,28 @@ final class StudioSamplerInstrumentFactoryTests: XCTestCase {
         let sampleFile = try AVAudioFile(forReading: URL(fileURLWithPath: patch.zones[0].filePath))
         XCTAssertGreaterThan(sampleFile.length, 44_100)
     }
+    func testFailedImportRecoveryPreservesPreparedCaptureOnly() throws {
+        let fm = FileManager.default
+        let prepared = fm.temporaryDirectory.appendingPathComponent(
+            "StudioFactoryPrepared-\(UUID().uuidString).wav")
+        try writeSample(prepared)
+        defer { try? fm.removeItem(at: prepared) }
+        let originalBytes = try Data(contentsOf: prepared)
+        let take = StudioSamplerFactoryTake(source: prepared)
+        let preserved = try StudioSamplerFactoryRecovery.preserve([take])
+        defer { try? fm.removeItem(at: preserved) }
+        let saved = preserved.appendingPathComponent(prepared.lastPathComponent)
+        XCTAssertEqual(try Data(contentsOf: saved), originalBytes)
+        XCTAssertEqual(try Data(contentsOf: prepared), originalBytes)
+
+        let other = try folder()
+        defer { try? fm.removeItem(at: other) }
+        let external = other.appendingPathComponent("user.wav")
+        try writeSample(external)
+        XCTAssertThrowsError(try StudioSamplerFactoryRecovery.preserve([
+            StudioSamplerFactoryTake(source: external)
+        ]))
+        XCTAssertTrue(fm.fileExists(atPath: external.path))
+    }
+
 }
