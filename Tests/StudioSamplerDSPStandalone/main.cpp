@@ -475,6 +475,78 @@ int main() {
     ss_render(starved, starvedL.data(), starvedR.data(), 512);
     ss_destroy(starved);
 
+
+    // Multimicrophone: two samples of the same note must sound together,
+    // with independent runtime gains/pan and zero callback allocations.
+    SSSampler *microphones = ss_create(44100, 8);
+    assert(microphones);
+    std::vector<float> closeMic(16000, .30f);
+    std::vector<float> roomMic(16000, .60f);
+    assert(ss_add_zone(microphones, 60, 60, 60, 1, 127, 44100,
+                       closeMic.data(), nullptr, 16000));
+    assert(ss_add_zone(microphones, 60, 60, 60, 1, 127, 44100,
+                       roomMic.data(), nullptr, 16000));
+    assert(!ss_configure_zone_performance(microphones, 1, 4, -1));
+    assert(!ss_configure_zone_performance(microphones, 1, 2, 60));
+    assert(ss_configure_zone_performance(microphones, 1, 2, -1));
+    assert(!ss_set_microphone_mix(microphones, 4, 1, 0));
+    assert(!ss_set_microphone_mix(microphones, 2, -1, 0));
+    assert(ss_note_on(microphones, 60, 127, 0));
+    std::vector<float> multiL(4096), multiR(4096);
+    ss_render(microphones, multiL.data(), multiR.data(), 4096);
+    assert(multiL[4000] > .20f); // combined .30+.60, with output headroom
+    assert(ss_set_microphone_mix(microphones, 2, 0.f, 1.f));
+    ss_render(microphones, multiL.data(), multiR.data(), 4096);
+    assert(multiL[4000] > .06f && multiL[4000] < .09f);
+    assert(multiR[4000] > .06f && multiR[4000] < .09f);
+    assert(ss_set_microphone_mix(microphones, 2, 1.f, 1.f));
+    ss_render(microphones, multiL.data(), multiR.data(), 4096);
+    assert(multiL[4000] > .06f && multiL[4000] < .09f);
+    assert(multiR[4000] > .20f);
+    assert(ss_control_change(microphones, 2, 0, 0)); // breath
+    ss_render(microphones, multiL.data(), multiR.data(), 4096);
+    assert(std::abs(multiR[4000]) < .001f);
+    assert(ss_control_change(microphones, 2, 127, 0));
+    assert(ss_control_change(microphones, 21, 100, 0)); // vibrato
+    assert(ss_all_notes_off(microphones));
+    ss_render(microphones, multiL.data(), multiR.data(), 4096);
+    ss_destroy(microphones);
+
+    // Recorded interval C4→D4 plays only when C4 is still held as D4
+    // begins. With no overlap it never sounds, and legato is opt-in.
+    SSSampler *legato = ss_create(44100, 12);
+    assert(legato);
+    std::vector<float> fromWave(20000, -.25f);
+    std::vector<float> toWave(20000, .25f);
+    std::vector<float> transitionWave(12000, .80f);
+    assert(ss_add_zone(legato, 60, 60, 60, 1, 127, 44100,
+                       fromWave.data(), nullptr, 20000));
+    assert(ss_add_zone(legato, 62, 62, 62, 1, 127, 44100,
+                       toWave.data(), nullptr, 20000));
+    assert(ss_add_zone(legato, 62, 62, 62, 1, 127, 44100,
+                       transitionWave.data(), nullptr, 12000));
+    assert(ss_configure_zone_performance(legato, 2, 0, 60));
+    assert(!ss_set_legato_mode(legato, 1, 300.f));
+    assert(ss_set_legato_mode(legato, 1, 40.f));
+    std::vector<float> legatoL(4096), legatoR(4096);
+    assert(ss_note_on(legato, 62, 127, 0)); // no C4 yet: sustained D4 only
+    ss_render(legato, legatoL.data(), legatoR.data(), 4096);
+    assert(legatoL[3500] > .05f && legatoL[3500] < .08f);
+    assert(ss_note_off(legato, 62, 0));
+    ss_render(legato, legatoL.data(), legatoR.data(), 4096);
+    assert(ss_note_on(legato, 60, 127, 0));
+    ss_render(legato, legatoL.data(), legatoR.data(), 4096);
+    assert(legatoL[3500] < -.05f);
+    assert(ss_note_on(legato, 62, 127, 0)); // overlapping recorded interval
+    ss_render(legato, legatoL.data(), legatoR.data(), 4096);
+    assert(legatoL[3500] > .20f); // transition + D4 sustain
+    assert(ss_note_off(legato, 60, 0)); // old key release doesn't cut D4
+    ss_render(legato, legatoL.data(), legatoR.data(), 4096);
+    assert(legatoL[3500] > .05f);
+    assert(ss_all_notes_off(legato));
+    ss_render(legato, legatoL.data(), legatoR.data(), 4096);
+    ss_destroy(legato);
+
     ss_destroy(sampler);
     std::printf("Studio Sampler DSP smoke test passed (%.1f Hz)\n", frequency);
     return 0;
