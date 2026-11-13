@@ -86,6 +86,21 @@ int32_t ss_add_zone_with_variation(SSSampler *sampler,
                     uint32_t fade_in_frames, uint32_t fade_out_frames,
                     uint8_t articulation_id,
                     uint8_t round_robin_index, uint8_t release_trigger);
+/* Shared PCM variant: retains an immutable StudioSharedPCM reference instead
+ * of duplicating the left/right arrays per zone. Calling before first render
+ * is mandatory. The sampler takes its own reference so caller may release
+ * its handle immediately after a successful call. */
+typedef struct SSSharedPCM SSSharedPCM;
+int32_t ss_add_shared_zone_with_variation(SSSampler* sampler,
+                    uint8_t root_note, uint8_t lowest_note, uint8_t highest_note,
+                    uint8_t lowest_velocity, uint8_t highest_velocity,
+                    SSSharedPCM* pcm,
+                    uint32_t playback_start_frame, uint32_t playback_end_frame,
+                    uint32_t loop_start_frame, uint32_t loop_end_frame,
+                    uint32_t loop_crossfade_frames,
+                    uint32_t fade_in_frames, uint32_t fade_out_frames,
+                    uint8_t articulation_id,
+                    uint8_t round_robin_index, uint8_t release_trigger);
 /* Streaming zones retain only a source-frame attack prefix. The background
  * reader owns file decoding; the render thread accesses immutable attack PCM
  * and two preallocated 4096-frame pages per active voice.
