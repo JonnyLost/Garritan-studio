@@ -1,0 +1,135 @@
+import XCTest
+import AVFoundation
+@testable import DAWCore
+
+@MainActor
+final class StudioAdditiveTests: XCTestCase {
+    func testFactoryBankContainsSixteenValidDistinctOriginalSounds() throws {
+        let presets = StudioAdditiveFactoryLibrary.presets
+        XCTAssertEqual(presets.count, 16)
+        XCTAssertEqual(Set(presets.map(\.id)).count, presets.count)
+        XCTAssertEqual(Set(presets.map(\.family)),
+                       Set(["Keys","Winds","Pads","Bass","Plucks","Textures"]))
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        XCTAssertEqual(Set(try presets.map { try encoder.encode($0.patch) }).count,
+                       presets.count)
+        for preset in presets {
+            XCTAssertTrue(preset.patch.validate(), preset.name)
+            for parameter in StudioAdditiveParameter.allCases {
+                XCTAssertTrue(parameter.valid(preset.patch.value(for: parameter)),
+                              "\(preset.name) \(parameter.name)")
+            }
+        }
+    }
+
+    func testLegacySoundAndNewAdditiveLayerRoundTrip() throws {
+        var patch = StudioSynthPatch()
+        patch.layers.append(StudioSynthLayer(engine: .additive))
+        XCTAssertTrue(patch.validate())
+        let layerID = try XCTUnwrap(patch.layers.last?.id)
+        var sound = StudioAdditivePatch()
+        sound.set(0.9, for: .partial8)
+        sound.set(-0.8, for: .spectralEvolution)
+        patch.layers[2].additivePatch = sound
+        patch.midiControls = StudioSynthMIDIControlSettings(mappings: [
+            StudioSynthMIDIControlMapping(
+                controller: 74,
+                target: .parameter(layerID: layerID,
+                                   destination: .additive(.spectralTilt)))
+        ])
+        XCTAssertTrue(patch.validate())
+        let data = try JSONEncoder().encode(patch)
+        XCTAssertEqual(try JSONDecoder().decode(StudioSynthPatch.self, from: data),
+                       patch)
+
+        var legacyJSON = try XCTUnwrap(JSONSerialization.jsonObject(with:
+            JSONEncoder().encode(StudioSynthPatch())) as? [String: Any])
+        legacyJSON.removeValue(forKey: "midiControls")
+        let original = try JSONDecoder().decode(StudioSynthPatch.self, from:
+            JSONSerialization.data(withJSONObject: legacyJSON))
+        XCTAssertTrue(original.validate())
+        XCTAssertNil(original.layers[0].additivePatch)
+    }
+
+    func testRejectsInvalidHarmonicsAndWrongEngineMappings() {
+        var patch = StudioSynthPatch.individual(.additive)
+        let id = patch.layers[0].id
+        var sound = StudioAdditivePatch()
+        sound.values["18"] = 3.4
+        patch.layers[0].additivePatch = sound
+        XCTAssertFalse(patch.validate())
+        sound.values["18"] = 0.5
+        patch.layers[0].additivePatch = sound
+        XCTAssertTrue(patch.validate())
+        var controls = StudioSynthMIDIControlSettings(mappings: [
+            StudioSynthMIDIControlMapping(
+                controller: 74, target: .parameter(
+                    layerID: id,destination: .additive(.partial8)))
+        ])
+        patch.midiControls = controls
+        XCTAssertTrue(patch.validate())
+        controls.mappings[0].target = .parameter(
+            layerID: id, destination: .fm(.feedback))
+        patch.midiControls = controls
+        XCTAssertFalse(patch.validate())
+    }
+
+    func testAdditiveRendersAndReleasesNotesOffline() throws {
+        let rate = 44_100.0
+        let patch = StudioSynthPatch.individual(.additive)
+        let instrument = try StudioSynthInstrument(sampleRate: rate, patch: patch)
+        let engine = AVAudioEngine()
+        try instrument.attach(to: engine,destination: engine.mainMixerNode,
+                              sampleRate: rate)
+        let format = try XCTUnwrap(AVAudioFormat(
+            standardFormatWithSampleRate: rate,channels: 2))
+        try engine.enableManualRenderingMode(.offline,format: format,
+                                             maximumFrameCount: 512)
+        try engine.start()
+        defer {engine.stop(); engine.disableManualRenderingMode()}
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(
+            pcmFormat: format,frameCapacity: 512))
+        XCTAssertTrue(instrument.noteOn(69,velocity: 110))
+        var peak: Float = 0
+        for _ in 0..<15 {
+            XCTAssertEqual(try engine.renderOffline(512,to: buffer), .success)
+            let channels = try XCTUnwrap(buffer.floatChannelData)
+            for i in 0..<Int(buffer.frameLength) {
+                XCTAssertTrue(channels[0][i].isFinite)
+                XCTAssertTrue(channels[1][i].isFinite)
+                peak = max(peak,abs(channels[0][i]),abs(channels[1][i]))
+            }
+        }
+        XCTAssertGreaterThan(peak,0.005)
+        XCTAssertTrue(instrument.noteOff(69))
+        // 0.3-second default release; render > 1.15 seconds.
+        for _ in 0..<100 {
+            XCTAssertEqual(try engine.renderOffline(512,to: buffer), .success)
+        }
+        let samples = try XCTUnwrap(buffer.floatChannelData)
+        var tail: Float = 0
+        for i in 0..<Int(buffer.frameLength) {
+            tail=max(tail,abs(samples[0][i]),abs(samples[1][i]))
+        }
+        XCTAssertLessThan(tail,0.0001)
+        XCTAssertTrue(instrument.allNotesOff())
+    }
+
+    func testFourEngineHybridCanRouteMIDIAndLiveAdditiveControls() throws {
+        var patch = StudioSynthPatch()
+        patch.layers.append(StudioSynthLayer(engine: .wavetable))
+        patch.layers.append(StudioSynthLayer(engine: .additive))
+        XCTAssertTrue(patch.validate())
+        let instrument = try StudioSynthInstrument(sampleRate: 44_100,patch: patch)
+        XCTAssertEqual(instrument.auxiliaryNodes.count,8)
+        let id = patch.layers[3].id
+        XCTAssertTrue(instrument.setAdditiveParameter(
+            id: id,parameter: .partial5,value: 0.72))
+        XCTAssertEqual(instrument.effectiveParameter(
+            id: id,destination: .additive(.partial5))!,0.72,accuracy: 0.001)
+        XCTAssertTrue(instrument.noteOn(60,velocity: 112))
+        XCTAssertTrue(instrument.noteOff(60))
+        XCTAssertTrue(instrument.allNotesOff())
+    }
+}
