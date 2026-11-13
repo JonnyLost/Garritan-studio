@@ -63,6 +63,7 @@ public final class AudioEngine: ObservableObject {
     /// Created only when explicitly enabled; the tested Apple path stays default.
     private var nativeConcertHallReverb: AVAudioUnitEffect?
     private var designedRoom = StudioAcousticRoomDesign()
+    @Published public private(set) var virtualMicrophoneSettings = StudioVirtualMicrophoneSettings()
     @Published public private(set) var usesNativeConcertHallReverb = false
     @Published public private(set) var selectedNativeRoomProfileID =
         StudioRoomAcousticProfile.abbeyRoadStudioOne.id
@@ -307,6 +308,8 @@ public final class AudioEngine: ObservableObject {
             hallSendLevel: Self.concertHallSendLevels[depth] * max(0, track.stageWetTrim ?? 1),
             zone: depth
         )
+        trackNode.setVirtualMicrophone(virtualMicrophoneSettings,
+                                       nativeEnabled: usesNativeConcertHallReverb)
 
         trackNodes[track.id] = trackNode
         print("[Track Audio] Installing meter")
@@ -485,6 +488,9 @@ public final class AudioEngine: ObservableObject {
         do {
             if wasRunning { try engine.start() }
             usesNativeConcertHallReverb = enabled
+            for node in trackNodes.values {
+                node.setVirtualMicrophone(virtualMicrophoneSettings, nativeEnabled: enabled)
+            }
             isRunning = engine.isRunning
         } catch {
             // The original Concert Hall routing is the rollback boundary.
@@ -494,6 +500,18 @@ public final class AudioEngine: ObservableObject {
             if wasRunning { try? engine.start() }
             isRunning = engine.isRunning
             throw AudioEngineError.failedToStart(underlying: error)
+        }
+    }
+
+    /// The virtual stereo microphone alters native early reflections and
+    /// direct-to-room balance without rebuilding the graph.
+    public func setVirtualMicrophone(_ settings: StudioVirtualMicrophoneSettings) {
+        let safe = StudioVirtualMicrophoneSettings(
+            perspective: settings.perspective, stereoWidth: settings.safeWidth
+        )
+        virtualMicrophoneSettings = safe
+        for node in trackNodes.values {
+            node.setVirtualMicrophone(safe, nativeEnabled: usesNativeConcertHallReverb)
         }
     }
 
@@ -560,6 +578,7 @@ public final class AudioEngine: ObservableObject {
         engine.connect(send, to: effect, format: format)
         engine.connect(effect, to: nativeEarlyReflectionMixer, format: format)
         node.installEarlyReflection(send: send, effect: effect)
+        node.setVirtualMicrophone(virtualMicrophoneSettings, nativeEnabled: true)
         node.setNativeRoomProfileIndex(
             StudioRoomAcousticProfile.index(forID: selectedNativeRoomProfileID) ?? 0
         )
@@ -1126,6 +1145,7 @@ public final class TrackAudioNode {
     public private(set) var earlyReflectionNode: AVAudioUnitEffect?
     private var stagePan: Float = 0
     private var stageZone = 2
+    private var nativeMicrophoneDirectGain: Float = 1
     
     // Plugin chain (Audio Units)
     public var pluginNodes: [AVAudioUnit] = []
@@ -1183,6 +1203,18 @@ public final class TrackAudioNode {
             .parameter(withAddress: NativeStageEarlyReflectionAudioUnit.roomAddress)?
             .value = AUValue(index)
     }
+
+    public func setVirtualMicrophone(_ settings: StudioVirtualMicrophoneSettings,
+                                     nativeEnabled: Bool) {
+        earlyReflectionNode?.auAudioUnit.parameterTree?
+            .parameter(withAddress: NativeStageEarlyReflectionAudioUnit.microphoneAddress)?
+            .value = AUValue(settings.perspective.parameterIndex)
+        earlyReflectionNode?.auAudioUnit.parameterTree?
+            .parameter(withAddress: NativeStageEarlyReflectionAudioUnit.microphoneWidthAddress)?
+            .value = settings.safeWidth
+        nativeMicrophoneDirectGain = nativeEnabled ? settings.perspective.directLevel : 1
+        updateOutputVolume()
+    }
     
     public func setPan(_ pan: Float) {
         stagePan = pan.isFinite ? min(1, max(-1, pan)) : 0
@@ -1206,7 +1238,7 @@ public final class TrackAudioNode {
     
     private func updateOutputVolume() {
         let dryGain: Float = isMuted ? 0.0 : volume
-        outputMixer.outputVolume = dryGain * stageDirectLevel
+        outputMixer.outputVolume = dryGain * stageDirectLevel * nativeMicrophoneDirectGain
         // The hall send branches before outputMixer, so it must explicitly
         // follow volume and mute (including solo) to prevent wet-only audio.
         // Keep the room send separate from direct-sound distance attenuation.
