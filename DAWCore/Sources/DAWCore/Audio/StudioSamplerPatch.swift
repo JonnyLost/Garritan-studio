@@ -180,6 +180,9 @@ public struct StudioSamplerPatch: Codable, Equatable, Sendable {
     public var selectedArticulationID: UInt8?
 
     public var presentation: StudioSamplerInstrumentKind { instrumentKind ?? .general }
+    /// An empty sampler remains a saved instrument choice while the user
+    /// builds a mapping. No audio node is created until samples are added.
+    public var isEmpty: Bool { zones.isEmpty }
 
     public init(zones: [StudioSamplerZone]) {
         self.zones = zones
