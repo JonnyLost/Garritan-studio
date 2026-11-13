@@ -42,11 +42,16 @@ public enum StudioSamplerMappingBuilder {
         let sorted = urls.sorted {
             $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending
         }
+        let hasDedicatedLegatoSustains = sorted.contains {
+            legatoIntervalHint(in: $0) == nil && articulationHint(in: $0) == "Legato"
+        }
         let names = Array(Set(sorted.compactMap { url -> String? in
-            // 'legato' in fromC4_toD4_legato is a transition technique,
-            // not automatically a separate playback articulation.
+            // Treat a named interval as a Legato articulation only when
+            // matching sustain recordings actually use that articulation.
             if legatoIntervalHint(in: url) != nil &&
-               articulationHint(in: url) == "Legato" { return nil }
+               articulationHint(in: url) == "Legato" && !hasDedicatedLegatoSustains {
+                return nil
+            }
             return articulationHint(in: url)
         })).sorted()
         guard names.count <= 15 else { throw MappingError.tooManyArticulations }
@@ -60,7 +65,8 @@ public enum StudioSamplerMappingBuilder {
                       velocity: velocityHint(in: url),
                       roundRobin: roundRobinHint(in: url),
                       isRelease: releaseHint(in: url),
-                      articulation: interval != nil && detected == "Legato" ? nil : detected,
+                      articulation: interval != nil && detected == "Legato" &&
+                          !hasDedicatedLegatoSustains ? nil : detected,
                       microphone: microphoneHint(in: url) ?? 0,
                       legatoFrom: interval.map { UInt8($0.from) })
 
@@ -189,6 +195,25 @@ public enum StudioSamplerMappingBuilder {
             reserved.insert(key)
         }
         var addedZones = imported.zones
+        // If interval recordings were imported separately from already
+        // loaded Legato sustains, move only the unassigned interval zones
+        // onto the existing Legato keyswitch group.
+        let legatoArticulation = articulations.first {
+            $0.name.localizedCaseInsensitiveCompare("Legato") == .orderedSame
+        }?.id
+        for index in addedZones.indices {
+            if addedZones[index].legatoFromNote != nil &&
+               (addedZones[index].articulationID ?? 0) == 0,
+               let legatoArticulation,
+               existing.zones.contains(where: {
+                   $0.articulationID == legatoArticulation &&
+                   $0.legatoFromNote == nil &&
+                   $0.rootNote == addedZones[index].rootNote &&
+                   ($0.microphoneID ?? 0) == (addedZones[index].microphoneID ?? 0)
+               }) {
+                addedZones[index].articulationID = legatoArticulation
+            }
+        }
         for index in addedZones.indices {
             addedZones[index].articulationID =
                 idMap[addedZones[index].articulationID ?? 0].flatMap { $0 == 0 ? nil : $0 }
