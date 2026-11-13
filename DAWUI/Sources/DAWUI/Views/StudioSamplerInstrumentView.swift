@@ -10,6 +10,7 @@ public struct StudioSamplerInstrumentView: View {
     public let trackID: TrackID
 
     @State private var editMapping = false
+    @State private var previewEmptyControls = false
 
     public init(viewModel: ProjectViewModel, trackID: TrackID) {
         self.viewModel = viewModel
@@ -40,14 +41,32 @@ public struct StudioSamplerInstrumentView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            if editMapping || patch?.isEmpty == true {
-                // Empty instruments start in the mapping workspace so Add
-                // Samples is immediately available without a file picker
-                // appearing before the sampler interface itself.
+            if editMapping || (patch?.isEmpty == true && !previewEmptyControls) {
+                // Empty instruments start in mapping, but can also preview
+                // their different performance faces before loading samples.
                 StudioSamplerMapView(viewModel: viewModel, trackID: trackID)
             } else if let patch {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
+                        if patch.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Label("Empty Studio Sampler", systemImage: "waveform")
+                                    .font(.headline)
+                                Text("Explore the controls and instrument layouts, or add your first recordings to make this sampler playable.")
+                                    .font(.callout).foregroundStyle(.secondary)
+                                Button {
+                                    previewEmptyControls = false
+                                    editMapping = true
+                                } label: {
+                                    Label("Add Samples…", systemImage: "plus")
+                                }
+                                .buttonStyle(.borderedProminent)
+                            }
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.secondary.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 9))
+                        }
                         switch kind {
                         case .soloViolin: soloViolin(patch)
                         case .cinematicPercussion: cinematicPercussion(patch)
@@ -112,9 +131,14 @@ public struct StudioSamplerInstrumentView: View {
             .pickerStyle(.menu)
             .frame(width: 200)
             if patch?.isEmpty == true {
-                Label("Ready to add samples", systemImage: "plus.square.dashed")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Button {
+                    previewEmptyControls.toggle()
+                    editMapping = false
+                } label: {
+                    Label(previewEmptyControls ? "Add Samples / Mapping" : "Explore Controls",
+                          systemImage: previewEmptyControls ? "plus" : "slider.horizontal.3")
+                }
+                .buttonStyle(.borderedProminent)
             } else {
                 Button {
                     editMapping.toggle()
