@@ -14,9 +14,17 @@ struct BandComparison: Codable {
     let t20DifferenceSeconds: Double?
     let t20ErrorPercent: Double?
     let suggestedInputDecaySeconds: Double?
+    /// Raw Eyring/Sabine estimate; nil for factory presets.
+    let unboundedDesignRT60Seconds: Double?
+    let targetWasClamped: Bool
 }
 
 struct RoomComparison: Codable {
+    let scenarioID: String
+    let designVolumeCubicMeters: Double?
+    let validT20Bands: Int
+    let meanAbsoluteT20ErrorPercent: Double?
+    let maximumAbsoluteT20ErrorPercent: Double?
     let roomID: String
     let roomName: String
     let sampleRate: Double
@@ -29,6 +37,7 @@ struct RoomComparison: Codable {
 
 struct Report: Codable {
     let generatedAtISO8601: String
+    let scenarioSuiteEnabled: Bool
     let profileCount: Int
     let note: String
     let rooms: [RoomComparison]
@@ -70,8 +79,34 @@ if let index = arguments.firstIndex(of: "--design-file") {
     design = StudioAcousticRoomDesign()
 }
 
-let profiles = StudioRoomAcousticProfile.profiles(with: design)
-let results: [RoomComparison] = profiles.map { room in
+struct CalibrationCase {
+    let scenarioID: String
+    let room: StudioRoomAcousticProfile
+    let rawDesignRT60: [Double]?
+    let volumeCubicMeters: Double?
+}
+
+var cases: [CalibrationCase] = StudioRoomAcousticProfile.starterProfiles.map {
+    CalibrationCase(scenarioID: $0.id, room: $0,
+                    rawDesignRT60: nil, volumeCubicMeters: nil)
+}
+cases.append(CalibrationCase(
+    scenarioID: arguments.contains("--design-file") ? "supplied-custom" : "default-holdout",
+    room: design.makeProfile(), rawDesignRT60: design.predictedRT60,
+    volumeCubicMeters: design.volumeCubicMeters
+))
+let runSuite = arguments.contains("--suite")
+if runSuite {
+    for scenario in StudioAcousticCalibrationScenario.contrastingRooms {
+        cases.append(CalibrationCase(
+            scenarioID: scenario.id, room: scenario.design.makeProfile(),
+            rawDesignRT60: scenario.design.predictedRT60,
+            volumeCubicMeters: scenario.design.volumeCubicMeters
+        ))
+    }
+}
+let results: [RoomComparison] = cases.map { item in
+    let room = item.room
     let measured = NativeRoomImpulseAnalyzer.measure(
         room: room, sampleRate: sampleRate, seconds: seconds
     )
@@ -99,7 +134,8 @@ let results: [RoomComparison] = profiles.map { room in
         provenance = "Three-band factory preset, interpolated for diagnostics only"
     }
 
-    let bands: [BandComparison] = zip(measured.bands, targets).map { measuredBand, target in
+    let bands: [BandComparison] = zip(measured.bands, targets).enumerated().map { index, pair in
+        let (measuredBand, target) = pair
         let t20 = measuredBand.t20Seconds
         let proposed: Double?
         if let t20, t20 > 0.1 {
@@ -117,10 +153,21 @@ let results: [RoomComparison] = profiles.map { room in
             measuredT30Seconds: measuredBand.t30Seconds,
             t20DifferenceSeconds: t20.map { $0 - target },
             t20ErrorPercent: t20.map { 100 * ($0 - target) / target },
-            suggestedInputDecaySeconds: proposed
+            suggestedInputDecaySeconds: proposed,
+            unboundedDesignRT60Seconds: item.rawDesignRT60?[index],
+            targetWasClamped: item.rawDesignRT60.map {
+                $0[index] < 0.2 || $0[index] > 15
+            } ?? false
         )
     }
+    let errors = bands.compactMap { $0.t20ErrorPercent.map(abs) }
     return RoomComparison(
+        scenarioID: item.scenarioID,
+        designVolumeCubicMeters: item.volumeCubicMeters,
+        validT20Bands: errors.count,
+        meanAbsoluteT20ErrorPercent: errors.isEmpty ? nil :
+            errors.reduce(0, +) / Double(errors.count),
+        maximumAbsoluteT20ErrorPercent: errors.max(),
         roomID: room.id, roomName: room.name,
         sampleRate: sampleRate, impulseLengthSeconds: seconds,
         targetProvenance: provenance,
@@ -132,8 +179,9 @@ let results: [RoomComparison] = profiles.map { room in
 
 let report = Report(
     generatedAtISO8601: ISO8601DateFormatter().string(from: Date()),
+    scenarioSuiteEnabled: runSuite,
     profileCount: results.count,
-    note: "Experimental six-band analysis of Studio's own synthesized responses. No venue impulse measurements. T20/T30 may be unavailable for insufficient response length or frequency resolution; filterbanks and finite-tail integration are not ISO 3382 compliant. Suggestions are not applied automatically.",
+    note: "Synthetic six-band T20 validation of Studio's own DSP at several deliberately different room sizes/materials. Four factory profile targets are interpolated approximations. Custom targets are bounded RT predictions; raw predictions and clamping are reported separately. Short dry tails or long reverberation beyond the finite measurement window may make some measurements unreliable. No reference room IR data, no ISO 3382 claim, no runtime calibration. Suggestions are never applied automatically.",
     rooms: results
 )
 let encoder = JSONEncoder()
