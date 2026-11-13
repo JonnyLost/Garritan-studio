@@ -28,7 +28,6 @@ public extension Notification.Name {
     // Request current project from viewModel
     static let requestProjectForSave = Notification.Name("requestProjectForSave")
     static let projectDataForSave = Notification.Name("projectDataForSave")
-    static let captureProjectForSave = Notification.Name("captureProjectForSave")
     static let projectStateCaptureFailed = Notification.Name("projectStateCaptureFailed")
 }
 
