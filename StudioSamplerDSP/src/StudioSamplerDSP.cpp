@@ -1198,6 +1198,7 @@ void ss_render(SSSampler *sampler, float *left, float *right, int32_t frames) {
     // Approximately 10 ms one-pole smoothing to avoid zipper noise.
     const float smoothing = std::min(1.f, float(1.0 / (sampler->outputRate * 0.01)));
     for (int32_t frame = 0; frame < frames; ++frame) {
+        std::array<float, 16> vibratoRates{};
         for (int channel = 0; channel < 16; ++channel) {
             sampler->smoothCC1[channel] +=
                 (sampler->targetCC1[channel] - sampler->smoothCC1[channel]) * smoothing;
@@ -1211,12 +1212,22 @@ void ss_render(SSSampler *sampler, float *left, float *right, int32_t frames) {
                 sampler->outputRate;
             if (sampler->vibratoPhase[channel] > 6.283185307179586)
                 sampler->vibratoPhase[channel] -= 6.283185307179586;
+            const float depth = sampler->smoothCC21[channel] / 127.f;
+            vibratoRates[channel] = depth <= 0.00001f ? 1.f :
+                1.f + depth * 0.0202f *
+                std::sin(float(sampler->vibratoPhase[channel]));
         }
+        std::array<float, 4> micLeft{};
+        std::array<float, 4> micRight{};
         for (int mic = 0; mic < 4; ++mic) {
             sampler->micGain[mic] +=
                 (sampler->targetMicGain[mic] - sampler->micGain[mic]) * smoothing;
             sampler->micPan[mic] +=
                 (sampler->targetMicPan[mic] - sampler->micPan[mic]) * smoothing;
+            micLeft[mic] = sampler->micGain[mic] *
+                std::cos(std::max(0.f, sampler->micPan[mic]) * kHalfPi);
+            micRight[mic] = sampler->micGain[mic] *
+                std::cos(std::max(0.f, -sampler->micPan[mic]) * kHalfPi);
         }
         float leftSum = 0;
         float rightSum = 0;
@@ -1320,17 +1331,11 @@ void ss_render(SSSampler *sampler, float *left, float *right, int32_t frames) {
                 sampleR *= voice.streamGain;
             }
             const int mic = sample->microphone;
-            const float pan = sampler->micPan[mic];
-            const float gain = sampler->micGain[mic];
-            leftSum += sampleL * amplitude * gain *
-                std::cos(std::max(0.f, pan) * kHalfPi);
-            rightSum += sampleR * amplitude * gain *
-                std::cos(std::max(0.f, -pan) * kHalfPi);
-            const float depth = sampler->smoothCC21[voice.channel] / 127.f;
-            const float rate = voice.releaseTrigger || voice.transitionVoice ? 1.f :
-                (1.f + depth * 0.0202f *
-                 std::sin(float(sampler->vibratoPhase[voice.channel])));
-            voice.position += voice.increment * rate;
+            leftSum += sampleL * amplitude * micLeft[mic];
+            rightSum += sampleR * amplitude * micRight[mic];
+            voice.position += voice.increment *
+                ((voice.releaseTrigger || voice.transitionVoice)
+                    ? 1.f : vibratoRates[voice.channel]);
         }
         // De-click stolen voices using a pool allocated at ss_create().
         // The old sample survives for exactly 64 more output frames,
@@ -1388,10 +1393,8 @@ void ss_render(SSSampler *sampler, float *left, float *right, int32_t frames) {
                 sampleR = sampleR * from + readLinear(sample->right, incoming) * to;
             }
             const int mic = sample->microphone;
-            leftSum += sampleL * gain * sampler->micGain[mic] *
-                std::cos(std::max(0.f, sampler->micPan[mic]) * kHalfPi);
-            rightSum += sampleR * gain * sampler->micGain[mic] *
-                std::cos(std::max(0.f, -sampler->micPan[mic]) * kHalfPi);
+            leftSum += sampleL * gain * micLeft[mic];
+            rightSum += sampleR * gain * micRight[mic];
             old.position += old.increment;
             --tail.framesLeft;
         }
