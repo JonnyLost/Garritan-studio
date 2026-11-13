@@ -59,6 +59,16 @@ public enum StudioSynthHybridFactoryLibrary {
                                 pan: pan, additivePatch: preset)
     }
 
+    private static func physical(_ name: String, sound: String,
+                                 gain: Float = 0.34,
+                                 pan: Float = 0.08) -> StudioSynthLayer {
+        let preset = StudioPhysicalFactoryLibrary.presets.first {
+            $0.name == sound
+        }?.patch ?? StudioPhysicalPatch()
+        return StudioSynthLayer(engine: .physical, name: name,
+                                gain: gain, pan: pan, physicalPatch: preset)
+    }
+
     private static func make(_ name: String, _ family: String,
                              _ summary: String, layers: [StudioSynthLayer],
                              motion: Bool = false) -> StudioSynthHybridPreset {
@@ -132,6 +142,21 @@ public enum StudioSynthHybridFactoryLibrary {
                                 position: 2.8),
                       fm("Digital Breath", gain: 0.22, feedback: 0.13)],
              motion: true),
+        make("Plucked Atmosphere", "Cinematic",
+             "An original physical-string transient over a slow native pad.",
+             layers: [
+                physical("Steel Attack", sound: "Bright Steel", gain: 0.28),
+                additive("Harmonic Tail", sound: "Warm String Bed",
+                         gain: 0.35, pan: -0.12)
+             ], motion: true),
+        make("Resonant Bronze", "Keys",
+             "Tuned native bell resonances with a light FM overtone layer.",
+             layers: [
+                physical("Metal Modes", sound: "Silver Bell",
+                         gain: 0.30, pan: -0.04),
+                fm("FM Halo", gain: 0.18, pan: 0.12,
+                   feedback: 0.10)
+             ]),
         make("Fourfold Spectrum", "Textures",
              "All four native synth engines, individually adjustable.",
              layers: [analog("Analog Root", gain: 0.23, cutoff: 1400),
