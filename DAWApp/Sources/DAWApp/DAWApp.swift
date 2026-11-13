@@ -39,11 +39,12 @@ struct DAWApp: App {
                 .environmentObject(appState)
                 .id(appState.projectID)  // Force view recreation when project changes
                 .onReceive(NotificationCenter.default.publisher(for: .projectDidChange)) { notification in
-                    // Sync project from viewModel back to appState
-                    if let project = notification.object as? Project {
-                        appState.currentProject = project
-                    }
-                    appState.markUnsavedChanges()
+                    // Ignore updates from a window belonging to a replaced
+                    // document. A late plugin restoration or UI event must
+                    // not reinsert the old project into the new session.
+                    guard let project = notification.object as? Project,
+                          project.id == appState.currentProject.id else { return }
+                    appState.updateProject(project)
                 }
             }
         }
@@ -429,7 +430,10 @@ class AppState: ObservableObject {
         let response = alert.runModal()
 
         if response == .alertFirstButtonReturn {
-            return await saveToCurrentLocationOrPrompt()
+            let saved = await saveToCurrentLocationOrPrompt()
+            // An edit made while the disk save was in progress is still
+            // unsaved. Never let Save-and-Replace discard that newer edit.
+            return saved && !hasUnsavedChanges
         }
         return response == .alertThirdButtonReturn
     }
