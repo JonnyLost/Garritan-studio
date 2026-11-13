@@ -324,14 +324,20 @@ public struct MainWindowView: View {
                         .foregroundColor(palette.secondaryText)
                     Spacer()
                     Menu {
-                        Button("Audio Track") { viewModel.addTrack(type: .audio) }
-                        Button("MIDI Track") { viewModel.addTrack(type: .midi) }
-                        Button("Instrument Track") { viewModel.addTrack(type: .instrument) }
+                        Button("Add Instrument") { addStudioTrack(.instrument) }
+                        Button("Add Sampler") { addStudioTrack(.sampler) }
+                        Button("Add Synth") { addStudioTrack(.synth) }
+                        Button("Add Audio") { addStudioTrack(.audio) }
                     } label: {
                         Image(systemName: "plus").font(.caption)
                     }
                     .menuStyle(.borderlessButton)
                     .frame(width: 20)
+                    // File > Track uses the same creation path as this menu.
+                    .onReceive(NotificationCenter.default.publisher(for: .newStudioTrack)) { event in
+                        guard let kind = event.object as? ProjectViewModel.StudioTrackKind else { return }
+                        addStudioTrack(kind)
+                    }
                 }
                 .frame(height: rulerHeight)
                 .padding(.horizontal, 8)
@@ -473,6 +479,24 @@ public struct MainWindowView: View {
     }
     
     // MARK: - Bottom Panel
+    /// One composer-facing entry point for sidebar and Track menu creation.
+    /// Open the relevant native editor immediately after a successful add.
+    private func addStudioTrack(_ kind: ProjectViewModel.StudioTrackKind) {
+        do {
+            _ = try viewModel.createStudioTrack(kind)
+            if kind != .audio {
+                selectWorkspace("Instruments")
+            }
+        } catch {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Unable to Add \(kind.label) Track"
+            alert.informativeText = error.localizedDescription
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        }
+    }
+
     
     private func selectWorkspace(_ workspace: String) {
         showInstrumentWorkspace = workspace == "Instruments"
@@ -564,7 +588,9 @@ public struct MainWindowView: View {
     @ViewBuilder
     private var bottomPanel: some View {
         if showInstrumentWorkspace {
-            if let track = viewModel.selectedTrack, track.studioFMEnabled == true {
+            if let track = viewModel.selectedTrack, track.studioSynthEnabled == true {
+                StudioSynthPanelView(viewModel: viewModel, trackID: track.id)
+            } else if let track = viewModel.selectedTrack, track.studioFMEnabled == true {
                 StudioFMPanelView(viewModel: viewModel, trackID: track.id)
             } else if let track = viewModel.selectedTrack, track.studioAnalogEnabled == true {
                 StudioAnalogPanelView(viewModel: viewModel, trackID: track.id)
