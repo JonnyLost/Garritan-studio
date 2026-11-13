@@ -19,16 +19,18 @@ public enum StudioInterruptedSaveRecovery {
         )
         let backups = siblings.filter { $0.lastPathComponent.hasPrefix(prefix) }
             .sorted {
-                let a = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]))
-                    ?.contentModificationDate ?? .distantPast
-                let b = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]))
-                    ?.contentModificationDate ?? .distantPast
-                return a > b
+                let left = (try? $0.resourceValues(
+                    forKeys: [URLResourceKey.contentModificationDateKey]
+                ).contentModificationDate) ?? Date.distantPast
+                let right = (try? $1.resourceValues(
+                    forKeys: [URLResourceKey.contentModificationDateKey]
+                ).contentModificationDate) ?? Date.distantPast
+                return left > right
             }
 
         for backup in backups {
             guard let values = try? backup.resourceValues(
-                forKeys: [.isDirectoryKey, .isSymbolicLinkKey]
+                forKeys: [URLResourceKey.isDirectoryKey, URLResourceKey.isSymbolicLinkKey]
             ), values.isDirectory == true, values.isSymbolicLink != true,
                   isCompleteProject(backup) else { continue }
 
