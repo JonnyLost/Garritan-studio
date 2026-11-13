@@ -19,7 +19,12 @@ final class AppState: ObservableObject {
     let recentProjectsManager = RecentProjectsManager()
     let autosaveManager: AutosaveManager
     private let fileManager: ProjectFileManager
+    private let recoveryStore: StudioDraftRecoveryStore
     private var revision = StudioSessionRevision()
+    private var recoveryTask: Task<Void, Never>?
+    private var activeRecoveryID: UUID?
+    private var hasCheckedRecoveryOnLaunch = false
+    private var hasReportedRecoveryError = false
     private var isTransitioning = false
     private var isSaving = false
     private var pendingPluginRestoreID: UUID?
@@ -28,6 +33,7 @@ final class AppState: ObservableObject {
         let fileManager = ProjectFileManager()
         self.fileManager = fileManager
         self.autosaveManager = AutosaveManager(fileManager: fileManager)
+        self.recoveryStore = StudioDraftRecoveryStore(fileManager: fileManager)
         let initial = ProjectFactory.createNewProject()
         self.currentProject = initial
         self.windowTitle = initial.name
@@ -55,6 +61,7 @@ final class AppState: ObservableObject {
         hasUnsavedChanges = revision.hasUnsavedChanges
         autosaveManager.markUnsavedChanges()
         updateWindowTitle()
+        scheduleUntitledRecovery()
     }
 
     private func updateWindowTitle() {
@@ -131,6 +138,9 @@ final class AppState: ObservableObject {
                 autosaveManager.markUnsavedChanges()
             }
             recentProjectsManager.addRecentProject(destination)
+            if !hasUnsavedChanges {
+                await discardActiveRecovery()
+            }
             print("[StudioSession] Saved project: \(destination.path)")
             return true
         } catch {
@@ -203,6 +213,7 @@ final class AppState: ObservableObject {
                 return
             }
 
+            await discardActiveRecovery()
             autosaveManager.stopAutosave()
             NotificationCenter.default.post(name: .clearAllPlugins, object: nil)
 
@@ -214,6 +225,7 @@ final class AppState: ObservableObject {
             currentProjectURL = isPackage ? url.standardizedFileURL : nil
             if !isPackage {
                 revision.markEdited()
+                scheduleUntitledRecovery()
             }
             hasUnsavedChanges = revision.hasUnsavedChanges
             projectID = UUID()
@@ -249,6 +261,7 @@ final class AppState: ObservableObject {
         defer { isTransitioning = false }
         guard await confirmReplaceEditedSession() else { return }
 
+        await discardActiveRecovery()
         autosaveManager.stopAutosave()
         NotificationCenter.default.post(name: .clearAllPlugins, object: nil)
         revision.replaceSession()
@@ -258,5 +271,138 @@ final class AppState: ObservableObject {
         pendingPluginRestoreID = nil
         projectID = UUID()
         updateWindowTitle()
+    }
+}
+
+    
+// MARK: - Untitled session crash recovery
+
+extension AppState {
+    /// Coalesce edits before writing the project and its actual audio files
+    /// to the private Studio/Recovery directory.
+    private func scheduleUntitledRecovery() {
+        guard currentProjectURL == nil, revision.hasUnsavedChanges else { return }
+        if activeRecoveryID == nil { activeRecoveryID = revision.sessionID }
+        recoveryTask?.cancel()
+        let expectedSession = revision.sessionID
+        recoveryTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: 5_000_000_000)
+            } catch { return }
+            await self?.storeUntitledRecovery(expectedSession: expectedSession)
+        }
+    }
+
+    private func storeUntitledRecovery(expectedSession: UUID) async {
+        guard !Task.isCancelled,
+              revision.sessionID == expectedSession,
+              currentProjectURL == nil, revision.hasUnsavedChanges,
+              let recoveryID = activeRecoveryID else { return }
+        let snapshot = captureProjectSnapshot()
+        guard snapshot.ticket.sessionID == expectedSession else { return }
+
+        do {
+            let stored = try await recoveryStore.store(
+                project: snapshot.project, sessionID: recoveryID
+            )
+            guard revision.sessionID == expectedSession,
+                  currentProjectURL == nil else { return }
+            if !stored || revision.saveTicket() != snapshot.ticket {
+                scheduleUntitledRecovery()
+            }
+        } catch {
+            print("[StudioRecovery] Untitled draft save failed: \(error)")
+            if !hasReportedRecoveryError {
+                hasReportedRecoveryError = true
+                projectErrorMessage = "Couldn't create an emergency recovery copy: \(error.localizedDescription). Please save your project to a chosen folder."
+            }
+        }
+    }
+
+    private func discardActiveRecovery() async {
+        let previous = recoveryTask
+        recoveryTask?.cancel()
+        recoveryTask = nil
+        await previous?.value
+        if let recoveryID = activeRecoveryID {
+            do {
+                try await recoveryStore.discard(sessionID: recoveryID)
+            } catch {
+                print("[StudioRecovery] Unable to discard backup: \(error)")
+            }
+        }
+        activeRecoveryID = nil
+        hasReportedRecoveryError = false
+    }
+
+    /// Offer the newest intact draft once per app launch; never remove a
+    /// recovery project without the user's explicit choice or successful Save.
+    func offerRecoveryOnLaunch() {
+        guard !hasCheckedRecoveryOnLaunch else { return }
+        hasCheckedRecoveryOnLaunch = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let drafts = await recoveryStore.availableDrafts()
+            guard let draft = drafts.first,
+                  currentProjectURL == nil, !revision.hasUnsavedChanges else { return }
+
+            let alert = NSAlert()
+            alert.alertStyle = .informational
+            alert.messageText = "Recover an unfinished Studio project?"
+            alert.informativeText = "\(draft.projectName) has a recovery copy from \(draft.modifiedAt.formatted()). Restore it, leave it for later, or discard the copy."
+            alert.addButton(withTitle: "Restore")
+            alert.addButton(withTitle: "Later")
+            alert.addButton(withTitle: "Discard Copy")
+            switch alert.runModal() {
+            case .alertFirstButtonReturn:
+                do {
+                    let before = revision.saveTicket()
+                    let recovered = try await recoveryStore.load(draft)
+                    guard before == revision.saveTicket(),
+                          currentProjectURL == nil else { return }
+                    autosaveManager.stopAutosave()
+                    NotificationCenter.default.post(name: .clearAllPlugins, object: nil)
+                    revision.replaceSession()
+                    currentProject = recovered
+                    currentProjectURL = nil
+                    projectID = UUID()
+                    pendingPluginRestoreID = recovered.id
+                    activeRecoveryID = draft.id
+                    revision.markEdited()
+                    hasUnsavedChanges = true
+                    updateWindowTitle()
+                    scheduleUntitledRecovery()
+                } catch {
+                    projectErrorMessage = "Recovery failed: \(error.localizedDescription). The original recovery package was kept."
+                }
+            case .alertThirdButtonReturn:
+                do {
+                    try await recoveryStore.discard(sessionID: draft.id)
+                } catch {
+                    projectErrorMessage = "Couldn't discard the recovery copy: \(error.localizedDescription)"
+                }
+            default:
+                break
+            }
+        }
+    }
+
+    /// Try a fresh recovery snapshot when Studio leaves the foreground.
+    func preserveUntitledWhenInactive() {
+        guard currentProjectURL == nil, revision.hasUnsavedChanges else { return }
+        recoveryTask?.cancel()
+        let expected = revision.sessionID
+        recoveryTask = Task { @MainActor [weak self] in
+            await self?.storeUntitledRecovery(expectedSession: expected)
+        }
+    }
+
+    /// The application delegate calls this before authorizing a macOS quit.
+    /// Cancel/failed Save always means the app must stay open.
+    func confirmApplicationTermination() async -> Bool {
+        guard !isTransitioning, !isSaving else { return false }
+        guard await confirmReplaceEditedSession() else { return false }
+        await discardActiveRecovery()
+        return true
     }
 }
