@@ -477,6 +477,27 @@ public final class ProjectViewModel: ObservableObject {
         updateTrack(track, description: "Load Studio Analog")
     }
 
+    /// Open a fully editable native sampler without requiring a recording.
+    /// This stores a lightweight, empty patch on the track; playback remains
+    /// silent until the mapping editor applies real samples. Reopening an
+    /// existing sampler does not discard its zones or interrupt its audio.
+    public func openEmptyStudioSampler(for trackID: TrackID) throws {
+        guard var track = project.track(withID: trackID),
+              track.type == .midi || track.type == .instrument else {
+            throw PlaybackError.trackNotFound(trackID)
+        }
+        if track.studioSamplerPatch != nil { return }
+        // Choosing the sampler replaces the previous track instrument just
+        // like the synth selection does, but does not initialize DSP or read
+        // files until the user imports their first recording.
+        unloadTrackInstrument(for: trackID)
+        track.instrumentSlot = nil
+        track.garritanProgramID = nil
+        track.studioAnalogEnabled = false
+        track.studioSamplerPatch = StudioSamplerPatch(zones: [])
+        updateTrack(track, description: "Open Empty Studio Sampler")
+    }
+
     /// Select the native Studio Sampler using a user-provided sample mapping.
     /// Preserve the loaded instrument and project state if sample decoding fails.
     public func loadStudioSampler(for trackID: TrackID, patch: StudioSamplerPatch) throws {
