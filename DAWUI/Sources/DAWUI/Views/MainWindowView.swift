@@ -304,7 +304,14 @@ public struct MainWindowView: View {
             // instrument/effect state, and the exact matching project model.
             // This replaces timer-based best-effort snapshots during saves.
             syncDAWState()
-            viewModel.saveAllPluginStates()
+            let failures = viewModel.saveAllPluginStates()
+            guard failures.isEmpty else {
+                NotificationCenter.default.post(
+                    name: .projectStateCaptureFailed,
+                    object: failures.joined(separator: "\\n")
+                )
+                return
+            }
             NotificationCenter.default.post(name: .projectDataForSave, object: viewModel.project)
         }
     }
