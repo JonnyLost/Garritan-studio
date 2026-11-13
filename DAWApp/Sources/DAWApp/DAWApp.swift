@@ -90,6 +90,12 @@ struct DAWApp: App {
                     appState.saveProjectAs()
                 }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
+
+                Divider()
+
+                Button("Export MIDI...") {
+                    appState.exportMIDI()
+                }
             }
             
             // Edit commands
@@ -370,6 +376,32 @@ class AppState: ObservableObject {
         }
     }
     
+    /// Export the current arrangement without altering the project save state.
+    func exportMIDI() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [UTType(filenameExtension: "mid") ?? .data]
+        panel.nameFieldStringValue = currentProject.name + ".mid"
+
+        panel.begin { [weak self] response in
+            guard let self = self, response == .OK, let url = panel.url else { return }
+            Task {
+                do {
+                    try await self.fileManager.export(
+                        project: self.currentProject, to: url, format: .midi
+                    )
+                    print("[AppState] Exported MIDI: \(url.path)")
+                } catch {
+                    let alert = NSAlert()
+                    alert.alertStyle = .warning
+                    alert.messageText = "MIDI Export Failed"
+                    alert.informativeText = error.localizedDescription
+                    alert.addButton(withTitle: "OK")
+                    alert.runModal()
+                }
+            }
+        }
+    }
+
     func newProject() {
         // TODO: Prompt to save if needed
         autosaveManager.stopAutosave()
