@@ -118,7 +118,7 @@ public enum StudioSamplerInstrumentPackage {
         else { throw PackageError.invalidPackage }
         let references = manifest.patch.zones.map(\.filePath)
         guard Set(references) == Set(manifest.samples.map(\.relativePath)),
-              manifest.patch.zones.allSatisfy { $0.managedFileName == nil }
+              manifest.patch.zones.allSatisfy({ $0.managedFileName == nil })
         else { throw PackageError.invalidPackage }
 
         let samplesDir = package.appendingPathComponent("Samples", isDirectory: true)
@@ -132,7 +132,7 @@ public enum StudioSamplerInstrumentPackage {
                   StudioSamplerSampleLibrary.validManagedFileName(String(parts[1])),
                   entry.byteCount > 0,
                   entry.sha256.count == 64,
-                  entry.sha256.allSatisfy { $0.isHexDigit }
+                  entry.sha256.allSatisfy({ $0.isHexDigit })
             else { throw PackageError.unsafeFile }
             let candidate = samplesDir.appendingPathComponent(String(parts[1]))
             guard regularFile(candidate),
