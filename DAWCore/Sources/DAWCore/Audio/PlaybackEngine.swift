@@ -2814,8 +2814,8 @@ public enum TrackInstrument {
             let offset: UInt32 = sampleOffset >= 0 && sampleOffset <= 65_535
                 ? UInt32(sampleOffset) : 0
             synth.pitchBend(value, channel: channel, frameOffset: offset)
-        case .studioSampler(let sampler):
-            _ = sampler.pitchBend(value, channel: channel)
+        case .studioSampler:
+            break // Native sampler pitch bend is not implemented yet.
         }
     }
 }
