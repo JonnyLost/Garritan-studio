@@ -3,6 +3,7 @@ import AppKit
 import AuthenticationServices
 import DAWCore
 import StudioCloudAuth
+import StudioIdentity
 
 // MARK: - Authentication View
 
@@ -88,10 +89,10 @@ public struct AuthenticationView: View {
     
     private var header: some View {
         VStack(spacing: 8) {
-            MusioLogo()
+            StudioSignInMark()
                 .frame(width: 60, height: 50)
             
-            Text("Musio Create")
+            Text(StudioApplicationIdentity.displayName)
                 .font(.title2)
                 .fontWeight(.bold)
             
@@ -356,22 +357,15 @@ private enum AuthMode {
     case signUp
 }
 
-// MARK: - Musio Logo (loads SVG from app bundle)
-
-struct MusioLogo: View {
+// MARK: - Studio Sign-In Mark
+// System artwork replaces the inherited product logo without changing saved assets.
+struct StudioSignInMark: View {
     var body: some View {
-        if let resourcePath = Bundle.main.path(forResource: "MusioLogo", ofType: "svg"),
-           let image = NSImage(contentsOfFile: resourcePath) {
-            Image(nsImage: image)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-        } else {
-            // Fallback if SVG not found
-            Image(systemName: "music.note")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .foregroundColor(.blue)
-        }
+        Image(systemName: "waveform")
+            .resizable()
+            .scaledToFit()
+            .foregroundColor(.accentColor)
+            .accessibilityHidden(true)
     }
 }
 

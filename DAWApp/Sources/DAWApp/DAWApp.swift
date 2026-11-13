@@ -3,17 +3,7 @@ import AppKit
 import UniformTypeIdentifiers
 import DAWCore
 import DAWUI
-
-// MARK: - Application Identity & Legacy Project Compatibility
-
-/// Product-facing identity is independent of persisted project identifiers.
-enum StudioApplicationIdentity {
-    static let displayName = "Studio"
-
-    /// Preserve the original project type so existing sessions remain recognizable.
-    /// Changing this requires a separately tested project-format migration.
-    static let legacyProjectTypeIdentifier = "com.musio.create.project"
-}
+import StudioIdentity
 
 // MARK: - UTType Extension
 

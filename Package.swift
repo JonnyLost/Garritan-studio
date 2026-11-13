@@ -10,6 +10,7 @@ let package = Package(
     ],
     products: [
         .library(name: "DAWCore", targets: ["DAWCore"]),
+        .library(name: "StudioIdentity", targets: ["StudioIdentity"]),
         .library(name: "StudioCloudAuth", targets: ["StudioCloudAuth"]),
         .library(name: "StudioAnalogDSP", targets: ["StudioAnalogDSP"]),
         .library(name: "StudioSamplerDSP", targets: ["StudioSamplerDSP"]),
@@ -66,6 +67,12 @@ let package = Package(
             path: "DAWRealtime",
             sources: ["DAWRealtime.c"],
             publicHeadersPath: "include"
+        ),
+
+        // MARK: - Shared lightweight product identity (no DAW or network dependencies)
+        .target(
+            name: "StudioIdentity",
+            path: "StudioIdentity/Sources/StudioIdentity"
         ),
 
         // MARK: - Optional cloud authentication (never required by the DAW core)
@@ -125,7 +132,7 @@ let package = Package(
         // MARK: - SwiftUI Layer
         .target(
             name: "DAWUI",
-            dependencies: ["DAWCore", "StudioCloudAuth"],
+            dependencies: ["DAWCore", "StudioCloudAuth", "StudioIdentity"],
             path: "DAWUI/Sources/DAWUI",
             resources: [
                 .copy("Resources/GPO5_keyswitch_catalog.json")
@@ -135,7 +142,7 @@ let package = Package(
         // MARK: - Main Application
         .executableTarget(
             name: "DAWApp",
-            dependencies: ["DAWCore", "DAWUI", "VST3Bridge"],
+            dependencies: ["DAWCore", "DAWUI", "VST3Bridge", "StudioIdentity"],
             path: "DAWApp/Sources/DAWApp"
         ),
         
@@ -147,6 +154,11 @@ let package = Package(
         ),
 
         // MARK: - Tests
+        .testTarget(
+            name: "StudioIdentityTests",
+            dependencies: ["StudioIdentity"],
+            path: "Tests/StudioIdentityTests"
+        ),
         .testTarget(
             name: "StudioFMDSPTests",
             dependencies: ["StudioFMDSP"],

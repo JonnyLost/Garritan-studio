@@ -6,13 +6,13 @@
     <string>DAWApp</string>
     
     <key>CFBundleDisplayName</key>
-    <string>Musio Create</string>
+    <string>Studio</string>
     
     <key>CFBundleIdentifier</key>
     <string>com.musio.create</string>
     
     <key>CFBundleName</key>
-    <string>Musio Create</string>
+    <string>Studio</string>
     
     <key>CFBundlePackageType</key>
     <string>APPL</string>
@@ -37,18 +37,18 @@
     
     <!-- Audio recording permission -->
     <key>NSMicrophoneUsageDescription</key>
-    <string>Musio Create needs access to your microphone to record audio and for voice commands.</string>
+    <string>Studio needs access to your microphone to record audio and for voice commands.</string>
     
     <!-- Speech recognition permission -->
     <key>NSSpeechRecognitionUsageDescription</key>
-    <string>Musio Create uses speech recognition for voice commands to the AI assistant.</string>
+    <string>Studio uses speech recognition for voice commands to the AI assistant.</string>
     
     <!-- Document types -->
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>
             <key>CFBundleTypeName</key>
-            <string>Musio Create Project</string>
+            <string>Studio Project</string>
             <key>CFBundleTypeRole</key>
             <string>Editor</string>
             <key>LSHandlerRank</key>
@@ -69,7 +69,7 @@
                 <string>com.apple.package</string>
             </array>
             <key>UTTypeDescription</key>
-            <string>Musio Create Project</string>
+            <string>Studio Project</string>
             <key>UTTypeIdentifier</key>
             <string>com.musio.create.project</string>
             <key>UTTypeTagSpecification</key>
