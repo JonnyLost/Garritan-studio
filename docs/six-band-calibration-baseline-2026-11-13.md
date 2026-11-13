@@ -1,7 +1,7 @@
 # Native Room Reverb — Six-Band Calibration Baseline
 
 **Generated:** November 13, 2026
-**Branch:** \`feature/stage-acoustics-sync\`
+**Branch:** `feature/stage-acoustics-sync`
 **GitHub Actions run:** https://github.com/JonnyLost/Garritan-studio/actions/runs/43383904003
 **Environment:** macOS 15 runner, original native DSP (not a third-party IR)
 **Test:** 48,000 Hz, six-second stereo wet-only impulse, per-track ER + shared 16-line FDN
