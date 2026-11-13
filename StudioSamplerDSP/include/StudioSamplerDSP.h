@@ -107,6 +107,14 @@ int32_t ss_add_stream_zone(SSSampler *sampler,
                     uint8_t articulation_id,
                     uint8_t round_robin_index, uint8_t release_trigger);
 
+/* Optional orchestral metadata, installed off the render thread once a
+ * zone has been added. from_note = -1 for ordinary sustained/release samples;
+ * 0..127 identifies a recorded from-note → zone root-note transition.
+ * microphone_id selects up to four coherent mic positions.
+ */
+int32_t ss_configure_zone_performance(SSSampler *sampler, int32_t zone_index,
+                                      uint8_t microphone_id, int32_t from_note);
+
 enum { SS_STREAM_PAGE_FRAMES = 4096 };
 typedef struct SSStreamRequest {
     int32_t voice_index;
@@ -159,6 +167,20 @@ int32_t ss_select_articulation(SSSampler *sampler,
 int32_t ss_control_change(SSSampler *sampler, uint8_t controller,
                           uint8_t value, uint8_t channel);
 int32_t ss_set_cc1_crossfade(SSSampler *sampler, int32_t enabled);
+
+/* Runtime mic mixing is queued (gain 0..2, pan -1..1, IDs 0..3);
+ * controls remain off the audio callback and are smoothed on the renderer.
+ * Existing instruments default to full-level center on microphone 0.
+ */
+int32_t ss_set_microphone_mix(SSSampler *sampler, uint8_t microphone_id,
+                              float gain, float pan);
+
+/* Mono-legato behavior only while consecutive MIDI keys overlap on the
+ * same channel and articulation. Recorded transitions can be selected by
+ * exact from/to pitch; otherwise two sustained recordings crossfade.
+ * Crossfade duration 5..250ms. Disabled for all old instruments.
+ */
+int32_t ss_set_legato_mode(SSSampler *sampler, int32_t enabled, float fade_ms);
 
 /* ADSR times in seconds, sustain in linear [0,1]; times in [0,30].
  * The render thread snapshots parameters for newly started voices.
