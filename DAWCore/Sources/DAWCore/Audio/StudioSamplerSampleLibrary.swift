@@ -164,4 +164,34 @@ public enum StudioSamplerSampleLibrary {
             throw error
         }
     }
+    /// The editor's complete import transaction. Validate size before copying,
+    /// infer a patch off the render thread, and remove only this batch's new
+    /// files if mapping or articulation merging fails.
+    public static func importMappedFiles(_ urls: [URL],
+                                         into directory: URL? = nil,
+                                         extending existing: StudioSamplerPatch? = nil) throws -> StudioSamplerPatch {
+        guard !urls.isEmpty else {
+            throw StudioSamplerMappingBuilder.MappingError.emptySelection
+        }
+        guard urls.count + (existing?.zones.count ?? 0) <= 128 else {
+            throw StudioSamplerMappingBuilder.MappingError.tooManySamples
+        }
+        let copies = try importFiles(urls, into: directory)
+        do {
+            let added = try StudioSamplerMappingBuilder.makePatch(urls: copies)
+            if let existing {
+                return try StudioSamplerMappingBuilder.append(added, to: existing)
+            }
+            return added
+        } catch {
+            let originalPaths = Set(urls.map { $0.standardizedFileURL.path })
+            for copied in copies {
+                guard !originalPaths.contains(copied.standardizedFileURL.path),
+                      managedName(for: copied, in: directory) != nil else { continue }
+                try? FileManager.default.removeItem(at: copied)
+            }
+            throw error
+        }
+    }
+
 }
