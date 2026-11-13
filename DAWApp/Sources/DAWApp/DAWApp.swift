@@ -48,7 +48,6 @@ struct DAWApp: App {
                 }
                 .environmentObject(appState)
                 .navigationTitle(appState.windowTitle)
-                .background(StudioWindowCloseGuard(appState: appState))
                 .alert("Studio Project", isPresented: Binding(
                     get: { appState.projectErrorMessage != nil },
                     set: { if !$0 { appState.projectErrorMessage = nil } }
@@ -77,6 +76,9 @@ struct DAWApp: App {
                     }
                 }
             }
+            // Remains installed while the inner composing view is recreated
+            // for a different project; avoid a chain of stale window delegates.
+            .background(StudioWindowCloseGuard(appState: appState))
         }
         .commands {
             // File commands
