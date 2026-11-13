@@ -182,7 +182,7 @@ final class StudioPhysicalDSPTests: XCTestCase {
             XCTAssertEqual(spm_set_parameter(synth, id, -0.01), 0)
             XCTAssertEqual(spm_set_parameter(synth, id, .nan), 0)
         }
-        XCTAssertEqual(spm_set_parameter(synth, SPM_PARAM_MODEL, 3), 0)
+        XCTAssertEqual(spm_set_parameter(synth, SPM_PARAM_MODEL, 8), 0)
     }
 
     func testWindAndBrassModelsRenderAndRespondToBreath() {
@@ -214,7 +214,103 @@ final class StudioPhysicalDSPTests: XCTestCase {
             XCTAssertEqual(spm_set_parameter(synth, id, .nan), 0)
         }
         XCTAssertEqual(spm_set_parameter(synth, SPM_PARAM_MODEL, 4), 1)
-        XCTAssertEqual(spm_set_parameter(synth, SPM_PARAM_MODEL, 5), 0)
+        XCTAssertEqual(spm_set_parameter(synth, SPM_PARAM_MODEL, 8), 0)
+    }
+
+    func testMalletBellAndMembraneAreAudibleAndDistinct() {
+        var outputs = [[Float]]()
+        for model: Float in [5, 6, 7] {
+            let synth = makeSynth()
+            XCTAssertEqual(spm_set_parameter(synth, SPM_PARAM_MODEL, model), 1)
+            XCTAssertEqual(spm_note_on(synth, 69, 120), 1)
+            let samples = render(synth, count: 4_096)
+            XCTAssertGreaterThan(samples.map { abs($0) }.max() ?? 0, 0.005)
+            outputs.append(samples)
+            spm_destroy(synth)
+        }
+        for (a, b) in [(0, 1), (1, 2), (0, 2)] {
+            let difference = zip(outputs[a], outputs[b]).reduce(0.0) {
+                $0 + Double(abs($1.0 - $1.1))
+            }
+            XCTAssertGreaterThan(difference, 0.1)
+        }
+    }
+
+    func testPercussionMaterialAndHardnessChangeTheSpectrum() {
+        let soft = makeSynth()
+        let hard = makeSynth()
+        defer { spm_destroy(soft); spm_destroy(hard) }
+        for synth in [soft, hard] {
+            XCTAssertEqual(spm_set_parameter(synth, SPM_PARAM_MODEL, 6), 1)
+        }
+        XCTAssertEqual(spm_set_parameter(soft, SPM_PARAM_PERC_HARDNESS, 0), 1)
+        XCTAssertEqual(spm_set_parameter(soft, SPM_PARAM_PERC_INHARMONICITY, 0), 1)
+        XCTAssertEqual(spm_set_parameter(hard, SPM_PARAM_PERC_HARDNESS, 1), 1)
+        XCTAssertEqual(spm_set_parameter(hard, SPM_PARAM_PERC_INHARMONICITY, 1), 1)
+        XCTAssertEqual(spm_note_on(soft, 60, 120), 1)
+        XCTAssertEqual(spm_note_on(hard, 60, 120), 1)
+        let a = render(soft, count: 4_096)
+        let b = render(hard, count: 4_096)
+        XCTAssertGreaterThan(zip(a,b).reduce(0.0) {
+            $0 + Double(abs($1.0 - $1.1))
+        }, 0.1)
+    }
+
+    func testMembraneNaturallyDecaysAndNoteOffDampsResonances() {
+        let synth = makeSynth()
+        defer { spm_destroy(synth) }
+        XCTAssertEqual(spm_set_parameter(synth, SPM_PARAM_MODEL, 7), 1)
+        XCTAssertEqual(spm_set_parameter(synth, SPM_PARAM_PERC_DECAY, 0), 1)
+        XCTAssertEqual(spm_note_on(synth, 60, 120), 1)
+        XCTAssertGreaterThan(render(synth, count: 2_048).map { abs($0) }.max() ?? 0, 0.001)
+        _ = render(synth, count: 44_100)
+        XCTAssertTrue(render(synth, count: 128).allSatisfy { $0 == 0 })
+
+        XCTAssertEqual(spm_set_parameter(synth, SPM_PARAM_PERC_DECAY, 1), 1)
+        XCTAssertEqual(spm_note_on(synth, 60, 120), 1)
+        _ = render(synth, count: 2_048)
+        XCTAssertEqual(spm_note_off(synth, 60), 1)
+        _ = render(synth, count: 44_100)
+        XCTAssertTrue(render(synth, count: 128).allSatisfy { $0 == 0 })
+    }
+
+    func testPercussionPitchBendRetunesActiveModesAndPanicWorks() {
+        let bent = makeSynth()
+        let stable = makeSynth()
+        defer { spm_destroy(bent); spm_destroy(stable) }
+        for synth in [bent, stable] {
+            XCTAssertEqual(spm_set_parameter(synth, SPM_PARAM_MODEL, 5), 1)
+            XCTAssertEqual(spm_note_on(synth, 69, 127), 1)
+            _ = render(synth, count: 2_048)
+        }
+        XCTAssertEqual(spm_midi_event(bent, 0xE0, 127, 127, 0), 1)
+        let a = render(bent, count: 4_096)
+        let b = render(stable, count: 4_096)
+        XCTAssertGreaterThan(zip(a,b).reduce(0.0) {
+            $0 + Double(abs($1.0 - $1.1))
+        }, 0.1)
+        XCTAssertEqual(spm_all_notes_off(bent), 1)
+        XCTAssertTrue(render(bent, count: 128).allSatisfy { $0 == 0 })
+    }
+
+    func testPercussionParameterRangesAndHighRateStability() {
+        let synth = makeSynth(384_000)
+        defer { spm_destroy(synth) }
+        for id in [SPM_PARAM_PERC_HARDNESS, SPM_PARAM_PERC_DECAY,
+                   SPM_PARAM_PERC_INHARMONICITY, SPM_PARAM_PERC_ATTACK_NOISE] {
+            XCTAssertEqual(spm_set_parameter(synth, id, 0), 1)
+            XCTAssertEqual(spm_set_parameter(synth, id, 1), 1)
+            XCTAssertEqual(spm_set_parameter(synth, id, -0.1), 0)
+            XCTAssertEqual(spm_set_parameter(synth, id, 1.1), 0)
+            XCTAssertEqual(spm_set_parameter(synth, id, .nan), 0)
+        }
+        XCTAssertEqual(spm_set_parameter(synth, SPM_PARAM_MODEL, 7), 1)
+        XCTAssertEqual(spm_set_parameter(synth, SPM_PARAM_MODEL, 7.5), 0)
+        XCTAssertEqual(spm_set_parameter(synth, SPM_PARAM_MODEL, 8), 0)
+        XCTAssertEqual(spm_note_on(synth, 21, 127), 1)
+        _ = render(synth, count: 16_384)
+        XCTAssertEqual(spm_midi_event(synth, 0xE0, 0, 0, 0), 1)
+        XCTAssertTrue(render(synth, count: 16_384).allSatisfy { $0.isFinite })
     }
 
     func testNoteReleaseSustainAndMultipleSampleRates() {
