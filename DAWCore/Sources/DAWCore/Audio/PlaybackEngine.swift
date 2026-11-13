@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import AudioToolbox
+import AppKit
 import Combine
 
 // MARK: - Playback Engine
@@ -82,6 +83,11 @@ public final class PlaybackEngine: ObservableObject {
     // Debug-only preview bookkeeping lives on MainActor, never the render
     // callback. It lets a single mouse audition expose missing note-offs.
     private var previewHeldPitches: [TrackID: Set<UInt8>] = [:]
+    // Retained by PlaybackEngine rather than a SwiftUI key view. SwiftUI may
+    // destroy/rebuild that view before mouse-up; the engine must still receive
+    // a matching note-off for every preview note started by a mouse gesture.
+    private var previewMouseUpMonitor: Any?
+    private var previewFocusObserver: NSObjectProtocol?
     
     // Last processed sample position (for tracking what's been played)
     private var lastProcessedSample: Int64 = 0
@@ -2494,7 +2500,55 @@ public final class PlaybackEngine: ObservableObject {
     }
     
     // MARK: - Note Preview
-    
+
+    /// Observe mouse-up at the app level so release does not depend on the
+    /// identity or lifetime of a SwiftUI piano-key view. AppKit invokes local
+    /// monitors on the main event thread; the callback is kept synchronous so
+    /// a new preview created in a mouse-up handler isn't released prematurely.
+    private func ensurePreviewMouseReleaseMonitoring() {
+        guard previewMouseUpMonitor == nil else { return }
+        previewMouseUpMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { [weak self] event in
+            MainActor.assumeIsolated {
+                self?.releaseHeldPreviews(reason: "mouse-up")
+            }
+            return event
+        }
+        previewFocusObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.releaseHeldPreviews(reason: "application deactivated")
+            }
+        }
+    }
+
+    private func releaseHeldPreviews(reason: String) {
+        guard !previewHeldPitches.isEmpty else { return }
+        // Snapshot before stopNotePreview mutates its per-track held set.
+        let outstanding = previewHeldPitches
+        #if DEBUG
+        let count = outstanding.values.reduce(0) { $0 + $1.count }
+        print("[Preview MIDI] App-level release reason=\(reason) held=\(count)")
+        #endif
+        for (trackID, pitches) in outstanding {
+            for pitch in pitches {
+                stopNotePreview(pitch: pitch, on: trackID)
+            }
+        }
+    }
+
+    private func removePreviewReleaseMonitoring() {
+        if let previewMouseUpMonitor {
+            NSEvent.removeMonitor(previewMouseUpMonitor)
+            self.previewMouseUpMonitor = nil
+        }
+        if let previewFocusObserver {
+            NotificationCenter.default.removeObserver(previewFocusObserver)
+            self.previewFocusObserver = nil
+        }
+    }
+
     /// Play a note immediately for preview (piano roll, keyboard).
     /// Trace only these UI events; never log from a real-time audio callback.
     public func playNotePreview(pitch: UInt8, velocity: UInt8, on trackID: TrackID) {
@@ -2513,6 +2567,11 @@ public final class PlaybackEngine: ObservableObject {
             return
         }
         let alreadyHeld = previewHeldPitches[trackID]?.contains(pitch) ?? false
+        // Prevent repeated mouse-down without a matching release from building
+        // multiple identical voices. One mouse-up then releases one voice.
+        if alreadyHeld {
+            stopNotePreview(pitch: pitch, on: trackID)
+        }
         // Accepted means the native instrument queued the MIDI event, not that
         // its render thread has consumed it or that the voice is audible.
         let accepted: Bool
@@ -2530,13 +2589,18 @@ public final class PlaybackEngine: ObservableObject {
         case .studioSampler(let sampler):
             route = "NativeSampler"
             accepted = sampler.noteOn(pitch, velocity: velocity, channel: 0)
-        default:
-            route = "AudioUnitOrSampler"
+        case .auInstrument(let au, _):
+            route = "AudioUnit:\(au.name)"
             instrument.startNote(pitch, velocity: velocity, channel: 0)
-            accepted = true // API does not report successful MIDI delivery.
+            accepted = true // AU API does not confirm MIDI delivery.
+        case .sampler:
+            route = "AVAudioUnitSampler"
+            instrument.startNote(pitch, velocity: velocity, channel: 0)
+            accepted = true // AVAudioUnitSampler does not confirm delivery.
         }
         if accepted {
             previewHeldPitches[trackID, default: []].insert(pitch)
+            ensurePreviewMouseReleaseMonitoring()
         }
         #if DEBUG
         print("[Preview MIDI] ON route=\(route) track=\(trackID.rawValue) pitch=\(pitch) velocity=\(velocity) queued=\(accepted) duplicate=\(alreadyHeld)")
@@ -2561,6 +2625,12 @@ public final class PlaybackEngine: ObservableObject {
             return
         }
         let wasHeld = previewHeldPitches[trackID]?.contains(pitch) ?? false
+        guard wasHeld else {
+            #if DEBUG
+            print("[Preview MIDI] OFF ignored: no matching preview ON track=\(trackID.rawValue) pitch=\(pitch)")
+            #endif
+            return
+        }
         let accepted: Bool
         let route: String
         switch instrument {
@@ -2576,12 +2646,21 @@ public final class PlaybackEngine: ObservableObject {
         case .studioSampler(let sampler):
             route = "NativeSampler"
             accepted = sampler.noteOff(pitch, channel: 0)
-        default:
-            route = "AudioUnitOrSampler"
+        case .auInstrument(let au, _):
+            route = "AudioUnit:\(au.name)"
             instrument.stopNote(pitch, channel: 0)
-            accepted = true // Delivery is not confirmed by this API.
+            accepted = true // AU API does not confirm delivery.
+        case .sampler:
+            route = "AVAudioUnitSampler"
+            instrument.stopNote(pitch, channel: 0)
+            accepted = true
         }
-        if accepted { previewHeldPitches[trackID]?.remove(pitch) }
+        if accepted {
+            previewHeldPitches[trackID]?.remove(pitch)
+            if previewHeldPitches[trackID]?.isEmpty == true {
+                previewHeldPitches.removeValue(forKey: trackID)
+            }
+        }
         #if DEBUG
         print("[Preview MIDI] OFF route=\(route) track=\(trackID.rawValue) pitch=\(pitch) queued=\(accepted) hadON=\(wasHeld)")
         #endif
@@ -2662,8 +2741,10 @@ public final class PlaybackEngine: ObservableObject {
     // MARK: - Cleanup
     
     public func cleanup() {
+        releaseHeldPreviews(reason: "engine cleanup")
+        removePreviewReleaseMonitoring()
         stopPlayback()
-        
+
         // Detach all instruments
         for instrument in trackInstruments.values {
             audioEngine.engine.detach(instrument.audioNode)
