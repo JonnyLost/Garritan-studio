@@ -13,6 +13,7 @@ public final class NativeRoomReverbProcessor {
             let bass: Float
             let mid: Float
             let treble: Float
+            let octaveGains: [Float]?
         }
 
         private let storage: UnsafeMutablePointer<Float>
@@ -22,7 +23,12 @@ public final class NativeRoomReverbProcessor {
         private var highState: Float = 0
         private let lowCoefficient: Float
         private let highCoefficient: Float
+        /// 5 cumulative lowpasses split the spectrum into six bands:
+        /// <177, 177-354, 354-707, 707-1414, 1414-2828, >2828 Hz.
+        private let octaveCoefficients: [Float]
+        private var octaveStates = [Float](repeating: 0, count: 5)
         private let presetGains: [DecayGains]
+        private var selectedGainIndex = 0
         private var bassGain: Float
         private var midGain: Float
         private var trebleGain: Float
@@ -34,6 +40,9 @@ public final class NativeRoomReverbProcessor {
             storage.initialize(repeating: 0, count: count)
             lowCoefficient = Float(1 - exp(-2 * Double.pi * 250 / sampleRate))
             highCoefficient = Float(1 - exp(-2 * Double.pi * 2500 / sampleRate))
+            octaveCoefficients = [177.0, 354, 707, 1_414, 2_828].map {
+                Float(1 - exp(-2 * Double.pi * $0 / sampleRate))
+            }
             func gain(_ seconds: Float) -> Float {
                 let safe = seconds.isFinite ? max(0.2, min(15, seconds)) : 2
                 return pow(10, -3 * delayFrameCount / (Float(sampleRate) * safe))
@@ -42,7 +51,9 @@ public final class NativeRoomReverbProcessor {
                 DecayGains(
                     bass: gain(profile.bassRT60),
                     mid: gain(profile.midRT60),
-                    treble: gain(profile.trebleRT60)
+                    treble: gain(profile.trebleRT60),
+                    octaveGains: profile.sixBandRT60?.count == 6
+                        ? profile.sixBandRT60!.map { gain($0) } : nil
                 )
             }
             presetGains = all
@@ -54,6 +65,7 @@ public final class NativeRoomReverbProcessor {
         /// Coefficients are prepared before rendering. Switching performs no
         /// exp/pow, allocation, locking or reverb-state reset on the audio thread.
         @inline(__always) func selectProfile(at index: Int) {
+            selectedGainIndex = index
             let gains = presetGains[index]
             bassGain = gains.bass
             midGain = gains.mid
@@ -68,6 +80,18 @@ public final class NativeRoomReverbProcessor {
         /// Read feedback sample at the current position and apply band decays.
         @inline(__always) func readDamped() -> Float {
             let sample = storage[position]
+            if let gains = presetGains[selectedGainIndex].octaveGains {
+                var previousLow: Float = 0
+                var output: Float = 0
+                for index in 0..<5 {
+                    octaveStates[index] += octaveCoefficients[index] *
+                        (sample - octaveStates[index])
+                    let currentLow = octaveStates[index]
+                    output += (currentLow - previousLow) * gains[index]
+                    previousLow = currentLow
+                }
+                return output + (sample - previousLow) * gains[5]
+            }
             lowState += lowCoefficient * (sample - lowState)
             highState += highCoefficient * (sample - highState)
             let bass = lowState
