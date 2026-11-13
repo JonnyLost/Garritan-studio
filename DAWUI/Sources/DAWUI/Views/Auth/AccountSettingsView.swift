@@ -7,7 +7,6 @@ import StudioCloudAuth
 public struct AccountSettingsView: View {
     @ObservedObject private var authService = SupabaseAuthService.shared
     @State private var showingSignOutConfirmation = false
-    @State private var showingDeleteConfirmation = false
     @State private var showingSupabaseConfig = false
     @Environment(\.dismiss) private var dismiss
     
@@ -52,17 +51,6 @@ public struct AccountSettingsView: View {
             }
         } message: {
             Text("Are you sure you want to sign out?")
-        }
-        .alert("Delete Account", isPresented: $showingDeleteConfirmation) {
-            Button("Cancel", role: .cancel) {}
-            Button("Delete", role: .destructive) {
-                Task {
-                    try? await authService.deleteAccount()
-                    dismiss()
-                }
-            }
-        } message: {
-            Text("This action cannot be undone. All your data will be permanently deleted.")
         }
         .sheet(isPresented: $showingSupabaseConfig) {
             SupabaseConfigView()
@@ -153,16 +141,11 @@ public struct AccountSettingsView: View {
                     }
                     .buttonStyle(.bordered)
                     
-                    Button(action: { showingDeleteConfirmation = true }) {
-                        HStack {
-                            Image(systemName: "trash")
-                            Text("Delete Account")
-                        }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 40)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.red)
+                    Text("Account deletion is not yet available. Signing out does not delete your account or local projects.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 20)

@@ -291,17 +291,13 @@ public final class SupabaseAuthService: ObservableObject {
     // MARK: - Delete Account
     
     public func deleteAccount() async throws {
-        guard let client = supabaseClient else {
-            throw AuthError.notConfigured
-        }
-        
-        // Note: Account deletion typically requires a server-side function
-        // This is a placeholder - you'd need to set up a Supabase Edge Function
-        print("[SupabaseAuth] Account deletion requested - implement server-side function")
-        
-        // For now, just sign out
-        try await signOut()
+        // A placeholder must never silently sign out while claiming deletion.
+        // Actual remote deletion requires an authenticated server-side endpoint.
+        throw AuthError.unknown(
+            "Account deletion is not implemented. No account or cloud data was deleted."
+        )
     }
+
 }
 
 // MARK: - Apple Sign In Helper
