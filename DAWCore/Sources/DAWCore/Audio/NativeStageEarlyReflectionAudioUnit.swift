@@ -18,10 +18,14 @@ public final class NativeStageEarlyReflectionAudioUnit: AUAudioUnit {
     private var roomParameter: AUParameter!
     private var panParameter: AUParameter!
     private var zoneParameter: AUParameter!
+    private var microphoneParameter: AUParameter!
+    private var microphoneWidthParameter: AUParameter!
 
     public static let roomAddress: AUParameterAddress = 0
     public static let panAddress: AUParameterAddress = 1
     public static let zoneAddress: AUParameterAddress = 2
+    public static let microphoneAddress: AUParameterAddress = 3
+    public static let microphoneWidthAddress: AUParameterAddress = 4
 
     public static let componentDescription = AudioComponentDescription(
         componentType: kAudioUnitType_Effect,
@@ -77,12 +81,30 @@ public final class NativeStageEarlyReflectionAudioUnit: AUAudioUnit {
             valueStrings: ["Dry", "L1", "L2", "L3", "L4", "L5"],
             dependentParameters: nil
         )
+        microphoneParameter = AUParameterTree.createParameter(
+            withIdentifier: "microphonePerspective",
+            name: "Virtual Microphone Position", address: Self.microphoneAddress,
+            min: 0, max: 2, unit: .indexed, unitName: nil,
+            flags: [.flag_IsReadable, .flag_IsWritable],
+            valueStrings: StudioMicrophonePerspective.allCases.map(\.displayName),
+            dependentParameters: nil
+        )
+        microphoneWidthParameter = AUParameterTree.createParameter(
+            withIdentifier: "microphoneWidth",
+            name: "Virtual Stereo Width", address: Self.microphoneWidthAddress,
+            min: 0, max: 1.5, unit: .generic, unitName: nil,
+            flags: [.flag_IsReadable, .flag_IsWritable],
+            valueStrings: nil, dependentParameters: nil
+        )
         parameterTree = AUParameterTree.createTree(withChildren: [
-            roomParameter, panParameter, zoneParameter
+            roomParameter, panParameter, zoneParameter,
+            microphoneParameter, microphoneWidthParameter
         ])
         roomParameter.value = 0
         panParameter.value = 0
         zoneParameter.value = 2
+        microphoneParameter.value = 0
+        microphoneWidthParameter.value = 1
     }
 
     /// Apply only with engine stopped; render thread never resizes taps.
@@ -135,7 +157,12 @@ public final class NativeStageEarlyReflectionAudioUnit: AUAudioUnit {
             let requestedZone = zoneParameter.value
             let depth = requestedZone.isFinite ?
                 min(5, max(0, Int(requestedZone.rounded()))) : 0
-            processor.update(roomIndex: selected, pan: panParameter.value, zone: depth)
+            let requestedMicrophone = microphoneParameter.value
+            let perspective = requestedMicrophone.isFinite ?
+                min(2, max(0, Int(requestedMicrophone.rounded()))) : 0
+            processor.update(roomIndex: selected, pan: panParameter.value, zone: depth,
+                             microphonePerspective: perspective,
+                             microphoneWidth: microphoneWidthParameter.value)
             processor.process(left: left, right: right, frameCount: Int(frames))
             return noErr
         }
