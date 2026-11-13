@@ -132,7 +132,7 @@ public actor DAWChatService {
     /// Static system prompt that can be cached (doesn't change between requests)
     private func getStaticSystemPrompt() -> String {
         return """
-        You are a friendly AI assistant built into Musio, a music creation app. Help users make music through natural conversation.
+        You are a friendly AI assistant built into Studio, a music creation app. Help users make music through natural conversation.
 
         **What you can do:**
         - Create and manage tracks
