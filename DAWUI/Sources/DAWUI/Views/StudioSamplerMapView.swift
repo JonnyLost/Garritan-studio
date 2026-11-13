@@ -231,7 +231,7 @@ public struct StudioSamplerMapView: View {
         }
         .fileImporter(
             isPresented: $showPackageImporter,
-            allowedContentTypes: [.folder, .data],
+            allowedContentTypes: [UTType(exportedAs: "com.garritanstudio.instrument", conformingTo: .package), .folder],
             allowsMultipleSelection: false
         ) { result in
             switch result {
