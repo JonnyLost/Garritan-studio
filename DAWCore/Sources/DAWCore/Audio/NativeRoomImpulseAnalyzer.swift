@@ -1,8 +1,17 @@
 import Foundation
 
+/// The original analyzer is retained as a reference for A/B comparison.
+/// The new filter uses cascaded second-order Butterworth high/low pass
+/// sections at octave edges, giving better out-of-band rejection for
+/// sharply contrasting decay times. Neither is an IEC/ISO certified filter.
+public enum NativeRoomAnalysisFilter: String, Codable, Sendable {
+    case legacyWideBand
+    case cascadedButterworth
+}
+
 /// Offline impulse-response measurements for Studio reverb development.
 /// This is NOT audio-thread code and is NOT an ISO 3382 conformant
-/// analyzer: bandpass filters are 2nd-order octave approximations and finite
+/// analyzer: bandpass filters are approximations and finite
 /// impulse-response tails are not noise-floor-corrected. Never describe
 /// these numbers as measured characteristics of a named real venue.
 public struct NativeRoomDecayMetrics: Codable, Sendable {
@@ -81,7 +90,9 @@ public enum NativeRoomImpulseAnalyzer {
     /// and least-squares slopes, with stereo-energy C80 on the wet-only impulse response.
     /// Nil means there was insufficient dynamic range to make that estimate.
     public static func analyze(left: [Float], right: [Float],
-                               sampleRate: Double, roomID: String) -> NativeRoomCalibrationResult {
+                               sampleRate: Double, roomID: String,
+                               filter: NativeRoomAnalysisFilter = .cascadedButterworth)
+        -> NativeRoomCalibrationResult {
         guard sampleRate.isFinite && sampleRate > 0,
               left.count == right.count, !left.isEmpty else {
             return NativeRoomCalibrationResult(roomID: roomID, sampleRate: sampleRate,
@@ -101,9 +112,9 @@ public enum NativeRoomImpulseAnalyzer {
                                               t30Seconds: nil)
             }
             let filteredL = octaveApproximate(stereoLeft, sampleRate: sampleRate,
-                                               centerHz: center)
+                                               centerHz: center, filter: filter)
             let filteredR = octaveApproximate(stereoRight, sampleRate: sampleRate,
-                                               centerHz: center)
+                                               centerHz: center, filter: filter)
             let decay = backwardIntegratedDecibels(left: filteredL, right: filteredR)
             return NativeRoomDecayMetrics(
                 bandCenterHz: center,
@@ -129,36 +140,90 @@ public enum NativeRoomImpulseAnalyzer {
     }
 
     public static func measure(room: StudioRoomAcousticProfile,
-                               sampleRate: Double = 48_000, seconds: Double = 5)
+                               sampleRate: Double = 48_000, seconds: Double = 5,
+                               filter: NativeRoomAnalysisFilter = .cascadedButterworth)
         -> NativeRoomCalibrationResult {
         let (l, r) = render(room: room, sampleRate: sampleRate, seconds: seconds)
-        return analyze(left: l, right: r, sampleRate: sampleRate, roomID: room.id)
+        return analyze(left: l, right: r, sampleRate: sampleRate, roomID: room.id,
+                       filter: filter)
     }
 
-    /// Simple bandpass, center frequency and approximately one-octave Q.
-    /// Not an IEC 61260 measurement filter; intended for repeatable tuning.
-    private static func octaveApproximate(_ signal: [Double], sampleRate: Double,
-                                           centerHz: Double) -> [Double] {
-        guard centerHz < sampleRate * 0.45 else { return signal }
-        let omega = 2 * Double.pi * centerHz / sampleRate
-        let alpha = sin(omega) / (2 * 1.41421356237)
-        let a0 = 1 + alpha
-        let b0 = alpha / a0
-        let b2 = -alpha / a0
-        let a1 = -2 * cos(omega) / a0
-        let a2 = (1 - alpha) / a0
-        var x1 = 0.0, x2 = 0.0, y1 = 0.0, y2 = 0.0
-        var output = [Double]()
-        output.reserveCapacity(signal.count)
-        for x in signal {
-            let y = b0 * x + b2 * x2 - a1 * y1 - a2 * y2
-            output.append(y)
-            x2 = x1
-            x1 = x
-            y2 = y1
-            y1 = y
+    /// Legacy analyzer retained for reproducible historical measurements.
+    /// This broad Q=1.414 resonator can leak an adjacent slow decay into a
+    /// strongly damped band's Schroeder slope.
+    static func octaveApproximate(_ signal: [Double], sampleRate: Double,
+                                  centerHz: Double,
+                                  filter: NativeRoomAnalysisFilter = .cascadedButterworth)
+        -> [Double] {
+        switch filter {
+        case .legacyWideBand:
+            let omega = 2 * Double.pi * centerHz / sampleRate
+            let alpha = sin(omega) / (2 * 1.41421356237)
+            let a0 = 1 + alpha
+            let b0 = alpha / a0
+            let b2 = -alpha / a0
+            let a1 = -2 * cos(omega) / a0
+            let a2 = (1 - alpha) / a0
+            var x1 = 0.0, x2 = 0.0, y1 = 0.0, y2 = 0.0
+            var output = [Double]()
+            output.reserveCapacity(signal.count)
+            for x in signal {
+                let y = b0 * x + b2 * x2 - a1 * y1 - a2 * y2
+                output.append(y)
+                x2 = x1
+                x1 = x
+                y2 = y1
+                y1 = y
+            }
+            return output
+
+        case .cascadedButterworth:
+            let halfOctave = sqrt(2.0)
+            let lowEdge = centerHz / halfOctave
+            let highEdge = centerHz * halfOctave
+            guard lowEdge > 0, highEdge < sampleRate * 0.49 else {
+                return [Double](repeating: 0, count: signal.count)
+            }
+            var highpass = Biquad(cutoffHz: lowEdge, sampleRate: sampleRate,
+                                  highpass: true)
+            var lowpass = Biquad(cutoffHz: highEdge, sampleRate: sampleRate,
+                                 highpass: false)
+            var output = [Double]()
+            output.reserveCapacity(signal.count)
+            for x in signal {
+                output.append(lowpass.process(highpass.process(x)))
+            }
+            return output
         }
-        return output
+    }
+
+    /// Butterworth Q=1/sqrt(2), transposed direct-form II, double precision.
+    /// Parameters and state are isolated to offline analysis; no audio-graph
+    /// dependencies, heap allocation in the sample loop, or runtime effect.
+    private struct Biquad {
+        private let b0, b1, b2, a1, a2: Double
+        private var z1: Double = 0
+        private var z2: Double = 0
+
+        init(cutoffHz: Double, sampleRate: Double, highpass: Bool) {
+            let omega = 2 * Double.pi * cutoffHz / sampleRate
+            let cosOmega = cos(omega)
+            let alpha = sin(omega) / sqrt(2.0)
+            let a0 = 1 + alpha
+            let sum = highpass ? (1 + cosOmega) : (1 - cosOmega)
+            b0 = (sum / 2) / a0
+            b1 = (highpass ? -sum : sum) / a0
+            b2 = (sum / 2) / a0
+            a1 = -2 * cosOmega / a0
+            a2 = (1 - alpha) / a0
+        }
+
+        mutating func process(_ sample: Double) -> Double {
+            let output = b0 * sample + z1
+            z1 = b1 * sample - a1 * output + z2
+            z2 = b2 * sample - a2 * output
+            return output
+        }
     }
 
     private static func backwardIntegratedDecibels(left: [Double],
