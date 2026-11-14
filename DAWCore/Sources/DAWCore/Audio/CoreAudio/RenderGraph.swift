@@ -85,6 +85,7 @@ public final class RenderGraph {
     final class TrackNode {
         let id: TrackID
         let controls = TrackControls()
+        var pendingInstrumentRequestID: UInt64 = 0
         var processing: ProcessingResources
 
         init(id: TrackID, bufferSize: Int) {
@@ -107,6 +108,7 @@ public final class RenderGraph {
     // MARK: - Properties
     
     private var tracks: [TrackID: TrackNode] = [:]
+    private var nextInstrumentRequestID: UInt64 = 0
     /// Route membership and processing resources are captured per generation.
     /// TrackControls remain shared, with writes owned by the render domain.
     private final class RenderSnapshot {
@@ -376,11 +378,41 @@ public final class RenderGraph {
         )
     }
 
-    /// Call only after the output callback is fully drained.
-    /// The old AVAudioUnit remains retained until this synchronous swap.
-    func installInstrument(_ prepared: PreparedInstrument, for trackID: TrackID) throws -> AudioUnit {
+    /// Control-serialized request tickets prevent slow async plugin loads
+    /// from replacing a newer instrument or a recreated track with the same ID.
+    func beginInstrumentReplacement(for trackID: TrackID) throws -> UInt64 {
         guard let track = tracks[trackID] else {
             throw AudioBackendError.trackNotFound(trackID)
+        }
+        nextInstrumentRequestID &+= 1
+        if nextInstrumentRequestID == 0 { nextInstrumentRequestID = 1 }
+        track.pendingInstrumentRequestID = nextInstrumentRequestID
+        return nextInstrumentRequestID
+    }
+
+    func validateInstrumentReplacement(for trackID: TrackID, requestID: UInt64) throws {
+        guard let track = tracks[trackID] else {
+            throw AudioBackendError.trackNotFound(trackID)
+        }
+        guard requestID != 0, track.pendingInstrumentRequestID == requestID else {
+            throw AudioBackendError.configurationError(
+                "Instrument request superseded by a newer load or unload"
+            )
+        }
+    }
+
+    /// Prepared instruments have separate AU instances and scratch buffers.
+    /// Publication is control-thread-only, and no hardware drain is needed
+    /// when the render callback pins a single immutable route generation.
+    /// Call only after the output callback is fully drained.
+    /// The old AVAudioUnit remains retained until this synchronous swap.
+    func installInstrument(_ prepared: PreparedInstrument, for trackID: TrackID,
+                           expectedRequestID: UInt64? = nil) throws -> AudioUnit {
+        guard let track = tracks[trackID] else {
+            throw AudioBackendError.trackNotFound(trackID)
+        }
+        if let request = expectedRequestID {
+            try validateInstrumentReplacement(for: trackID, requestID: request)
         }
         let previous = track.processing
         track.processing = ProcessingResources(
@@ -392,14 +424,16 @@ public final class RenderGraph {
             scratch: TrackScratchBuffers(frameCapacity: bufferSize)
         )
         publishRenderSnapshot()
+        track.pendingInstrumentRequestID = 0
         return prepared.unit
     }
 
     /// Convenience method for non-running graph usage. The backend calls the
     /// two stages separately to minimize hardware disruption.
     func loadInstrument(_ description: AudioComponentDescription, for trackID: TrackID) async throws -> AudioUnit {
+        let request = try beginInstrumentReplacement(for: trackID)
         let prepared = try await prepareInstrument(description, maximumFrames: UInt32(bufferSize))
-        return try installInstrument(prepared, for: trackID)
+        return try installInstrument(prepared, for: trackID, expectedRequestID: request)
     }
 
     func prepareEffect(_ description: AudioComponentDescription) throws -> PreparedEffect {
@@ -486,6 +520,7 @@ public final class RenderGraph {
         var block = old.renderBlock
 
         if slot < 0 {
+            track.pendingInstrumentRequestID = 0
             owner = nil
             unit = nil
             au = nil
