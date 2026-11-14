@@ -2149,12 +2149,23 @@ public final class PlaybackEngine: ObservableObject {
             let playerNode = AVAudioPlayerNode()
             audioEngine.engine.attach(playerNode)
             
-            // Connect to main mixer (same path as V-Rack instruments for perfect sync)
+            // Route file audio through the SAME track graph as instruments.
+            // Sending it straight to master bypasses this channel's pan,
+            // effect inserts, mute/solo AND Concert Hall send, and makes
+            // exported stems inconsistent with the mixer.
+            guard let trackNode = audioEngine.trackNode(for: track.id) else {
+                audioEngine.engine.detach(playerNode)
+                print("[PlaybackEngine] Missing channel mixer for \(track.name)")
+                return
+            }
             let format = audioFile.processingFormat
-            audioEngine.engine.connect(playerNode, to: audioEngine.engine.mainMixerNode, format: format)
-            
-            // Set volume
-            playerNode.volume = track.volume * clip.gain
+            audioEngine.engine.connect(
+                playerNode, to: trackNode.inputMixer, format: format
+            )
+
+            // TrackAudioNode applies the channel gain once; player applies
+            // only the clip-specific gain to avoid double attenuation.
+            playerNode.volume = clip.gain
             
             // Store player node, file, and clip info
             audioPlayerNodes[clip.id] = playerNode
@@ -2169,7 +2180,7 @@ public final class PlaybackEngine: ObservableObject {
                 clipStartBeat: clipStartBeat,
                 clipEndBeat: clipEndBeat,
                 fileURL: fileURL,
-                volume: track.volume * clip.gain
+                volume: clip.gain
             )
             
             let fileDuration = Double(audioFile.length) / audioFile.processingFormat.sampleRate
