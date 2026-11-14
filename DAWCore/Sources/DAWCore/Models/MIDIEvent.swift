@@ -54,18 +54,23 @@ public struct NoteData: Codable, Sendable, Hashable {
     
     /// Release velocity (optional)
     public var releaseVelocity: UInt8?
+    /// Optional to decode older projects without individual note muting.
+    /// A muted note remains editable but is excluded from live MIDI and SMF.
+    public var isMuted: Bool?
     
     public init(
         pitch: UInt8,
         velocity: UInt8 = 100,
         duration: Double = 0.25,
-        releaseVelocity: UInt8? = nil
+        releaseVelocity: UInt8? = nil,
+        isMuted: Bool? = nil
     ) {
         self.pitch = min(127, pitch)
         // Incoming MIDI note-off messages use velocity zero; preserve it.
         self.velocity = min(127, velocity)
         self.duration = max(0, duration)
         self.releaseVelocity = releaseVelocity
+        self.isMuted = isMuted
     }
     
     /// Note name (e.g., "C4", "F#5")

@@ -341,21 +341,21 @@ final class ProjectPersistenceSafetyTests: XCTestCase {
         XCTAssertTrue(preserved.audioFiles.isEmpty)
     }
 
-    func testUnimplementedMIDIExportNeverWritesMalformedFile() async throws {
+    func testDefaultMIDIExportWritesValidConductorEvenForEmptyProject() async throws {
         let destination = FileManager.default.temporaryDirectory
             .appendingPathComponent("GarritanExport-\(UUID().uuidString).mid")
         defer { try? FileManager.default.removeItem(at: destination) }
 
         let manager = ProjectFileManager()
-        do {
-            try await manager.export(project: Project(name: "Test"), to: destination, format: .midi)
-            XCTFail("MIDI export must not report success before track chunks are supported")
-        } catch {
-            XCTAssertFalse(
-                FileManager.default.fileExists(atPath: destination.path),
-                "An unsupported export must not produce a corrupt MIDI file"
-            )
-        }
+        try await manager.export(project: Project(name: "Test"),
+                                 to: destination, format: .midi)
+        let bytes = Array(try Data(contentsOf: destination))
+        XCTAssertGreaterThan(bytes.count, 22)
+        XCTAssertEqual(Array(bytes.prefix(4)), Array("MThd".utf8))
+        XCTAssertEqual(Array(bytes[8..<10]), [0x00, 0x01]) // Format 1
+        XCTAssertEqual(Array(bytes[10..<12]), [0x00, 0x01]) // Conductor track
+        XCTAssertEqual(Array(bytes[12..<14]), [0x01, 0xE0]) // 480 PPQ
+        XCTAssertEqual(Array(bytes[14..<18]), Array("MTrk".utf8))
     }
 
     func testFullSavePreservesAudioAlreadyInsideProjectPackage() async throws {

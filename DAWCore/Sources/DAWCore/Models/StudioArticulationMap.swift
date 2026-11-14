@@ -120,15 +120,19 @@ public enum StudioArticulationRenderer {
     }
 
     public static func events(for midi: MIDIClipData, map: StudioArticulationMap?) -> [MIDIEvent] {
+        let audible = midi.events.filter { event in
+            guard case .note(let note) = event.type else { return true }
+            return note.isMuted != true
+        }
         guard let map, let assignments = midi.articulations, !assignments.isEmpty else {
-            return midi.events
+            return audible
         }
         let byNote = Dictionary(assignments.map { ($0.noteID, $0.articulationID) },
                                 uniquingKeysWith: { _, new in new })
         var result: [(event: MIDIEvent, priority: Int, originalOrder: Int)] = []
         var emittedSwitches = Set<KeyswitchKey>()
         var heldControllerWindows: [HeldControllerKey: [(start: Double, end: Double)]] = [:]
-        for (order, original) in midi.events.enumerated() {
+        for (order, original) in audible.enumerated() {
             var noteEvent = original
             if case .note(let note) = original.type,
                let key = byNote[original.id],

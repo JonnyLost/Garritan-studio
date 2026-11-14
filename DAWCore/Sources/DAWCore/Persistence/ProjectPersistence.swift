@@ -509,6 +509,26 @@ public actor ProjectFileManager {
         return migratedProject
     }
     
+    // MARK: - Standard MIDI File Import
+
+    /// Read a MIDI file into a completely new project. The caller decides
+    /// whether to replace the active document; import never edits it in place.
+    public func importMIDI(from url: URL) async throws -> Project {
+        // Check on-disk size *before* mapping file contents into memory.
+        // This protects MacBook sessions from unexpectedly huge SMF inputs.
+        let values = try url.resourceValues(forKeys: [.fileSizeKey])
+        if let byteCount = values.fileSize, byteCount > 64 * 1024 * 1024 {
+            throw PersistenceError.invalidFormat(
+                "MIDI import is limited to 64 MB per file"
+            )
+        }
+        let data = try Data(contentsOf: url)
+        let suggestedName = url.deletingPathExtension().lastPathComponent
+        return try StandardMIDIFileImporter.decode(
+            data, name: suggestedName.isEmpty ? "Imported MIDI" : suggestedName
+        )
+    }
+
     // MARK: - Export
     
     /// Export project to a standard format
@@ -526,17 +546,18 @@ public actor ProjectFileManager {
             try data.write(to: url)
             
         case .midi:
-            try await exportAsMIDI(project: project, to: url)
+            try exportAsMIDI(project: project, to: url, mode: .musicalOnly)
+        case .midiPerformance:
+            try exportAsMIDI(project: project, to: url, mode: .renderedPerformance)
         }
     }
-    
-    private func exportAsMIDI(project: Project, to url: URL) async throws {
-        // A header by itself is not a valid Standard MIDI File. Until the
-        // MIDI track/chunk writer is implemented, fail explicitly rather than
-        // exporting an unreadable file that appears to have succeeded.
-        throw PersistenceError.invalidFormat(
-            "Standard MIDI export is not implemented yet; no file was created."
-        )
+
+    /// Validate and construct the entire Standard MIDI File before replacing
+    /// the destination. The mode never changes or marks the project as saved.
+    private func exportAsMIDI(project: Project, to url: URL,
+                              mode: StudioMIDIExportMode) throws {
+        let data = try StandardMIDIFileExporter.encode(project: project, mode: mode)
+        try data.write(to: url, options: .atomic)
     }
 }
 
@@ -569,7 +590,10 @@ public enum PersistenceError: Error, LocalizedError {
 
 public enum ExportFormat {
     case json
+    /// The established export case stays compatible and never bakes switches.
     case midi
+    /// Explicit opt-in to instrument-specific keyswitch / CC / program commands.
+    case midiPerformance
 }
 
 // MARK: - Project Metadata Info

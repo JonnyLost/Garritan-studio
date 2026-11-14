@@ -183,4 +183,130 @@ enum StudioMIDINoteEditing {
             return updated
         }
     }
+    /// Split selected notes strictly inside their sounding interval. The
+    /// existing ID remains on the left half so the original articulation is
+    /// retained; callers copy its semantic map to the new right-hand ID.
+    static func splitting(_ events: [MIDIEvent], selectedIDs: Set<UUID>,
+                          at beat: Double,
+                          minimumDuration: Double = 0.001)
+        -> (events: [MIDIEvent], idMapping: [UUID: UUID]) {
+        guard beat.isFinite, beat >= 0, !selectedIDs.isEmpty else {
+            return (events, [:])
+        }
+        var output: [MIDIEvent] = []
+        var mapping: [UUID: UUID] = [:]
+        for event in events {
+            guard selectedIDs.contains(event.id),
+                  case .note(let note) = event.type,
+                  note.velocity > 0,
+                  beat > event.beatPosition + minimumDuration,
+                  beat < event.beatPosition + note.duration - minimumDuration else {
+                output.append(event)
+                continue
+            }
+            var left = event
+            var leftData = note
+            leftData.duration = beat - event.beatPosition
+            left.type = .note(leftData)
+
+            var right = event
+            right.id = UUID()
+            right.beatPosition = beat
+            var rightData = note
+            rightData.duration = event.beatPosition + note.duration - beat
+            right.type = .note(rightData)
+            output.append(left)
+            output.append(right)
+            mapping[event.id] = right.id
+        }
+        return (output, mapping)
+    }
+
+    /// Merge adjacent equal-performance notes only when articulation and
+    /// channel agree. Gaps, overlaps and expressive differences must not be
+    /// silently discarded by a "Glue" command.
+    static func gluing(_ events: [MIDIEvent], selectedIDs: Set<UUID>,
+                       articulations: [UUID: String] = [:])
+        -> (events: [MIDIEvent], removedIDs: Set<UUID>) {
+        guard selectedIDs.count > 1 else { return (events, []) }
+        let ordered = selectedNotes(in: events, ids: selectedIDs).sorted {
+            if $0.beatPosition != $1.beatPosition {
+                return $0.beatPosition < $1.beatPosition
+            }
+            return $0.id.uuidString < $1.id.uuidString
+        }
+        var merged: [UUID: MIDIEvent] = [:]
+        var removed: Set<UUID> = []
+        for event in ordered {
+            guard case .note(let data) = event.type, data.velocity > 0 else { continue }
+            let compatible = ordered.first { candidate in
+                guard candidate.id != event.id, !removed.contains(candidate.id),
+                      case .note(let other) = candidate.type,
+                      other.velocity > 0,
+                      candidate.beatPosition < event.beatPosition,
+                      candidate.channel == event.channel,
+                      other.pitch == data.pitch,
+                      other.velocity == data.velocity,
+                      other.releaseVelocity == data.releaseVelocity,
+                      (other.isMuted == true) == (data.isMuted == true),
+                      articulations[candidate.id] == articulations[event.id] else {
+                    return false
+                }
+                let predecessor = merged[candidate.id] ?? candidate
+                guard case .note(let priorData) = predecessor.type else { return false }
+                return abs(predecessor.beatPosition + priorData.duration -
+                           event.beatPosition) < 0.000001
+            }
+            if let previous = compatible {
+                var mergedEvent = merged[previous.id] ?? previous
+                if case .note(var old) = mergedEvent.type {
+                    old.duration += data.duration
+                    mergedEvent.type = .note(old)
+                    merged[previous.id] = mergedEvent
+                    removed.insert(event.id)
+                }
+            }
+        }
+        guard !removed.isEmpty else { return (events, []) }
+        return (events.compactMap { event in
+            if removed.contains(event.id) { return nil }
+            return merged[event.id] ?? event
+        }, removed)
+    }
+
+    /// An individual toggle is stored on the note and travels through
+    /// duplicate, undo, clipboard, and project save/reopen operations.
+    static func togglingMute(_ events: [MIDIEvent],
+                             selectedIDs: Set<UUID>) -> [MIDIEvent] {
+        events.map { event in
+            guard selectedIDs.contains(event.id),
+                  case .note(var note) = event.type, note.velocity > 0 else {
+                return event
+            }
+            var changed = event
+            note.isMuted = note.isMuted != true
+            changed.type = .note(note)
+            return changed
+        }
+    }
+
+    /// Quantize against the arrangement's *absolute* musical grid, even in
+    /// regions starting between beats. Keep every note clip-relative and
+    /// leave controller events and unselected notes unchanged.
+    static func quantizing(_ events: [MIDIEvent], selectedIDs: Set<UUID>,
+                           division: Double, clipStartBeat: Double) -> [MIDIEvent] {
+        guard division.isFinite, division > 0, clipStartBeat.isFinite else {
+            return events
+        }
+        return events.map { event in
+            guard selectedIDs.contains(event.id), case .note = event.type,
+                  event.beatPosition.isFinite else { return event }
+            var result = event
+            let absolute = clipStartBeat + event.beatPosition
+            let snapped = (absolute / division).rounded() * division
+            result.beatPosition = max(0, snapped - clipStartBeat)
+            return result
+        }
+    }
+
 }

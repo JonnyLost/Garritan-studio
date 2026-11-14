@@ -30,4 +30,18 @@ final class StudioMusicalGridTests: XCTestCase {
         XCTAssertEqual(StudioMusicalGrid.snap(.infinity, division: 1), 0)
         XCTAssertEqual(StudioMusicalGrid.snap(4.25, division: 0), 4.25)
     }
+    func testFractionalMeterQuarterMarksRestartAtEachBar() {
+        let sevenEight = TimeSignature(numerator: 7, denominator: 8)
+        XCTAssertEqual(StudioMusicalGrid.interiorQuarterBeats(sevenEight),
+                       [1, 2, 3])
+        let barLength = StudioMusicalGrid.beatsPerBar(sevenEight)
+        let secondBar = StudioMusicalGrid.interiorQuarterBeats(sevenEight)
+            .map { $0 + barLength }
+        XCTAssertEqual(secondBar, [4.5, 5.5, 6.5])
+        XCTAssertEqual(StudioMusicalGrid.interiorQuarterBeats(.sixEight),
+                       [1, 2])
+        XCTAssertEqual(StudioMusicalGrid.interiorQuarterBeats(
+            TimeSignature(numerator: 1, denominator: 8)), [])
+    }
+
 }

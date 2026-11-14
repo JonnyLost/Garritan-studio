@@ -90,6 +90,16 @@ struct DAWApp: App {
                     appState.saveProjectAs()
                 }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
+
+                Divider()
+
+                Button("Import MIDI as New Project...") {
+                    appState.importMIDI()
+                }
+
+                Button("Export MIDI...") {
+                    appState.exportMIDI()
+                }
             }
             
             // Edit commands
@@ -390,6 +400,109 @@ class AppState: ObservableObject {
         }
     }
     
+    /// A foreign SMF becomes a new, unsaved Studio project. Never overwrite
+    /// an unsaved composing session or destructively append unreviewed tracks.
+    func importMIDI() {
+        guard !hasUnsavedChanges else {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Save Your Current Project First"
+            alert.informativeText = """
+                Import MIDI opens a new Studio project. Save your current changes before importing so nothing is lost.
+                """
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            return
+        }
+
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [
+            UTType(filenameExtension: "mid") ?? .data,
+            UTType(filenameExtension: "midi") ?? .data
+        ]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.begin { [weak self] response in
+            Task { @MainActor in
+                guard let self, response == .OK, let url = panel.url else { return }
+                do {
+                    // Full parsing and validation happen before we stop the
+                    // old audio session or replace the active document.
+                    let imported = try await self.fileManager.importMIDI(from: url)
+                    guard !self.hasUnsavedChanges else { return }
+                    self.autosaveManager.stopAutosave()
+                    NotificationCenter.default.post(
+                        name: .clearAllPlugins, object: nil)
+                    self.currentProject = imported
+                    self.currentProjectURL = nil
+                    self.projectID = UUID()
+                    self.markUnsavedChanges()
+                    print("[AppState] Imported MIDI as a new project: \(url.path)")
+                } catch {
+                    let alert = NSAlert()
+                    alert.alertStyle = .warning
+                    alert.messageText = "MIDI Import Failed"
+                    alert.informativeText = error.localizedDescription
+                    alert.addButton(withTitle: "OK")
+                    alert.runModal()
+                }
+            }
+        }
+    }
+
+    /// Choose whether portable MIDI should contain only the composed music
+    /// or instrument-specific performance commands. Keep musical-only as the
+    /// safest default for sending MIDI to a different synth or DAW.
+    func exportMIDI() {
+        let choice = NSAlert()
+        choice.alertStyle = .informational
+        choice.messageText = "Export Standard MIDI File"
+        choice.informativeText = """
+            Musical MIDI exports notes and authored controllers without baking articulation triggers.
+
+            Rendered Performance MIDI adds the configured keyswitches, controller and program changes for the loaded instrument. Other instruments may interpret these commands differently.
+            """
+        choice.addButton(withTitle: "Musical MIDI")
+        choice.addButton(withTitle: "Rendered Performance MIDI")
+        choice.addButton(withTitle: "Cancel")
+
+        // NSAlert supports runModal and beginSheetModal(for:); it does not
+        // expose the NSSavePanel-style begin(completionHandler:) method.
+        let format: ExportFormat
+        switch choice.runModal() {
+        case .alertFirstButtonReturn:
+            format = .midi
+        case .alertSecondButtonReturn:
+            format = .midiPerformance
+        default:
+            return
+        }
+
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [UTType(filenameExtension: "mid") ?? .data]
+        panel.nameFieldStringValue = currentProject.name + ".mid"
+        panel.begin { [weak self] response in
+            Task { @MainActor in
+                guard let self, response == .OK, let url = panel.url else { return }
+                // Snapshot at confirmation and preserve unsaved-project state.
+                let project = self.currentProject
+                do {
+                    try await self.fileManager.export(
+                        project: project, to: url, format: format
+                    )
+                    print("[AppState] Exported MIDI to: \(url.path)")
+                } catch {
+                    let alert = NSAlert()
+                    alert.alertStyle = .warning
+                    alert.messageText = "MIDI Export Failed"
+                    alert.informativeText = error.localizedDescription
+                    alert.addButton(withTitle: "OK")
+                    alert.runModal()
+                }
+            }
+        }
+    }
+
     func newProject() {
         // TODO: Prompt to save if needed
         autosaveManager.stopAutosave()

@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/studio-sampler-native
+      - feature/pro-midi-file-export
   pull_request:
     paths:
       - "StudioSamplerDSP/**"
