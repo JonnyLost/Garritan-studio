@@ -147,6 +147,7 @@ public struct AdvancedPianoRollView: View {
     @State private var showArticulationLane = false
     @State private var showArticulationMapEditor = false
     @State private var selectedCCType: CCType = .modulation
+    @State private var expressionDrawMode: StudioExpressionDrawMode = .pencil
     @State private var expressionChannel = 0
     @State private var expressionStroke: [StudioMIDIExpressionPoint] = []
     @State private var keyswitchPitch = 24
@@ -352,6 +353,18 @@ public struct AdvancedPianoRollView: View {
             case "v":
                 currentTool = .velocity
                 return .handled
+            case "1" where showCCLane:
+                expressionDrawMode = .pencil
+                return .handled
+            case "2" where showCCLane:
+                expressionDrawMode = .line
+                return .handled
+            case "3" where showCCLane:
+                expressionDrawMode = .curve
+                return .handled
+            case "4" where showCCLane:
+                expressionDrawMode = .erase
+                return .handled
             case "q":
                 // Quantize shortcut - only if notes are selected
                 if !selectedNoteIDs.isEmpty {
@@ -524,6 +537,14 @@ public struct AdvancedPianoRollView: View {
                 }
                 .pickerStyle(.menu)
                 .frame(width: 120)
+                Picker("Shape", selection: $expressionDrawMode) {
+                    ForEach(StudioExpressionDrawMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(width: 112)
+                .help("Expression edit mode: 1 Pencil · 2 Line · 3 Curve · 4 Erase")
             }
 
             Picker("Ch", selection: $expressionChannel) {
@@ -976,6 +997,7 @@ public struct AdvancedPianoRollView: View {
                 return absolute
             },
             lane: selectedCCType,
+            mode: expressionDrawMode,
             channel: UInt8(expressionChannel),
             pixelsPerBeat: pixelsPerBeat,
             width: totalWidth,
@@ -1439,8 +1461,10 @@ public struct AdvancedPianoRollView: View {
         var draft = original
         draft.events = StudioMIDIExpressionEditing.draw(
             events: original.events, lane: selectedCCType, points: expressionStroke,
-            clipStartBeat: start, division: step, channel: UInt8(expressionChannel))
-        previewMIDI = draft
+            clipStartBeat: start, division: step, channel: UInt8(expressionChannel),
+            mode: expressionDrawMode)
+        previewMIDI = expressionDrawMode == .erase &&
+                     draft.events.count == original.events.count ? nil : draft
     }
 
     private func commitExpression() {
@@ -1451,7 +1475,8 @@ public struct AdvancedPianoRollView: View {
         guard !expressionStroke.isEmpty, let draft = previewMIDI,
               var clip = currentClip else { return }
         clip.content = .midi(draft)
-        updateClip(clip, description: "Draw \(selectedCCType.name) MIDI Expression")
+        updateClip(clip, description:
+            "\(expressionDrawMode == .erase ? "Erase" : "Draw") \(selectedCCType.name) MIDI Expression")
     }
 
     /// A keyswitch is a short, ordinary MIDI note. Its meaning is determined
