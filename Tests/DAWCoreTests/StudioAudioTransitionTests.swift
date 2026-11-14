@@ -136,6 +136,42 @@ final class StudioAudioTransitionTests: XCTestCase {
             XCTAssertEqual(outR[i], 0)
         }
     }
+    func testEffectInputCanBorrowZeroCopyBuffersFromUpstream() {
+        struct StereoBufferList {
+            var mNumberBuffers: UInt32 = 2
+            var left = AudioBuffer()
+            var right = AudioBuffer()
+        }
+        let context = StudioEffectInputContext()
+        let sourceL = UnsafeMutablePointer<Float>.allocate(capacity: 8)
+        let sourceR = UnsafeMutablePointer<Float>.allocate(capacity: 8)
+        defer { sourceL.deallocate(); sourceR.deallocate() }
+        sourceL.initialize(repeating: 0.25, count: 8)
+        sourceR.initialize(repeating: -0.25, count: 8)
+        context.setSource(
+            left: UnsafePointer(sourceL), right: UnsafePointer(sourceR),
+            sampleTime: 10, frames: 8
+        )
+        var stamp = AudioTimeStamp()
+        stamp.mFlags = .sampleTimeValid
+        stamp.mSampleTime = 10
+        var io = StereoBufferList()
+        io.left = AudioBuffer(mNumberChannels: 1, mDataByteSize: 0, mData: nil)
+        io.right = AudioBuffer(mNumberChannels: 1, mDataByteSize: 0, mData: nil)
+        let status = withUnsafePointer(to: &stamp) { time in
+            withUnsafeMutablePointer(to: &io) { ptr in
+                ptr.withMemoryRebound(to: AudioBufferList.self, capacity: 1) {
+                    context.supply(timeStamp: time, frames: 8, output: $0)
+                }
+            }
+        }
+        XCTAssertEqual(status, noErr)
+        XCTAssertEqual(io.left.mDataByteSize, 32)
+        XCTAssertEqual(io.right.mDataByteSize, 32)
+        XCTAssertEqual(io.left.mData?.assumingMemoryBound(to: Float.self)[0], 0.25)
+        XCTAssertEqual(io.right.mData?.assumingMemoryBound(to: Float.self)[0], -0.25)
+    }
+
     /// This exercises Apple's actual native effect renderer with a nonzero
     /// signal, not just our standalone input copy routine. No output device
     /// or external third-party plug-in is needed on the macOS CI runner.
