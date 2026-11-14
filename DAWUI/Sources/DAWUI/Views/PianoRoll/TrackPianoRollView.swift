@@ -806,10 +806,10 @@ public struct TrackPianoRollView: View {
                     if pencilPreviewStart == nil {
                         pencilPreviewStart = snapBeat(beat)
                         pencilPreviewPitch = pitch
-                        pencilPreviewDuration = snapMode.division > 0 ? snapMode.division : 0.25
+                        pencilPreviewDuration = snapMode.division(for: viewModel.transportState.timeSignature) > 0 ? snapMode.division(for: viewModel.transportState.timeSignature) : 0.25
                         viewModel.playNotePreview(pitch: UInt8(pitch))
                     } else if let start = pencilPreviewStart {
-                        pencilPreviewDuration = max(snapMode.division > 0 ? snapMode.division : 0.25, snapBeat(beat) - start)
+                        pencilPreviewDuration = max(snapMode.division(for: viewModel.transportState.timeSignature) > 0 ? snapMode.division(for: viewModel.transportState.timeSignature) : 0.25, snapBeat(beat) - start)
                     }
 
                 case .select:
@@ -1012,8 +1012,8 @@ public struct TrackPianoRollView: View {
         if NSEvent.modifierFlags.contains(.command) {
             return beat
         }
-        guard snapMode != .off, snapMode.division > 0 else { return beat }
-        return round(beat / snapMode.division) * snapMode.division
+        guard snapMode != .off, snapMode.division(for: viewModel.transportState.timeSignature) > 0 else { return beat }
+        return round(beat / snapMode.division(for: viewModel.transportState.timeSignature)) * snapMode.division(for: viewModel.transportState.timeSignature)
     }
     
     private func selectNote(_ id: UUID) {
@@ -1247,7 +1247,7 @@ public struct TrackPianoRollView: View {
 
         let beatDelta = delta.width / pixelsPerBeat
         let pitchDelta = -Int(delta.height / noteHeight)
-        let minDuration = snapMode.division > 0 ? snapMode.division : 0.0625
+        let minDuration = snapMode.division(for: viewModel.transportState.timeSignature) > 0 ? snapMode.division(for: viewModel.transportState.timeSignature) : 0.0625
 
         switch dragMode {
         case .move:
