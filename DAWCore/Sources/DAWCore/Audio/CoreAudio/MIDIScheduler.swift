@@ -96,6 +96,23 @@ public final class MIDIScheduler {
         endSample: Int64,
         renderGraph: RenderGraph
     ) -> Int {
+        processEvents(startSample: startSample, endSample: endSample) { event, offset in
+            renderGraph.sendMIDI(
+                to: event.trackID, status: event.status,
+                data1: event.data1, data2: event.data2, sampleOffset: offset
+            )
+        }
+    }
+
+    /// A non-escaping delivery callback lets RenderGraph pin ONE immutable
+    /// snapshot for both this buffer's MIDI events and its audio processing.
+    /// The closure does not retain or release any snapshot on the callback.
+    @discardableResult
+    func processEvents(
+        startSample: Int64,
+        endSample: Int64,
+        deliver: (ScheduledMIDIEvent, UInt32) -> Void
+    ) -> Int {
         var processed = 0
         
         // Process events from the ring buffer
@@ -104,13 +121,7 @@ public final class MIDIScheduler {
             let sampleOffset = UInt32(max(0, event.samplePosition - startSample))
             
             // Send the MIDI event
-            renderGraph.sendMIDI(
-                to: event.trackID,
-                status: event.status,
-                data1: event.data1,
-                data2: event.data2,
-                sampleOffset: sampleOffset
-            )
+            deliver(event, sampleOffset)
             
             // Track note-on for later note-off
             if isNoteOn(event.status) {
