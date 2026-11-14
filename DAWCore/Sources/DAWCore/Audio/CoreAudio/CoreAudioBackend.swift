@@ -512,13 +512,13 @@ public final class CoreAudioBackend: AudioBackend {
     
     public func setMetronomeEnabled(_ enabled: Bool) {
         controlGate.perform {
-        metronomeRenderer.isEnabled = enabled
+        withDrainedOutput { metronomeRenderer.isEnabled = enabled }
     
         }}
     
     public func setMetronomeVolume(_ volume: Float) {
         controlGate.perform {
-        metronomeRenderer.volume = volume
+        withDrainedOutput { metronomeRenderer.volume = volume }
     
         }}
     
@@ -529,14 +529,16 @@ public final class CoreAudioBackend: AudioBackend {
         timeSignature: TimeSignature
     ) {
         controlGate.perform {
-        _tempo = tempo
-        metronomeRenderer.scheduleClicks(
-            from: startBeat,
-            to: endBeat,
-            tempo: tempo,
-            sampleRate: _sampleRate,
-            timeSignature: timeSignature
-        )
+        withDrainedOutput {
+            _tempo = tempo
+            metronomeRenderer.scheduleClicks(
+                from: startBeat,
+                to: endBeat,
+                tempo: tempo,
+                sampleRate: _sampleRate,
+                timeSignature: timeSignature
+            )
+        }
     
         }}
     
