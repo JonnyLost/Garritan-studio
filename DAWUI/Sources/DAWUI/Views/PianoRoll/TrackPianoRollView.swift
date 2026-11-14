@@ -37,6 +37,7 @@ public struct TrackPianoRollView: View {
     @State private var showArticulationMapEditor = false
     private let articulationLaneHeight: CGFloat = 42
     @State private var selectedCCType: CCType = .modulation
+    @State private var expressionDrawMode: StudioExpressionDrawMode = .pencil
     @State private var expressionChannel = 0
     @State private var expressionStroke: [StudioMIDIExpressionPoint] = []
     @State private var expressionTargetClipID: ClipID? = nil
@@ -402,6 +403,18 @@ public struct TrackPianoRollView: View {
             case "p": currentTool = .pencil; return .handled
             case "e": currentTool = .eraser; return .handled
             case "v": currentTool = .velocity; return .handled
+            case "1" where showCCLane:
+                expressionDrawMode = .pencil
+                return .handled
+            case "2" where showCCLane:
+                expressionDrawMode = .line
+                return .handled
+            case "3" where showCCLane:
+                expressionDrawMode = .curve
+                return .handled
+            case "4" where showCCLane:
+                expressionDrawMode = .erase
+                return .handled
             case "q":
                 if !selectedNoteIDs.isEmpty { showQuantizeDialog = true }
                 return .handled
@@ -566,6 +579,14 @@ public struct TrackPianoRollView: View {
                 }
                 .pickerStyle(.menu)
                 .frame(width: 125)
+                Picker("Shape", selection: $expressionDrawMode) {
+                    ForEach(StudioExpressionDrawMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(width: 112)
+                .help("Expression edit mode: 1 Pencil · 2 Line · 3 Curve · 4 Erase")
             }
 
             Picker("Ch", selection: $expressionChannel) {
@@ -945,6 +966,7 @@ public struct TrackPianoRollView: View {
         StudioExpressionLaneCanvas(
             events: ccEvents,
             lane: selectedCCType,
+            mode: expressionDrawMode,
             channel: UInt8(expressionChannel),
             pixelsPerBeat: pixelsPerBeat,
             width: totalWidth,
@@ -1579,6 +1601,8 @@ public struct TrackPianoRollView: View {
             }) {
                 expressionTargetClipID = clip.id
             } else {
+                // An eraser gesture must never create a new empty region.
+                guard expressionDrawMode != .erase else { return }
                 // Drawing expression on an empty lane creates one MIDI region,
                 // together with its controller events in a single undo action.
                 let startBeat = floor(point.beat / bar) * bar
@@ -1619,9 +1643,15 @@ public struct TrackPianoRollView: View {
         edited.events = StudioMIDIExpressionEditing.draw(
             events: originalData.events, lane: selectedCCType,
             points: expressionStroke, clipStartBeat: start,
-            division: step, channel: UInt8(expressionChannel))
-        draft.clips[index].content = .midi(edited)
-        previewTrack = draft
+            division: step, channel: UInt8(expressionChannel),
+            mode: expressionDrawMode)
+        if expressionDrawMode == .erase &&
+            edited.events.count == originalData.events.count {
+            previewTrack = nil
+        } else {
+            draft.clips[index].content = .midi(edited)
+            previewTrack = draft
+        }
     }
 
     private func commitExpression() {
@@ -1632,7 +1662,8 @@ public struct TrackPianoRollView: View {
             previewTrack = nil
         }
         guard !expressionStroke.isEmpty, let draft = previewTrack else { return }
-        viewModel.updateTrack(draft, description: "Draw \(selectedCCType.name) MIDI Expression")
+        viewModel.updateTrack(draft, description:
+            "\(expressionDrawMode == .erase ? "Erase" : "Draw") \(selectedCCType.name) MIDI Expression")
     }
 
     /// Instrument-specific articulation changes are ordinary keyswitch notes;
