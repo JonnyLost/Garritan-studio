@@ -100,6 +100,38 @@ enum StudioMIDINoteEditing {
         }
     }
 
+    /// Arrow-key nudging preserves every selected note's relative rhythm and
+    /// chord voicing, including originally unsnapped performance timing.
+    /// Unlike pointer dragging, it advances by exactly the requested increment,
+    /// without silently quantizing notes to the editor's current snap grid.
+    static func nudging(_ events: [MIDIEvent], selectedIDs: Set<UUID>,
+                        beatDelta: Double = 0, pitchDelta: Int = 0) -> [MIDIEvent] {
+        guard beatDelta.isFinite, !selectedIDs.isEmpty else { return events }
+        let selected = selectedNotes(in: events, ids: selectedIDs)
+        guard !selected.isEmpty else { return events }
+
+        let earliest = selected.map(\.beatPosition).min() ?? 0
+        let appliedBeat = max(-earliest, beatDelta)
+        let pitches = selected.compactMap { event -> Int? in
+            guard case .note(let note) = event.type else { return nil }
+            return Int(note.pitch)
+        }
+        let minPitch = pitches.min() ?? 0
+        let maxPitch = pitches.max() ?? 127
+        let appliedPitch = max(-minPitch, min(127 - maxPitch, pitchDelta))
+        guard appliedBeat != 0 || appliedPitch != 0 else { return events }
+
+        return events.map { event in
+            guard selectedIDs.contains(event.id),
+                  case .note(var note) = event.type else { return event }
+            var moved = event
+            moved.beatPosition += appliedBeat
+            note.pitch = UInt8(Int(note.pitch) + appliedPitch)
+            moved.type = .note(note)
+            return moved
+        }
+    }
+
     /// Keep the opposite edge fixed and never produce zero/negative length notes.
     static func resizing(_ events: [MIDIEvent], noteID: UUID, edge: ResizeEdge,
                          beatDelta: Double, division: Double, bypassSnap: Bool = false,
