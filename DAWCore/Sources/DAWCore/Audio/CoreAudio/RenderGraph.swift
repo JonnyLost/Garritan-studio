@@ -10,8 +10,9 @@ public final class RenderGraph {
     
     // MARK: - Track Node
     
-    struct TrackNode {
+    final class TrackNode {
         let id: TrackID
+        init(id: TrackID) { self.id = id }
         var instrumentUnit: AudioUnit?
         var auAudioUnit: AUAudioUnit?  // For AUv3 rendering
         var renderBlock: AURenderBlock?  // AUv3 render callback
@@ -29,6 +30,27 @@ public final class RenderGraph {
     // MARK: - Properties
     
     private var tracks: [TrackID: TrackNode] = [:]
+    /// Immutable route membership prepared by the control thread while
+    /// output callbacks are drained. Per-track parameters remain mutable
+    /// only by the single active render consumer.
+    private struct RenderSnapshot {
+        let generation: UInt64
+        let routes: [TrackNode]
+    }
+    private var renderSnapshot = RenderSnapshot(generation: 0, routes: [])
+
+    private func publishRenderSnapshot() {
+        let routes = tracks.values.sorted {
+            $0.id.rawValue.uuidString < $1.id.rawValue.uuidString
+        }
+        renderSnapshot = RenderSnapshot(
+            generation: renderSnapshot.generation &+ 1, routes: routes
+        )
+    }
+
+    var renderSnapshotGeneration: UInt64 { renderSnapshot.generation }
+    var renderSnapshotTrackIDs: [TrackID] { renderSnapshot.routes.map(\.id) }
+
     private var masterVolume: Float = 1.0
     private let sampleRate: Double
     private var bufferSize: Int
@@ -88,6 +110,7 @@ public final class RenderGraph {
         track.renderBufferRight?.initialize(repeating: 0, count: bufferSize)
         
         tracks[id] = track
+        publishRenderSnapshot()
         print("[RenderGraph] Created track \(id.rawValue)")
     }
     
@@ -108,6 +131,7 @@ public final class RenderGraph {
         track.renderBufferRight?.deallocate()
         
         tracks.removeValue(forKey: id)
+        publishRenderSnapshot()
         updateSoloState()
         
         print("[RenderGraph] Removed track \(id.rawValue)")
@@ -218,6 +242,7 @@ public final class RenderGraph {
         track.renderBlock = renderBlock
         avAudioUnits[trackID] = avAudioUnit
         tracks[trackID] = track
+        publishRenderSnapshot()
         
         print("[RenderGraph] Loaded instrument for track \(trackID.rawValue) using AVAudioUnit (renderBlock: \(renderBlock != nil ? "✓" : "nil"))")
         return unit
@@ -280,6 +305,7 @@ public final class RenderGraph {
         }
         track.effectUnits[slot] = unit
         tracks[trackID] = track
+        publishRenderSnapshot()
         
         print("[RenderGraph] Loaded effect at slot \(slot) for track \(trackID.rawValue)")
         return unit
@@ -302,6 +328,7 @@ public final class RenderGraph {
         }
         
         tracks[trackID] = track
+        publishRenderSnapshot()
     }
     
     func getInstrumentUnit(for trackID: TrackID) -> AudioUnit? {
@@ -369,7 +396,7 @@ public final class RenderGraph {
         
         guard let outL = outputLeft, let outR = outputRight else { return }
         
-        for (_, track) in tracks {
+        for track in renderSnapshot.routes {
             // Skip muted tracks (or non-soloed tracks when solo is active)
             if track.isMuted { continue }
             if hasSoloedTracks && !track.isSolo { continue }
