@@ -431,7 +431,10 @@ public struct TrackPianoRollView: View {
             )
         }
         .sheet(isPresented: $showArticulationMapEditor) {
-            StudioArticulationMapEditor(map: currentTrack?.articulationMap) { map in
+            StudioArticulationMapEditor(
+                map: currentTrack?.articulationMap,
+                garritanProgramID: currentTrack?.garritanProgramID
+            ) { map in
                 guard var track = currentTrack else { return }
                 track.articulationMap = map
                 viewModel.updateTrack(track, description: "Edit Articulation Map")
