@@ -1,0 +1,101 @@
+name: Studio MIDI Integration Readiness
+
+on:
+  push:
+    branches:
+      - feature/pro-midi-m14-integration-readiness
+  pull_request:
+    branches:
+      - feature/pro-midi-file-export
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: midi-integration-readiness-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  branch-overlap-audit:
+    # This is an entirely non-mutating comparison. It does NOT run git merge,
+    # create merge commits, update refs, or change any workstream.
+    name: Identify integration overlaps without merging branches
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout all history and branch tips
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Identify concurrent changes by common ancestor
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '## Professional MIDI integration overlap scan' >> "${GITHUB_STEP_SUMMARY}"
+          echo 'This is a read-only comparison; no branches are merged or changed.' >> "${GITHUB_STEP_SUMMARY}"
+          echo '' >> "${GITHUB_STEP_SUMMARY}"
+          echo '| Parallel workstream | MIDI changed files | Other changed files | Shared filenames |' >> "${GITHUB_STEP_SUMMARY}"
+          echo '| --- | ---: | ---: | ---: |' >> "${GITHUB_STEP_SUMMARY}"
+
+          targets=(
+            integration/studio-complete-mac-test
+            feature/studio-export-engine
+            feature/studio-core-midi-export
+            feature/studio-track-workflow
+          )
+          for target in "${targets[@]}"; do
+            ref="refs/remotes/origin/${target}"
+            if ! git show-ref --verify --quiet "${ref}"; then
+              echo "Missing parallel branch: ${target}" >&2
+              exit 1
+            fi
+
+            base="$(git merge-base HEAD "${ref}")"
+            ours="$(mktemp)"
+            theirs="$(mktemp)"
+            common="$(mktemp)"
+            git diff --name-only "${base}" HEAD | LC_ALL=C sort -u > "${ours}"
+            git diff --name-only "${base}" "${ref}" | LC_ALL=C sort -u > "${theirs}"
+            LC_ALL=C comm -12 "${ours}" "${theirs}" > "${common}"
+
+            our_count="$(wc -l < "${ours}" | tr -d ' ')"
+            their_count="$(wc -l < "${theirs}" | tr -d ' ')"
+            overlap="$(wc -l < "${common}" | tr -d ' ')"
+            echo "| \`${target}\` | ${our_count} | ${their_count} | ${overlap} |" >> "${GITHUB_STEP_SUMMARY}"
+
+            if [[ "${overlap}" -gt 0 ]]; then
+              echo '' >> "${GITHUB_STEP_SUMMARY}"
+              echo "<details><summary>Files touched by both MIDI and ${target}</summary>" >> "${GITHUB_STEP_SUMMARY}"
+              echo '' >> "${GITHUB_STEP_SUMMARY}"
+              echo '```text' >> "${GITHUB_STEP_SUMMARY}"
+              head -n 90 "${common}" >> "${GITHUB_STEP_SUMMARY}"
+              echo '```' >> "${GITHUB_STEP_SUMMARY}"
+              echo '</details>' >> "${GITHUB_STEP_SUMMARY}"
+            fi
+            rm -f "${ours}" "${theirs}" "${common}"
+          done
+
+          echo '' >> "${GITHUB_STEP_SUMMARY}"
+          echo 'Shared filename means review required; it is **not** proof of a textual merge conflict.' >> "${GITHUB_STEP_SUMMARY}"
+          echo 'In particular, preserve Studio export UI and sampler/synth routing when reconciling MIDI menus and project persistence.' >> "${GITHUB_STEP_SUMMARY}"
+
+  midi-regression-acceptance:
+    name: MacBook DAW build, integration tests and optimized application
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Report native Apple toolchain
+        run: |
+          sw_vers
+          swift --version
+      - name: Resolve Swift packages
+        run: swift package resolve
+      - name: Build all Studio targets
+        run: swift build
+      - name: Run full unit and orchestral integration regressions
+        run: swift test --parallel
+      - name: Build optimized DAWApp
+        run: swift build -c release --product DAWApp
