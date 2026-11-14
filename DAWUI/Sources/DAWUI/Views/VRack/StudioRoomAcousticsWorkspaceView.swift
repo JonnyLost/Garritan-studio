@@ -402,7 +402,7 @@ struct StudioRoomAcousticsWorkspaceView: View {
 
             let sourceCount = viewModel.project.tracks.filter {
                 $0.type == .midi || $0.type == .instrument || $0.type == .audio
-            }.count
+            }.count + (viewModel.audioEngine.hasVRackCaptureSource ? 1 : 0)
             HStack(spacing: 12) {
                 Button(viewModel.audioEngine.isMicrophoneAuditionActive ?
                         "Return to Original Mix" : "Audition Microphones") {
@@ -442,6 +442,11 @@ struct StudioRoomAcousticsWorkspaceView: View {
                             viewModel.audioEngine.microphoneRoomWetLevel * 100))
                     .font(.caption.monospacedDigit())
                     .frame(width: 45, alignment: .trailing)
+            }
+            if viewModel.audioEngine.hasVRackCaptureSource {
+                Text("V-Rack is included as one combined microphone source centered on Stage. Its original direct monitor is muted during audition, but V-Rack recording stays connected. Individual rack instruments do not yet have independent stage positions.")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Text("One shared hall field is blended into microphone audition. It uses existing stage sends, not measured reflections at each capsule. Set to 0% for direct/spill-only comparison.")
                 .font(.caption2).foregroundStyle(.secondary)
