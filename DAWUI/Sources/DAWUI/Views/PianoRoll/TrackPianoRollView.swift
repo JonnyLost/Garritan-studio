@@ -1330,7 +1330,6 @@ public struct TrackPianoRollView: View {
             if StudioMIDINoteEditing.hasPitchOrTimingChanges(
                 before: midi.events, after: edited) {
                 midi.events = edited
-                midi.articulations?.removeAll { ids.contains($0.noteID) }
                 track.clips[index].content = .midi(midi)
                 changed = true
             }
@@ -1513,6 +1512,7 @@ public struct TrackPianoRollView: View {
             let edited = StudioMIDINoteEditing.deletingSelected(in: midi.events, ids: ids)
             if edited.count != midi.events.count {
                 midi.events = edited
+                midi.articulations?.removeAll { ids.contains($0.noteID) }
                 track.clips[index].content = .midi(midi)
                 changed = true
             }
