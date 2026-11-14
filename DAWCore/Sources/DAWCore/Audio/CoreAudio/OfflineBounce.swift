@@ -29,6 +29,12 @@ public final class OfflineBounce {
         self.metronomeRenderer = metronomeRenderer
     }
     
+    private struct StereoBufferList {
+        var mNumberBuffers: UInt32 = 2
+        var mBuffers0 = AudioBuffer()
+        var mBuffers1 = AudioBuffer()
+    }
+
     // MARK: - Bounce
     
     /// Bounce audio to a file
@@ -120,27 +126,18 @@ public final class OfflineBounce {
         leftBuffer.initialize(repeating: 0, count: Int(bufferSize))
         rightBuffer.initialize(repeating: 0, count: Int(bufferSize))
         
-        // Set up buffer list
-        var bufferList = AudioBufferList(
-            mNumberBuffers: 2,
-            mBuffers: AudioBuffer(
-                mNumberChannels: 1,
-                mDataByteSize: bufferSize * 4,
-                mData: leftBuffer
-            )
+        // AudioBufferList uses a C flexible-array layout. A plain Swift
+        // AudioBufferList contains storage for ONE AudioBuffer only. Keep
+        // two adjacent buffers in the same layout as RenderGraph's stereo
+        // list and rebound the pointer for each synchronous render block.
+        var stereoList = StereoBufferList()
+        stereoList.mBuffers0 = AudioBuffer(
+            mNumberChannels: 1, mDataByteSize: bufferSize * 4, mData: leftBuffer
         )
-        
-        // We need to set up the second buffer manually
-        // AudioBufferList is a C struct with variable-length array
-        let ablPointer = UnsafeMutableAudioBufferListPointer(&bufferList)
-        if ablPointer.count >= 2 {
-            ablPointer[1] = AudioBuffer(
-                mNumberChannels: 1,
-                mDataByteSize: bufferSize * 4,
-                mData: rightBuffer
-            )
-        }
-        
+        stereoList.mBuffers1 = AudioBuffer(
+            mNumberChannels: 1, mDataByteSize: bufferSize * 4, mData: rightBuffer
+        )
+
         let totalSamples = endSample - startSample
         var currentSample = startSample
         var lastProgressUpdate = Date()
@@ -152,7 +149,7 @@ public final class OfflineBounce {
             
             // Calculate frames for this iteration
             let remainingSamples = endSample - currentSample
-            let framesToRender = min(UInt32(remainingSamples), bufferSize)
+            let framesToRender = UInt32(min(remainingSamples, Int64(bufferSize)))
             
             // Clear buffers
             memset(leftBuffer, 0, Int(framesToRender) * MemoryLayout<Float>.size)
@@ -165,34 +162,33 @@ public final class OfflineBounce {
                 renderGraph: renderGraph
             )
             
-            // Render tracks
-            renderGraph.render(
-                frameCount: framesToRender,
-                currentSample: currentSample,
-                outputBuffer: &bufferList
-            )
-            
-            // Render audio clips
-            audioClipRenderer.renderOffline(
-                into: &bufferList,
-                currentSample: currentSample,
-                frameCount: framesToRender
-            )
-            
-            // Render metronome (if enabled)
-            metronomeRenderer.render(
-                into: &bufferList,
-                currentSample: currentSample,
-                frameCount: framesToRender
-            )
-            
-            // Write to file
-            status = ExtAudioFileWrite(outFile, framesToRender, &bufferList)
-            if status != noErr {
-                ExtAudioFileDispose(outFile)
-                throw AudioBackendError.bounceError("Write error: \(status)")
+            // All borrowed buffer pointers stay inside one synchronous scope.
+            // This avoids writing a second AudioBuffer header past Swift's
+            // single-buffer AudioBufferList layout.
+            let writeStatus: OSStatus = withUnsafeMutablePointer(to: &stereoList) { stereoPointer in
+                stereoPointer.withMemoryRebound(to: AudioBufferList.self, capacity: 1) { bufferList in
+                    renderGraph.render(
+                        frameCount: framesToRender,
+                        currentSample: currentSample,
+                        outputBuffer: bufferList
+                    )
+                    audioClipRenderer.renderOffline(
+                        into: bufferList,
+                        currentSample: currentSample,
+                        frameCount: framesToRender
+                    )
+                    metronomeRenderer.render(
+                        into: bufferList,
+                        currentSample: currentSample,
+                        frameCount: framesToRender
+                    )
+                    return ExtAudioFileWrite(outFile, framesToRender, bufferList)
+                }
             }
-            
+            guard writeStatus == noErr else {
+                throw AudioBackendError.bounceError("Write error: \\(writeStatus)")
+            }
+
             currentSample += Int64(framesToRender)
             
             // Update progress (throttled to avoid UI flood)
