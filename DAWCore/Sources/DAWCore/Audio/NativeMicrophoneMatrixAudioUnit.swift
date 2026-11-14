@@ -174,12 +174,9 @@ public final class NativeMicrophoneMatrixAudioUnit: AUAudioUnit {
                   Int(frames) <= cachedFrameCapacity else {
                 return kAudioUnitErr_TooManyFramesToProcess
             }
-            let output = UnsafeMutableAudioBufferListPointer(outputData)
-            guard output.count == 2,
-                  let left = output[0].mData?.assumingMemoryBound(to: Float.self),
-                  let right = output[1].mData?.assumingMemoryBound(to: Float.self)
-            else { return kAudioUnitErr_FormatNotSupported }
-
+            guard UnsafeMutableAudioBufferListPointer(outputData).count == 2 else {
+                return kAudioUnitErr_FormatNotSupported
+            }
             let time = timestamp.pointee.mSampleTime
             if time != cachedSampleTime || frames != cachedFrameCount {
                 // The first requested output bus carries the upstream input.
@@ -188,6 +185,11 @@ public final class NativeMicrophoneMatrixAudioUnit: AUAudioUnit {
                 // the same results and cannot advance the delay line twice.
                 let status = pull(flags, timestamp, frames, 0, outputData)
                 guard status == noErr else { return status }
+                let input = UnsafeMutableAudioBufferListPointer(outputData)
+                guard input.count == 2,
+                      let inputLeft = input[0].mData?.assumingMemoryBound(to: Float.self),
+                      let inputRight = input[1].mData?.assumingMemoryBound(to: Float.self)
+                else { return kAudioUnitErr_FormatNotSupported }
                 for index in 0..<Self.microphoneCount {
                     _ = matrix.setPath(
                         source: 0, microphone: index,
@@ -197,7 +199,7 @@ public final class NativeMicrophoneMatrixAudioUnit: AUAudioUnit {
                     )
                 }
                 var source = NativeMicrophoneCaptureMatrix.Source(
-                    left: UnsafePointer(left), right: UnsafePointer(right)
+                    left: UnsafePointer(inputLeft), right: UnsafePointer(inputRight)
                 )
                 let didRender = withUnsafePointer(to: &source) { pointer in
                     let inputs = UnsafeBufferPointer(start: pointer, count: 1)
@@ -210,6 +212,11 @@ public final class NativeMicrophoneMatrixAudioUnit: AUAudioUnit {
                 cachedSampleTime = time
                 cachedFrameCount = frames
             }
+            let output = UnsafeMutableAudioBufferListPointer(outputData)
+            guard output.count == 2,
+                  let left = output[0].mData?.assumingMemoryBound(to: Float.self),
+                  let right = output[1].mData?.assumingMemoryBound(to: Float.self)
+            else { return kAudioUnitErr_FormatNotSupported }
             let mono = cachedOutputs[bus]
             for index in 0..<Int(frames) {
                 let value = mono[index]
