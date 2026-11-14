@@ -41,6 +41,8 @@ public final class ProjectViewModel: ObservableObject {
     @Published public var zoomLevel: Double = 1.0
     @Published public var scrollOffset: CGPoint = .zero
     @Published public var pixelsPerBeat: Double = 40.0
+    /// Arrangement grid; piano-roll grid remains independently adjustable.
+    @Published public var arrangementSnapMode: SnapMode = .beat
     
     // UI state
     @Published public var showMixer: Bool = false
@@ -1452,6 +1454,15 @@ public final class ProjectViewModel: ObservableObject {
         }
     }
     
+    /// Shift-click toggles a region without losing the rest of the selection.
+    public func toggleClipSelection(_ id: ClipID) {
+        if selectedClipIDs.contains(id) {
+            selectedClipIDs.remove(id)
+        } else {
+            selectedClipIDs.insert(id)
+        }
+    }
+
     public func deselectAllClips() {
         selectedClipIDs.removeAll()
     }
@@ -1726,7 +1737,9 @@ public final class ProjectViewModel: ObservableObject {
         }.min() ?? 0
         
         var newClipIDs: [ClipID] = []
-        
+        undoManager.beginGrouping(name: "Paste Regions")
+        defer { undoManager.endGrouping() }
+
         for clip in clipboardClips {
             let clipBeat = clip.timeRange.start.beats(atTempo: transportState.tempo.bpm)
             let offsetFromEarliest = clipBeat - earliestBeat
@@ -1743,7 +1756,8 @@ public final class ProjectViewModel: ObservableObject {
             newClip.id = ClipID()
             newClip.timeRange = TimeRange(start: newStart, end: newEnd)
             
-            project.tracks[trackIndex].clips.append(newClip)
+            undoManager.registerAction(AddClipAction(trackID: trackID, clip: newClip),
+                                       project: &project)
             newClipIDs.append(newClip.id)
         }
         
@@ -1762,7 +1776,9 @@ public final class ProjectViewModel: ObservableObject {
         guard !clipsTodup.isEmpty else { return }
         
         var newClipIDs: [ClipID] = []
-        
+        undoManager.beginGrouping(name: "Duplicate Regions")
+        defer { undoManager.endGrouping() }
+
         for clip in clipsTodup {
             // Place duplicate right after the original
             let endBeat = clip.timeRange.end.beats(atTempo: transportState.tempo.bpm)
@@ -1779,7 +1795,8 @@ public final class ProjectViewModel: ObservableObject {
             newClip.name = "\(clip.name) Copy"
             newClip.timeRange = TimeRange(start: newStart, end: newEnd)
             
-            project.tracks[trackIndex].clips.append(newClip)
+            undoManager.registerAction(AddClipAction(trackID: trackID, clip: newClip),
+                                       project: &project)
             newClipIDs.append(newClip.id)
         }
         
@@ -1824,6 +1841,13 @@ public final class ProjectViewModel: ObservableObject {
             let clipEndBeat = clip.timeRange.end.beats(atTempo: transportState.tempo.bpm)
             
             if playheadBeat > clipStartBeat && playheadBeat < clipEndBeat {
+                // Reuse the tested MIDI splitter: it preserves notes crossing
+                // the cut and creates one undoable edit.
+                if clip.content.isMIDI {
+                    splitMIDIClip(clip.id, on: trackID)
+                    return
+                }
+                // Preserve the existing separate audio-region path.
                 // Split this clip
                 let splitPoint = TimePosition(beats: playheadBeat, tempo: transportState.tempo.bpm, sampleRate: transportState.sampleRate)
                 
@@ -1897,8 +1921,11 @@ public final class ProjectViewModel: ObservableObject {
     /// Nudge selected clips by a beat amount
     public func nudgeSelectedClips(byBeats: Double) {
         guard let trackID = selectedTrackID,
-              let trackIndex = project.tracks.firstIndex(where: { $0.id == trackID }) else { return }
-        
+              let trackIndex = project.tracks.firstIndex(where: { $0.id == trackID }),
+              byBeats.isFinite, byBeats != 0 else { return }
+
+        undoManager.beginGrouping(name: "Nudge Regions")
+        defer { undoManager.endGrouping() }
         for clipID in selectedClipIDs {
             guard let clipIndex = project.tracks[trackIndex].clips.firstIndex(where: { $0.id == clipID }) else { continue }
             
@@ -1908,12 +1935,10 @@ public final class ProjectViewModel: ObservableObject {
             
             let duration = clip.timeRange.duration
             let newStartPos = TimePosition(beats: newStart, tempo: transportState.tempo.bpm, sampleRate: transportState.sampleRate)
-            let newEndPos = TimePosition(
-                samples: newStartPos.samples + duration.samples,
-                sampleRate: transportState.sampleRate
-            )
-            
-            project.tracks[trackIndex].clips[clipIndex].timeRange = TimeRange(start: newStartPos, end: newEndPos)
+            guard newStartPos != clip.timeRange.start else { continue }
+            undoManager.registerAction(MoveClipAction(trackID: trackID, clipID: clipID,
+                                                      from: clip.timeRange.start, to: newStartPos),
+                                       project: &project)
         }
     }
     
