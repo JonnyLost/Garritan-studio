@@ -21,6 +21,9 @@ public final class MIDISequencer: ObservableObject {
     // Scheduled events
     private var scheduledEvents: [SequencerMIDIEvent] = []
     private var activeNotes: [ActiveNote] = []
+    /// Retain track source models so each loop lap can rebuild its
+    /// controller and articulation state, not just replay old note flags.
+    private var scheduledTracks: [TrackID: (track: Track, sampler: AVAudioUnitSampler)] = [:]
     
     // Timer for sequencer updates
     private var updateTimer: Timer?
@@ -75,6 +78,9 @@ public final class MIDISequencer: ObservableObject {
         isPlaying = true
         currentBeat = transport.playheadBeats
         lastUpdateTime = Date()
+        if !scheduledTracks.isEmpty {
+            rebuildTrackSessions(from: currentBeat)
+        }
         
         // Start update timer
         updateTimer = Timer.scheduledTimer(
@@ -117,6 +123,7 @@ public final class MIDISequencer: ObservableObject {
         trackSamplers: [TrackID: AVAudioUnitSampler]
     ) {
         scheduledEvents.removeAll()
+        scheduledTracks.removeAll()
         
         for clip in clips {
             guard case .midi(let midiData) = clip.content else { continue }
@@ -148,36 +155,48 @@ public final class MIDISequencer: ObservableObject {
     }
     
     /// Schedule events for a specific track
-    public func scheduleTrackEvents(
-        track: Track,
-        sampler: AVAudioUnitSampler
-    ) {
-        for clip in track.clips {
-            guard case .midi(let midiData) = clip.content else { continue }
-            guard !clip.isMuted else { continue }
-            
-            let clipStartBeat = clip.timeRange.start.beats(
-                atTempo: transportState?.tempo.bpm ?? 120
-            )
-            
-            for event in StudioArticulationRenderer.events(for: midiData, map: track.articulationMap) {
-                let absoluteBeat = clipStartBeat + event.beatPosition
-                
-                let scheduled = SequencerMIDIEvent(
-                    event: event,
-                    absoluteBeat: absoluteBeat,
-                    clipID: clip.id,
-                    trackID: track.id,
-                    sampler: sampler
-                )
-                
-                scheduledEvents.append(scheduled)
+    /// The track source is retained only for this sequencer instance.
+    /// A loop lap and a seek compile fresh MIDI state from the musical notes.
+    public func scheduleTrackEvents(track: Track, sampler: AVAudioUnitSampler) {
+        scheduledTracks[track.id] = (track, sampler)
+        rebuildTrackSessions(from: transportState?.playheadBeats ?? 0)
+    }
+
+    private func rebuildTrackSessions(from startBeat: Double) {
+        scheduledEvents.removeAll { $0.trackID != nil }
+        let tempo = transportState?.tempo.bpm ?? 120
+        let loopEnd: Double? = {
+            guard let transport = transportState, transport.isLoopEnabled else {
+                return nil
+            }
+            return transport.loopEnd.beats(atTempo: tempo.bpm)
+        }()
+        for trackID in scheduledTracks.keys.sorted(
+            by: { $0.rawValue.uuidString < $1.rawValue.uuidString }) {
+            guard let source = scheduledTracks[trackID] else { continue }
+            let entries = StudioMIDISessionPlanner.events(
+                for: source.track, tempo: tempo, from: startBeat,
+                until: loopEnd)
+            for item in entries {
+                scheduledEvents.append(SequencerMIDIEvent(
+                    event: item.event,
+                    absoluteBeat: item.absoluteBeat,
+                    clipID: item.clipID,
+                    trackID: trackID,
+                    sampler: source.sampler))
             }
         }
-        
-        scheduledEvents.sort { $0.absoluteBeat < $1.absoluteBeat }
+        // Preserve stable compiled order for simultaneous keyswitches,
+        // controllers and musical note events.
+        scheduledEvents = scheduledEvents.enumerated().sorted {
+            lhs, rhs in
+            if lhs.element.absoluteBeat != rhs.element.absoluteBeat {
+                return lhs.element.absoluteBeat < rhs.element.absoluteBeat
+            }
+            return lhs.offset < rhs.offset
+        }.map(\.element)
     }
-    
+
     // MARK: - Sequencer Update
     
     private func updateSequencer() {
@@ -196,28 +215,39 @@ public final class MIDISequencer: ObservableObject {
         let previousBeat = currentBeat
         currentBeat += elapsedBeats
         
-        // Handle looping
-        if transport.isLoopEnabled {
-            let loopEndBeat = transport.loopEnd.beats(atTempo: transport.tempo.bpm)
-            let loopStartBeat = transport.loopStart.beats(atTempo: transport.tempo.bpm)
-            
-            if currentBeat >= loopEndBeat {
-                currentBeat = loopStartBeat + (currentBeat - loopEndBeat)
-                // Re-schedule events for next loop iteration
-            }
-        }
-        
-        // Update transport
-        transport.setPlayheadBeats(currentBeat)
-        
-        // Calculate look-ahead window
+        // Calculate look-ahead once; do not fire notes beyond a loop
+        // boundary before the corresponding articulation reset.
         let lookAheadBeats = (lookAheadTime / 60.0) * transport.tempo.bpm
-        let windowEnd = currentBeat + lookAheadBeats
-        
-        // Process events in window
-        processEvents(from: previousBeat, to: windowEnd)
-        
-        // Update active notes (check for note-offs)
+        let loopStartBeat = transport.loopStart.beats(atTempo: transport.tempo.bpm)
+        let loopEndBeat = transport.loopEnd.beats(atTempo: transport.tempo.bpm)
+        let loopLength = loopEndBeat - loopStartBeat
+        let canLoop = transport.isLoopEnabled && loopLength.isFinite &&
+                      loopLength > 0.001
+        if canLoop && currentBeat >= loopEndBeat {
+            // Consume the tail once, then silence previous-lap voices.
+            processEvents(from: previousBeat, to: loopEndBeat)
+            stopAllNotes()
+            let overrun = (currentBeat - loopEndBeat)
+                .truncatingRemainder(dividingBy: loopLength)
+            currentBeat = loopStartBeat + overrun
+            // Rebuild from loop start to restore earlier keyswitch, CC and
+            // program state. Generic clip events can also fire next lap.
+            if !scheduledTracks.isEmpty {
+                rebuildTrackSessions(from: loopStartBeat)
+            }
+            for index in scheduledEvents.indices where
+                scheduledEvents[index].trackID == nil {
+                scheduledEvents[index].processed = false
+            }
+            processEvents(from: loopStartBeat,
+                          to: min(loopEndBeat, currentBeat + lookAheadBeats))
+        } else {
+            processEvents(from: previousBeat,
+                          to: canLoop
+                            ? min(loopEndBeat, currentBeat + lookAheadBeats)
+                            : currentBeat + lookAheadBeats)
+        }
+        transport.setPlayheadBeats(currentBeat)
         updateActiveNotes()
         
         lastUpdateTime = now
