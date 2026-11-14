@@ -453,7 +453,7 @@ struct StudioRoomAcousticsWorkspaceView: View {
                 }
             }
             Divider()
-            Text("Experimental direct-and-spill monitoring: capsule pickup, distance attenuation, air damping and propagation delay are audible. The shared room return and legacy dry route are bypassed while auditioning, so room reflections, independent mic stems and larger orchestral matrices remain future audio milestones.")
+            Text("Experimental direct-and-spill monitoring: capsule pickup, distance attenuation, air damping and propagation delay are audible. The original dry route is muted while auditioning; the shared room return has its own wet trim. Align shifts an entire capsule's capture by up to ±20 ms; it is a manual timing correction, not automatic phase matching. Independent mic stems and large orchestral matrices remain future milestones.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -489,6 +489,23 @@ struct StudioRoomAcousticsWorkspaceView: View {
                 ), in: 0...2)
                 Text(String(format: "%.0f%%", settings.safeLevel * 100))
                     .monospacedDigit().frame(width: 53)
+            }
+            HStack {
+                Text("Align").frame(width: 42, alignment: .leading)
+                Slider(value: Binding(
+                    get: { Double(mic.mixer.safeAlignmentMilliseconds) },
+                    set: { value in
+                        editMixer(mic) { $0.alignmentMilliseconds = Float(value) }
+                    }
+                ), in: -20...20, step: 0.1)
+                .accessibilityIdentifier("mic-alignment-" + mic.id.uuidString)
+                Text(String(format: "%+.1f ms",
+                            settings.safeAlignmentMilliseconds))
+                    .monospacedDigit().frame(width: 66)
+                Button("Zero") {
+                    editMixer(mic) { $0.alignmentMilliseconds = nil }
+                }
+                .buttonStyle(.bordered)
             }
             HStack {
                 Text("Pan").frame(width: 42, alignment: .leading)
