@@ -83,10 +83,32 @@ final class VRackMicrophoneRoutingTests: XCTestCase {
             }.first
             XCTAssertNotNil(captureNode, "Rack sum must connect to the mic AU")
             if let captureNode {
-                XCTAssertFalse(engine.outputConnectionPoints(
+                let gainAddress = shared
+                    ? NativeMicrophoneMatrixAudioUnit.gainAddress(0)
+                    : NativeMicrophoneSpillAudioUnit.signedGainAddress
+                let actualGain = captureNode.auAudioUnit.parameterTree?
+                    .parameter(withAddress: gainAddress)?.value ?? 0
+                XCTAssertGreaterThan(abs(actualGain), 0.01,
+                    "Rack capture AU must receive a nonzero microphone pickup gain")
+                let capsuleOutputs = engine.outputConnectionPoints(
                     for: captureNode, outputBus: 0
-                ).isEmpty, "Mic AU must connect to a mic channel")
+                )
+                let micChannel = capsuleOutputs.first?.node as? AVAudioMixerNode
+                XCTAssertNotNil(micChannel, "Capsule must reach a microphone channel")
+                if let micChannel {
+                    XCTAssertGreaterThan(micChannel.outputVolume, 0.9,
+                        "Microphone channel must be unmuted at audition start")
+                    let channelOutputs = engine.outputConnectionPoints(
+                        for: micChannel, outputBus: 0
+                    )
+                    let micMaster = channelOutputs.first?.node as? AVAudioMixerNode
+                    XCTAssertNotNil(micMaster, "Mic channel must reach mic master")
+                    XCTAssertGreaterThan(micMaster?.outputVolume ?? -1, 0.9,
+                        "Mic master bus must be enabled")
+                }
             }
+            XCTAssertGreaterThan(rackSum.outputVolume, 0.9,
+                "Rack sum must stay at unity for microphone and recording taps")
 
             // AudioEngine prepares its device graph during initialization.
             // Offline rendering may only be enabled after a full stop.
