@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import DAWCore
 
 /// Studio Synth's unified native instrument interface. The layer overview
@@ -11,6 +12,15 @@ public struct StudioSynthPanelView: View {
     @State private var selectedLayerID: UUID?
     @State private var selectedAdditiveHarmonic = 0
     @State private var panelError: String?
+    @State private var userPresets: [StudioSynthUserPresetLibrary.Preset] = []
+    @State private var showSavePreset = false
+    @State private var presetName = ""
+    @State private var presetToRename: StudioSynthUserPresetLibrary.Preset?
+    @State private var renamedPresetName = ""
+    @State private var showRenamePreset = false
+    @State private var presetToDelete: StudioSynthUserPresetLibrary.Preset?
+    @State private var showDeleteConfirmation = false
+    @State private var showPresetImporter = false
     @State private var showSampleCapture = false
     @State private var sampleCaptureName = ""
     @State private var sampleCaptureExpanded = false
@@ -54,6 +64,51 @@ public struct StudioSynthPanelView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
+                Menu {
+                    Button("Save Current Sound…") {
+                        presetName = viewModel.project.track(withID: trackID)?.name
+                            ?? "My Studio Synth"
+                        showSavePreset = true
+                    }
+                    Divider()
+                    if userPresets.isEmpty {
+                        Text("No saved sounds")
+                    } else {
+                        ForEach(userPresets) { preset in
+                            Menu(preset.name) {
+                                Button("Load Sound") {
+                                    loadUserPreset(preset)
+                                }
+                                Button("Rename…") {
+                                    presetToRename = preset
+                                    renamedPresetName = preset.name
+                                    showRenamePreset = true
+                                }
+                                Button("Show in Finder") {
+                                    NSWorkspace.shared.activateFileViewerSelecting([
+                                        StudioSynthUserPresetLibrary.fileURL(for: preset)
+                                    ])
+                                }
+                                Divider()
+                                Button("Delete Sound…", role: .destructive) {
+                                    presetToDelete = preset
+                                    showDeleteConfirmation = true
+                                }
+                            }
+                        }
+                    }
+                    Divider()
+                    Button("Import Sound…") { showPresetImporter = true }
+                    Button("Open Preset Folder") {
+                        let directory = StudioSynthUserPresetLibrary.directory()
+                        try? FileManager.default.createDirectory(
+                            at: directory, withIntermediateDirectories: true)
+                        NSWorkspace.shared.open(directory)
+                    }
+                    Button("Refresh Saved Sounds") { refreshUserPresets() }
+                } label: {
+                    Label("My Sounds", systemImage: "square.and.arrow.down")
+                }
                 Button {
                     sampleCaptureName = viewModel.project.track(withID: trackID)?.name
                         ?? "Studio Synth Capture"
@@ -145,6 +200,25 @@ public struct StudioSynthPanelView: View {
                     Label("Add Layer", systemImage: "plus")
                 }
                 .disabled(patch.layers.count >= 4)
+                if let targetLayer = selectedLayer, targetLayer.enabled {
+                    Menu {
+                        ForEach(StudioSynthModDestination.available(
+                            for: targetLayer.engine), id: \.self) { destination in
+                            Button(destination.title) {
+                                if !viewModel.addStudioSynthAutomationLane(
+                                    for: trackID, layerID: targetLayer.id,
+                                    destination: destination) {
+                                    panelError = "This parameter already has an automation lane."
+                                } else {
+                                    panelError = nil
+                                }
+                            }
+                        }
+                    } label: {
+                        Label("Automate", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
+                    }
+                    .help("Create an editable track automation lane for the selected Synth layer")
+                }
             }
             .padding(12)
             Divider()
@@ -166,6 +240,7 @@ public struct StudioSynthPanelView: View {
                         .font(.caption).foregroundStyle(.secondary)
 
                     layerOverview
+                    synthAutomationEditor
 
                     StudioSynthModulationView(viewModel: viewModel, trackID: trackID)
                     StudioSynthMIDILearnView(viewModel: viewModel, trackID: trackID)
@@ -311,6 +386,105 @@ public struct StudioSynthPanelView: View {
         .sheet(isPresented: $showSampleCapture) {
             synthSampleCaptureSheet
         }
+        .sheet(isPresented: $showSavePreset) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("SAVE STUDIO SYNTH SOUND").font(.headline)
+                TextField("Sound name", text: $presetName)
+                    .textFieldStyle(.roundedBorder)
+                Text("Saves all layers, modulation and MIDI assignments as a reusable Studio Synth preset.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if StudioSynthAutomationConsistency.usesExternalGranularAudio(patch) {
+                    Label("Granular recordings stay in their original location. Move the audio files with the preset when transferring to another Mac.",
+                          systemImage: "externaldrive.badge.exclamationmark")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+                Text("Presets are stored in your local Studio library.")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Spacer()
+                    Button("Cancel") { showSavePreset = false }
+                    Button("Save") {
+                        do {
+                            _ = try StudioSynthUserPresetLibrary.save(
+                                name: presetName, patch: patch)
+                            refreshUserPresets()
+                            panelError = nil
+                            showSavePreset = false
+                        } catch {
+                            panelError = error.localizedDescription
+                            showSavePreset = false
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(presetName.trimmingCharacters(
+                        in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .padding(24)
+            .frame(width: 460)
+        }
+        .sheet(isPresented: $showRenamePreset) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("RENAME STUDIO SYNTH SOUND").font(.headline)
+                TextField("Sound name", text: $renamedPresetName)
+                    .textFieldStyle(.roundedBorder)
+                HStack {
+                    Spacer()
+                    Button("Cancel") { showRenamePreset = false }
+                    Button("Rename") {
+                        guard let preset = presetToRename else { return }
+                        do {
+                            _ = try StudioSynthUserPresetLibrary.rename(
+                                preset, to: renamedPresetName)
+                            refreshUserPresets()
+                            panelError = nil
+                        } catch {
+                            panelError = error.localizedDescription
+                        }
+                        showRenamePreset = false
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(renamedPresetName.trimmingCharacters(
+                        in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .padding(24).frame(width: 420)
+        }
+        .confirmationDialog(
+            "Delete saved Synth sound?",
+            isPresented: $showDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Sound", role: .destructive) {
+                guard let preset = presetToDelete else { return }
+                do {
+                    try StudioSynthUserPresetLibrary.delete(preset)
+                    refreshUserPresets()
+                    panelError = nil
+                } catch {
+                    panelError = error.localizedDescription
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This deletes only the saved preset file, not your track, project, or source recordings.")
+        }
+        .fileImporter(
+            isPresented: $showPresetImporter,
+            allowedContentTypes: [UTType(filenameExtension: "studiosynth") ?? .json]
+        ) { result in
+            do {
+                let url = try result.get()
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                _ = try StudioSynthUserPresetLibrary.importPreset(from: url)
+                refreshUserPresets()
+                panelError = nil
+            } catch {
+                panelError = error.localizedDescription
+            }
+        }
+        .onAppear { refreshUserPresets() }
         .onDisappear {
             viewModel.cancelStudioSynthMIDILearn(for: trackID)
         }
@@ -407,6 +581,56 @@ public struct StudioSynthPanelView: View {
         }
     }
 
+    private var synthAutomationEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let selectedLayer,
+               let track = viewModel.project.track(withID: trackID) {
+                let lanes = track.automationLanes.filter { lane in
+                    if case .studioSynth(let id, _) = lane.parameter {
+                        return id == selectedLayer.id
+                    }
+                    return false
+                }
+                if !lanes.isEmpty {
+                    HStack {
+                        Text("TRACK AUTOMATION")
+                            .font(.caption.weight(.semibold))
+                        Spacer()
+                        Text("Add or edit points at the playhead")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(lanes) { lane in
+                        HStack(spacing: 10) {
+                            Text(lane.parameter.name)
+                                .font(.caption)
+                                .frame(width: 170, alignment: .leading)
+                            Slider(value: Binding<Double>(
+                                get: {
+                                    let beat = max(0, viewModel.transportState.playheadBeats)
+                                    let latest = viewModel.project
+                                        .track(withID: trackID)?
+                                        .automationLanes.first(where: { $0.id == lane.id })
+                                    return Double(latest?.value(atBeat: beat) ?? 0.5)
+                                },
+                                set: { value in
+                                    let beat = max(0, viewModel.transportState.playheadBeats)
+                                    _ = viewModel.setStudioSynthAutomationPoint(
+                                        for: trackID, laneID: lane.id,
+                                        normalized: Float(value), atBeat: beat)
+                                }), in: 0...1)
+                            Text(lane.parameter.format(
+                                value: lane.value(atBeat:
+                                    max(0, viewModel.transportState.playheadBeats))))
+                                .font(.caption.monospacedDigit())
+                                .frame(width: 58, alignment: .trailing)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private var layerOverview: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("LAYERS")
@@ -495,6 +719,26 @@ public struct StudioSynthPanelView: View {
                 .background(Color.primary.opacity(0.04),
                             in: RoundedRectangle(cornerRadius: 7))
             }
+        }
+    }
+
+    private func loadUserPreset(
+        _ preset: StudioSynthUserPresetLibrary.Preset
+    ) {
+        let missing = StudioSynthAutomationConsistency.missingGranularSources(
+            in: preset.patch)
+        if let first = missing.first {
+            panelError = "This sound needs its original Granular recording: \(first). Restore or relink the file before loading."
+            return
+        }
+        replace(with: preset.patch)
+    }
+
+    private func refreshUserPresets() {
+        do {
+            userPresets = try StudioSynthUserPresetLibrary.list()
+        } catch {
+            panelError = error.localizedDescription
         }
     }
 

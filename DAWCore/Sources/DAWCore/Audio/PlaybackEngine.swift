@@ -100,6 +100,9 @@ public final class PlaybackEngine: ObservableObject {
     // Native synth track scores, compiled before Play and executed directly
     // in each AVAudioSourceNode render callback.
     private var nativeSequencedTracks: Set<TrackID> = []
+    /// Project snapshot of enabled native Synth automation. Only this
+    /// control-thread table is consulted by the metering/control timer.
+    private var synthAutomationLanes: [TrackID: [AutomationLane]] = [:]
     
     // Timer for processing V-Rack MIDI events in hybrid mode
     // (When Core Audio backend is active, AVAudioEngine's timing tap may not fire)
@@ -1663,8 +1666,14 @@ public final class PlaybackEngine: ObservableObject {
             midiQueuePlaybackActive = false
         }
 
-        // Stop metering
+        // Stop metering and restore the persistent preset base on every
+        // native layer. This never changes project automation points.
         stopMetering()
+        for instrument in trackInstruments.values {
+            if case .studioSynth(let synth) = instrument {
+                synth.clearAutomation()
+            }
+        }
         
         // Stop hybrid MIDI timer (if running)
         stopHybridMIDITimer()
@@ -1727,8 +1736,44 @@ public final class PlaybackEngine: ObservableObject {
     
     // MARK: - Event Scheduling
     
+    /// Refresh a track's automation snapshot whenever its points or
+    /// enablement change, even while the transport is running. Never parse
+    /// project JSON or inspect SwiftUI state from an audio callback.
+    public func updateSynthAutomation(for track: Track) {
+        let oldIDs = Set((synthAutomationLanes[track.id] ?? []).map(\.id))
+        var lanes: [AutomationLane] = []
+        if track.studioSynthEnabled == true, let patch = track.studioSynthPatch {
+            lanes = track.automationLanes.filter { lane in
+                guard lane.isEnabled, !lane.points.isEmpty,
+                      case .studioSynth(let id, let destination) =
+                        lane.parameter else { return false }
+                return destination.isContinuouslyModulatable &&
+                    patch.layers.contains {
+                        $0.id == id && $0.enabled &&
+                        $0.engine == destination.engine
+                    }
+            }
+        }
+        if lanes.isEmpty {
+            synthAutomationLanes.removeValue(forKey: track.id)
+        } else {
+            synthAutomationLanes[track.id] = lanes
+        }
+        // If a lane is deleted or disabled mid-play, the transport must
+        // release its temporary DSP override immediately.
+        if !oldIDs.isSubset(of: Set(lanes.map(\.id))),
+           let instrument = trackInstruments[track.id],
+           case .studioSynth(let synth) = instrument {
+            synth.clearAutomation()
+        }
+    }
+
     /// Prepare all clips for playback
     public func prepareForPlayback(project: Project) {
+        synthAutomationLanes.removeAll()
+        for track in project.tracks {
+            updateSynthAutomation(for: track)
+        }
         // Core Audio backend path
         if let backend = coreAudioBackend {
             prepareForPlaybackCoreAudio(project: project, backend: backend)
@@ -2496,7 +2541,9 @@ public final class PlaybackEngine: ObservableObject {
         meteringTimer?.invalidate()
         meteringTimer = Timer.scheduledTimer(withTimeInterval: meteringInterval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.updateMeterLevels()
+                guard let self else { return }
+                self.updateMeterLevels()
+                self.applySynthAutomationAtPlayhead()
             }
         }
     }
@@ -2510,6 +2557,28 @@ public final class PlaybackEngine: ObservableObject {
         masterMeterLevel = (0, 0)
     }
     
+    /// Read project lanes at control rate. MIDI notes stay sample-accurate;
+    /// parameter automation is intentionally control-rate and never touches
+    /// the AVAudioSourceNode render callback.
+    private func applySynthAutomationAtPlayhead() {
+        guard isPlaying, let beat = transportState?.playheadBeats,
+              beat.isFinite else { return }
+        for (trackID, lanes) in synthAutomationLanes {
+            guard let instrument = trackInstruments[trackID],
+                  case .studioSynth(let synth) = instrument else {
+                continue
+            }
+            for lane in lanes {
+                if case .studioSynth(let id, let destination) = lane.parameter {
+                    let normalized = lane.value(atBeat: beat)
+                    _ = synth.setAutomation(layerID: id,
+                                             destination: destination,
+                                             normalized: normalized)
+                }
+            }
+        }
+    }
+
     private func updateMeterLevels() {
         var newTrackLevels: [TrackID: (left: Float, right: Float)] = [:]
         var masterLeft: Float = 0

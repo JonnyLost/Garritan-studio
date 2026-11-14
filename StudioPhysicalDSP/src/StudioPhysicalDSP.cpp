@@ -75,8 +75,9 @@ struct Mode {
     }
     float process(float input) noexcept {
         const float y=a*y1-b*y2+drive*input;
-        y2=y1; y1=y;
-        return y;
+        y2=std::abs(y1)<1.0e-20f ? 0.f : y1;
+        y1=std::abs(y)<1.0e-20f ? 0.f : y;
+        return y1;
     }
 };
 /* Six independently tuned, exponentially decaying modes. The oscillator
@@ -108,9 +109,10 @@ struct PercussionMode {
         if(!enabled) return 0.f;
         const float nextReal=radius*(cosine*real-sine*imaginary)+impulse*gain;
         const float nextImag=radius*(sine*real+cosine*imaginary);
-        real=nextReal;
-        imaginary=nextImag;
-        return nextReal;
+        // Silence subnormal modal tails to avoid expensive denormal arithmetic.
+        real=std::abs(nextReal)<1.0e-20f ? 0.f : nextReal;
+        imaginary=std::abs(nextImag)<1.0e-20f ? 0.f : nextImag;
+        return real;
     }
 };
 constexpr std::array<double,kPercussionModes> kMalletRatios{{
@@ -260,6 +262,7 @@ struct Voice {
         const float filterCutoff=(model>=3 ? 0.08f+0.68f*p[SPM_PARAM_BORE] :
             0.12f+brightness*0.78f);
         filter += filterCutoff*(dispersed-filter);
+        if(std::abs(filter)<1.0e-20f) filter=0.f;
         const float retained=0.992f + 0.0077f*p[SPM_PARAM_DAMPING];
         float excitation=0;
         if(model==3 || model==4) {
@@ -316,7 +319,8 @@ struct Voice {
         // its ongoing excitation supplies the missing energy.
         const float feedback=(model>=2 ? 0.995f : retained)*filter;
         const float value=excitation+feedback;
-        delay[size_t(write)]=value;
+        // Clear inaudible feedback tails before storing them in the delay.
+        delay[size_t(write)]=std::abs(value)<1.0e-20f ? 0.f : value;
         if(++write==kDelayCapacity)write=0;
         ++age;
         if(releasing) {

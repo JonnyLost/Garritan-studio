@@ -686,6 +686,8 @@ public final class ProjectViewModel: ObservableObject {
         track.studioSynthEnabled = true
         track.studioSamplerPatch = nil
         track.studioSynthPatch = patch
+        track.automationLanes = StudioSynthAutomationConsistency.reconcile(
+            track.automationLanes, for: patch)
         updateTrack(track, description: "Load Studio Synth")
     }
 
@@ -862,6 +864,71 @@ public final class ProjectViewModel: ObservableObject {
 
     /// Topology changes happen on the main/control thread while the graph is
     /// stopped. This is not called from a MIDI callback or slider drag.
+    /// Add an editable native Synth automation lane without rebuilding the
+    /// instrument. Existing saved presets and modulation settings stay intact.
+    @discardableResult
+    public func addStudioSynthAutomationLane(
+        for trackID: TrackID, layerID: UUID,
+        destination: StudioSynthModDestination
+    ) -> Bool {
+        guard let track = project.track(withID: trackID),
+              track.studioSynthEnabled == true,
+              let patch = track.studioSynthPatch,
+              destination.isContinuouslyModulatable,
+              patch.layers.contains(where: {
+                  $0.id == layerID && $0.enabled &&
+                  $0.engine == destination.engine
+              }) else { return false }
+        let parameter = AutomationParameter.studioSynth(
+            layerID: layerID, destination: destination)
+        guard !track.automationLanes.contains(where: {
+            $0.parameter == parameter
+        }) else { return false }
+        var updated = track
+        let currentValue: Float
+        if let instrument = playbackEngine.instrument(for: trackID),
+           case .studioSynth(let synth) = instrument {
+            currentValue = synth.effectiveParameter(
+                id: layerID, destination: destination) ??
+                destination.defaultValue
+        } else {
+            currentValue = destination.defaultValue
+        }
+        let initial = Float(destination.position(for: currentValue))
+        let startBeat = max(0, transportState.playheadBeats)
+        var lane = AutomationLane(parameter: parameter, isVisible: true)
+        lane.setPoint(at: startBeat, value: initial)
+        updated.automationLanes.append(lane)
+        updated.isAutomationVisible = true
+        updateTrack(updated, description: "Add Studio Synth Automation")
+        return true
+    }
+
+    @discardableResult
+    public func setStudioSynthAutomationPoint(
+        for trackID: TrackID, laneID: UUID,
+        normalized: Float, atBeat beat: Double
+    ) -> Bool {
+        guard normalized.isFinite, (0...1).contains(normalized),
+              beat.isFinite, beat >= 0,
+              let track = project.track(withID: trackID),
+              let index = track.automationLanes.firstIndex(where: {
+                  $0.id == laneID
+              }),
+              case .studioSynth(let layerID, let destination) =
+                  track.automationLanes[index].parameter,
+              let patch = track.studioSynthPatch,
+              patch.layers.contains(where: {
+                  $0.id == layerID &&
+                  $0.engine == destination.engine
+              }) else { return false }
+        var updated = track
+        updated.automationLanes[index].setPoint(
+            at: beat, value: normalized)
+        updateTrack(updated, description: "Edit Studio Synth Automation")
+        return true
+    }
+
     public func updateStudioSynthPatch(_ patch: StudioSynthPatch,
                                        for trackID: TrackID) throws {
         guard patch.validate(),
@@ -870,7 +937,11 @@ public final class ProjectViewModel: ObservableObject {
             throw StudioSynthError.invalidPatch
         }
         try playbackEngine.loadStudioSynth(for: trackID, patch: patch)
-        project.tracks[index].studioSynthPatch = patch
+        var updated = project.tracks[index]
+        updated.studioSynthPatch = patch
+        updated.automationLanes = StudioSynthAutomationConsistency.reconcile(
+            updated.automationLanes, for: patch)
+        updateTrack(updated, description: "Replace Studio Synth Sound")
     }
 
     /// Apply routing/settings in place, without stopping the audio graph or
@@ -1268,7 +1339,10 @@ public final class ProjectViewModel: ObservableObject {
             description: description
         )
         undoManager.registerAction(action, project: &project)
-        
+        // Control-rate Synth automation responds immediately to edits made
+        // while playing; no audio graph rebuild or render-thread work.
+        playbackEngine.updateSynthAutomation(for: track)
+
         // Update audio engine
         audioEngine.updateTrackParameters(for: track)
         audioEngine.updateSoloState(tracks: project.tracks)

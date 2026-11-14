@@ -28,6 +28,8 @@ internal final class StudioSynthModulationWorker {
     // MIDI CC changes a performance value rather than the saved patch's
     // original knob setting. Removing a mapping restores that original base.
     private var controllerBases: [Key: Float] = [:]
+    // Transport changes a temporary base rather than saved preset values.
+    private var automationBases: [Key: Float] = [:]
     private var macroOverride: Float?
     private var clock: DispatchSourceTimer?
     private var clockIntervalUs: Int?
@@ -112,6 +114,32 @@ internal final class StudioSynthModulationWorker {
         }
     }
 
+    /// Apply transport values on this worker, never in the audio callback.
+    /// A stopped transport releases every automation value and restores the
+    /// saved base even if a controller had previously moved it.
+    func setAutomation(layer: UUID, destination: StudioSynthModDestination,
+                       normalized: Float) -> Bool {
+        guard normalized.isFinite, (0...1).contains(normalized),
+              destination.isContinuouslyModulatable else { return false }
+        return queue.sync {
+            let key = Key(layer: layer, destination: destination)
+            let previous = activeKeys()
+            automationBases[key] = destination.value(at: Double(normalized))
+            reconcile(previous: previous, oldMapped: mappedKeys(),
+                      restoringOldRoutes: true)
+            return true
+        }
+    }
+
+    func clearAutomation() {
+        queue.sync {
+            let previous = activeKeys()
+            automationBases.removeAll()
+            reconcile(previous: previous, oldMapped: mappedKeys(),
+                      restoringOldRoutes: true)
+        }
+    }
+
     /// The host's existing MIDI producers feed a copy of *accepted* events.
     /// This does not alter MIDI timing or block the render thread.
     func receiveMIDI(status: UInt8, data1: UInt8, data2: UInt8) {
@@ -151,7 +179,7 @@ internal final class StudioSynthModulationWorker {
         let modulated = Set(settings.routes.filter(\.enabled).map {
             Key(layer: $0.layerID, destination: $0.destination)
         })
-        return modulated.union(mappedKeys())
+        return modulated.union(mappedKeys()).union(automationBases.keys)
     }
 
     private func install(_ newer: StudioSynthModulationSettings,
@@ -244,7 +272,8 @@ internal final class StudioSynthModulationWorker {
     }
 
     private func applyCurrentValues() {
-        guard settings.hasEnabledRoutes || controls.hasEnabledMappings else {
+        guard settings.hasEnabledRoutes || controls.hasEnabledMappings ||
+              !automationBases.isEmpty else {
             return
         }
 
@@ -264,7 +293,7 @@ internal final class StudioSynthModulationWorker {
         // Sum modulation after the MIDI-controlled base value. A single CC
         // can drive several layer parameters, with no "last writer wins" race.
         for key in activeKeys() {
-            let base = controllerBases[key] ?? baselines[key]
+            let base = automationBases[key] ?? controllerBases[key] ?? baselines[key]
                 ?? key.destination.defaultValue
             let effective = key.destination.apply(
                 base: base, normalizedOffset: offsets[key] ?? 0)
