@@ -240,3 +240,148 @@ void daw_sample_position_publish(DAWAtomicSamplePosition *position, int64_t fram
 int64_t daw_sample_position_load(const DAWAtomicSamplePosition *position) {
     return position ? atomic_load_explicit(&position->frames, memory_order_acquire) : 0;
 }
+
+
+// MARK: - Stereo PCM page handoff (disk worker -> Core Audio render)
+//
+// Each slot uses a one-shot CAS to claim ownership. When the decoder is
+// writing a page, the callback never waits: it outputs silence for the
+// missing section. When the renderer is reading, the worker never overwrites
+// the page until the reader releases it. Page data and its pageIndex are
+// accessed only with exclusive slot ownership.
+enum { PCM_FREE = 0, PCM_WRITING = 1, PCM_READY = 2, PCM_READING = 3 };
+struct DAWPCMPageSlot {
+    float *stereo;
+    uint64_t pageIndex;
+    _Atomic(uint32_t) state;
+};
+struct DAWPCMPageCache {
+    uint32_t pageFrames;
+    uint32_t pageCount;
+    struct DAWPCMPageSlot *slots;
+    _Atomic(uint64_t) requestedPage; // UINT64_MAX means no demand
+    _Atomic(uint64_t) underrunFrames;
+};
+
+DAWPCMPageCache *daw_pcm_page_cache_create(uint32_t pageFrames,
+                                           uint32_t pageCount) {
+    if (pageFrames == 0 || pageFrames > 65536 ||
+        pageCount == 0 || pageCount > 16) return NULL;
+    DAWPCMPageCache *cache = calloc(1, sizeof(*cache));
+    if (!cache) return NULL;
+    cache->slots = calloc(pageCount, sizeof(struct DAWPCMPageSlot));
+    if (!cache->slots) { free(cache); return NULL; }
+    cache->pageFrames = pageFrames;
+    cache->pageCount = pageCount;
+    atomic_init(&cache->requestedPage, UINT64_MAX);
+    atomic_init(&cache->underrunFrames, 0);
+    for (uint32_t i = 0; i < pageCount; i++) {
+        cache->slots[i].stereo = calloc((size_t)pageFrames * 2, sizeof(float));
+        if (!cache->slots[i].stereo) {
+            daw_pcm_page_cache_destroy(cache);
+            return NULL;
+        }
+        atomic_init(&cache->slots[i].state, PCM_FREE);
+    }
+    return cache;
+}
+
+void daw_pcm_page_cache_destroy(DAWPCMPageCache *cache) {
+    if (!cache) return;
+    if (cache->slots) {
+        for (uint32_t i = 0; i < cache->pageCount; i++)
+            free(cache->slots[i].stereo);
+        free(cache->slots);
+    }
+    free(cache);
+}
+
+void daw_pcm_page_cache_request(DAWPCMPageCache *cache, uint64_t frame) {
+    if (cache)
+        atomic_store_explicit(&cache->requestedPage,
+                              frame / cache->pageFrames, memory_order_release);
+}
+
+bool daw_pcm_page_cache_requested_page(const DAWPCMPageCache *cache,
+                                       uint64_t *pageIndex) {
+    if (!cache || !pageIndex) return false;
+    uint64_t requested = atomic_load_explicit(&cache->requestedPage,
+                                               memory_order_acquire);
+    if (requested == UINT64_MAX) return false;
+    *pageIndex = requested;
+    return true;
+}
+
+bool daw_pcm_page_cache_contains(const DAWPCMPageCache *cache,
+                                 uint64_t pageIndex) {
+    if (!cache) return false;
+    const struct DAWPCMPageSlot *slot = &cache->slots[pageIndex % cache->pageCount];
+    // Only the one disk worker modifies pageIndex; while state is READY
+    // the callback may temporarily transition it to READING.
+    uint32_t state = atomic_load_explicit(&slot->state, memory_order_acquire);
+    return (state == PCM_READY || state == PCM_READING) &&
+           slot->pageIndex == pageIndex;
+}
+
+bool daw_pcm_page_cache_supply(DAWPCMPageCache *cache, uint64_t pageIndex,
+                               const float *stereo, uint32_t frames) {
+    if (!cache || !stereo || frames > cache->pageFrames) return false;
+    struct DAWPCMPageSlot *slot = &cache->slots[pageIndex % cache->pageCount];
+    uint32_t state = atomic_load_explicit(&slot->state, memory_order_acquire);
+    while (state == PCM_READY || state == PCM_FREE) {
+        if (atomic_compare_exchange_weak_explicit(
+                &slot->state, &state, PCM_WRITING,
+                memory_order_acq_rel, memory_order_acquire)) {
+            const size_t samples = (size_t)frames * 2;
+            memcpy(slot->stereo, stereo, samples * sizeof(float));
+            memset(slot->stereo + samples, 0,
+                   ((size_t)cache->pageFrames * 2 - samples) * sizeof(float));
+            slot->pageIndex = pageIndex;
+            atomic_store_explicit(&slot->state, PCM_READY, memory_order_release);
+            return true;
+        }
+    }
+    // When the render callback has claimed this slot it must not be touched.
+    return false;
+}
+
+uint32_t daw_pcm_page_cache_mix(DAWPCMPageCache *cache, uint64_t clipFrame,
+                                uint32_t frames, float *outLeft,
+                                float *outRight, float gain) {
+    if (!cache || !outLeft || !outRight || frames == 0) return 0;
+    daw_pcm_page_cache_request(cache, clipFrame);
+    uint32_t mixed = 0;
+    uint32_t offset = 0;
+    while (offset < frames) {
+        uint64_t frame = clipFrame + offset;
+        if (frame < clipFrame) break; // unsigned overflow protection
+        uint64_t page = frame / cache->pageFrames;
+        uint32_t pageOffset = (uint32_t)(frame % cache->pageFrames);
+        uint32_t section = cache->pageFrames - pageOffset;
+        if (section > frames - offset) section = frames - offset;
+        struct DAWPCMPageSlot *slot = &cache->slots[page % cache->pageCount];
+        uint32_t expected = PCM_READY;
+        if (atomic_compare_exchange_strong_explicit(
+                &slot->state, &expected, PCM_READING,
+                memory_order_acq_rel, memory_order_acquire)) {
+            if (slot->pageIndex == page) {
+                for (uint32_t i = 0; i < section; i++) {
+                    uint32_t source = (pageOffset + i) * 2;
+                    outLeft[offset + i] += slot->stereo[source] * gain;
+                    outRight[offset + i] += slot->stereo[source + 1] * gain;
+                }
+                mixed += section;
+            }
+            atomic_store_explicit(&slot->state, PCM_READY, memory_order_release);
+        }
+        offset += section;
+    }
+    atomic_fetch_add_explicit(&cache->underrunFrames,
+                              frames - mixed, memory_order_relaxed);
+    return mixed;
+}
+
+uint64_t daw_pcm_page_cache_underrun_frames(const DAWPCMPageCache *cache) {
+    return cache ? atomic_load_explicit(&cache->underrunFrames,
+                                        memory_order_acquire) : 0;
+}

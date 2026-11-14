@@ -115,4 +115,51 @@ final class RealtimeCaptureBufferTests: XCTestCase {
         XCTAssertEqual(daw_audio_peak_meter_take(meter), 0.9, accuracy: 0.00001)
         XCTAssertEqual(daw_audio_peak_meter_take(meter), 0, accuracy: 0.00001)
     }
+    func testPCMPagesPublishStereoDataAndCountMissingFrames() throws {
+        let cache = try XCTUnwrap(daw_pcm_page_cache_create(4, 2))
+        defer { daw_pcm_page_cache_destroy(cache) }
+        var left = [Float](repeating: 0, count: 6)
+        var right = left
+        XCTAssertEqual(daw_pcm_page_cache_mix(
+            cache, 0, 4, &left, &right, 1
+        ), 0)
+        XCTAssertEqual(daw_pcm_page_cache_underrun_frames(cache), 4)
+
+        var requested: UInt64 = 999
+        XCTAssertTrue(daw_pcm_page_cache_requested_page(cache, &requested))
+        XCTAssertEqual(requested, 0)
+        let first: [Float] = [1, 10, 2, 20, 3, 30, 4, 40]
+        XCTAssertTrue(first.withUnsafeBufferPointer {
+            daw_pcm_page_cache_supply(cache, 0, $0.baseAddress, 4)
+        })
+        XCTAssertTrue(daw_pcm_page_cache_contains(cache, 0))
+        XCTAssertEqual(daw_pcm_page_cache_mix(cache, 0, 4, &left, &right, 0.5), 4)
+        XCTAssertEqual(Array(left.prefix(4)), [0.5, 1, 1.5, 2])
+        XCTAssertEqual(Array(right.prefix(4)), [5, 10, 15, 20])
+
+        let second: [Float] = [5, 50, 6, 60, 7, 70, 8, 80]
+        XCTAssertTrue(second.withUnsafeBufferPointer {
+            daw_pcm_page_cache_supply(cache, 1, $0.baseAddress, 4)
+        })
+        XCTAssertEqual(daw_pcm_page_cache_mix(cache, 2, 4, &left, &right, 1), 4)
+        XCTAssertEqual(Array(left.prefix(4)), [3.5, 5, 5, 6])
+        XCTAssertEqual(Array(right.prefix(4)), [35, 50, 50, 60])
+        XCTAssertEqual(daw_pcm_page_cache_underrun_frames(cache), 4)
+
+        // Page zero and page two alias the same bounded slot. A seek must
+        // never return stale page-zero samples for page two.
+        XCTAssertFalse(daw_pcm_page_cache_contains(cache, 2))
+        XCTAssertTrue(first.withUnsafeBufferPointer {
+            daw_pcm_page_cache_supply(cache, 2, $0.baseAddress, 4)
+        })
+        XCTAssertFalse(daw_pcm_page_cache_contains(cache, 0))
+        XCTAssertEqual(daw_pcm_page_cache_mix(cache, 0, 4, &left, &right, 1), 0)
+        XCTAssertEqual(daw_pcm_page_cache_underrun_frames(cache), 8)
+    }
+
+    func testPCMPageCacheRejectsUnboundedAllocations() {
+        XCTAssertNil(daw_pcm_page_cache_create(0, 4))
+        XCTAssertNil(daw_pcm_page_cache_create(4096, 0))
+        XCTAssertNil(daw_pcm_page_cache_create(4096, 17))
+    }
 }

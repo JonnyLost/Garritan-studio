@@ -63,6 +63,26 @@ void daw_sample_position_destroy(DAWAtomicSamplePosition *position);
 void daw_sample_position_publish(DAWAtomicSamplePosition *position, int64_t frames);
 int64_t daw_sample_position_load(const DAWAtomicSamplePosition *position);
 
+
+// Fixed-page, nonblocking stereo PCM handoff for Core Audio disk playback.
+// The disk worker writes pages after decoding, the audio callback reads only
+// published pages. No callback memory allocation, waiting or file access.
+// Each page index is a clip-relative frame offset / pageFrames.
+typedef struct DAWPCMPageCache DAWPCMPageCache;
+DAWPCMPageCache *daw_pcm_page_cache_create(uint32_t pageFrames,
+                                           uint32_t pageCount);
+void daw_pcm_page_cache_destroy(DAWPCMPageCache *cache);
+void daw_pcm_page_cache_request(DAWPCMPageCache *cache, uint64_t frame);
+bool daw_pcm_page_cache_requested_page(const DAWPCMPageCache *cache,
+                                       uint64_t *pageIndex);
+bool daw_pcm_page_cache_contains(const DAWPCMPageCache *cache, uint64_t pageIndex);
+bool daw_pcm_page_cache_supply(DAWPCMPageCache *cache, uint64_t pageIndex,
+                               const float *interleavedStereo, uint32_t frames);
+uint32_t daw_pcm_page_cache_mix(DAWPCMPageCache *cache, uint64_t clipFrame,
+                                uint32_t frames, float *outLeft,
+                                float *outRight, float gain);
+uint64_t daw_pcm_page_cache_underrun_frames(const DAWPCMPageCache *cache);
+
 #ifdef __cplusplus
 }
 #endif
