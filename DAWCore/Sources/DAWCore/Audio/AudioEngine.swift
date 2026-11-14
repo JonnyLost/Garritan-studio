@@ -92,6 +92,9 @@ public final class AudioEngine: ObservableObject {
     private var routedMicrophones: [StudioVirtualMicrophone] = []
     private var microphoneRoom = StudioAcousticRoomDesign()
     @Published public private(set) var isMicrophoneAuditionActive = false
+    /// Temporary wet trim for the existing shared hall while auditioning capsules.
+    /// This is one room field for the whole orchestra, never one reverb per mic.
+    @Published public private(set) var microphoneRoomWetLevel: Float = 0.20
     /// Shared hall return level, independent of individual instrument sends.
     @Published public private(set) var concertHallOverallReverb: Float = 1.0
 
@@ -470,10 +473,22 @@ public final class AudioEngine: ObservableObject {
         )
     }
 
+    /// Real-time mixer gain only: no AVAudioEngine topology changes.
+    /// The shared room is an approximation sourced from existing stage sends,
+    /// not an independently measured impulse response for each capsule.
+    public func setMicrophoneRoomWetLevel(_ level: Float) {
+        microphoneRoomWetLevel = level.isFinite ? min(1, max(0, level)) : 0.20
+        if isMicrophoneAuditionActive {
+            concertHallReturnMixer.outputVolume =
+                concertHallOverallReverb * microphoneRoomWetLevel
+        }
+    }
+
     public func setConcertHallOverallReverb(_ level: Float) {
         concertHallOverallReverb = level.isFinite ? min(2, max(0, level)) : 1
         concertHallReturnMixer.outputVolume = isMicrophoneAuditionActive
-            ? 0 : concertHallOverallReverb
+            ? concertHallOverallReverb * microphoneRoomWetLevel
+            : concertHallOverallReverb
     }
 
     /// Switch the single shared hall return to Studio's original algorithmic DSP.
@@ -709,7 +724,9 @@ public final class AudioEngine: ObservableObject {
                 node.setMicrophoneAuditionActive(enabled)
             }
             microphoneMasterMixer.outputVolume = enabled ? 1 : 0
-            concertHallReturnMixer.outputVolume = enabled ? 0 : concertHallOverallReverb
+            concertHallReturnMixer.outputVolume = enabled
+                ? concertHallOverallReverb * microphoneRoomWetLevel
+                : concertHallOverallReverb
             if running { try engine.start() }
             isRunning = engine.isRunning
         } catch {
