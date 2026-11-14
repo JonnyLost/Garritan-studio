@@ -71,10 +71,18 @@ original gain-to-panner connections, dry track output and hall return.
 Failed engine startup during mic graph setup attempts to roll back
 to the original routing.
 
-**Audition currently includes direct sound and synthetic spill only**.
-The hall return is intentionally bypassed. Incorporating the shared
-native late-field return and per-microphone early reflections is the
-next acoustic integration step. Some separate routing paths, such as
+**Milestone 3 shared-field integration:** Microphone audition now blends
+an adjustable fraction (0–100%, initially 20%) of the **existing single
+shared hall return** into the mic audition. Studio's normal dry orchestra
+is still muted while auditioning; the wet trim is independent of the
+normal hall return level and is not stored as a mic capsule setting.
+At 0% the microphone audition remains direct/spill-only. The shared
+return is driven by existing stage-positioned track sends (and existing
+native early reflections when selected), **not** individual microphones'
+physical positions. Therefore this is an intentionally approximate room
+field, not microphone-specific early-reflection modeling, measured mic
+impulses, or a guarantee of physical phase coherence. Per-mic reflection
+routing and alignment remain to be implemented. Some separate routing paths, such as
 V-Rack output and metronome, are not necessarily included in the
 per-track capture matrix and require dedicated evaluation.
 
@@ -83,7 +91,7 @@ per-track capture matrix and require dedicated evaluation.
 1. Place instruments in **Stage** and add microphones using **Stage
    → Add Spot Mic** or **Rooms → Microphones** (Spot, XY, ORTF, Decca).
 2. Position/aim them and set pickup patterns, then open **Rooms → Mic Mixer**.
-3. **With transport stopped**, press **Audition Microphones**. Stop
+3. **With transport stopped**, press **Audition Microphones**. Adjust **Shared room return** to blend one wet hall field, or set it to 0% to isolate simulated direct/spill. Stop
    audition to add or remove mic objects.
 4. Move/aim mics and adjust microphone channel levels/pan/mute/solo
    while hearing the synthetic capture. Multiple instrument sources
@@ -129,7 +137,8 @@ milestone. Do not claim that a named room's recorded microphone signal
 can be reproduced from dry source samples.
 
 Next work should prioritize a more efficient single matrix engine
-for large orchestras; shared native room reflections in the mic
-audition mix; source-directivity and frequency-dependent air loss;
-mic-bus meter and alignment controls; optional mic/stem exports; and
-one consolidated MacBook test.
+for large orchestras; microphone-dependent early-reflection geometry
+and phase/latency alignment; source-directivity and frequency-dependent
+air loss; V-Rack routing parity; mic-bus meters; optional mic/stem
+exports; and one consolidated MacBook test. Milestone 3 shared-field
+routing is committed but **not yet Mac-build or listening verified**.
