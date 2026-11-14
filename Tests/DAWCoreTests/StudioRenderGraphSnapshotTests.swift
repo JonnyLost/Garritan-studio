@@ -73,4 +73,41 @@ final class StudioRenderGraphSnapshotTests: XCTestCase {
         XCTAssertEqual(graph.renderSnapshotGeneration, revision)
         XCTAssertEqual(graph.renderSnapshotTrackIDs, members)
     }
+
+    func testNewEmptyTracksCanPublishWhileRenderReadsAnOlderSnapshot() {
+        struct StereoList {
+            var mNumberBuffers: UInt32 = 2
+            var left = AudioBuffer()
+            var right = AudioBuffer()
+        }
+        let graph = RenderGraph(sampleRate: 48_000, bufferSize: 128)
+        let queue = DispatchQueue(label: "studio.route.snapshot.render", qos: .userInitiated)
+        let finished = expectation(description: "render reader finished")
+        queue.async {
+            let left = UnsafeMutablePointer<Float>.allocate(capacity: 128)
+            let right = UnsafeMutablePointer<Float>.allocate(capacity: 128)
+            defer { left.deallocate(); right.deallocate() }
+            left.initialize(repeating: 0, count: 128)
+            right.initialize(repeating: 0, count: 128)
+            var stereo = StereoList()
+            stereo.left = AudioBuffer(mNumberChannels: 1, mDataByteSize: 512, mData: left)
+            stereo.right = AudioBuffer(mNumberChannels: 1, mDataByteSize: 512, mData: right)
+            for tick in 0..<400 {
+                withUnsafeMutablePointer(to: &stereo) { ptr in
+                    ptr.withMemoryRebound(to: AudioBufferList.self, capacity: 1) { buffers in
+                        graph.render(
+                            frameCount: 128,
+                            currentSample: Int64(tick * 128),
+                            outputBuffer: buffers
+                        )
+                    }
+                }
+            }
+            finished.fulfill()
+        }
+        for _ in 0..<64 { graph.createTrack(id: TrackID()) }
+        wait(for: [finished], timeout: 10)
+        XCTAssertEqual(graph.renderSnapshotTrackIDs.count, 64)
+        XCTAssertEqual(graph.renderSnapshotGeneration, 64)
+    }
 }
