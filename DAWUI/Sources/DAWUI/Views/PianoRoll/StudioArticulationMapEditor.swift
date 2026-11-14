@@ -78,6 +78,14 @@ struct StudioArticulationMapEditor: View {
                         Button(saved.name) { draft = saved }
                     }
                 }
+                Button("Duplicate Map") {
+                    // Keep articulation IDs, but give this instrument its own
+                    // editable map identity and library file.
+                    draft.id = UUID()
+                    draft.name += " Copy"
+                    libraryMessage = "Duplicated map; musical articulation IDs preserved"
+                }
+                .help("Create an independent map for another instrument without losing note assignments")
                 Button("Save to Library") {
                     do {
                         try StudioArticulationMapLibrary.save(draft)
