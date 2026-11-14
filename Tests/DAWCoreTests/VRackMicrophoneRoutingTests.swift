@@ -113,6 +113,25 @@ final class VRackMicrophoneRoutingTests: XCTestCase {
         }
     }
 
+    func testRackOnlyMIDITracksAreCountedThroughRackAggregate() {
+        let rackID = UUID()
+        var tracks: [Track] = []
+        for index in 0..<32 {
+            var track = Track(name: "Rack MIDI \(index)", type: .midi)
+            track.midiOutput = .rackInstrument(id: rackID, channel: 1)
+            tracks.append(track)
+        }
+        XCTAssertTrue(tracks.allSatisfy {
+            !AudioEngine.isIndependentMicrophoneSource($0)
+        })
+
+        let independentMIDI = Track(name: "Standalone MIDI", type: .midi)
+        XCTAssertTrue(AudioEngine.isIndependentMicrophoneSource(independentMIDI))
+        var audio = Track(name: "Audio Track", type: .audio)
+        audio.midiOutput = .rackInstrument(id: rackID, channel: 1)
+        XCTAssertTrue(AudioEngine.isIndependentMicrophoneSource(audio))
+    }
+
     func testAddingOrRemovingRackDuringAuditionReturnsToOriginalMix() throws {
         let studio = AudioEngine()
         let engine = studio.engine
