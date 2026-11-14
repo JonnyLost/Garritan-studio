@@ -164,9 +164,8 @@ public final class RenderGraph {
             }
         }
         
-        // Keep AVAudioUnit alive
-        avAudioUnits[trackID] = avAudioUnit
-        
+        // Keep the old unit alive until the new one has allocated
+        // resources and is ready to replace it.
         // Get the underlying AudioUnit
         let unit = avAudioUnit.audioUnit
         
@@ -217,6 +216,7 @@ public final class RenderGraph {
         track.instrumentUnit = unit
         track.auAudioUnit = auAudioUnit
         track.renderBlock = renderBlock
+        avAudioUnits[trackID] = avAudioUnit
         tracks[trackID] = track
         
         print("[RenderGraph] Loaded instrument for track \(trackID.rawValue) using AVAudioUnit (renderBlock: \(renderBlock != nil ? "✓" : "nil"))")
