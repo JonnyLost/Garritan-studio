@@ -109,8 +109,15 @@ struct ArticulationsWorkspaceView: View {
     }
 
     private var canSendKeyswitch: Bool {
-        guard let activePatch, let suggestedPatch, viewModel.selectedTrack != nil else { return false }
-        return activePatch.patch == suggestedPatch.patch
+        guard let activePatch, let suggestedPatch,
+              let programID = viewModel.selectedTrack?.garritanProgramID,
+              activePatch.patch == suggestedPatch.patch else { return false }
+        // A name match alone is insufficient: the GPO5 manual lists
+        // different Notation octaves and duplicate names for some programs.
+        if case .ready = StudioGarritanArticulationFactory.resolve(programID: programID) {
+            return true
+        }
+        return false
     }
 
     private func selectArticulation(_ assignment: GPOKeyswitchCatalog.Assignment) {
@@ -427,6 +434,11 @@ struct ArticulationsWorkspaceView: View {
         }
     }
 
+    private var isInstantOrchestraSelected: Bool {
+        viewModel.selectedTrack?.garritanProgramID?
+            .hasPrefix("Garritan Instant Orchestra:") == true
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             StudioWorkspaceHeader(
@@ -448,7 +460,20 @@ struct ArticulationsWorkspaceView: View {
                     .buttonStyle(.borderless)
             }
 
-            if let catalog {
+            if isInstantOrchestraSelected {
+                VStack(alignment: .leading, spacing: 14) {
+                    Label("Instant Orchestra uses performance controllers, not keyswitches",
+                          systemImage: "slider.horizontal.3")
+                        .font(.headline)
+                    Text("The Instant Orchestra owner’s manual explicitly confirms that this library contains no keyswitches. Select CC1, CC2 or CC11 in the piano-roll controller lane to shape dynamics; CC104 changes GM/GPO expression mode. Blending Textures patches use CC1/CC11 crossfades and CC30–32 layer levels.")
+                        .font(.body)
+                    Text("These are per-patch performance options, not interchangeable string pizzicato / staccato switches.")
+                        .font(.caption)
+                        .foregroundStyle(palette.secondaryText)
+                }
+                .padding(22)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else if let catalog {
                 HStack(spacing: 0) {
                     VStack(alignment: .leading, spacing: 10) {
                         StudioSectionHeading("Keyswitch Programs", symbol: "list.bullet")
@@ -533,8 +558,8 @@ struct ArticulationsWorkspaceView: View {
                                         .foregroundStyle(canSendKeyswitch ?
                                                          Color.green : palette.accent)
                                     Text(canSendKeyswitch
-                                         ? "Keyswitches control the loaded Garritan instrument."
-                                         : "Manual reference only. Load the matching KS instrument to enable MIDI.")
+                                         ? "Verified GPO5 Standard-set MIDI notes; keyswitches control the loaded Garritan instrument."
+                                         : "Manual reference only. Load a verified exact Standard KS patch; Notation and ambiguous mappings require manual calibration.")
                                         .foregroundStyle(palette.secondaryText)
                                 }
                                 .font(.system(size: 11))
