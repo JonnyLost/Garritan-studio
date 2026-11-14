@@ -38,6 +38,14 @@ final class NativeMicrophoneMatrixAudioUnitTests: XCTestCase {
         let capture = AVAudioUnitEffect(
             audioComponentDescription: NativeMicrophoneMatrixAudioUnit.componentDescription
         )
+        // Studio's host negotiates the actual engine sample rate before
+        // attaching any custom microphone Audio Unit (48 kHz here).
+        for index in 0..<capture.auAudioUnit.inputBusses.count {
+            try capture.auAudioUnit.inputBusses[index].setFormat(audioFormat)
+        }
+        for index in 0..<capture.auAudioUnit.outputBusses.count {
+            try capture.auAudioUnit.outputBusses[index].setFormat(audioFormat)
+        }
         engine.attach(player)
         engine.attach(capture)
         engine.connect(player, to: capture, format: audioFormat)
