@@ -24,6 +24,8 @@ public final class ProjectViewModel: ObservableObject {
     @Published public var activeKeyswitchArticulationID: String?
     @Published public var activeKeyswitchTrackID: TrackID?
     @Published public private(set) var selectedTrackID: TrackID?
+    /// UI selection only; microphone objects are stored in DAWState.
+    @Published public private(set) var selectedVirtualMicrophoneID: UUID?
     @Published public private(set) var selectedClipIDs: Set<ClipID> = []
     @Published public private(set) var isModified: Bool = false
     
@@ -615,6 +617,52 @@ public final class ProjectViewModel: ObservableObject {
         project.dawState.virtualMicrophoneSettings = safe
     }
 
+    /// Movable microphones are presently a persistent geometry editor.
+    /// They do not alter playback until the native mic/spill routing matrix
+    /// has passed its own engine stability and isolation milestone.
+    public func addVirtualMicrophoneArray(_ preset: StudioMicrophoneArrayPreset) {
+        let room = project.dawState.acousticRoomDesign ?? StudioAcousticRoomDesign()
+        var microphones = project.dawState.virtualMicrophones ?? []
+        guard microphones.count + preset.microphoneCount <= 32 else { return }
+        let added = preset.makeMicrophones(in: room)
+        microphones.append(contentsOf: added)
+        project.dawState.virtualMicrophones = microphones
+        selectedVirtualMicrophoneID = added.first?.id
+    }
+
+    public func selectVirtualMicrophone(_ id: UUID?) {
+        guard id == nil || (project.dawState.virtualMicrophones ?? []).contains(where: {
+            $0.id == id
+        }) else { return }
+        selectedVirtualMicrophoneID = id
+    }
+
+    public func updateVirtualMicrophone(_ microphone: StudioVirtualMicrophone) {
+        guard var microphones = project.dawState.virtualMicrophones,
+              let index = microphones.firstIndex(where: { $0.id == microphone.id })
+        else { return }
+        let room = project.dawState.acousticRoomDesign ?? StudioAcousticRoomDesign()
+        microphones[index] = microphone.clamped(to: room)
+        project.dawState.virtualMicrophones = microphones
+    }
+
+    public func setVirtualMicrophonePosition(id: UUID, position: StudioRoomPosition3D) {
+        guard var microphone = project.dawState.virtualMicrophones?.first(where: {
+            $0.id == id
+        }) else { return }
+        microphone.position = position
+        updateVirtualMicrophone(microphone)
+    }
+
+    public func removeVirtualMicrophone(id: UUID) {
+        guard var microphones = project.dawState.virtualMicrophones else { return }
+        microphones.removeAll { $0.id == id }
+        project.dawState.virtualMicrophones = microphones
+        if selectedVirtualMicrophoneID == id {
+            selectedVirtualMicrophoneID = microphones.first?.id
+        }
+    }
+
     /// Apply current room geometry/materials to our native FDN and source
     /// reflections. The button is disabled during transport activity.
     /// Save the new design only after the audio engine accepted it.
@@ -631,6 +679,11 @@ public final class ProjectViewModel: ObservableObject {
             else { return }
             acousticRoomSelectionError = nil
             project.dawState.acousticRoomDesign = design
+            if let microphones = project.dawState.virtualMicrophones {
+                project.dawState.virtualMicrophones = microphones.map {
+                    $0.clamped(to: design)
+                }
+            }
             project.dawState.acousticRoomProfileID = StudioAcousticRoomDesign.profileID
         } catch {
             acousticRoomSelectionError =
