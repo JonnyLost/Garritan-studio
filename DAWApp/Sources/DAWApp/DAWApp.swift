@@ -92,6 +92,12 @@ struct DAWApp: App {
                 .keyboardShortcut("s", modifiers: [.command, .shift])
 
                 Divider()
+                Button("Export Audio & Stems…") {
+                    NotificationCenter.default.post(name: .showStudioExport, object: nil)
+                }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
+
+                Divider()
 
                 Button("Import MIDI as New Project...") {
                     appState.importMIDI()
