@@ -82,6 +82,22 @@ public final class AudioEngine: ObservableObject {
     // Both retain the 16-source cap until orchestral benchmarks pass.
     public static let maximumAuditionMicrophones = 4
     public static let maximumAuditionSources = 16
+
+    /// A MIDI-only track routed to the V-Rack does not have its own
+    /// independent instrument audio: the V-Rack sum captures it once.
+    /// Keep any timeline audio clips on that track individually eligible.
+    /// This avoids consuming the source cap with silent rack MIDI tracks.
+    public static func isIndependentMicrophoneSource(_ track: Track) -> Bool {
+        guard track.type == .midi || track.type == .instrument ||
+                track.type == .audio else { return false }
+        if track.type != .audio,
+           let destination = track.midiOutput,
+           case .rackInstrument = destination,
+           !track.clips.contains(where: { $0.content.isAudio }) {
+            return false
+        }
+        return true
+    }
     private let microphoneMasterMixer = AVAudioMixerNode()
     private var microphoneChannelMixers: [UUID: AVAudioMixerNode] = [:]
 
@@ -421,8 +437,12 @@ public final class AudioEngine: ObservableObject {
                                        nativeEnabled: usesNativeConcertHallReverb)
 
         trackNodes[track.id] = trackNode
-        if isMicrophoneAuditionActive,
-           (track.type == .midi || track.type == .instrument || track.type == .audio) {
+        if isMicrophoneAuditionActive {
+            if !Self.isIndependentMicrophoneSource(track) {
+                // Newly added rack MIDI-only tracks must not leak dry audio
+                // when audition is already in progress.
+                trackNode.setMicrophoneAuditionActive(true)
+            } else {
             let sourceCount = Set(microphoneRoutes.map(\.sourceID)).count
             if sourceCount + (hasVRackCaptureSource ? 1 : 0) >= Self.maximumAuditionSources {
                 // A newly created track must NEVER become inaudible just
@@ -439,6 +459,7 @@ public final class AudioEngine: ObservableObject {
                 attachMicrophoneCaptures(for: track, format: format)
                 updateMicrophoneCapture(for: track)
                 trackNode.setMicrophoneAuditionActive(true)
+            }
             }
         }
         print("[Track Audio] Installing meter")
@@ -758,8 +779,7 @@ public final class AudioEngine: ObservableObject {
             return
         }
         let sources = tracks.filter {
-            ($0.type == .midi || $0.type == .instrument || $0.type == .audio) &&
-                trackNodes[$0.id] != nil
+            Self.isIndependentMicrophoneSource($0) && trackNodes[$0.id] != nil
         }
         let rackSourceIncluded = hasVRackCaptureSource && vRackSourceMixer != nil
         if enabled {
