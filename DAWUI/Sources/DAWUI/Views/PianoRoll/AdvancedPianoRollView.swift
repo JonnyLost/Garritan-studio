@@ -1006,7 +1006,8 @@ public struct AdvancedPianoRollView: View {
                                                 at: insertion)
         guard !newIDs.isEmpty else { return }
         clip.content = .midi(midiData)
-        updateClip(clip, description: "Paste MIDI Notes")
+        updateClip(extendingClip(clip, toInclude: newIDs),
+                   description: "Paste MIDI Notes")
         selectedNoteIDs = newIDs
     }
 
@@ -1017,7 +1018,8 @@ public struct AdvancedPianoRollView: View {
                                                           ids: selectedNoteIDs)
         guard !ids.isEmpty else { return }
         clip.content = .midi(midiData)
-        updateClip(clip, description: "Duplicate MIDI Notes")
+        updateClip(extendingClip(clip, toInclude: ids),
+                   description: "Duplicate MIDI Notes")
         selectedNoteIDs = ids
     }
 
@@ -1041,7 +1043,8 @@ public struct AdvancedPianoRollView: View {
         midiData.events.append(newEvent)
         clip.content = .midi(midiData)
 
-        updateClip(clip)
+        updateClip(extendingClip(clip, toInclude: [newEvent.id]),
+                   description: "Add MIDI Note")
         selectedNoteIDs = [newEvent.id]
         
         // Play preview
@@ -1246,11 +1249,13 @@ public struct AdvancedPianoRollView: View {
             }
             guard !selectedCopies.isEmpty else { return }
             clip.content = .midi(copied)
-            updateClip(clip, description: "Copy MIDI Notes")
+            updateClip(extendingClip(clip, toInclude: selectedCopies),
+                       description: "Copy MIDI Notes")
             selectedNoteIDs = selectedCopies
         } else {
             clip.content = .midi(draft)
-            updateClip(clip, description: "Edit MIDI Notes")
+            updateClip(extendingClip(clip, toInclude: selectedNoteIDs),
+                       description: "Edit MIDI Notes")
         }
     }
 
@@ -1352,6 +1357,28 @@ public struct AdvancedPianoRollView: View {
         return CGRect(x: x, y: y, width: width, height: noteHeight)
     }
     
+    /// Grow a MIDI clip only for notes that were actively added or edited.
+    /// Existing hidden notes beyond a trimmed boundary stay hidden.
+    private func extendingClip(_ clip: Clip, toInclude ids: Set<UUID>) -> Clip {
+        guard !ids.isEmpty, case .midi(let midi) = clip.content else { return clip }
+        let currentLength = clip.timeRange.duration.beats(
+            atTempo: viewModel.transportState.tempo.bpm)
+        let latestEnd = midi.events.compactMap { event -> Double? in
+            guard ids.contains(event.id), case .note(let note) = event.type else {
+                return nil
+            }
+            return event.beatPosition + note.duration
+        }.max() ?? 0
+        guard latestEnd > currentLength else { return clip }
+        var grown = clip
+        grown.timeRange = TimeRange(
+            start: clip.timeRange.start,
+            duration: TimePosition(beats: latestEnd,
+                tempo: viewModel.transportState.tempo.bpm,
+                sampleRate: viewModel.project.sampleRate))
+        return grown
+    }
+
     private func updateClip(_ clip: Clip, description: String = "Edit MIDI") {
         guard let trackID = viewModel.selectedTrackID,
               var track = viewModel.project.track(withID: trackID),
