@@ -133,6 +133,13 @@ public final class AudioEngine: ObservableObject {
         }
         let existing = engine.outputConnectionPoints(for: sumMixer, outputBus: 0)
         if vRackSourceMixer !== sumMixer || existing.isEmpty {
+            // If a source was replaced/disconnected during audition, avoid
+            // muted dry monitoring with stale capture edges. Fall back first.
+            if isMicrophoneAuditionActive {
+                try? setMicrophoneAuditionEnabled(
+                    false, tracks: [], microphones: [], room: microphoneRoom
+                )
+            }
             vRackSourceMixer = sumMixer
             connectVRackMicrophoneFanout(format: format)
         }
