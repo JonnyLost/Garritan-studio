@@ -264,7 +264,10 @@ audition restores the original mix to avoid missing or duplicated rack audio.
 
 **Source-count guard:** the aggregate V-Rack signal counts as **one** source
 when rack instruments are present; it contributes to the existing 16-source
-live limit. This limit is not increased until multi-source performance is
+live limit. Rack-routed MIDI-only tracks are not redundantly counted as
+independent audio sources; track audio and any rack-routed track with audio
+clips remain independently eligible. The Mic Mixer displays the effective
+source count. This limit is not increased until multi-source performance is
 benchmarked on a MacBook. V-Rack microphone pickup is currently modeled as
 one **centered, middle-stage** acoustic source. Multiple rack instruments,
 even if triggered by separate MIDI channels or tracks, are already summed at
