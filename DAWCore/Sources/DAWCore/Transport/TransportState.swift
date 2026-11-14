@@ -72,6 +72,8 @@ public final class TransportState: ObservableObject {
     // MARK: - Internal State
     
     private var playStartTime: Date?
+    private var loopWrapPending = false
+    private var lastLoopWrapFinishedAt: Date = .distantPast
     private var playStartPosition: TimePosition = TimePosition()
     private var playbackTimer: Timer?
     private var lastToggleTime: Date = .distantPast
@@ -186,6 +188,7 @@ public final class TransportState: ObservableObject {
         
         // CRITICAL: Capture the EXACT position BEFORE anything else
         // This is the position that audio/MIDI playback must use
+        loopWrapPending = false
         playbackStartBeat = playheadBeats
         playStartPosition = playheadPosition
         playbackStartSamplePosition = playheadPosition.samples
@@ -223,6 +226,7 @@ public final class TransportState: ObservableObject {
         isPlaying = false
         isPaused = false
         isRecording = false
+        loopWrapPending = false
         
         // Stop audio engine playback
         audioEngine?.stopPlayback()
@@ -425,13 +429,27 @@ public final class TransportState: ObservableObject {
     /// Studio's coordinator. ProjectViewModel then stops, recompiles and
     /// restarts the audio/MIDI engines from this exact position.
     private func rebaseForLoop(to beat: Double) {
-        guard beat.isFinite, beat >= 0 else { return }
+        // The control thread needs to finish rebuilding the MIDI/audio
+        // session before accepting another tap notification from the
+        // previous loop. Debounce stale publications immediately afterward.
+        guard beat.isFinite, beat >= 0, !loopWrapPending,
+              Date().timeIntervalSince(lastLoopWrapFinishedAt) > 0.075 else {
+            return
+        }
+        loopWrapPending = true
         playbackStartBeat = beat
         let position = TimePosition(beats: beat, tempo: tempo.bpm,
                                     sampleRate: sampleRate)
         playbackStartSamplePosition = position.samples
         setPlayheadPosition(position)
         transportEventSubject.send(.loopWrapped)
+    }
+
+    /// Called by the playback coordinator after the new audio session is
+    /// installed; never called from an audio render callback.
+    public func finishLoopWrap() {
+        loopWrapPending = false
+        lastLoopWrapFinishedAt = Date()
     }
 
     public func togglePlayPause() {
