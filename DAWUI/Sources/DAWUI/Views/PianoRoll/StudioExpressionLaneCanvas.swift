@@ -6,6 +6,7 @@ import DAWCore
 struct StudioExpressionLaneCanvas: View {
     let events: [MIDIEvent] // all positions are absolute project beats
     let lane: CCType
+    let mode: StudioExpressionDrawMode
     let channel: UInt8
     let pixelsPerBeat: Double
     let width: CGFloat
@@ -88,6 +89,7 @@ struct StudioExpressionLaneCanvas: View {
                 }
                 .onEnded { _ in onFinish() }
         )
-        .accessibilityLabel("MIDI \(lane.name) expression lane")
+        .accessibilityLabel("MIDI \(lane.name) \(mode.rawValue) expression lane")
+        .help(mode.help)
     }
 }
