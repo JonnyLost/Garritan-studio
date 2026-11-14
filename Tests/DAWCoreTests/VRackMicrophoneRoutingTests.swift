@@ -260,12 +260,24 @@ final class VRackMicrophoneRoutingTests: XCTestCase {
         let micChannel = try XCTUnwrap(engine.outputConnectionPoints(
             for: capture, outputBus: 0
         ).first?.node as? AVAudioMixerNode)
+        let micMaster = try XCTUnwrap(engine.outputConnectionPoints(
+            for: micChannel, outputBus: 0
+        ).first?.node as? AVAudioMixerNode)
+        let micMain = engine.outputConnectionPoints(
+            for: micMaster, outputBus: 0
+        )
+        XCTAssertTrue(micMain.contains { $0.node === engine.mainMixerNode },
+            "Mic master must remain connected to main mixer")
+        XCTAssertGreaterThan(micMaster.outputVolume, 0.9)
 
         engine.stop()
+        // Disconnect the silent AU before redirecting the source, ensuring
+        // the mic channel receives its only active source on input bus zero.
+        engine.disconnectNodeOutput(capture)
+        engine.disconnectNodeInput(capture)
         engine.connect(rackSum, to: [
             AVAudioConnectionPoint(node: monitor, bus: 0),
-            AVAudioConnectionPoint(node: micChannel,
-                                   bus: micChannel.nextAvailableInputBus)
+            AVAudioConnectionPoint(node: micChannel, bus: 0)
         ], fromBus: 0, format: format)
 
         // Only the mic bus may sound; the dry monitor stays off.
