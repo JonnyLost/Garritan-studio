@@ -2468,7 +2468,8 @@ public final class PlaybackEngine: ObservableObject {
         guard isPlaying, let beat = transportState?.playheadBeats,
               beat.isFinite else { return }
         for (trackID, lanes) in synthAutomationLanes {
-            guard case .studioSynth(let synth) = trackInstruments[trackID] else {
+            guard let instrument = trackInstruments[trackID],
+                  case .studioSynth(let synth) = instrument else {
                 continue
             }
             for lane in lanes {
