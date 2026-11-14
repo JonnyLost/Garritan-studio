@@ -90,8 +90,9 @@ final class StudioSynthFinalizationTests: XCTestCase {
         edited.layers[0].enabled = false
         let disabled = StudioSynthAutomationConsistency.reconcile(
             lanes, for: edited)
-        XCTAssertEqual(disabled.count, 2)
-        XCTAssertFalse(disabled.contains { $0.id == analog.id })
+        XCTAssertEqual(disabled.count, 3,
+                       "Temporarily disabling a layer must preserve its lanes")
+        XCTAssertTrue(disabled.contains { $0.id == analog.id })
     }
 
     func testGranularMissingRecordingIsReportedBeforeLoadingSound() throws {
