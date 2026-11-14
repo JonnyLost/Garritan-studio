@@ -145,4 +145,41 @@ final class StudioMIDIExportPlannerTests: XCTestCase {
             XCTAssertEqual(error as? StudioMIDIExportPlanningError, .invalidTempo)
         }
     }
+    func testHeldControllerIsReleasedOnceAtTrimBoundary() throws {
+        let a = MIDIEvent.note(at: 0, pitch: 60, duration: 3)
+        let b = MIDIEvent.note(at: 1, pitch: 64, duration: 5)
+        let map = StudioArticulationMap(articulations: [
+            StudioArticulationDefinition(id: "legato", name: "Legato",
+                actions: [StudioArticulationAction(
+                    kind: .controller, number: 68, value: 127,
+                    holdForNote: true)])
+        ])
+        let track = makeTrack(length: 4, notes: [a, b], map: map,
+            assignments: [a, b].map {
+                .init(noteID: $0.id, articulationID: "legato")
+            })
+        let messages = try StudioMIDIExportPlanner.messages(
+            for: track, tempo: 120, mode: .renderedPerformance)
+        let releases = messages.filter { $0.bytes == [0xB0, 68, 0] }
+        XCTAssertEqual(releases.count, 1)
+        XCTAssertEqual(releases.first?.tick, 1920)
+        XCTAssertFalse(messages.contains { $0.tick > 1920 })
+    }
+
+    func testUnconfiguredArticulationMapNeverInventsKeyswitches() throws {
+        let note = MIDIEvent.note(at: 0, pitch: 70)
+        let map = StudioArticulationMap(articulations: [
+            StudioArticulationDefinition(id: "notation", name: "Uncalibrated",
+                                         actions: [])
+        ])
+        let track = makeTrack(notes: [note], map: map,
+            assignments: [.init(noteID: note.id, articulationID: "notation")])
+        let messages = try StudioMIDIExportPlanner.messages(
+            for: track, tempo: 120, mode: .renderedPerformance)
+        XCTAssertEqual(messages.map(\.bytes), [
+            [0x90, 70, 100], [0x80, 70, 0]
+        ])
+        XCTAssertFalse(messages.contains(where: \.generatedArticulation))
+    }
+
 }
