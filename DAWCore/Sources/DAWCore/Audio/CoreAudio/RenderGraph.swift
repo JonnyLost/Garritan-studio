@@ -107,8 +107,8 @@ public final class RenderGraph {
     // MARK: - Properties
     
     private var tracks: [TrackID: TrackNode] = [:]
-    /// Stable membership object. A published instance is never changed;
-    /// TrackNode still contains mutable render-owned parameters and AUs.
+    /// Route membership and processing resources are captured per generation.
+    /// TrackControls remain shared, with writes owned by the render domain.
     private final class RenderSnapshot {
         let generation: UInt64
         let routes: [RenderRoute]
@@ -178,6 +178,15 @@ public final class RenderGraph {
 
     var renderSnapshotGeneration: UInt64 { latestSnapshot.generation }
     var renderSnapshotTrackIDs: [TrackID] { latestSnapshot.routes.map(\.id) }
+    /// Test-only/introspection identity of the immutable resources retained
+    /// by the last published graph generation, not the mutable track table.
+    func publishedProcessingIdentity(for id: TrackID) -> ObjectIdentifier? {
+        latestSnapshot.byID[id].map { ObjectIdentifier($0.processing) }
+    }
+    func publishedScratchCapacity(for id: TrackID) -> Int? {
+        latestSnapshot.byID[id]?.processing.scratch.frameCapacity
+    }
+
 
     private var masterVolume: Float = 1.0
     private let sampleRate: Double
@@ -247,8 +256,8 @@ public final class RenderGraph {
         print("[RenderGraph] Created track \\(id.rawValue)")
     }
 
-    /// Route contents must remain alive until snapshots retire. The raw AU
-    /// and scratch resources now belong to TrackNode instead of this method.
+    /// A retired snapshot retains its immutable ProcessingResources even after
+    /// the control dictionary releases the track.
     func removeTrack(id: TrackID) {
         guard tracks.removeValue(forKey: id) != nil else { return }
         publishRenderSnapshot()
@@ -486,7 +495,7 @@ public final class RenderGraph {
     }
 
     func getInstrumentUnit(for trackID: TrackID) -> AudioUnit? {
-        return tracks[trackID]?.instrumentUnit
+        return tracks[trackID]?.processing.instrumentUnit
     }
     
     // MARK: - MIDI Processing
