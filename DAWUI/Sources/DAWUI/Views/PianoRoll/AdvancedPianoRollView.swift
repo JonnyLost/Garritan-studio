@@ -744,17 +744,14 @@ public struct AdvancedPianoRollView: View {
 
                     // Include the last quarter-beat subdivision in odd /
                     // compound meters such as 7/8 (bar length 3.5 beats).
-                    if beatsPerBar > 1 {
-                        for quarter in 1...Int(ceil(beatsPerBar))
-                            where Double(quarter) < beatsPerBar {
-                            let beatX = x + Double(quarter) * pixelsPerBeat
+                    for quarter in StudioMusicalGrid.interiorQuarterBeats(timeSignature) {
+                            let beatX = x + quarter * pixelsPerBeat
                             let beatPath = Path { path in
                                 path.move(to: CGPoint(x: beatX, y: size.height * 0.6))
                                 path.addLine(to: CGPoint(x: beatX, y: size.height))
                             }
                             context.stroke(beatPath, with: .color(Color.gray.opacity(0.3)),
                                            lineWidth: 0.5)
-                        }
                     }
                 }
             }
@@ -851,37 +848,41 @@ public struct AdvancedPianoRollView: View {
                 }
             }
             
-            // Draw beat subdivisions and true bar starts separately.
-            let totalBeats = Int(size.width / pixelsPerBeat) + 1
-            let barLength = StudioMusicalGrid.beatsPerBar(viewModel.transportState.timeSignature)
-            
-            for beat in 0..<totalBeats {
-                let x = CGFloat(beat) * pixelsPerBeat
-                let linePath = Path { path in
+            // Draw fractional meter boundaries FIRST, and quarter-note beat
+            // lines from EACH bar start. 7/8's second bar begins at beat 3.5.
+            let totalBeats = Double(size.width / pixelsPerBeat) + 1
+            let signature = viewModel.transportState.timeSignature
+            let barLength = StudioMusicalGrid.beatsPerBar(signature)
+            let quarterOffsets = StudioMusicalGrid.interiorQuarterBeats(signature)
+            for bar in 0...Int(ceil(totalBeats / barLength)) {
+                let base = Double(bar) * barLength
+                let x = CGFloat(base) * pixelsPerBeat
+                let barLine = Path { path in
                     path.move(to: CGPoint(x: x, y: 0))
                     path.addLine(to: CGPoint(x: x, y: size.height))
                 }
-                context.stroke(linePath, with: .color(Color.gray.opacity(0.2)), lineWidth: 0.5)
-
-                // Subdivision lines
-                if snapMode == .sixteenth || snapMode == .thirtysecond {
-                    for sub in 1..<4 {
-                        let subX = x + (CGFloat(sub) * pixelsPerBeat / 4)
-                        let subPath = Path { path in
-                            path.move(to: CGPoint(x: subX, y: 0))
-                            path.addLine(to: CGPoint(x: subX, y: size.height))
-                        }
-                        context.stroke(subPath, with: .color(Color.gray.opacity(0.1)), lineWidth: 0.5)
+                context.stroke(barLine, with: .color(Color.gray.opacity(0.5)), lineWidth: 1)
+                for quarter in quarterOffsets {
+                    let beatX = CGFloat(base + quarter) * pixelsPerBeat
+                    let line = Path { path in
+                        path.move(to: CGPoint(x: beatX, y: 0))
+                        path.addLine(to: CGPoint(x: beatX, y: size.height))
                     }
+                    context.stroke(line, with: .color(Color.gray.opacity(0.2)),
+                                   lineWidth: 0.5)
                 }
             }
-            for bar in 0...Int(ceil(Double(totalBeats) / barLength)) {
-                let x = CGFloat(Double(bar) * barLength) * pixelsPerBeat
-                let line = Path { path in
-                    path.move(to: CGPoint(x: x, y: 0))
-                    path.addLine(to: CGPoint(x: x, y: size.height))
+            if snapMode == .sixteenth || snapMode == .thirtysecond {
+                let step = snapMode == .thirtysecond ? 0.125 : 0.25
+                for index in 0...Int(ceil(totalBeats / step)) {
+                    let x = CGFloat(Double(index) * step) * pixelsPerBeat
+                    let line = Path { path in
+                        path.move(to: CGPoint(x: x, y: 0))
+                        path.addLine(to: CGPoint(x: x, y: size.height))
+                    }
+                    context.stroke(line, with: .color(Color.gray.opacity(0.075)),
+                                   lineWidth: 0.5)
                 }
-                context.stroke(line, with: .color(Color.gray.opacity(0.5)), lineWidth: 1)
             }
         }
     }
