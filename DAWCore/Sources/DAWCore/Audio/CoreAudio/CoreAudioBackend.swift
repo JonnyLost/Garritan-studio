@@ -344,7 +344,9 @@ public final class CoreAudioBackend: AudioBackend {
     // MARK: - Track Management
     
     public func createTrack(id: TrackID) throws {
-        withDrainedOutput { renderGraph.createTrack(id: id) }
+        // This protocol method can report an occupied offline graph; avoid
+        // silently losing a track-creation request during export.
+        try withDrainedOutputResult { renderGraph.createTrack(id: id) }
     }
     
     public func removeTrack(id: TrackID) {
