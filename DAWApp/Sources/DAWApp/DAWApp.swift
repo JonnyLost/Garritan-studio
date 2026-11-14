@@ -19,15 +19,18 @@ struct DAWApp: App {
     @StateObject private var appState = AppState()
 
     init() {
-        // 'swift run DAWApp' launches an unbundled executable. Ensure macOS
-        // treats it as a foreground app so its windows can receive keyboard focus.
+        // The development executable is named DAWApp for compatibility with
+        // 'swift run DAWApp', but the visible product is Garritan Studio.
+        ProcessInfo.processInfo.processName = "Garritan Studio"
+        // The SwiftPM executable isn't a bundled .app; make it foreground-capable.
         NSApplication.shared.setActivationPolicy(.regular)
     }
 
     var body: some Scene {
         // Main document window
-        WindowGroup {
-            MainWindowView(project: appState.currentProject)
+        WindowGroup("Garritan Studio") {
+            StudioAppearanceHost {
+                MainWindowView(project: appState.currentProject)
                 .onAppear {
                     DispatchQueue.main.async {
                         NSApplication.shared.activate(ignoringOtherApps: true)
@@ -42,6 +45,7 @@ struct DAWApp: App {
                     }
                     appState.markUnsavedChanges()
                 }
+            }
         }
         .commands {
             // File commands
@@ -163,6 +167,11 @@ struct DAWApp: App {
                 }
                 .keyboardShortcut("i", modifiers: .command)
                 
+                Button("Show/Hide On-Screen Keyboard") {
+                    NotificationCenter.default.post(name: Notification.Name("toggleStudioKeyboard"), object: nil)
+                }
+                .keyboardShortcut("k", modifiers: .command)
+
                 Divider()
                 
                 Button("Zoom In") {
@@ -179,7 +188,9 @@ struct DAWApp: App {
         
         // Settings window
         Settings {
-            SettingsView()
+            StudioAppearanceHost {
+                SettingsView()
+            }
         }
     }
 }
@@ -244,16 +255,18 @@ class AppState: ObservableObject {
     
     func openProject(at url: URL) async {
         do {
+            // Decode and validate the next project BEFORE tearing down the
+            // current session. A missing/corrupt file must not silence the
+            // existing instruments or stop its autosave.
+            let loadedProject = try await fileManager.load(from: url)
+
             autosaveManager.stopAutosave()
-            
-            // Clear all existing plugins first
             NotificationCenter.default.post(name: .clearAllPlugins, object: nil)
-            
-            // Small delay to ensure cleanup completes
+
+            // Allow the old graph to release its hosted instruments.
             try? await Task.sleep(nanoseconds: 100_000_000)
-            
-            // Load the project
-            currentProject = try await fileManager.load(from: url)
+
+            currentProject = loadedProject
             currentProjectURL = url
             hasUnsavedChanges = false
             projectID = UUID()  // Force view refresh with new project
@@ -384,8 +397,152 @@ extension Notification.Name {
 
 struct SettingsView: View {
     var body: some View {
-        GeneralSettingsView()
-            .frame(width: 400, height: 250)
+        TabView {
+            GeneralSettingsView()
+                .tabItem { Label("General", systemImage: "gearshape") }
+            AppearanceSettingsView()
+                .tabItem { Label("Appearance", systemImage: "paintpalette") }
+        }
+        .frame(width: 680, height: 540)
+    }
+}
+
+/// Appearance is a user preference, not a property of the musical project.
+private struct AppearanceSettingsView: View {
+    @State private var showingIconGallery = false
+    @AppStorage("garritanStudio.appearance") private var selection = StudioAppearance.system.rawValue
+    @AppStorage("garritanStudio.iconCollection") private var iconSelection = StudioIconCollection.matchAppearance.rawValue
+    @Environment(\.studioPalette) private var palette
+    @Environment(\.studioIconCollection) private var resolvedIcons
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Garritan Studio Appearance").font(.title3.bold())
+                Text("Three visual styles inspired by Garritan's orchestral heritage.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            HStack(spacing: 14) {
+                ForEach(StudioAppearance.visualThemes) { appearance in
+                    Button {
+                        selection = appearance.rawValue
+                    } label: {
+                        themeCard(appearance)
+                    }
+                    .buttonStyle(.plain)
+                    .help(appearance.subtitle)
+                }
+            }
+            Toggle("Automatically follow macOS light and dark appearance", isOn: Binding(
+                get: { selection == StudioAppearance.system.rawValue },
+                set: { selection = $0 ? StudioAppearance.system.rawValue : StudioAppearance.gpo5Modern.rawValue }
+            ))
+            Text("When automatic, light uses Personal Orchestra and dark uses Orchestral Strings. The chosen theme is saved for future launches.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Divider()
+
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Instrument Icons").font(.headline)
+                    Text("Choose a full icon collection, or match your selected appearance.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Picker("Icon Collection", selection: $iconSelection) {
+                    ForEach(StudioIconCollection.allCases) { icons in
+                        Text(icons.title).tag(icons.rawValue)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 202)
+            }
+
+            HStack(spacing: 11) {
+                ForEach(["Piccolo", "Oboe Solo", "French Horn 1 Solo",
+                         "Trumpet 1 Solo", "Violin 1 KS", "Cello 1 KS",
+                         "Timpani", "Concert Grand Harp"], id: \.self) { name in
+                    VStack(spacing: 7) {
+                        StudioInstrumentIcon(name: name, size: 43)
+                        Text(name.components(separatedBy: " ").first ?? name)
+                            .font(.system(size: 9))
+                            .foregroundStyle(palette.secondaryText)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .padding(12)
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: 10))
+
+            HStack {
+                Text((StudioIconCollection(rawValue: iconSelection) ?? .matchAppearance).detail +
+                     " · Active: " + resolvedIcons.title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    showingIconGallery = true
+                } label: {
+                    Label("View All Instrument Icons", systemImage: "square.grid.3x3")
+                }
+                .buttonStyle(.bordered)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(22)
+        .sheet(isPresented: $showingIconGallery) {
+            StudioIconGalleryView()
+        }
+    }
+
+    private func themeCard(_ appearance: StudioAppearance) -> some View {
+        let colors = StudioPalette(appearance: appearance)
+        let selected = selection == appearance.rawValue
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                Spacer()
+                Image(systemName: "music.note")
+            }
+            .font(.caption)
+            HStack(spacing: 5) {
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(colors.sidebar)
+                    .frame(width: 22, height: 66)
+                VStack(spacing: 5) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(colors.surface)
+                        .frame(height: 27)
+                    HStack(spacing: 4) {
+                        ForEach(0..<4, id: \.self) { _ in
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(colors.accentMuted)
+                                .frame(height: 29)
+                        }
+                    }
+                }
+            }
+            Text(appearance.title)
+                .font(.caption.bold())
+                .lineLimit(1)
+            Text(appearance == .heritageLight ? "Heritage Light" :
+                 appearance == .gpo5Modern ? "Modern" : "Heritage Dark")
+                .font(.caption2)
+                .opacity(0.8)
+        }
+        .foregroundStyle(colors.primaryText)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(colors.canvas))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(selected ? colors.accent : colors.separator,
+                              lineWidth: selected ? 3 : 1)
+        }
     }
 }
 

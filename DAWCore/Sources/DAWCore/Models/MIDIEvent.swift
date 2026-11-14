@@ -62,7 +62,8 @@ public struct NoteData: Codable, Sendable, Hashable {
         releaseVelocity: UInt8? = nil
     ) {
         self.pitch = min(127, pitch)
-        self.velocity = min(127, max(1, velocity))
+        // Incoming MIDI note-off messages use velocity zero; preserve it.
+        self.velocity = min(127, velocity)
         self.duration = max(0, duration)
         self.releaseVelocity = releaseVelocity
     }

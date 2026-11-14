@@ -54,17 +54,29 @@ public actor ProjectFileManager {
             packageURL = url.deletingPathExtension().appendingPathExtension(Self.projectExtension)
         }
         
-        // Remove existing package if present
-        if fm.fileExists(atPath: packageURL.path) {
-            try fm.removeItem(at: packageURL)
+        // Assemble a complete replacement beside the original package. Never
+        // delete the user's last successful save before all files are ready.
+        let parentURL = packageURL.deletingLastPathComponent()
+        let stagingURL = parentURL.appendingPathComponent(
+            ".\(packageURL.lastPathComponent).staging-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        let backupURL = parentURL.appendingPathComponent(
+            ".\(packageURL.lastPathComponent).backup-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer {
+            // On an error, only the incomplete staging package is discarded.
+            if fm.fileExists(atPath: stagingURL.path) {
+                try? fm.removeItem(at: stagingURL)
+            }
         }
-        
-        // Create package directory
-        try fm.createDirectory(at: packageURL, withIntermediateDirectories: true)
-        
-        // Create subdirectories
-        let audioDir = packageURL.appendingPathComponent(Self.audioFolderName)
-        let pluginsDir = packageURL.appendingPathComponent(Self.pluginStatesFolderName)
+
+        try fm.createDirectory(at: stagingURL, withIntermediateDirectories: true)
+
+        // Create subdirectories in the staging package.
+        let audioDir = stagingURL.appendingPathComponent(Self.audioFolderName)
+        let pluginsDir = stagingURL.appendingPathComponent(Self.pluginStatesFolderName)
         
         try fm.createDirectory(at: audioDir, withIntermediateDirectories: true)
         try fm.createDirectory(at: pluginsDir, withIntermediateDirectories: true)
@@ -102,16 +114,31 @@ public actor ProjectFileManager {
             let destURL = audioDir.appendingPathComponent(destFileName)
             let relativePath = "\(Self.audioFolderName)/\(destFileName)"
             
-            // Try to find the source file
-            let sourceURL = findAudioFile(for: audioRef)
-            
-            if let sourceURL = sourceURL, fm.fileExists(atPath: sourceURL.path) {
-                // Copy the file
-                try fm.copyItem(at: sourceURL, to: destURL)
-                print("[ProjectFileManager] Copied audio: \(sourceURL.lastPathComponent) -> \(destFileName)")
-            } else {
-                print("[ProjectFileManager] Warning: Audio file not found: \(audioRef.originalPath)")
+            // A previously saved recording may live inside the original package.
+            // Copy it before replacing that package, even if the external source
+            // file was moved or deleted.
+            // Only a real file inside the saved "Audio Files" folder may
+            // satisfy this fallback. An empty relativePath previously resolved
+            // to the .dawproj DIRECTORY itself and was copied as a .wav.
+            let relativeComponents = audioRef.relativePath.split(separator: "/").map(String.init)
+            let isPackagedAudioPath = relativeComponents.count >= 2
+                && relativeComponents.first == Self.audioFolderName
+                && !relativeComponents.contains("..")
+                && !relativeComponents.contains(".")
+                && !audioRef.relativePath.hasPrefix("/")
+            let existingPackagedFile = isPackagedAudioPath
+                ? packageURL.appendingPathComponent(audioRef.relativePath)
+                : nil
+            let originalSource = findAudioFile(for: audioRef)
+            let sourceURL = originalSource.flatMap { Self.isRegularFile($0) ? $0 : nil }
+                ?? existingPackagedFile.flatMap { Self.isRegularFile($0) ? $0 : nil }
+            guard let sourceURL else {
+                // Never silently replace a valid project with missing audio
+                // or a directory masquerading as an audio file.
+                throw PersistenceError.fileNotFound(URL(fileURLWithPath: audioRef.originalPath))
             }
+            try fm.copyItem(at: sourceURL, to: destURL)
+            print("[ProjectFileManager] Copied audio: \(sourceURL.lastPathComponent) -> \(destFileName)")
             
             // Update the reference in project
             var updatedRef = audioRef
@@ -138,12 +165,24 @@ public actor ProjectFileManager {
             ))
         }
         
-        // Create project file
+        // Preserve any legacy plug-in state records inside the old package.
+        // Existing track and rack slot state is also embedded in updatedProject.
+        // Never silently discard earlier state while replacing an existing save.
+        var legacyPluginStates: [PluginStateEntry] = []
+        let previousJSON = packageURL.appendingPathComponent(Self.projectFileName)
+        if fm.fileExists(atPath: previousJSON.path) {
+            let previousData = try Data(contentsOf: previousJSON)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let previousFile = try decoder.decode(ProjectFile.self, from: previousData)
+            legacyPluginStates = previousFile.pluginStates
+        }
+
         let projectFile = ProjectFile(
             version: Project.currentFormatVersion,
             project: updatedProject,
             audioFileManifest: audioManifest,
-            pluginStates: []  // Plugin states saved separately in future
+            pluginStates: legacyPluginStates
         )
         
         // Encode and save
@@ -152,12 +191,39 @@ public actor ProjectFileManager {
         encoder.dateEncodingStrategy = .iso8601
         
         let data = try encoder.encode(projectFile)
-        let projectFileURL = packageURL.appendingPathComponent(Self.projectFileName)
-        try data.write(to: projectFileURL)
-        
+        let projectFileURL = stagingURL.appendingPathComponent(Self.projectFileName)
+        try data.write(to: projectFileURL, options: .atomic)
+
+        // Promote the complete staging package. If promotion fails, restore the
+        // previous package instead of leaving a corrupt or partial project.
+        let hadPreviousPackage = fm.fileExists(atPath: packageURL.path)
+        if hadPreviousPackage {
+            try fm.moveItem(at: packageURL, to: backupURL)
+        }
+        do {
+            try fm.moveItem(at: stagingURL, to: packageURL)
+        } catch {
+            if hadPreviousPackage {
+                try? fm.moveItem(at: backupURL, to: packageURL)
+            }
+            throw error
+        }
+        if hadPreviousPackage {
+            // A cleanup failure must not turn a completed save into an error.
+            try? fm.removeItem(at: backupURL)
+        }
+
         print("[ProjectFileManager] Saved project to: \(packageURL.path)")
     }
     
+    /// Reject package directories and other non-audio sources before copying.
+    /// FileManager.fileExists alone returns true for directories.
+    private static func isRegularFile(_ url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+            && !isDirectory.boolValue
+    }
+
     /// Find the actual location of an audio file
     private func findAudioFile(for ref: AudioFileReference) -> URL? {
         let fm = FileManager.default
@@ -279,118 +345,14 @@ public actor ProjectFileManager {
         return nil
     }
     
-    /// Quick save - update project.json and copy any NEW audio files
+    /// Quick Save uses the same staged, rollback-capable package replacement
+    /// as Save. Rewriting project.json in place could previously leave orphan
+    /// audio files, retain missing-file references, or diverge from the manifest.
+    /// A full staged save costs more I/O but protects the previous good project.
     public func saveQuick(project: Project, to url: URL) async throws {
-        let fm = FileManager.default
-        
-        var packageURL = url
-        if packageURL.pathExtension != Self.projectExtension {
-            packageURL = url.deletingPathExtension().appendingPathExtension(Self.projectExtension)
-        }
-        
-        let projectFileURL = packageURL.appendingPathComponent(Self.projectFileName)
-        let audioDir = packageURL.appendingPathComponent(Self.audioFolderName)
-        
-        // If package doesn't exist, do full save
-        guard fm.fileExists(atPath: projectFileURL.path) else {
-            try await save(project: project, to: packageURL)
-            return
-        }
-        
-        // Load existing manifest
-        let existingData = try Data(contentsOf: projectFileURL)
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let existingFile = try decoder.decode(ProjectFile.self, from: existingData)
-        
-        // Collect all audio references from clips
-        var allAudioRefs: [AudioFileReference] = project.audioFiles
-        for track in project.tracks {
-            for clip in track.clips {
-                if case .audio(let audioData) = clip.content {
-                    if !allAudioRefs.contains(where: { $0.fileID == audioData.fileReference.fileID }) {
-                        allAudioRefs.append(audioData.fileReference)
-                    }
-                }
-            }
-        }
-        
-        // Find NEW audio files that aren't in the existing manifest
-        var updatedProject = project
-        var updatedManifest = existingFile.audioFileManifest
-        
-        for audioRef in allAudioRefs {
-            let alreadySaved = existingFile.audioFileManifest.contains { $0.fileID == audioRef.fileID }
-            
-            if !alreadySaved {
-                // This is a NEW audio file - copy it
-                let destFileName = "\(audioRef.fileID.uuidString).\(URL(fileURLWithPath: audioRef.originalPath).pathExtension.isEmpty ? "wav" : URL(fileURLWithPath: audioRef.originalPath).pathExtension)"
-                let destURL = audioDir.appendingPathComponent(destFileName)
-                let relativePath = "\(Self.audioFolderName)/\(destFileName)"
-                
-                // Try to find and copy the source file
-                if let sourceURL = findAudioFile(for: audioRef), fm.fileExists(atPath: sourceURL.path) {
-                    // Make sure audio directory exists
-                    if !fm.fileExists(atPath: audioDir.path) {
-                        try fm.createDirectory(at: audioDir, withIntermediateDirectories: true)
-                    }
-                    
-                    try fm.copyItem(at: sourceURL, to: destURL)
-                    print("[ProjectFileManager] Quick save - copied NEW audio: \(sourceURL.lastPathComponent) -> \(destFileName)")
-                    
-                    // Add to manifest
-                    updatedManifest.append(AudioFileEntry(
-                        fileID: audioRef.fileID,
-                        relativePath: relativePath,
-                        originalPath: audioRef.originalPath,
-                        checksum: nil
-                    ))
-                    
-                    // Update or add the reference in project.audioFiles
-                    if let index = updatedProject.audioFiles.firstIndex(where: { $0.fileID == audioRef.fileID }) {
-                        updatedProject.audioFiles[index].relativePath = relativePath
-                    } else {
-                        // Add to audioFiles if not present
-                        var newRef = audioRef
-                        newRef.relativePath = relativePath
-                        updatedProject.audioFiles.append(newRef)
-                    }
-                    
-                    // Update clips that reference this file
-                    for trackIndex in 0..<updatedProject.tracks.count {
-                        for clipIndex in 0..<updatedProject.tracks[trackIndex].clips.count {
-                            if case .audio(var audioData) = updatedProject.tracks[trackIndex].clips[clipIndex].content {
-                                if audioData.fileReference.fileID == audioRef.fileID {
-                                    audioData.fileReference.relativePath = relativePath
-                                    updatedProject.tracks[trackIndex].clips[clipIndex].content = .audio(audioData)
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    print("[ProjectFileManager] Quick save - WARNING: New audio file not found: \(audioRef.originalPath)")
-                }
-            }
-        }
-        
-        // Create updated project file
-        let projectFile = ProjectFile(
-            version: Project.currentFormatVersion,
-            project: updatedProject,
-            audioFileManifest: updatedManifest,
-            pluginStates: existingFile.pluginStates
-        )
-        
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        
-        let data = try encoder.encode(projectFile)
-        try data.write(to: projectFileURL)
-        
-        print("[ProjectFileManager] Quick save complete")
+        try await save(project: project, to: url)
     }
-    
+
     // MARK: - Loading
     
     /// Load project from a URL
@@ -555,20 +517,12 @@ public actor ProjectFileManager {
     }
     
     private func exportAsMIDI(project: Project, to url: URL) async throws {
-        // Build a standard MIDI file from MIDI tracks
-        var midiData = Data()
-        
-        // MIDI file header
-        let headerChunk: [UInt8] = [
-            0x4D, 0x54, 0x68, 0x64,  // "MThd"
-            0x00, 0x00, 0x00, 0x06,  // Chunk length
-            0x00, 0x01,              // Format type 1
-            0x00, UInt8(project.tracks.count + 1),  // Number of tracks
-            0x01, 0xE0               // 480 ticks per quarter note
-        ]
-        midiData.append(contentsOf: headerChunk)
-        
-        try midiData.write(to: url)
+        // A header by itself is not a valid Standard MIDI File. Until the
+        // MIDI track/chunk writer is implemented, fail explicitly rather than
+        // exporting an unreadable file that appears to have succeeded.
+        throw PersistenceError.invalidFormat(
+            "Standard MIDI export is not implemented yet; no file was created."
+        )
     }
 }
 

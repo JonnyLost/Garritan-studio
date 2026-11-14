@@ -104,7 +104,7 @@ public final class TransportState: ObservableObject {
     
     public init() {}
     
-    @MainActor deinit {
+    deinit {
         playbackTimer?.invalidate()
         samplePositionCancellable?.cancel()
         // Stop display link directly in deinit

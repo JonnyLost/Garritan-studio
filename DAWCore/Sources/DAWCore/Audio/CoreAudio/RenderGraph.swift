@@ -299,62 +299,26 @@ public final class RenderGraph {
     
     // MARK: - MIDI Processing
     
-    private var midiSendCount = 0
     private var renderErrorCount = 0
-    private var renderDebugCount = 0
     
     func sendMIDI(to trackID: TrackID, status: UInt8, data1: UInt8, data2: UInt8, sampleOffset: UInt32) {
-        guard let track = tracks[trackID] else {
-            if midiSendCount < 10 {
-                print("[RenderGraph] No track for \(trackID.rawValue), status: \(status)")
-            }
-            midiSendCount += 1
-            return
-        }
-        
-        // Debug: log MIDI sends
-        if midiSendCount < 20 {
-            let isNoteOn = (status & 0xF0) == 0x90
-            let isNoteOff = (status & 0xF0) == 0x80
-            let channel = status & 0x0F
-            if isNoteOn {
-                print("[RenderGraph] ✓ Sending Note ON: note=\(data1) vel=\(data2) ch=\(channel)")
-            } else if isNoteOff {
-                print("[RenderGraph] ✓ Sending Note OFF: note=\(data1) ch=\(channel)")
-            }
-        }
-        
-        // Try AUv3 MIDI scheduling first (for AUv3 plugins)
+        guard let track = tracks[trackID] else { return }
+
+        // Called by the real-time scheduler: never log or format strings here.
         if let auAudioUnit = track.auAudioUnit,
            let scheduleMIDIEventBlock = auAudioUnit.scheduleMIDIEventBlock {
-            // AUv3 MIDI scheduling
             let midiData: [UInt8] = [status, data1, data2]
             midiData.withUnsafeBufferPointer { buffer in
                 scheduleMIDIEventBlock(AUEventSampleTimeImmediate, 0, 3, buffer.baseAddress!)
             }
-            if midiSendCount < 5 {
-                print("[RenderGraph] ✓ AUv3 scheduleMIDIEventBlock succeeded")
-            }
         } else if let unit = track.instrumentUnit {
-            // Fall back to legacy MusicDeviceMIDIEvent
-            let result = MusicDeviceMIDIEvent(unit, UInt32(status), UInt32(data1), UInt32(data2), sampleOffset)
-            if result != noErr {
-                if midiSendCount < 20 {
-                    print("[RenderGraph] ⚠️ MusicDeviceMIDIEvent error: \(result)")
-                }
-            } else if midiSendCount < 5 {
-                print("[RenderGraph] ✓ MusicDeviceMIDIEvent succeeded")
-            }
-        } else {
-            if midiSendCount < 10 {
-                print("[RenderGraph] No instrument or AUAudioUnit for track \(trackID.rawValue)")
-            }
+            _ = MusicDeviceMIDIEvent(
+                unit, UInt32(status), UInt32(data1), UInt32(data2), sampleOffset
+            )
         }
-        
-        midiSendCount += 1
     }
-    
-    func allNotesOff() {
+
+        func allNotesOff() {
         for track in tracks.values {
             guard let unit = track.instrumentUnit else { continue }
             
@@ -446,38 +410,12 @@ public final class RenderGraph {
                 }
             }
             
-            // Debug: check render status and if we got any audio
+            // Never perform string interpolation or console I/O on the
+            // real-time render callback. Failed renders are skipped, and audio
+            // diagnostics can be collected asynchronously outside this path.
             if renderStatus != noErr {
-                if renderErrorCount < 10 {
-                    print("[RenderGraph] ⚠️ Render failed: \(renderStatus) for track \(track.id.rawValue)")
-                    renderErrorCount += 1
-                }
+                renderErrorCount += 1
                 continue
-            }
-            
-            // Debug: check if there's any audio output (throttled)
-            if renderDebugCount < 100 {
-                var hasAudio = false
-                var maxSample: Float = 0
-                for i in 0..<min(Int(frameCount), 64) {
-                    let sample = max(abs(bufferL[i]), abs(bufferR[i]))
-                    if sample > maxSample {
-                        maxSample = sample
-                    }
-                    if sample > 0.0001 {
-                        hasAudio = true
-                    }
-                }
-                
-                // Always log for first few renders to see what's happening
-                let shortID = String(track.id.rawValue.uuidString.prefix(8))
-                if renderDebugCount < 10 {
-                    let useRenderBlock = track.renderBlock != nil
-                    print("[RenderGraph] Render #\(renderDebugCount): track=\(shortID), maxSample=\(maxSample), hasAudio=\(hasAudio), AUv3=\(useRenderBlock)")
-                } else if hasAudio {
-                    print("[RenderGraph] ✓ Track \(shortID) produced audio! maxSample=\(maxSample)")
-                }
-                renderDebugCount += 1
             }
             
             // Process through effects

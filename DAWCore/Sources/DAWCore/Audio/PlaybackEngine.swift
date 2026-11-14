@@ -37,14 +37,19 @@ public final class PlaybackEngine: ObservableObject {
     private var vRackSumMixerConnected: Bool = false
     
     // V-Rack recording state
-    private var vRackRecordingFile: AVAudioFile?
+    private var vRackRecordingCapture: BufferedAudioCapture?
     private var vRackRecordingURL: URL?
+    private var vRackRecordingSampleRate: Double = 44100
+    private var vRackRecordingProgressTimer: Timer?
+    @Published public private(set) var vRackRecordingError: String?
     private var vRackRecordingStartBeat: Double = 0
     @Published public private(set) var isRecordingVRack: Bool = false
     @Published public private(set) var vRackRecordingLevel: Float = 0
     
     // V-Rack input monitoring (for armed tracks)
     private var isMonitoringVRackInput: Bool = false
+    private var vRackInputMeter: RealtimeStereoPeakMeter?
+    private var vRackInputMeterTimer: Timer?
     @Published public private(set) var vRackInputLevel: (left: Float, right: Float) = (0, 0)
     
     // V-Rack recording waveform visualization
@@ -82,6 +87,16 @@ public final class PlaybackEngine: ObservableObject {
     
     // High-priority queue for MIDI processing (avoids blocking audio thread)
     private let midiProcessingQueue = DispatchQueue(label: "com.musio.midi-processing", qos: .userInteractive)
+    // These fields are owned exclusively by midiProcessingQueue. The audio
+    // tap submits buffer positions but never reads mutable transport state.
+    private var midiQueuePlaybackActive = false
+    private var midiQueueStartBeat: Double = 0
+    private var midiQueueStartSample: Int64 = 0
+    private var midiQueueSampleRate: Double = 44100
+    // Playback workers consult queue-owned snapshots, never the mutable
+    // MainActor registries used by UI and AU loading.
+    private var midiQueueTrackInstruments: [TrackID: TrackInstrument] = [:]
+    private var midiQueueRackInstruments: [UUID: TrackInstrument] = [:]
     
     // Timer for processing V-Rack MIDI events in hybrid mode
     // (When Core Audio backend is active, AVAudioEngine's timing tap may not fire)
@@ -125,14 +140,15 @@ public final class PlaybackEngine: ObservableObject {
         let sumMixer = AVAudioMixerNode()
         audioEngine.engine.attach(sumMixer)
         
-        // Connect sum mixer to main mixer
-        // Use a standard format since the engine might not be started yet
-        let format = AVAudioFormat(standardFormatWithSampleRate: audioEngine.sampleRate, channels: 2)!
-        audioEngine.engine.connect(sumMixer, to: audioEngine.engine.mainMixerNode, format: format)
-        
+        // The rack sum remains at unity for recording and capture.
+        // AudioEngine owns a separate dry monitor mixer, enabling silent
+        // original rack monitoring during mic audition without silencing
+        // the signal offered to the virtual microphones.
+        audioEngine.registerVRackSumMixer(sumMixer)
+
         vRackSumMixer = sumMixer
         vRackSumMixerConnected = true
-        print("[PlaybackEngine] V-Rack sum mixer created and connected with format: \(format)")
+        print("[PlaybackEngine] V-Rack sum registered for isolated mic monitoring")
     }
     
     /// Ensure the V-Rack sum mixer is connected (call after engine restart)
@@ -146,9 +162,8 @@ public final class PlaybackEngine: ObservableObject {
         // If not attached, re-attach and connect
         if audioEngine.engine.outputConnectionPoints(for: sumMixer, outputBus: 0).isEmpty {
             print("[PlaybackEngine] V-Rack sum mixer disconnected, reconnecting...")
-            let format = AVAudioFormat(standardFormatWithSampleRate: audioEngine.sampleRate, channels: 2)!
-            audioEngine.engine.connect(sumMixer, to: audioEngine.engine.mainMixerNode, format: format)
-            print("[PlaybackEngine] V-Rack sum mixer reconnected")
+            audioEngine.registerVRackSumMixer(sumMixer)
+            print("[PlaybackEngine] V-Rack sum mixer reconnected through direct monitor")
         }
     }
     
@@ -243,6 +258,9 @@ public final class PlaybackEngine: ObservableObject {
         try await loadDefaultSound(for: sampler)
         
         trackInstruments[track.id] = .sampler(sampler)
+        midiProcessingQueue.sync {
+            midiQueueTrackInstruments[track.id] = .sampler(sampler)
+        }
         print("[PlaybackEngine] Setup fallback sampler for track: \(track.name)")
     }
     
@@ -257,15 +275,27 @@ public final class PlaybackEngine: ObservableObject {
             let desc = audioUnit.audioComponentDescription
             _ = try await coreAudioBackend!.loadInstrument(desc, for: trackID)
             // Also store in trackInstruments for UI access
-            trackInstruments[trackID] = .auInstrument(audioUnit, pluginID: pluginID)
+            let loadedInstrument = TrackInstrument.auInstrument(audioUnit, pluginID: pluginID)
+            trackInstruments[trackID] = loadedInstrument
+            midiProcessingQueue.sync {
+                midiQueueTrackInstruments[trackID] = loadedInstrument
+            }
             print("[PlaybackEngine] ✓ Instrument loaded via Core Audio backend")
             return
         }
         
+        // Validate the target and Audio Unit before disconnecting an
+        // existing, working track instrument. Earlier code removed the old
+        // instrument and only then checked whether the track node existed.
+        guard audioEngine.trackNode(for: trackID) != nil else {
+            throw PlaybackError.trackNotFound(trackID)
+        }
+        let auFormat = audioUnit.outputFormat(forBus: 0)
+        guard auFormat.sampleRate > 0, auFormat.channelCount > 0 else {
+            throw AudioEngineError.invalidFormat
+        }
+
         // Legacy AVAudioEngine path
-        // Remove existing instrument if any
-        removeInstrument(for: trackID)
-        
         print("[PlaybackEngine] ========================================")
         print("[PlaybackEngine] Loading AU instrument: \(audioUnit.name)")
         print("[PlaybackEngine] Track ID: \(trackID.rawValue)")
@@ -277,9 +307,22 @@ public final class PlaybackEngine: ObservableObject {
             audioEngine.engine.stop()
             print("[PlaybackEngine] Stopped engine for reconfiguration")
         }
-        
-        // Get the output format from the AU
-        let auFormat = audioUnit.outputFormat(forBus: 0)
+        defer {
+            // A failed track lookup or AU setup must not strand the whole
+            // engine stopped. The normal success path restarts it below.
+            if wasRunning && !audioEngine.engine.isRunning {
+                do {
+                    try audioEngine.engine.start()
+                } catch {
+                    print("[PlaybackEngine] Failed to restore engine after AU load: \(error)")
+                }
+            }
+        }
+
+        // Remove the old instrument only after stopping the graph.
+        removeInstrument(for: trackID)
+
+        // Already validated above; old AU has only now been detached.
         print("[PlaybackEngine] AU native format: \(auFormat)")
         
         // Engine format
@@ -325,14 +368,11 @@ public final class PlaybackEngine: ObservableObject {
             throw PlaybackError.trackNotFound(trackID)
         }
         
-        // Restart the engine
+        // Restart the engine; don't report a successful AU load if playback
+        // cannot resume. The defer above also attempts recovery on failure.
         if wasRunning {
-            do {
-                try audioEngine.engine.start()
-                print("[PlaybackEngine] ✓ Engine restarted")
-            } catch {
-                print("[PlaybackEngine] ⚠️ Failed to restart engine: \(error)")
-            }
+            try audioEngine.engine.start()
+            print("[PlaybackEngine] ✓ Engine restarted")
         }
         
         // Check the connections
@@ -344,8 +384,12 @@ public final class PlaybackEngine: ObservableObject {
         // Check if the AU is now rendering
         print("[PlaybackEngine] AU render resources allocated: \(audioUnit.auAudioUnit.renderResourcesAllocated)")
         
-        trackInstruments[trackID] = .auInstrument(audioUnit, pluginID: pluginID)
-        
+        let loadedInstrument = TrackInstrument.auInstrument(audioUnit, pluginID: pluginID)
+        trackInstruments[trackID] = loadedInstrument
+        midiProcessingQueue.sync {
+            midiQueueTrackInstruments[trackID] = loadedInstrument
+        }
+
         // Verify we can get the instrument back
         if let inst = trackInstruments[trackID] {
             print("[PlaybackEngine] Instrument stored successfully: \(inst)")
@@ -357,7 +401,33 @@ public final class PlaybackEngine: ObservableObject {
     /// Remove the instrument from a track
     public func removeInstrument(for trackID: TrackID) {
         guard let instrument = trackInstruments[trackID] else { return }
-        
+
+        // Drain the MIDI worker and release this track's active notes before
+        // detaching its AU. Other tracks routed to V-Rack remain untouched.
+        midiProcessingQueue.sync {
+            for note in activeNotes where note.trackID == trackID {
+                if case .rackInstrument = note.midiOutput { continue }
+                midiQueueTrackInstruments[trackID]?.stopNote(note.pitch, channel: note.channel)
+            }
+            activeNotes.removeAll { note in
+                guard note.trackID == trackID else { return false }
+                if case .rackInstrument = note.midiOutput { return false }
+                return true
+            }
+            midiQueueTrackInstruments.removeValue(forKey: trackID)
+        }
+
+        // AU and mixer detachment is a graph mutation. The instrument picker
+        // and track header can call this while playback is active.
+        let wasRunning = audioEngine.engine.isRunning
+        if wasRunning { audioEngine.engine.stop() }
+        defer {
+            if wasRunning {
+                do { try audioEngine.start() }
+                catch { print("[PlaybackEngine] Failed to restart after instrument removal: \(error)") }
+            }
+        }
+
         // Disconnect and detach the audio node
         audioEngine.engine.disconnectNodeOutput(instrument.audioNode)
         audioEngine.engine.detach(instrument.audioNode)
@@ -390,9 +460,11 @@ public final class PlaybackEngine: ObservableObject {
     
     /// Load an AU instrument plugin for the V-Rack
     public func loadRackInstrument(_ audioUnit: AVAudioUnit, rackID: UUID, pluginID: UUID) async throws {
-        // Remove existing instrument if any
-        removeRackInstrument(rackID: rackID)
-        
+        // Preflight before removing the previously hosted V-Rack instrument.
+        let auFormat = audioUnit.outputFormat(forBus: 0)
+        guard auFormat.sampleRate > 0, auFormat.channelCount > 0 else {
+            throw AudioEngineError.invalidFormat
+        }
         print("[PlaybackEngine] ========================================")
         print("[PlaybackEngine] Loading V-Rack AU instrument: \(audioUnit.name)")
         print("[PlaybackEngine] Rack ID: \(rackID)")
@@ -402,7 +474,19 @@ public final class PlaybackEngine: ObservableObject {
         if wasRunning {
             audioEngine.engine.stop()
         }
-        
+        defer {
+            if wasRunning && !audioEngine.engine.isRunning {
+                do {
+                    try audioEngine.engine.start()
+                } catch {
+                    print("[PlaybackEngine] Failed to restore engine after V-Rack load: \(error)")
+                }
+            }
+        }
+
+        // Remove the previous V-Rack instrument while the graph is stopped.
+        removeRackInstrument(rackID: rackID)
+
         // Attach the audio unit to the engine
         audioEngine.engine.attach(audioUnit)
         
@@ -411,8 +495,7 @@ public final class PlaybackEngine: ObservableObject {
         audioEngine.engine.attach(converterMixer)
         rackInstrumentMixers[rackID] = converterMixer
         
-        // Get the AU's native output format
-        let auFormat = audioUnit.outputFormat(forBus: 0)
+        // AU format was checked before disconnecting the old instrument.
         // Use a standard format for the engine side (more reliable than querying stopped engine)
         let engineFormat = AVAudioFormat(standardFormatWithSampleRate: audioEngine.sampleRate, channels: 2)!
         
@@ -447,8 +530,13 @@ public final class PlaybackEngine: ObservableObject {
         }
         
         // Store the instrument
-        rackInstruments[rackID] = .auInstrument(audioUnit, pluginID: pluginID)
-        
+        let loadedInstrument = TrackInstrument.auInstrument(audioUnit, pluginID: pluginID)
+        rackInstruments[rackID] = loadedInstrument
+        midiProcessingQueue.sync {
+            midiQueueRackInstruments[rackID] = loadedInstrument
+        }
+        audioEngine.setVRackCaptureSourcePresent(true)
+
         print("[PlaybackEngine] V-Rack instrument loaded successfully: \(audioUnit.name)")
         
         // NOTE: V-Rack instruments stay ONLY in AVAudioEngine
@@ -464,7 +552,35 @@ public final class PlaybackEngine: ObservableObject {
     /// Remove a rack instrument
     public func removeRackInstrument(rackID: UUID) {
         guard let instrument = rackInstruments[rackID] else { return }
-        
+
+        // Multiple MIDI tracks may share this AU. Release every active note
+        // targeting the rack before the underlying graph nodes are detached.
+        midiProcessingQueue.sync {
+            for note in activeNotes {
+                if case .rackInstrument(let destinationID, _) = note.midiOutput,
+                   destinationID == rackID {
+                    midiQueueRackInstruments[rackID]?.stopNote(note.pitch, channel: note.channel)
+                }
+            }
+            activeNotes.removeAll { note in
+                if case .rackInstrument(let destinationID, _) = note.midiOutput {
+                    return destinationID == rackID
+                }
+                return false
+            }
+            midiQueueRackInstruments.removeValue(forKey: rackID)
+        }
+
+        // Match track-instrument removal: don't detach an actively rendered AU.
+        let wasRunning = audioEngine.engine.isRunning
+        if wasRunning { audioEngine.engine.stop() }
+        defer {
+            if wasRunning {
+                do { try audioEngine.start() }
+                catch { print("[PlaybackEngine] Failed to restart after V-Rack removal: \(error)") }
+            }
+        }
+
         // Disconnect and detach the audio node
         audioEngine.engine.disconnectNodeOutput(instrument.audioNode)
         audioEngine.engine.detach(instrument.audioNode)
@@ -480,6 +596,7 @@ public final class PlaybackEngine: ObservableObject {
         // They stay only in AVAudioEngine
         
         rackInstruments.removeValue(forKey: rackID)
+        audioEngine.setVRackCaptureSourcePresent(!rackInstruments.isEmpty)
         print("[PlaybackEngine] Removed V-Rack instrument: \(rackID)")
     }
     
@@ -513,146 +630,122 @@ public final class PlaybackEngine: ObservableObject {
         public let latencyCompensation: TimeInterval
     }
     
-    /// Start recording from the V-Rack sum mixer
-    /// - Parameter destinationURL: URL where the WAV file will be saved
-    /// - Returns: True if recording started successfully
+    /// Start a bounded, background-written stereo WAV capture from the
+    /// V-Rack sum mixer. This uses the same realtime-safe writer as input audio.
     @discardableResult
     public func startVRackRecording(to destinationURL: URL) -> Bool {
-        guard let sumMixer = vRackSumMixer else {
-            print("[PlaybackEngine] Cannot start V-Rack recording: sum mixer not available")
-            return false
-        }
-        
-        guard !isRecordingVRack else {
-            print("[PlaybackEngine] V-Rack recording already in progress")
-            return false
-        }
-        
-        // Get the format from the sum mixer
+        guard let sumMixer = vRackSumMixer, !isRecordingVRack else { return false }
+        if isMonitoringVRackInput { stopVRackInputMonitoring() }
         let format = sumMixer.outputFormat(forBus: 0)
-        
-        // Create the audio file for recording
+        guard format.sampleRate > 0, format.channelCount > 0,
+              format.commonFormat == .pcmFormatFloat32 else {
+            vRackRecordingError = "V-Rack output is not Float32 PCM"
+            return false
+        }
+
         do {
-            let audioFile = try AVAudioFile(
+            let file = try AVAudioFile(
                 forWriting: destinationURL,
                 settings: [
                     AVFormatIDKey: kAudioFormatLinearPCM,
                     AVSampleRateKey: format.sampleRate,
-                    AVNumberOfChannelsKey: format.channelCount,
+                    AVNumberOfChannelsKey: 2,
                     AVLinearPCMBitDepthKey: 24,
                     AVLinearPCMIsFloatKey: false,
                     AVLinearPCMIsBigEndianKey: false,
                     AVLinearPCMIsNonInterleaved: false
                 ]
             )
-            
-            vRackRecordingFile = audioFile
+            let capture = try BufferedAudioCapture(file: file, sampleRate: format.sampleRate)
+            sumMixer.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
+                capture.append(buffer)
+            }
+
+            vRackRecordingCapture = capture
             vRackRecordingURL = destinationURL
+            vRackRecordingSampleRate = format.sampleRate
             vRackRecordingStartBeat = transportState?.playheadBeats ?? 0
-            
-            // Clear waveform buffer for new recording
+            vRackRecordingError = nil
+            vRackRecordingLevel = 0
             vRackWaveformBuffer.removeAll()
             vRackWaveformSamples.removeAll()
-            
-            // Install a tap on the sum mixer to capture audio
-            sumMixer.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
-                guard let self = self, let file = self.vRackRecordingFile else { return }
-                
-                do {
-                    try file.write(from: buffer)
-                    
-                    // Calculate level for metering and collect waveform samples
-                    if let channelData = buffer.floatChannelData?[0] {
-                        let frameLength = Int(buffer.frameLength)
-                        var sum: Float = 0
-                        var waveformPoints: [Float] = []
-                        
-                        // Downsample for waveform display (take every Nth sample)
-                        let downsampleFactor = max(1, frameLength / 64)
-                        
-                        for i in 0..<frameLength {
-                            let sample = channelData[i]
-                            sum += sample * sample
-                            
-                            // Collect samples for waveform visualization
-                            if i % downsampleFactor == 0 {
-                                waveformPoints.append(abs(sample))
+            isRecordingVRack = true
+
+            vRackRecordingProgressTimer?.invalidate()
+            vRackRecordingProgressTimer = Timer.scheduledTimer(
+                withTimeInterval: 0.1, repeats: true
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self, let current = self.vRackRecordingCapture else { return }
+                    current.requestProgress { [weak self] progress in
+                        Task { @MainActor [weak self] in
+                            guard let self, self.vRackRecordingCapture === current else { return }
+                            let peak = max(progress.peak, 0.000001)
+                            let db = 20 * log10(peak)
+                            self.vRackRecordingLevel = max(0, min(1, (db + 60) / 60))
+                            if !progress.waveformPoints.isEmpty {
+                                self.vRackWaveformBuffer.append(contentsOf: progress.waveformPoints)
+                                if self.vRackWaveformBuffer.count > self.maxWaveformSamples {
+                                    self.vRackWaveformBuffer.removeFirst(
+                                        self.vRackWaveformBuffer.count - self.maxWaveformSamples
+                                    )
+                                }
+                                self.vRackWaveformSamples = self.vRackWaveformBuffer
                             }
-                        }
-                        
-                        let rms = sqrt(sum / Float(frameLength))
-                        let level = 20 * log10(max(rms, 0.000001))
-                        let normalizedLevel = max(0, min(1, (level + 60) / 60))
-                        
-                        DispatchQueue.main.async {
-                            self.vRackRecordingLevel = normalizedLevel
-                            
-                            // Update waveform buffer
-                            self.vRackWaveformBuffer.append(contentsOf: waveformPoints)
-                            
-                            // Trim buffer if it gets too large
-                            if self.vRackWaveformBuffer.count > self.maxWaveformSamples {
-                                self.vRackWaveformBuffer.removeFirst(self.vRackWaveformBuffer.count - self.maxWaveformSamples)
-                            }
-                            
-                            self.vRackWaveformSamples = self.vRackWaveformBuffer
                         }
                     }
-                } catch {
-                    print("[PlaybackEngine] Error writing V-Rack recording buffer: \(error)")
                 }
             }
-            
-            isRecordingVRack = true
-            print("[PlaybackEngine] V-Rack recording started to: \(destinationURL.lastPathComponent)")
+            print("[PlaybackEngine] Started buffered V-Rack recording: \(destinationURL.lastPathComponent)")
             return true
-            
         } catch {
-            print("[PlaybackEngine] Failed to create V-Rack recording file: \(error)")
+            vRackRecordingError = String(describing: error)
+            try? FileManager.default.removeItem(at: destinationURL)
+            print("[PlaybackEngine] V-Rack capture start failed: \(error)")
             return false
         }
     }
-    
-    /// Stop V-Rack recording and return the result
-    /// - Returns: Recording result containing file info and timing data, or nil if not recording
+
+    /// Stop the tap before draining the recording worker. Any dropped audio
+    /// frames or write errors invalidate the take rather than silently
+    /// returning a corrupted file as though recording succeeded.
     public func stopVRackRecording() -> VRackRecordingResult? {
-        guard isRecordingVRack, let sumMixer = vRackSumMixer else {
-            return nil
-        }
-        
-        // Remove the recording tap
+        guard isRecordingVRack, let sumMixer = vRackSumMixer,
+              let capture = vRackRecordingCapture else { return nil }
+
         sumMixer.removeTap(onBus: 0)
-        
-        // Get recording info before clearing
-        guard let file = vRackRecordingFile, let url = vRackRecordingURL else {
-            isRecordingVRack = false
-            return nil
-        }
-        
-        let durationInSamples = file.length
-        let sampleRate = file.processingFormat.sampleRate
+        vRackRecordingProgressTimer?.invalidate()
+        vRackRecordingProgressTimer = nil
+        let completion = capture.finish()
+        let url = vRackRecordingURL
         let startBeat = vRackRecordingStartBeat
+        let rate = vRackRecordingSampleRate
         let latency = calculateVRackLatency()
-        
-        // Clear recording state
-        vRackRecordingFile = nil
+
+        vRackRecordingCapture = nil
         vRackRecordingURL = nil
         isRecordingVRack = false
         vRackRecordingLevel = 0
         vRackWaveformBuffer.removeAll()
         vRackWaveformSamples.removeAll()
-        
-        print("[PlaybackEngine] V-Rack recording stopped. Duration: \(Double(durationInSamples) / sampleRate)s, Latency compensation: \(latency * 1000)ms")
-        
+
+        guard completion.succeeded, let url else {
+            vRackRecordingError = completion.writeError ??
+                "V-Rack capture overflow: \(completion.droppedFrames) frames lost"
+            print("[PlaybackEngine] V-Rack recording failed: \(vRackRecordingError ?? "Unknown error")")
+            if let url { try? FileManager.default.removeItem(at: url) }
+            return nil
+        }
+        print("[PlaybackEngine] V-Rack recording flushed \(completion.writtenFrames) frames")
         return VRackRecordingResult(
             fileURL: url,
             startBeat: startBeat,
-            durationInSamples: durationInSamples,
-            sampleRate: sampleRate,
+            durationInSamples: completion.writtenFrames,
+            sampleRate: rate,
             latencyCompensation: latency
         )
     }
-    
+
     /// Calculate the maximum latency across all loaded V-Rack instruments
     /// This is used to offset the recorded audio so it aligns with MIDI events
     public func calculateVRackLatency() -> TimeInterval {
@@ -687,82 +780,42 @@ public final class PlaybackEngine: ObservableObject {
     /// Start monitoring V-Rack input levels (for armed audio tracks with V-Rack input)
     /// This is lighter weight than recording - just measures levels without writing to disk
     public func startVRackInputMonitoring() {
-        guard let sumMixer = vRackSumMixer else {
-            print("[PlaybackEngine] Cannot start V-Rack monitoring: sum mixer not available")
-            return
-        }
-        
-        // Don't start monitoring if already recording (recording tap provides levels)
-        guard !isRecordingVRack && !isMonitoringVRackInput else {
-            return
-        }
-        
+        guard let sumMixer = vRackSumMixer, !isRecordingVRack,
+              !isMonitoringVRackInput else { return }
         let format = sumMixer.outputFormat(forBus: 0)
-        
-        // Install a lightweight tap just for metering
-        sumMixer.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            guard let self = self else { return }
-            
-            // Calculate stereo levels
-            let frameLength = Int(buffer.frameLength)
-            guard frameLength > 0 else { return }
-            
-            var leftSum: Float = 0
-            var rightSum: Float = 0
-            
-            if let channelData = buffer.floatChannelData {
-                // Left channel
-                for i in 0..<frameLength {
-                    let sample = channelData[0][i]
-                    leftSum += sample * sample
-                }
-                
-                // Right channel (if stereo)
-                if buffer.format.channelCount > 1 {
-                    for i in 0..<frameLength {
-                        let sample = channelData[1][i]
-                        rightSum += sample * sample
-                    }
-                } else {
-                    rightSum = leftSum  // Mono - use same value
-                }
-            }
-            
-            let leftRms = sqrt(leftSum / Float(frameLength))
-            let rightRms = sqrt(rightSum / Float(frameLength))
-            
-            // Convert to normalized 0-1 range (with -60dB floor)
-            let leftDb = 20 * log10(max(leftRms, 0.000001))
-            let rightDb = 20 * log10(max(rightRms, 0.000001))
-            
-            let leftNormalized = max(0, min(1, (leftDb + 60) / 60))
-            let rightNormalized = max(0, min(1, (rightDb + 60) / 60))
-            
-            DispatchQueue.main.async {
-                self.vRackInputLevel = (leftNormalized, rightNormalized)
-            }
+        guard format.commonFormat == .pcmFormatFloat32,
+              let meter = RealtimeStereoPeakMeter() else { return }
+
+        sumMixer.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+            meter.measure(buffer)
         }
-        
+        vRackInputMeter = meter
         isMonitoringVRackInput = true
-        print("[PlaybackEngine] V-Rack input monitoring started")
+        vRackInputMeterTimer?.invalidate()
+        vRackInputMeterTimer = Timer.scheduledTimer(
+            withTimeInterval: 0.05, repeats: true
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, let meter = self.vRackInputMeter else { return }
+                let peak = meter.takePeaks()
+                self.vRackInputLevel = (
+                    min(1, peak.left), min(1, peak.right)
+                )
+            }
+        }
+        print("[PlaybackEngine] V-Rack monitoring started")
     }
-    
-    /// Stop monitoring V-Rack input levels
+
     public func stopVRackInputMonitoring() {
-        guard isMonitoringVRackInput, let sumMixer = vRackSumMixer else {
-            return
-        }
-        
-        // Don't remove tap if we're recording (recording needs it)
-        guard !isRecordingVRack else {
-            return
-        }
-        
+        guard isMonitoringVRackInput, let sumMixer = vRackSumMixer,
+              !isRecordingVRack else { return }
         sumMixer.removeTap(onBus: 0)
+        vRackInputMeterTimer?.invalidate()
+        vRackInputMeterTimer = nil
+        vRackInputMeter = nil
         isMonitoringVRackInput = false
         vRackInputLevel = (0, 0)
-        
-        print("[PlaybackEngine] V-Rack input monitoring stopped")
+        print("[PlaybackEngine] V-Rack monitoring stopped")
     }
 
     // Diagnostic taps are installed only when live MIDI is first routed.
@@ -925,6 +978,21 @@ public final class PlaybackEngine: ObservableObject {
         let sampleRate = coreAudioBackend?.sampleRate ?? audioEngine.sampleRate
         playbackStartSample = beatsToSamples(playbackStartBeat, tempo: transport.tempo.bpm, sampleRate: sampleRate)
         lastProcessedSample = playbackStartSample
+
+        // Start a new MIDI session only after any previous queued buffer work
+        // has drained. Events earlier than the seek position must not play.
+        midiProcessingQueue.sync {
+            midiQueueStartBeat = playbackStartBeat
+            midiQueueStartSample = playbackStartSample
+            midiQueueSampleRate = sampleRate
+            midiQueueTrackInstruments = trackInstruments
+            midiQueueRackInstruments = rackInstruments
+            for index in scheduledMIDIEvents.indices
+            where scheduledMIDIEvents[index].absoluteBeat < playbackStartBeat {
+                scheduledMIDIEvents[index].processed = true
+            }
+            midiQueuePlaybackActive = true
+        }
         
         // Core Audio backend path (HYBRID MODE)
         if let backend = coreAudioBackend {
@@ -1001,42 +1069,48 @@ public final class PlaybackEngine: ObservableObject {
     /// Process MIDI events for the current audio buffer (called from audio thread)
     /// This is the heart of sample-accurate timing
     private func processAudioBuffer(startSample: Int64, frameCount: AVAudioFrameCount, tempo: Double) {
-        guard isPlaying else { return }
-        
+        // Do not inspect MainActor playback state on the render callback.
+        // Only submit scalar timing values; the serial MIDI worker owns the
+        // session snapshot, event cursor and active-note list.
         let bufferEndSample = startSample + Int64(frameCount)
-        
-        // Convert sample range to beat range
-        let bufferStartBeat = samplesToBeats(startSample - playbackStartSample, tempo: tempo) + playbackStartBeat
-        let bufferEndBeat = samplesToBeats(bufferEndSample - playbackStartSample, tempo: tempo) + playbackStartBeat
-        
-        // Dispatch MIDI processing to high-priority queue (NOT the audio thread)
-        // This avoids blocking the audio render and prevents deadlocks
         midiProcessingQueue.async { [weak self] in
-            guard let self = self, self.isPlaying else { return }
-            
-            // Process MIDI events that fall within this buffer's time window
-            for i in 0..<self.scheduledMIDIEvents.count {
-                guard !self.scheduledMIDIEvents[i].processed else { continue }
-                
-                let eventBeat = self.scheduledMIDIEvents[i].absoluteBeat
-                
-                // Skip events before our window
-                guard eventBeat >= bufferStartBeat else { continue }
-                
-                // Stop if we're past the buffer window
-                guard eventBeat < bufferEndBeat else { break }
-                
-                // Process the event immediately (AUEventSampleTimeImmediate since we're slightly behind)
-                self.processEventSampleAccurate(self.scheduledMIDIEvents[i], sampleOffset: AUEventSampleTimeImmediate)
-                self.scheduledMIDIEvents[i].processed = true
+            guard let self = self, self.midiQueuePlaybackActive else { return }
+            let beatsPerSample = tempo / (60.0 * self.midiQueueSampleRate)
+            let bufferStartBeat = Double(startSample - self.midiQueueStartSample)
+                * beatsPerSample + self.midiQueueStartBeat
+            let bufferEndBeat = Double(bufferEndSample - self.midiQueueStartSample)
+                * beatsPerSample + self.midiQueueStartBeat
+
+            let window = MIDIPlaybackWindow(
+                sessionStartBeat: self.midiQueueStartBeat,
+                bufferEndBeat: bufferEndBeat
+            )
+            for index in self.scheduledMIDIEvents.indices {
+                guard !self.scheduledMIDIEvents[index].processed else { continue }
+                let disposition = window.disposition(
+                    for: self.scheduledMIDIEvents[index].absoluteBeat
+                )
+                switch disposition {
+                case .beforeSession:
+                    // Seeking past a note must not cause it to sound later.
+                    self.scheduledMIDIEvents[index].processed = true
+                case .due:
+                    // Process late-arriving work rather than losing the event.
+                    self.processEventSampleAccurate(
+                        self.scheduledMIDIEvents[index],
+                        sampleOffset: AUEventSampleTimeImmediate
+                    )
+                    self.scheduledMIDIEvents[index].processed = true
+                case .future:
+                    // Events are sorted: nothing else can be due yet.
+                    break
+                }
+                if disposition == .future { break }
             }
-            
-            // Process note-offs
-            self.processNoteOffsInBuffer(bufferStartBeat: bufferStartBeat, bufferEndBeat: bufferEndBeat, tempo: tempo)
+
+            self.processNoteOffsInBuffer(bufferEndBeat: bufferEndBeat)
+            self.lastProcessedSample = bufferEndSample
         }
-        
-        // Update last processed position
-        lastProcessedSample = bufferEndSample
     }
     
     // MARK: - Hybrid Mode Timer
@@ -1085,7 +1159,8 @@ public final class PlaybackEngine: ObservableObject {
     
     /// Process V-Rack MIDI events based on elapsed time
     private func processHybridMIDIEvents(tempo: Double, sampleRate: Double) {
-        guard isPlaying else { return }
+        // This timer runs on midiProcessingQueue, like legacy buffer work.
+        guard midiQueuePlaybackActive else { return }
         
         // Calculate elapsed time in nanoseconds
         var timebaseInfo = mach_timebase_info_data_t()
@@ -1146,9 +1221,9 @@ public final class PlaybackEngine: ObservableObject {
                 let instrument: TrackInstrument? = {
                     switch note.midiOutput {
                     case .rackInstrument(let rackID, _):
-                        return rackInstruments[rackID]
+                        return midiQueueRackInstruments[rackID]
                     case .trackInstrument, .none:
-                        return trackInstruments[note.trackID]
+                        return midiQueueTrackInstruments[note.trackID]
                     }
                 }()
                 instrument?.stopNote(note.pitch, channel: note.channel)
@@ -1168,9 +1243,11 @@ public final class PlaybackEngine: ObservableObject {
         let (instrument, channel): (TrackInstrument?, UInt8) = {
             switch scheduled.midiOutput {
             case .rackInstrument(let rackID, let ch):
-                return (rackInstruments[rackID], ch - 1)
+                // Saved V-Rack destinations are 1-based. Clamp malformed or
+                // old project values before subtraction to avoid UInt8 traps.
+                return (midiQueueRackInstruments[rackID], min(16, max(1, ch)) - 1)
             case .trackInstrument, .none:
-                return (trackInstruments[scheduled.trackID], scheduled.event.channel)
+                return (midiQueueTrackInstruments[scheduled.trackID], scheduled.event.channel)
             }
         }()
         
@@ -1211,18 +1288,20 @@ public final class PlaybackEngine: ObservableObject {
         }
     }
     
-    /// Process note-offs that fall within the buffer
-    /// Called from midiProcessingQueue - NOT the audio thread
-    private func processNoteOffsInBuffer(bufferStartBeat: Double, bufferEndBeat: Double, tempo: Double) {
-        let notesToStop = activeNotes.filter { $0.endBeat >= bufferStartBeat && $0.endBeat < bufferEndBeat }
+    /// Release all notes due by the end of this buffer, including overdue
+    /// notes when callback delivery or MIDI processing ran late. Previously
+    /// overdue notes were removed without sending their Note Off messages.
+    /// Called from midiProcessingQueue - NOT the audio thread.
+    private func processNoteOffsInBuffer(bufferEndBeat: Double) {
+        let notesToStop = activeNotes.filter { $0.endBeat < bufferEndBeat }
         
         for note in notesToStop {
             let instrument: TrackInstrument? = {
                 switch note.midiOutput {
                 case .rackInstrument(let rackID, _):
-                    return rackInstruments[rackID]
+                    return midiQueueRackInstruments[rackID]
                 case .trackInstrument, .none:
-                    return trackInstruments[note.trackID]
+                    return midiQueueTrackInstruments[note.trackID]
                 }
             }()
             
@@ -1333,6 +1412,11 @@ public final class PlaybackEngine: ObservableObject {
     
     public func stopPlayback() {
         isPlaying = false
+        // Barrier: drain any queued buffer processing and prevent callbacks
+        // enqueued after stop from releasing or retriggering notes.
+        midiProcessingQueue.sync {
+            midiQueuePlaybackActive = false
+        }
 
         // Stop metering
         stopMetering()
@@ -1378,6 +1462,9 @@ public final class PlaybackEngine: ObservableObject {
     
     public func pausePlayback() {
         isPlaying = false
+        midiProcessingQueue.sync {
+            midiQueuePlaybackActive = false
+        }
         
         // Note: We don't stop notes on pause - they'll continue until their natural end
         // This matches DAW behavior where pausing doesn't cut notes off
@@ -1473,9 +1560,8 @@ public final class PlaybackEngine: ObservableObject {
                     let clipEndBeat = clip.timeRange.end.beats(atTempo: tempo)
                     
                     for event in midiData.events {
-                        // Selected channel filters MIDI; All (nil) preserves channel 1–16.
-                        if let selectedChannel = track.midiOutputChannel,
-                           event.channel != selectedChannel { continue }
+                        // Use the same channel filter as live MIDI playthrough.
+                        guard track.acceptsMIDIChannel(event.channel) else { continue }
                         let absoluteBeat = clipStartBeat + event.beatPosition
                         guard absoluteBeat >= clipStartBeat && absoluteBeat < clipEndBeat else { continue }
                         
@@ -1590,6 +1676,9 @@ public final class PlaybackEngine: ObservableObject {
         }
         
         hasLoggedPlaybackDebug = false
+        // Build the playback schedule off-queue, then publish it with one
+        // queue barrier. The worker must never observe a partially built list.
+        var localScheduledMIDIEvents: [ScheduledEvent] = []
 
         // Clean up old audio player nodes first
         cleanupAudioPlayers()
@@ -1625,7 +1714,10 @@ public final class PlaybackEngine: ObservableObject {
                 switch clip.content {
                 case .midi(let midiData):
                     print("[PlaybackEngine] MIDI clip with \(midiData.events.count) events")
-                    scheduleMIDIClip(midiData, clip: clip, track: track, project: project)
+                    scheduleMIDIClip(
+                        midiData, clip: clip, track: track, project: project,
+                        into: &localScheduledMIDIEvents
+                    )
 
                 case .audio(let audioData):
                     // Use simple AVAudioPlayer for reliable playback
@@ -1638,9 +1730,10 @@ public final class PlaybackEngine: ObservableObject {
             }
         }
         
-        // Sort by beat position for efficient processing (thread-safe)
+        // Publish the complete sorted schedule atomically to the worker.
+        localScheduledMIDIEvents.sort { $0.absoluteBeat < $1.absoluteBeat }
         midiProcessingQueue.sync {
-            scheduledMIDIEvents.sort { $0.absoluteBeat < $1.absoluteBeat }
+            scheduledMIDIEvents = localScheduledMIDIEvents
         }
     }
     
@@ -1747,12 +1840,16 @@ public final class PlaybackEngine: ObservableObject {
         _ midiData: MIDIClipData,
         clip: Clip,
         track: Track,
-        project: Project
+        project: Project,
+        into events: inout [ScheduledEvent]
     ) {
         let clipStartBeat = clip.timeRange.start.beats(atTempo: project.tempo.bpm)
         let clipEndBeat = clip.timeRange.end.beats(atTempo: project.tempo.bpm)
 
         for event in midiData.events {
+            // Match the same filter used by the hybrid backend and live input.
+            guard track.acceptsMIDIChannel(event.channel) else { continue }
+
             let absoluteBeat = clipStartBeat + event.beatPosition
 
             // Skip events outside clip bounds
@@ -1766,7 +1863,7 @@ public final class PlaybackEngine: ObservableObject {
                 midiOutput: track.midiOutput  // Capture the track's routing
             )
 
-            scheduledMIDIEvents.append(scheduled)
+            events.append(scheduled)
         }
     }
     
@@ -1929,13 +2026,24 @@ public final class PlaybackEngine: ObservableObject {
         }
     }
     
+    /// Release every scheduled note before clearing MIDI playback state.
+    /// Active notes are owned by midiProcessingQueue, including V-Rack notes.
+    /// Keeping cleanup on that queue prevents a late buffer callback from
+    /// mutating the list while stop is iterating it.
     private func stopAllNotes() {
-        for (trackID, instrument) in trackInstruments {
-            for note in activeNotes where note.trackID == trackID {
-                instrument.stopNote(note.pitch, channel: note.channel)
+        midiProcessingQueue.sync {
+            for note in activeNotes {
+                let instrument: TrackInstrument?
+                switch note.midiOutput {
+                case .rackInstrument(let rackID, _):
+                    instrument = midiQueueRackInstruments[rackID]
+                case .trackInstrument, .none:
+                    instrument = midiQueueTrackInstruments[note.trackID]
+                }
+                instrument?.stopNote(note.pitch, channel: note.channel)
             }
+            activeNotes.removeAll()
         }
-        activeNotes.removeAll()
     }
     
     private func stopAllAudioPlayers() {

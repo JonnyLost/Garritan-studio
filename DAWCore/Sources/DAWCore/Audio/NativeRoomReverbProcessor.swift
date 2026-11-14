@@ -1,0 +1,267 @@
+import Foundation
+
+/// Fully original, wet-only reverb kernel: sparse stereo early reflections plus
+/// a 16-line orthogonal feedback delay network with three-band decay control.
+///
+/// Create or replace off the audio thread. The process method performs no
+/// heap allocation, locking, logging or file I/O. One render thread owns each
+/// processor instance, and the caller supplies two distinct noninterleaved
+/// Float32 buffers. Do not modify the processor from the UI thread mid-render.
+public final class NativeRoomReverbProcessor {
+    private final class DelayLine {
+        private struct DecayGains {
+            let delayFrames: Int
+            let bass: Float
+            let mid: Float
+            let treble: Float
+            let octaveGains: [Float]?
+        }
+
+        private let storage: UnsafeMutablePointer<Float>
+        private let capacity: Int
+        private var activeDelayFrames: Int
+        private var position = 0
+        private var lowState: Float = 0
+        private var highState: Float = 0
+        private let lowCoefficient: Float
+        private let highCoefficient: Float
+        /// 5 cumulative lowpasses split the spectrum into six bands:
+        /// <177, 177-354, 354-707, 707-1414, 1414-2828, >2828 Hz.
+        private let octaveCoefficients: [Float]
+        private var octaveStates = [Float](repeating: 0, count: 5)
+        private let presetGains: [DecayGains]
+        private var selectedGainIndex = 0
+        private var bassGain: Float
+        private var midGain: Float
+        private var trebleGain: Float
+
+        init(frames: Int, sampleRate: Double, profiles: [StudioRoomAcousticProfile]) {
+            let baseFrames = max(2, frames)
+            let profileDelays = profiles.map { profile -> Int in
+                guard let requested = profile.lateDelayScale, requested.isFinite else {
+                    return baseFrames
+                }
+                let scale = max(0.65, min(1.8, Double(requested)))
+                return max(2, Int((Double(baseFrames) * scale).rounded()))
+            }
+            capacity = max(baseFrames, profileDelays.max() ?? baseFrames)
+            activeDelayFrames = profileDelays.first ?? baseFrames
+            storage = .allocate(capacity: capacity)
+            storage.initialize(repeating: 0, count: capacity)
+            lowCoefficient = Float(1 - exp(-2 * Double.pi * 250 / sampleRate))
+            highCoefficient = Float(1 - exp(-2 * Double.pi * 2500 / sampleRate))
+            octaveCoefficients = [177.0, 354, 707, 1_414, 2_828].map {
+                Float(1 - exp(-2 * Double.pi * $0 / sampleRate))
+            }
+            func gain(_ seconds: Float, delayFrames: Int) -> Float {
+                let safe = seconds.isFinite ? max(0.2, min(15, seconds)) : 2
+                return pow(10, -3 * Float(delayFrames) / (Float(sampleRate) * safe))
+            }
+            let all = profiles.enumerated().map { index, profile in
+                let delayFrames = profileDelays[index]
+                let octave = profile.sixBandRT60
+                let sixBandGains: [Float]?
+                if let octave, octave.count == 6 {
+                    if profile.shortRoomFeedbackCalibration == true {
+                        sixBandGains = NativeShortRoomFeedbackCalibrator.gains(
+                            targetRT60: octave, delayFrames: delayFrames,
+                            sampleRate: sampleRate
+                        )
+                    } else {
+                        sixBandGains = octave.map { gain($0, delayFrames: delayFrames) }
+                    }
+                } else {
+                    sixBandGains = nil
+                }
+                return DecayGains(
+                    delayFrames: delayFrames,
+                    bass: gain(profile.bassRT60, delayFrames: delayFrames),
+                    mid: gain(profile.midRT60, delayFrames: delayFrames),
+                    treble: gain(profile.trebleRT60, delayFrames: delayFrames),
+                    octaveGains: sixBandGains
+                )
+            }
+            presetGains = all
+            bassGain = all[0].bass
+            midGain = all[0].mid
+            trebleGain = all[0].treble
+        }
+
+        /// Coefficients are prepared before rendering. Switching performs no
+        /// exp/pow, allocation, locking or reverb-state reset on the audio thread.
+        @inline(__always) func selectProfile(at index: Int) {
+            selectedGainIndex = index
+            let gains = presetGains[index]
+            activeDelayFrames = gains.delayFrames
+            bassGain = gains.bass
+            midGain = gains.mid
+            trebleGain = gains.treble
+        }
+
+        deinit {
+            storage.deinitialize(count: capacity)
+            storage.deallocate()
+        }
+
+        /// Read feedback sample at the current position and apply band decays.
+        @inline(__always) func readDamped() -> Float {
+            // A larger ring stores all prepared delay lengths. The selected
+            // tap distance changes only when the host changes room profile.
+            // Factory rooms retain their previous delay lengths exactly.
+            var readPosition = position - activeDelayFrames
+            if readPosition < 0 { readPosition += capacity }
+            let sample = storage[readPosition]
+            if let gains = presetGains[selectedGainIndex].octaveGains {
+                var previousLow: Float = 0
+                var output: Float = 0
+                for index in 0..<5 {
+                    octaveStates[index] += octaveCoefficients[index] *
+                        (sample - octaveStates[index])
+                    let currentLow = octaveStates[index]
+                    output += (currentLow - previousLow) * gains[index]
+                    previousLow = currentLow
+                }
+                return output + (sample - previousLow) * gains[5]
+            }
+            lowState += lowCoefficient * (sample - lowState)
+            highState += highCoefficient * (sample - highState)
+            let bass = lowState
+            let mid = highState - lowState
+            let treble = sample - highState
+            return bass * bassGain + mid * midGain + treble * trebleGain
+        }
+
+        @inline(__always) func write(_ sample: Float) {
+            storage[position] = sample
+            position += 1
+            if position == capacity { position = 0 }
+        }
+    }
+
+    private struct ReflectionTap {
+        let offset: Int
+        let leftGain: Float
+        let rightGain: Float
+    }
+
+    private static let delaysMilliseconds: [Double] = [
+        29.7, 33.1, 36.7, 40.9, 44.3, 48.1, 52.7, 57.1,
+        61.3, 65.9, 70.1, 74.9, 80.3, 85.1, 91.1, 97.7
+    ]
+    private let lines: [DelayLine]
+    private var network = [Float](repeating: 0, count: 16)
+    private let presetReflections: [[ReflectionTap]]
+    public private(set) var selectedProfileIndex = 0
+    private let earlyLeft: UnsafeMutablePointer<Float>
+    private let earlyRight: UnsafeMutablePointer<Float>
+    private let earlyLength: Int
+    private var earlyPosition = 0
+
+    /// Standalone initializer retained for existing DSP tests and callers.
+    public convenience init(sampleRate: Double,
+                            profile: StudioRoomAcousticProfile = .abbeyRoadStudioOne) {
+        self.init(sampleRate: sampleRate, profiles: [profile])
+    }
+
+    /// Profiles and all delay/filter coefficients are prepared off the audio thread.
+    public init(sampleRate: Double, profiles: [StudioRoomAcousticProfile],
+                includeEarlyReflections: Bool = true) {
+        let rate = sampleRate.isFinite && (8_000...192_000).contains(sampleRate)
+            ? sampleRate : 48_000
+        let selected = profiles.isEmpty ? [StudioRoomAcousticProfile.abbeyRoadStudioOne] : profiles
+        lines = Self.delaysMilliseconds.map { ms in
+            DelayLine(frames: Int((ms * rate / 1000).rounded()),
+                      sampleRate: rate, profiles: selected)
+        }
+        presetReflections = selected.map { profile in
+            // In the AVAudioEngine, a distinct per-track sidechain owns
+            // source-positioned early reflections. Prevent a doubled ER field.
+            (includeEarlyReflections ? profile.earlyReflections : []).prefix(32)
+                .compactMap { tap -> ReflectionTap? in
+                guard tap.delayMilliseconds.isFinite, tap.delayMilliseconds >= 0,
+                      tap.leftGain.isFinite, tap.rightGain.isFinite else { return nil }
+                let offset = Int((Double(min(200, tap.delayMilliseconds)) * rate / 1000).rounded())
+                return ReflectionTap(offset: offset,
+                                     leftGain: min(1, max(-1, tap.leftGain)),
+                                     rightGain: min(1, max(-1, tap.rightGain)))
+            }
+        }
+        earlyLength = max(2, (presetReflections.flatMap { $0 }.map(\.offset).max() ?? 0) + 1)
+        earlyLeft = .allocate(capacity: earlyLength)
+        earlyRight = .allocate(capacity: earlyLength)
+        earlyLeft.initialize(repeating: 0, count: earlyLength)
+        earlyRight.initialize(repeating: 0, count: earlyLength)
+    }
+
+    /// Must be invoked from the owning render thread, never concurrently with
+    /// process(). Preserves the current FDN tail across profile changes.
+    public func selectProfile(at index: Int) {
+        guard presetReflections.indices.contains(index),
+              selectedProfileIndex != index else { return }
+        selectedProfileIndex = index
+        for line in lines { line.selectProfile(at: index) }
+    }
+
+    deinit {
+        earlyLeft.deinitialize(count: earlyLength)
+        earlyRight.deinitialize(count: earlyLength)
+        earlyLeft.deallocate()
+        earlyRight.deallocate()
+    }
+
+    public func process(left: UnsafeMutablePointer<Float>,
+                        right: UnsafeMutablePointer<Float>, frameCount: Int) {
+        guard frameCount > 0 else { return }
+        let reflections = presetReflections[selectedProfileIndex]
+        for frame in 0..<frameCount {
+            let inputLeft = left[frame]
+            let inputRight = right[frame]
+            let mono = 0.5 * (inputLeft + inputRight)
+
+            earlyLeft[earlyPosition] = inputLeft
+            earlyRight[earlyPosition] = inputRight
+            var earlyOutLeft: Float = 0
+            var earlyOutRight: Float = 0
+            for tap in reflections {
+                let read = (earlyPosition + earlyLength - tap.offset) % earlyLength
+                let reflected = 0.5 * (earlyLeft[read] + earlyRight[read])
+                earlyOutLeft += reflected * tap.leftGain
+                earlyOutRight += reflected * tap.rightGain
+            }
+            earlyPosition += 1
+            if earlyPosition == earlyLength { earlyPosition = 0 }
+
+            var tailLeft: Float = 0
+            var tailRight: Float = 0
+            for index in 0..<16 {
+                let value = lines[index].readDamped()
+                network[index] = value
+                tailLeft += value * ((index & 1) == 0 ? 1 : -1)
+                tailRight += value * ((index & 2) == 0 ? 1 : -1)
+            }
+
+            // In-place Walsh-Hadamard transform, scaled by 1/sqrt(16) = 0.25.
+            // This orthogonal mix does not amplify feedback-loop energy.
+            var span = 1
+            while span < 16 {
+                var start = 0
+                while start < 16 {
+                    for index in start..<(start + span) {
+                        let a = network[index]
+                        let b = network[index + span]
+                        network[index] = a + b
+                        network[index + span] = a - b
+                    }
+                    start += 2 * span
+                }
+                span *= 2
+            }
+            for index in 0..<16 {
+                let injection: Float = ((index & 4) == 0 ? 0.13 : -0.13) * mono
+                lines[index].write(network[index] * 0.25 + injection)
+            }
+            left[frame] = 0.50 * earlyOutLeft + 0.12 * tailLeft
+            right[frame] = 0.50 * earlyOutRight + 0.12 * tailRight
+        }
+    }
+}

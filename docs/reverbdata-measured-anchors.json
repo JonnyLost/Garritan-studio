@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "source": "REVERBDATA (Polytechnic University of Lisbon)",
+  "sourceWebsite": "https://reverbdata.ipl.pt/",
+  "lastReviewed": "2026-11-13",
+  "purpose": "External published reference measurements for manual validation of Studio algorithmic reverb; NOT playable IR presets or six-band targets.",
+  "usageNote": "Published T30,wide is a broadband measurement at a specified source/listener position. It MUST NOT be replicated across the six octave-band RT targets. Match measurement conditions and obtain licensed bandwise data before quantitative six-band calibration. No third-party audio or impulse-response files are bundled.",
+  "licensing": "Website displays CC BY-NC-SA 4.0; separate dataset permissions must be checked before reproducing or distributing audio or other copyrighted materials. Only source-attributed factual measurement values are recorded here.",
+  "measurements": [
+    {
+      "id": "gulbenkian-main-hall",
+      "venue": "Gulbenkian Great Hall",
+      "place": "Lisbon, Portugal",
+      "parameter": "T30,wide",
+      "seconds": 1.54,
+      "sourcePosition": "Acoustic source on stage",
+      "receiverPosition": "Acquisition position 3; orchestral configuration",
+      "notes": "12 acquisition positions; 875 m² floor; ~8 m height. Specific configuration is essential.",
+      "url": "https://reverbdata.ipl.pt/reverbdata/gulbenkian-hall/"
+    },
+    {
+      "id": "convent-christ-church",
+      "venue": "Church of the Convent of Christ",
+      "place": "Tomar, Portugal",
+      "parameter": "T30,wide",
+      "seconds": 4.86,
+      "sourcePosition": "Pulpit",
+      "receiverPosition": "Acquisition position 1",
+      "notes": "Charola/rotunda historical church; acoustic paths depend strongly on receiver position.",
+      "url": "https://reverbdata.ipl.pt/reverbdata/church-of-convent-of-christ/"
+    },
+    {
+      "id": "jeronimos-church",
+      "venue": "Church of the Monastery of Jerónimos",
+      "place": "Lisbon, Portugal",
+      "parameter": "T30,wide",
+      "seconds": 6.14,
+      "sourcePosition": "High choir (S1)",
+      "receiverPosition": "Nave position 1",
+      "notes": "Approximate room volume 45,950 m³ with mixed masonry, limestone, wood and glass; the geometry is nonrectangular.",
+      "url": "https://reverbdata.ipl.pt/reverbdata/church-of-monastery-of-jeronimos/"
+    },
+    {
+      "id": "convent-christ-refectory",
+      "venue": "Refectory of the Convent of Christ",
+      "place": "Tomar, Portugal",
+      "parameter": "T30,wide",
+      "seconds": 6.24,
+      "sourcePosition": "S1",
+      "receiverPosition": "Acquisition position 2",
+      "notes": "Historic vaulted refectory; not necessarily a diffuse rectangular room.",
+      "url": "https://reverbdata.ipl.pt/reverbdata/refectory/"
+    },
+    {
+      "id": "crows-cloister-cistern",
+      "venue": "Cistern of the Crow’s Cloister",
+      "place": "Tomar, Portugal",
+      "parameter": "T30,wide",
+      "seconds": 9.61,
+      "sourcePosition": "S3",
+      "receiverPosition": "Acquisition position 1",
+      "notes": "Extreme reverberant enclosed stone space, potentially multi-slope decay.",
+      "url": "https://reverbdata.ipl.pt/reverbdata/cistern-of-the-crows-cloister/"
+    }
+  ]
+}

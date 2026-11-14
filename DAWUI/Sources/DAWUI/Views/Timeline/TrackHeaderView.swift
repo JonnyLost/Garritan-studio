@@ -7,6 +7,7 @@ import Foundation
 // MARK: - Track Header View
 
 struct TrackHeaderView: View {
+    @Environment(\.studioPalette) private var palette
     let track: Track
     @ObservedObject var viewModel: ProjectViewModel
     var onCreateClip: (() -> Void)? = nil
@@ -32,12 +33,18 @@ struct TrackHeaderView: View {
                         .textFieldStyle(.plain)
                         .font(.system(size: 12, weight: .medium))
                     } else {
-                        Text(track.name)
-                            .font(.system(size: 12, weight: .medium))
-                            .lineLimit(1)
-                            .onTapGesture(count: 2) {
-                                startEditing()
+                        HStack(spacing: 5) {
+                            if track.type == .instrument {
+                                StudioInstrumentIcon(name: track.name, size: 17)
+                                    .frame(width: 19)
                             }
+                            Text(track.name)
+                                .font(.system(size: 12, weight: .medium))
+                                .lineLimit(1)
+                                .onTapGesture(count: 2) {
+                                    startEditing()
+                                }
+                        }
                     }
                     
                     // Instrument slot for MIDI/Instrument tracks
@@ -131,7 +138,7 @@ struct TrackHeaderView: View {
                 isPresented: $showInstrumentBrowser
             )
         }
-        .background(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
+        .background(isSelected ? palette.selectedBackground.opacity(0.7) : Color.clear)
         .contentShape(Rectangle())
         .onTapGesture {
             // Instant selection with piano roll follow (no animation delay)
@@ -368,9 +375,11 @@ struct InstrumentSlotButton: View {
     }
     
     private func openInstrumentUI() {
-        guard let slot = track.instrumentSlot,
-              let pluginID = slot.pluginID,
-              let loadedPlugin = viewModel.pluginHost.loadedPlugins.values.first(where: { $0.identifier == pluginID }) else { return }
+        // Multiple tracks can host identical ARIA AU descriptions. Match the
+        // instance bound to this track, never the first registry entry.
+        guard let instrument = viewModel.playbackEngine.instrument(for: track.id),
+              case .auInstrument(_, let instanceID) = instrument,
+              let loadedPlugin = viewModel.pluginHost.loadedPlugins[instanceID] else { return }
         
         PluginWindowManager.shared.openPluginWindow(for: loadedPlugin, trackName: track.name)
     }
@@ -379,7 +388,7 @@ struct InstrumentSlotButton: View {
         var updatedTrack = track
         updatedTrack.instrumentSlot = nil
         viewModel.updateTrack(updatedTrack, description: "Remove Instrument")
-        viewModel.playbackEngine.removeInstrument(for: track.id)
+        viewModel.unloadTrackInstrument(for: track.id)
     }
 }
 
@@ -967,25 +976,38 @@ struct InstrumentBrowserSheet: View {
                 )
                 log("Step 2 DONE: Plugin loaded: \(loadedPlugin.name)")
                 
-                // Update track's instrument slot
+                // Only persist a new slot once its Audio Unit is actually
+                // connected to this track's playback graph.
                 if var track = viewModel.project.track(withID: trackID) {
-                    log("Step 3: Updating track slot...")
+                    let previousPluginID: UUID?
+                    if let instrument = viewModel.playbackEngine.instrument(for: trackID),
+                       case .auInstrument(_, let instanceID) = instrument {
+                        previousPluginID = instanceID
+                    } else {
+                        previousPluginID = nil
+                    }
+
+                    log("Step 3: Connecting the new Audio Unit...")
+                    do {
+                        try await viewModel.playbackEngine.loadInstrument(
+                            loadedPlugin.audioUnit,
+                            for: trackID,
+                            pluginID: loadedPlugin.id
+                        )
+                    } catch {
+                        viewModel.pluginHost.unloadPlugin(id: loadedPlugin.id)
+                        throw error
+                    }
+                    if let previousPluginID, previousPluginID != loadedPlugin.id {
+                        viewModel.pluginHost.unloadPlugin(id: previousPluginID)
+                    }
+
                     track.instrumentSlot = PluginSlot(pluginID: description.identifier, isEnabled: true)
-                    
                     await MainActor.run {
                         viewModel.updateTrack(track, description: "Load Instrument")
                     }
-                    log("Step 3 DONE: Track updated")
-                    
-                    // Load instrument into playback engine
-                    log("Step 4: Loading into playback engine...")
-                    try await viewModel.playbackEngine.loadInstrument(
-                        loadedPlugin.audioUnit,
-                        for: trackID,
-                        pluginID: loadedPlugin.id
-                    )
-                    log("Step 4 DONE: Playback engine loaded")
-                    
+                    log("Step 3 DONE: Instrument connected and slot saved")
+
                     await MainActor.run {
                         // Do not automatically create the Audio Unit editor.
                         // ARIA Player can crash inside its custom editor on macOS
@@ -997,6 +1019,7 @@ struct InstrumentBrowserSheet: View {
                         log("Step 5 DONE: Instrument loaded; browser closed without opening editor")
                     }
                 } else {
+                    viewModel.pluginHost.unloadPlugin(id: loadedPlugin.id)
                     log("ERROR: Track not found for ID: \(trackID)")
                 }
             } catch {
@@ -1155,7 +1178,7 @@ struct AudioInputSelector: View {
             }) {
                 HStack {
                     Text("None")
-                    if track.inputSource == nil || track.inputSource == .none {
+                    if track.inputSource == nil || track.inputSource == InputSource.none {
                         Image(systemName: "checkmark")
                     }
                 }

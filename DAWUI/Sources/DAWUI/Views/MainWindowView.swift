@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 // MARK: - Main Window View
 
 public struct MainWindowView: View {
+    @Environment(\.studioPalette) private var palette
     @StateObject private var viewModel: ProjectViewModel
     
     // Global key monitor for keyboard shortcuts
@@ -17,6 +18,14 @@ public struct MainWindowView: View {
     @State private var mixerHeight: CGFloat = 280
     @State private var pianoRollHeight: CGFloat = 500
     @State private var showStageWorkspace = false
+    @State private var showRoomAcousticsWorkspace = false
+    @State private var showChannelWorkspace = false
+    @State private var showArticulationsWorkspace = false
+    @State private var showInstrumentWorkspace = false
+    @State private var compactLowerWorkspace = false
+    @State private var showDockedKeyboard = false
+    @State private var lowerWorkspaceMaximized = false
+    @State private var lowerWorkspaceRestoreHeight: CGFloat = 500
     @State private var showCreateClipDialog: Bool = false
     @State private var createClipTrackID: TrackID?
     @State private var horizontalScrollOffset: CGFloat = 0
@@ -79,60 +88,101 @@ public struct MainWindowView: View {
     public var body: some View {
         VStack(spacing: 0) {
             TransportView(viewModel: viewModel)
+                .background(palette.panel)
             Divider()
             
             HStack(spacing: 0) {
-                // V-Rack sidebar (left side)
+                // Navigation spans both arrangement and lower editor.
                 if showVRack {
-                    VRackView(viewModel: viewModel, openStageWorkspace: {
-                        showStageWorkspace = true
-                    })
-                        .frame(width: composerDrawerWidth)
-                    Rectangle()
-                        .fill(Color(nsColor: .separatorColor))
-                        .frame(width: 5)
-                        .contentShape(Rectangle())
-                        .help("Drag to resize the composer drawer")
-                        .gesture(
-                            DragGesture(minimumDistance: 2)
-                                .onChanged { value in
-                                    let startingWidth = drawerDragStartWidth ?? composerDrawerWidth
-                                    if drawerDragStartWidth == nil { drawerDragStartWidth = startingWidth }
-                                    composerDrawerWidth = min(600, max(270, startingWidth + value.translation.width))
-                                }
-                                .onEnded { _ in drawerDragStartWidth = nil }
-                        )
+                    workspaceNavigation
+                    Divider()
                 }
-                
-                arrangeView
 
-                if viewModel.showInspector {
-                    Divider()
-                    InspectorView(viewModel: viewModel)
-                        .frame(width: 250)  // Fixed width
-                }
-                
-                if viewModel.showAIAssistant {
-                    Divider()
-                    AIAssistantView(viewModel: viewModel, isGenerativeFillMode: $isAIGenerationMode, voiceInput: voiceInput)
-                        .frame(width: 320)  // Fixed width for AI panel
-                }
-            }
-            
-                if showStageWorkspace || viewModel.showMixer || viewModel.showPianoRoll {
-                // Draggable resize handle
-                ResizeHandle(height: (showStageWorkspace || viewModel.showPianoRoll) ? $pianoRollHeight : $mixerHeight)
-                
-                bottomPanel
-                    .frame(height: (showStageWorkspace || viewModel.showPianoRoll) ? pianoRollHeight : mixerHeight)
-                    .simultaneousGesture(
-                        TapGesture().onEnded { _ in
-                            NSApp.keyWindow?.makeFirstResponder(nil)
+                VStack(spacing: 0) {
+                    HStack(spacing: 0) {
+                        arrangeView
+
+                        if viewModel.showInspector {
+                            Divider()
+                            InspectorView(viewModel: viewModel)
+                                .frame(width: 250)
                         }
-                    )
+
+                        if viewModel.showAIAssistant {
+                            Divider()
+                            AIAssistantView(viewModel: viewModel, isGenerativeFillMode: $isAIGenerationMode, voiceInput: voiceInput)
+                                .frame(width: 320)
+                        }
+                    }
+                    .frame(maxHeight: .infinity)
+
+                    if showDockedKeyboard {
+                        Divider()
+                        HStack(spacing: 0) {
+                            ArticulationsWorkspaceView(viewModel: viewModel).dockedKeyboard
+                                .frame(maxWidth: .infinity)
+                            Button {
+                                showDockedKeyboard = false
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.secondary)
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Hide On-Screen Keyboard")
+                            .padding(.trailing, 12)
+                        }
+                        .frame(height: 94)
+                        .background(Color(nsColor: .controlBackgroundColor))
+                    }
+
+                    if showInstrumentWorkspace || showChannelWorkspace || showStageWorkspace || showRoomAcousticsWorkspace || showArticulationsWorkspace || viewModel.showMixer || viewModel.showPianoRoll {
+                        ResizeHandle(height: $pianoRollHeight)
+                            .onTapGesture(count: 2) {
+                                if lowerWorkspaceMaximized {
+                                    pianoRollHeight = lowerWorkspaceRestoreHeight
+                                } else {
+                                    lowerWorkspaceRestoreHeight = pianoRollHeight
+                                    pianoRollHeight = max(500, (NSApp.keyWindow?.contentView?.bounds.height ?? 800) - 190)
+                                }
+                                lowerWorkspaceMaximized.toggle()
+                            }
+
+                        VStack(spacing: 0) {
+                            HStack {
+                                Text(compactLowerWorkspace ? (showArticulationsWorkspace ? "Quick Articulations" : "Compact Workspace") : "Full Workspace")
+                                    .font(.caption.weight(.medium))
+                                Spacer()
+                                Button(compactLowerWorkspace ? "Expand" : "Compact") {
+                                    compactLowerWorkspace.toggle()
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                            .padding(.horizontal, 12)
+                            .frame(height: 28)
+                            Divider()
+                            if compactLowerWorkspace {
+                                if showArticulationsWorkspace {
+                                    ArticulationsWorkspaceView(viewModel: viewModel).compactControls
+                                } else {
+                                    compactWorkspaceStrip
+                                }
+                            } else {
+                                bottomPanel
+                            }
+                        }
+                            .frame(height: compactLowerWorkspace ? (showArticulationsWorkspace ? 155 : 108) : pianoRollHeight)
+                            .simultaneousGesture(
+                                TapGesture().onEnded { _ in
+                                    NSApp.keyWindow?.makeFirstResponder(nil)
+                                }
+                            )
+                    }
+                }
             }
         }
         .frame(minWidth: 1200, minHeight: 700)
+        .background(palette.canvas)
+        .tint(palette.accent)
         .toolbar { toolbarContent }
         .sheet(isPresented: $showAIPromptDialog) {
             AIPromptDialogView(
@@ -218,6 +268,9 @@ public struct MainWindowView: View {
             // Stop keyboard monitor when view disappears (e.g., project reload)
             keyMonitor.stop()
         }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("toggleStudioKeyboard"))) { _ in
+            showDockedKeyboard.toggle()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .performUndo)) { _ in
             viewModel.undo()
         }
@@ -266,9 +319,10 @@ public struct MainWindowView: View {
             VStack(spacing: 0) {
                 // Tracks label header
                 HStack {
-                    Text("Tracks")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    Text("TRACKS")
+                        .font(.system(size: 10, weight: .semibold))
+                        .tracking(0.9)
+                        .foregroundColor(palette.secondaryText)
                     Spacer()
                     Menu {
                         Button("Audio Track") { viewModel.addTrack(type: .audio) }
@@ -282,7 +336,7 @@ public struct MainWindowView: View {
                 }
                 .frame(height: rulerHeight)
                 .padding(.horizontal, 8)
-                .background(Color(nsColor: .windowBackgroundColor))
+                .background(palette.panel)
                 
                 Divider()
                 
@@ -294,13 +348,14 @@ public struct MainWindowView: View {
                                 // Drop indicator line above track
                                 if dropTargetIndex == index && draggedTrackID != nil && draggedTrackID != track.id {
                                     Rectangle()
-                                        .fill(Color.accentColor)
+                                        .fill(palette.accent)
                                         .frame(height: 3)
                                 }
                                 
                                 TrackHeaderView(track: track, viewModel: viewModel)
                                     .frame(width: trackHeaderWidth, height: trackHeight)
-                                    .background(viewModel.selectedTrackID == track.id ? Color.accentColor.opacity(0.1) : Color(nsColor: .controlBackgroundColor))
+                                    .background(viewModel.selectedTrackID == track.id ?
+                                                palette.selectedBackground.opacity(0.7) : palette.surface)
                                     .opacity(draggedTrackID == track.id ? 0.5 : 1.0)
                                     .onDrag {
                                         draggedTrackID = track.id
@@ -420,29 +475,149 @@ public struct MainWindowView: View {
     
     // MARK: - Bottom Panel
     
+    private func selectWorkspace(_ workspace: String) {
+        showInstrumentWorkspace = workspace == "Instruments"
+        showChannelWorkspace = workspace == "Channel"
+        showStageWorkspace = workspace == "Stage"
+        showRoomAcousticsWorkspace = workspace == "Rooms"
+        showArticulationsWorkspace = workspace == "Articulations"
+        viewModel.showPianoRoll = workspace == "Piano Roll"
+        viewModel.showMixer = workspace == "Mixer"
+    }
+
+    @ViewBuilder
+    private var workspaceNavigation: some View {
+        VStack(spacing: 8) {
+            workspaceButton("Instruments", symbol: "music.note.list", active: showInstrumentWorkspace) {
+                selectWorkspace("Instruments")
+            }
+            workspaceButton("Channel", symbol: "slider.horizontal.3", active: showChannelWorkspace) {
+                selectWorkspace("Channel")
+            }
+            workspaceButton("Stage", symbol: "circle.hexagongrid", active: showStageWorkspace) {
+                selectWorkspace("Stage")
+            }
+            workspaceButton("Rooms", symbol: "waveform.path", active: showRoomAcousticsWorkspace) {
+                selectWorkspace("Rooms")
+            }
+            workspaceButton("Articulations", symbol: "music.note", active: showArticulationsWorkspace) {
+                selectWorkspace("Articulations")
+            }
+            workspaceButton("Piano Roll", symbol: "pianokeys", active: viewModel.showPianoRoll && !showInstrumentWorkspace && !showChannelWorkspace && !showStageWorkspace && !showRoomAcousticsWorkspace && !showArticulationsWorkspace && !viewModel.showMixer) {
+                selectWorkspace("Piano Roll")
+            }
+            workspaceButton("Mixer", symbol: "slider.vertical.3", active: viewModel.showMixer && !showInstrumentWorkspace && !showChannelWorkspace && !showStageWorkspace && !showRoomAcousticsWorkspace && !showArticulationsWorkspace) {
+                selectWorkspace("Mixer")
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 10)
+        .frame(width: 78)
+        .background(palette.sidebar)
+    }
+
+    private func workspaceButton(_ title: String, symbol: String, active: Bool,
+                                 action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 5) {
+                Image(systemName: symbol).font(.system(size: 17))
+                Text(title).font(.system(size: 9))
+            }
+            .foregroundColor(active ? palette.selectedText : palette.secondaryText)
+            .frame(width: 68, height: 56)
+            .background(active ? palette.selectedBackground : Color.clear)
+            .cornerRadius(9)
+            .overlay {
+                RoundedRectangle(cornerRadius: 9)
+                    .strokeBorder(active ? palette.accent.opacity(0.6) : .clear, lineWidth: 1)
+            }
+            .animation(.easeInOut(duration: 0.15), value: active)
+        }
+        .buttonStyle(.plain)
+        .help(title)
+    }
+
+    private var compactWorkspaceStrip: some View {
+        HStack(spacing: 16) {
+            if showRoomAcousticsWorkspace {
+                Image(systemName: "waveform.path")
+                Text("Room Acoustics").font(.subheadline.weight(.semibold))
+                Text(viewModel.project.dawState.acousticRoomProfileID ?? "Apple Medium Hall")
+                    .font(.caption).foregroundColor(.secondary)
+                Spacer()
+                Button("Expand to Edit") { compactLowerWorkspace = false }
+                    .buttonStyle(.borderless)
+            } else if let track = viewModel.selectedTrack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(track.name).font(.subheadline.weight(.semibold))
+                    Text(track.instrumentSlot?.pluginID?.name ?? "No instrument loaded")
+                        .font(.caption).foregroundColor(.secondary)
+                }
+                Spacer()
+                Text(track.volume <= 0 ? "−∞ dB" :
+                     String(format: "%.1f dB", 20 * log10(Double(track.volume))))
+                    .font(.caption.monospacedDigit())
+                Text(abs(track.pan) < 0.01 ? "Center" :
+                     String(format: "%.0f%% %@", abs(track.pan) * 100,
+                            track.pan < 0 ? "Left" : "Right"))
+                    .font(.caption)
+            } else {
+                Text("Select a track to view its essential controls")
+                    .font(.caption).foregroundColor(.secondary)
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(palette.surface)
+    }
+
     @ViewBuilder
     private var bottomPanel: some View {
-        if showStageWorkspace {
+        if showInstrumentWorkspace {
+            VRackView(viewModel: viewModel, expandedOnly: true)
+        } else if showChannelWorkspace {
+            ChannelWorkspaceView(viewModel: viewModel)
+        } else if showArticulationsWorkspace {
+            ArticulationsWorkspaceView(viewModel: viewModel)
+        } else if showRoomAcousticsWorkspace {
             VStack(spacing: 0) {
-                HStack {
-                    Text("Orchestral Stage").font(.headline)
-                    Spacer()
+                StudioWorkspaceHeader(
+                    "Room Acoustics",
+                    subtitle: "Room library, original six-band designer and orchestral ambience",
+                    symbol: "waveform.path"
+                ) {
+                    Button("Stage") { selectWorkspace("Stage") }
+                        .buttonStyle(.borderless)
+                    Button {
+                        selectWorkspace("Piano Roll")
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Close Room Acoustics workspace")
+                }
+                StudioRoomAcousticsWorkspaceView(viewModel: viewModel)
+            }
+        } else if showStageWorkspace {
+            VStack(spacing: 0) {
+                StudioWorkspaceHeader(
+                    "Orchestral Stage",
+                    subtitle: "Orchestra seating, stereo placement and Concert Hall ambience",
+                    symbol: "circle.hexagongrid"
+                ) {
                     Button("Piano Roll") {
-                        showStageWorkspace = false
-                        viewModel.showPianoRoll = true
+                        selectWorkspace("Piano Roll")
                     }
                     .buttonStyle(.borderless)
                     Button {
-                        showStageWorkspace = false
+                        selectWorkspace("Piano Roll")
                     } label: {
                         Image(systemName: "xmark")
                     }
                     .buttonStyle(.borderless)
                     .help("Close Stage workspace")
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                Divider()
                 OrchestralStageView(viewModel: viewModel, expanded: true)
             }
         } else if viewModel.showPianoRoll {
@@ -457,7 +632,9 @@ public struct MainWindowView: View {
                 PianoRollPlaceholderView()
             }
         } else if viewModel.showMixer {
-            MixerView(viewModel: viewModel)
+            MixerView(viewModel: viewModel, openStageWorkspace: {
+                selectWorkspace("Stage")
+            })
         }
     }
     
@@ -536,13 +713,13 @@ public struct MainWindowView: View {
             Toggle(isOn: $showVRack) {
                 Image(systemName: "pianokeys")
             }
-            .help("Toggle Instruments Panel")
+            .help("Toggle Workspace Navigation")
 
             Toggle(isOn: Binding(
-                get: { viewModel.showPianoRoll && !showStageWorkspace },
+                get: { viewModel.showPianoRoll && !showStageWorkspace && !showRoomAcousticsWorkspace && !showChannelWorkspace && !showInstrumentWorkspace },
                 set: { enabled in
-                    showStageWorkspace = false
-                    viewModel.showPianoRoll = enabled
+                    if enabled { selectWorkspace("Piano Roll") }
+                    else { viewModel.showPianoRoll = false }
                 }
             )) {
                 Image(systemName: "rectangle.split.3x1")
@@ -550,10 +727,10 @@ public struct MainWindowView: View {
             .help("Toggle MIDI Editor Panel")
             
             Toggle(isOn: Binding(
-                get: { viewModel.showMixer && !showStageWorkspace },
+                get: { viewModel.showMixer && !showStageWorkspace && !showRoomAcousticsWorkspace && !showChannelWorkspace && !showInstrumentWorkspace },
                 set: { enabled in
-                    showStageWorkspace = false
-                    viewModel.showMixer = enabled
+                    if enabled { selectWorkspace("Mixer") }
+                    else { viewModel.showMixer = false }
                 }
             )) {
                 Image(systemName: "slider.horizontal.3")
@@ -1898,6 +2075,135 @@ struct InspectorView: View {
     }
 }
 
+// MARK: - Channel Workspace
+
+/// Focused selected-track channel controls, distinct from the full multitrack mixer.
+private struct ChannelWorkspaceView: View {
+    @Environment(\.studioPalette) private var palette
+    @ObservedObject var viewModel: ProjectViewModel
+
+    private func signalNode(_ title: String, _ detail: String, _ symbol: String) -> some View {
+        VStack(spacing: 9) {
+            Image(systemName: symbol)
+                .font(.system(size: 21, weight: .medium))
+                .foregroundStyle(palette.accent)
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(palette.primaryText)
+            Text(detail)
+                .font(.system(size: 10))
+                .foregroundStyle(palette.secondaryText)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, minHeight: 96)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 12)
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: 9))
+        .overlay {
+            RoundedRectangle(cornerRadius: 9)
+                .strokeBorder(palette.separator.opacity(0.8), lineWidth: 1)
+                .allowsHitTesting(false)
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            StudioWorkspaceHeader(
+                "Channel",
+                subtitle: "Track controls and signal routing",
+                symbol: "slider.horizontal.3"
+            ) {
+                if let track = viewModel.selectedTrack {
+                    Text(track.name)
+                        .foregroundStyle(palette.secondaryText)
+                        .lineLimit(1)
+                }
+            }
+
+            ScrollView {
+                if let track = viewModel.selectedTrack {
+                    HStack(alignment: .top, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 16) {
+                            StudioSectionHeading("Track & Routing", symbol: "slider.horizontal.3")
+                            TrackInspectorSection(
+                                track: track,
+                                viewModel: viewModel,
+                                audioRecorder: viewModel.audioRecorder
+                            )
+                        }
+                        .padding(18)
+                        .frame(width: 350, alignment: .leading)
+                        .studioPanel()
+
+                        VStack(alignment: .leading, spacing: 17) {
+                            StudioSectionHeading("Signal Flow", symbol: "arrow.right")
+                            HStack(spacing: 7) {
+                                signalNode("Instrument", track.instrumentSlot?.pluginID?.name ?? "No instrument", "pianokeys")
+                                Image(systemName: "arrow.right")
+                                    .foregroundStyle(palette.accent)
+                                    .font(.system(size: 11))
+                                signalNode("Inserts", "Effects", "waveform.path")
+                                Image(systemName: "arrow.right")
+                                    .foregroundStyle(palette.accent)
+                                    .font(.system(size: 11))
+                                signalNode("Sends", "Stage ambience", "arrow.triangle.branch")
+                                Image(systemName: "arrow.right")
+                                    .foregroundStyle(palette.accent)
+                                    .font(.system(size: 11))
+                                signalNode("Output", "Master", "speaker.wave.2")
+                            }
+
+                            Rectangle().fill(palette.separator).frame(height: 1)
+
+                            StudioSectionHeading("Channel Overview", symbol: "waveform")
+                            HStack {
+                                Text("Level")
+                                Spacer()
+                                Text(track.volume <= 0 ? "−∞ dB" :
+                                     String(format: "%.1f dB", 20 * log10(Double(track.volume))))
+                                    .monospacedDigit()
+                            }
+                            .font(.system(size: 12))
+                            .foregroundStyle(palette.primaryText)
+                            ProgressView(value: min(max(Double(track.volume) / 1.4, 0), 1))
+                                .tint(palette.accent)
+                            HStack {
+                                Text("Pan")
+                                Spacer()
+                                Text(abs(track.pan) < 0.01 ? "Center" :
+                                     String(format: "%.0f%% %@", abs(track.pan) * 100,
+                                            track.pan < 0 ? "Left" : "Right"))
+                                    .monospacedDigit()
+                            }
+                            .font(.system(size: 12))
+                            .foregroundStyle(palette.primaryText)
+
+                            Text("Signal flow is a visual overview. Adjust the track controls on the left.")
+                                .font(.system(size: 11))
+                                .foregroundStyle(palette.secondaryText)
+                        }
+                        .padding(18)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .studioPanel()
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(18)
+                } else {
+                    ContentUnavailableView(
+                        "No Track Selected",
+                        systemImage: "slider.horizontal.3",
+                        description: Text("Select a track in the arrangement to edit its channel.")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+        .background(palette.canvas)
+        .tint(palette.accent)
+    }
+}
+
 // MARK: - Track Inspector Section
 
 struct TrackInspectorSection: View {
@@ -1993,14 +2299,9 @@ struct TrackInspectorSection: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    if let pluginID = track.instrumentSlot?.pluginID {
+                    if track.instrumentSlot?.pluginID != nil {
                         Button {
-                            if let loaded = viewModel.pluginHost.loadedPlugins.values.first(where: {
-                                $0.identifier == pluginID
-                            }) {
-                                PluginWindowManager.shared.openPluginWindow(
-                                    for: loaded, trackName: track.name)
-                            }
+                            viewModel.openTrackInstrumentUI(track.id)
                         } label: {
                             Label("Instrument Controls…", systemImage: "slider.horizontal.3")
                                 .frame(maxWidth: .infinity)

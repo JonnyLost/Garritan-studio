@@ -11,7 +11,9 @@ public enum AudioEngineError: Error, LocalizedError {
     case invalidFormat
     case bufferAllocationFailed
     case nodeNotFound(TrackID)
+    case invalidPluginSlot(Int)
     case fileLoadFailed(URL, Error)
+    case microphoneRoutingUnavailable(String)
     
     public var errorDescription: String? {
         switch self {
@@ -27,8 +29,12 @@ public enum AudioEngineError: Error, LocalizedError {
             return "Failed to allocate audio buffer"
         case .nodeNotFound(let id):
             return "Audio node not found for track: \(id.rawValue)"
+        case .invalidPluginSlot(let index):
+            return "Invalid insert effect slot: \(index)"
         case .fileLoadFailed(let url, let error):
             return "Failed to load audio file at \(url): \(error.localizedDescription)"
+        case .microphoneRoutingUnavailable(let reason):
+            return "Microphone audition unavailable: \(reason)"
         }
     }
 }
@@ -38,6 +44,13 @@ public enum AudioEngineError: Error, LocalizedError {
 /// Main audio engine wrapping AVAudioEngine with track management
 @MainActor
 public final class AudioEngine: ObservableObject {
+    // Shared Concert Hall send curve, indexed by persisted stage zone (0...5).
+    // Keeping one curve avoids discrepancies between live movement and project loading.
+    private static let concertHallSendLevels: [Float] = [0.0, 0.12, 0.20, 0.30, 0.43, 0.58]
+    // Gentle direct-sound falloff across the five seating rows. Conductor
+    // remains at unity and dry. Reverb remains independently controllable.
+    private static let stageDirectLevels: [Float] = [1.0, 1.0, 0.94, 0.88, 0.82, 0.76]
+
     // MARK: - Properties
     
     /// The underlying AVAudioEngine - exposed for advanced node attachment
@@ -50,10 +63,143 @@ public final class AudioEngine: ObservableObject {
     // Keeping the established dry signal path untouched makes startup
     // behavior independently testable before introducing audio routing.
     private let concertHallReverb = AVAudioUnitReverb()
+    /// Created only when explicitly enabled; the tested Apple path stays default.
+    private var nativeConcertHallReverb: AVAudioUnitEffect?
+    private var designedRoom = StudioAcousticRoomDesign()
+    @Published public private(set) var virtualMicrophoneSettings = StudioVirtualMicrophoneSettings()
+    @Published public private(set) var usesNativeConcertHallReverb = false
+    @Published public private(set) var selectedNativeRoomProfileID =
+        StudioRoomAcousticProfile.abbeyRoadStudioOne.id
     private let concertHallSendMixer = AVAudioMixerNode()
+    private let concertHallReturnMixer = AVAudioMixerNode()
+    private let nativeEarlyReflectionMixer = AVAudioMixerNode()
+    private var nativeEarlyReflectionMixerConnected = false
+
+    // Mic audition is an alternate, explicitly selected mix. The original dry
+    // tracks and hall always remain wired and can be restored immediately.
+    // The verified per-pair graph remains the default. An opt-in shared-
+    // history matrix uses one Audio Unit per source with four output busses.
+    // Both retain the 16-source cap until orchestral benchmarks pass.
+    public static let maximumAuditionMicrophones = 4
+    public static let maximumAuditionSources = 16
+
+    /// A MIDI-only track routed to the V-Rack does not have its own
+    /// independent instrument audio: the V-Rack sum captures it once.
+    /// Keep any timeline audio clips on that track individually eligible.
+    /// This avoids consuming the source cap with silent rack MIDI tracks.
+    public static func isIndependentMicrophoneSource(_ track: Track) -> Bool {
+        guard track.type == .midi || track.type == .instrument ||
+                track.type == .audio else { return false }
+        if track.type != .audio,
+           let destination = track.midiOutput,
+           case .rackInstrument = destination,
+           !track.clips.contains(where: { $0.content.isAudio }) {
+            return false
+        }
+        return true
+    }
+    private let microphoneMasterMixer = AVAudioMixerNode()
+    private var microphoneChannelMixers: [UUID: AVAudioMixerNode] = [:]
+
+    // V-Rack is a separate audio graph, not part of the track input mixers.
+    // Keep its recording sum at unity and control only a dedicated dry
+    // monitor return. Microphone audition may receive this sum as ONE
+    // aggregate source without changing existing rack recording taps.
+    private weak var vRackSourceMixer: AVAudioMixerNode?
+    private let vRackDirectMonitorMixer = AVAudioMixerNode()
+    private var vRackDirectMonitorAttached = false
+    @Published public private(set) var hasVRackCaptureSource = false
+    private struct VRackMicrophoneRoute {
+        let microphoneID: UUID
+        let capture: AVAudioUnitEffect
+        let microphoneBus: Int
+    }
+    private var vRackMicrophoneRoutes: [VRackMicrophoneRoute] = []
+    private struct MicrophoneRoute {
+        let sourceID: TrackID
+        let microphoneID: UUID
+        let capture: AVAudioUnitEffect
+        /// Output bus for the shared-history Audio Unit; zero for legacy.
+        let microphoneBus: Int
+    }
+    private var microphoneRoutes: [MicrophoneRoute] = []
+    private var routedMicrophones: [StudioVirtualMicrophone] = []
+    private var microphoneRoom = StudioAcousticRoomDesign()
+    @Published public private(set) var isMicrophoneAuditionActive = false
+    /// Experimental backend. Opt-in, never restored automatically at launch.
+    /// One shared-history processor per source, not one AU per pair.
+    @Published public private(set) var usesSharedMicrophoneMatrix = false
+
+    /// Topology may only change with audition disabled.
+    public func setSharedMicrophoneMatrixEnabled(_ enabled: Bool) {
+        guard !isMicrophoneAuditionActive else { return }
+        usesSharedMicrophoneMatrix = enabled
+    }
+    /// Register the V-Rack sum as an independent audio source. PlaybackEngine
+    /// calls this after attaching its sum mixer, with graph edits stopped.
+    /// Re-registration is idempotent while the monitor edge is intact.
+    public func registerVRackSumMixer(_ sumMixer: AVAudioMixerNode) {
+        let existing = engine.outputConnectionPoints(for: sumMixer, outputBus: 0)
+        let needsConnection = !vRackDirectMonitorAttached ||
+            vRackSourceMixer !== sumMixer || existing.isEmpty
+        if !needsConnection {
+            vRackDirectMonitorMixer.outputVolume = isMicrophoneAuditionActive ? 0 : 1
+            return
+        }
+        // A replaced/disconnected source invalidates any previous mic
+        // capture fanout. Restore the dry path before rewiring.
+        if isMicrophoneAuditionActive {
+            try? setMicrophoneAuditionEnabled(
+                false, tracks: [], microphones: [], room: microphoneRoom
+            )
+        }
+        let wasRunning = engine.isRunning
+        if wasRunning { engine.stop() }
+        let format = AVAudioFormat(
+            standardFormatWithSampleRate: sampleRate, channels: 2
+        )!
+        if !vRackDirectMonitorAttached {
+            engine.attach(vRackDirectMonitorMixer)
+            engine.connect(vRackDirectMonitorMixer, to: masterMixer, format: format)
+            vRackDirectMonitorAttached = true
+        }
+        vRackSourceMixer = sumMixer
+        connectVRackMicrophoneFanout(format: format)
+        vRackDirectMonitorMixer.outputVolume = 1
+        if wasRunning {
+            do {
+                try engine.start()
+                isRunning = engine.isRunning
+            } catch {
+                isRunning = false
+                print("[V-Rack] Could not restart audio engine after monitor reconnect: \(error)")
+            }
+        }
+    }
+
+    /// V-Rack graph cardinality changes while a mic audition is active are
+    /// deliberately resolved by returning to the original complete mix.
+    /// This avoids a new rack instrument playing without a mic capture.
+    public func setVRackCaptureSourcePresent(_ present: Bool) {
+        guard hasVRackCaptureSource != present else { return }
+        if isMicrophoneAuditionActive {
+            try? setMicrophoneAuditionEnabled(
+                false, tracks: [], microphones: [], room: microphoneRoom
+            )
+        }
+        hasVRackCaptureSource = present
+    }
+
+    /// Temporary wet trim for the existing shared hall while auditioning capsules.
+    /// This is one room field for the whole orchestra, never one reverb per mic.
+    @Published public private(set) var microphoneRoomWetLevel: Float = 0.20
+    /// Shared hall return level, independent of individual instrument sends.
+    @Published public private(set) var concertHallOverallReverb: Float = 1.0
 
     /// Post-fader stereo peak levels (linear 0...1), refreshed approximately 20 times/sec.
     @Published public private(set) var trackPeakLevels: [TrackID: [Float]] = [:]
+    private var trackMeterStates: [TrackID: RealtimeStereoPeakMeter] = [:]
+    private var trackMeterTimer: Timer?
     
     @Published public private(set) var isRunning: Bool = false
     @Published public private(set) var sampleRate: Double = 44100
@@ -81,6 +227,8 @@ public final class AudioEngine: ObservableObject {
     
     // Timing tap installed flag
     private var timingTapInstalled = false
+    private let realtimeSamplePosition = RealtimeSamplePosition()
+    private var timingPositionUITimer: Timer?
     
     // Metronome
     private var metronomeNode: MetronomeNode?
@@ -97,8 +245,9 @@ public final class AudioEngine: ObservableObject {
         engine.attach(concertHallSendMixer)
 
         // Dedicated Concert Hall return; existing dry routes stay untouched.
-        let hallReturnMixer = AVAudioMixerNode()
-        engine.attach(hallReturnMixer)
+        engine.attach(concertHallReturnMixer)
+        engine.attach(microphoneMasterMixer)
+        microphoneMasterMixer.outputVolume = 0
 
         let hallFormat = AVAudioFormat(
             standardFormatWithSampleRate: engine.outputNode.outputFormat(forBus: 0).sampleRate,
@@ -106,8 +255,9 @@ public final class AudioEngine: ObservableObject {
         )!
 
         engine.connect(concertHallSendMixer, to: concertHallReverb, format: hallFormat)
-        engine.connect(concertHallReverb, to: hallReturnMixer, format: hallFormat)
-        engine.connect(hallReturnMixer, to: masterMixer, format: hallFormat)
+        engine.connect(concertHallReverb, to: concertHallReturnMixer, format: hallFormat)
+        engine.connect(concertHallReturnMixer, to: masterMixer, format: hallFormat)
+        engine.connect(microphoneMasterMixer, to: masterMixer, format: hallFormat)
 
         print("[ConcertHall] Dedicated reverb return connected")
         
@@ -147,7 +297,7 @@ public final class AudioEngine: ObservableObject {
         }
     }
     
-    @MainActor deinit {
+    deinit {
         engine.stop()
     }
     
@@ -176,11 +326,36 @@ public final class AudioEngine: ObservableObject {
     }
     
     // MARK: - Track Management
-    
+
+    /// Mixer graphs currently attached to AVAudioEngine. Used to reconcile
+    /// track add/delete operations performed through undo and redo.
+    public var activeTrackIDs: Set<TrackID> {
+        Set(trackNodes.keys)
+    }
+
     /// Create audio nodes for a track
     public func createTrackNode(for track: Track) throws {
         guard trackNodes[track.id] == nil else { return }
+        // AVAudioEngine can stall when a new track is connected to a live
+        // master mixer. Reconfigure the graph while stopped, then resume.
+        let wasRunning = engine.isRunning
+        if wasRunning {
+            print("[Track Audio] Pausing engine for track graph reconfiguration")
+            engine.stop()
+        }
+        defer {
+            if wasRunning {
+                do {
+                    try engine.start()
+                    print("[Track Audio] Engine restarted after track creation")
+                } catch {
+                    print("[Track Audio] ERROR restarting engine after track creation: \(error)")
+                    isRunning = false
+                }
+            }
+        }
         
+        print("[Track Audio] Constructing track node")
         let trackNode = TrackAudioNode(
             trackID: track.id,
             channelCount: 2,
@@ -189,10 +364,12 @@ public final class AudioEngine: ObservableObject {
         
         // Instantiate the in-process stereo positioning effect. If unavailable,
         // preserve the original mixer pan path instead of losing audio.
+        print("[Track Audio] Registering stereo effect")
         StereoPositionAudioUnit.registerIfNeeded()
         let stereoEffect = AVAudioUnitEffect(audioComponentDescription: StereoPositionAudioUnit.componentDescription)
         trackNode.stereoPositionNode = stereoEffect
 
+        print("[Track Audio] Stereo effect instantiated; attaching nodes")
         // Attach nodes to engine
         engine.attach(trackNode.inputMixer)
         engine.attach(trackNode.gainNode)
@@ -200,6 +377,7 @@ public final class AudioEngine: ObservableObject {
         engine.attach(trackNode.pannerNode)
         engine.attach(trackNode.outputMixer)
         engine.attach(trackNode.concertHallSend)
+        print("[Track Audio] Nodes attached; connecting hall send")
         engine.connect(
             trackNode.concertHallSend,
             to: concertHallSendMixer,
@@ -215,12 +393,14 @@ public final class AudioEngine: ObservableObject {
             channels: 2
         )!
         
+        print("[Track Audio] Hall send connected; connecting signal chain")
         engine.connect(trackNode.inputMixer, to: trackNode.gainNode, format: format)
         engine.connect(trackNode.gainNode, to: stereoEffect, format: format)
         engine.connect(stereoEffect, to: trackNode.pannerNode, format: format)
         // Split the post-panner signal into dry and Concert Hall send paths.
         // Both destinations receive the same audio; the send mixer
         // controls how much reaches the shared reverb.
+        print("[Track Audio] Connecting split panner output")
         engine.connect(
             trackNode.pannerNode,
             to: [
@@ -230,12 +410,17 @@ public final class AudioEngine: ObservableObject {
             fromBus: 0,
             format: format
         )
+        print("[Track Audio] Split connected; connecting master output")
         engine.connect(trackNode.outputMixer, to: masterMixer, format: format)
+        if usesNativeConcertHallReverb {
+            installStageEarlyReflections(for: trackNode, format: format)
+        }
         let dryEdges = engine.outputConnectionPoints(for: trackNode.outputMixer, outputBus: 0)
         print("[ConcertHall] Dry track \(track.id.rawValue) -> master: \(dryEdges.contains { $0.node === masterMixer })")
         print("[ConcertHall] Track output format: \(trackNode.outputMixer.outputFormat(forBus: 0))")
         print("[ConcertHall] Master input format: \(masterMixer.inputFormat(forBus: 0))")
         
+        print("[Track Audio] Master output connected; applying parameters")
         // Set initial values
         trackNode.setVolume(track.volume)
         trackNode.setPan(track.pan)
@@ -243,36 +428,68 @@ public final class AudioEngine: ObservableObject {
         
         // Restore saved orchestral stage depth.
         let depth = max(0, min(5, track.stageReverbZone ?? 2))
-        let sendLevels: [Float] = [0.0, 0.12, 0.20, 0.30, 0.43, 0.58]
-        trackNode.concertHallSend.outputVolume = sendLevels[depth]
+        trackNode.setStageAcoustics(
+            directLevel: Self.stageDirectLevels[depth],
+            hallSendLevel: Self.concertHallSendLevels[depth] * max(0, track.stageWetTrim ?? 1),
+            zone: depth
+        )
+        trackNode.setVirtualMicrophone(virtualMicrophoneSettings,
+                                       nativeEnabled: usesNativeConcertHallReverb)
 
         trackNodes[track.id] = trackNode
+        if isMicrophoneAuditionActive {
+            if !Self.isIndependentMicrophoneSource(track) {
+                // Newly added rack MIDI-only tracks must not leak dry audio
+                // when audition is already in progress.
+                trackNode.setMicrophoneAuditionActive(true)
+            } else {
+                let sourceCount = Set(microphoneRoutes.map(\.sourceID)).count
+                if sourceCount + (hasVRackCaptureSource ? 1 : 0) >= Self.maximumAuditionSources {
+                    // Never hide a newly created source when the bounded
+                    // microphone audition graph reaches its safety cap.
+                    dismantleMicrophoneCaptures(format: format)
+                    isMicrophoneAuditionActive = false
+                    microphoneMasterMixer.outputVolume = 0
+                    concertHallReturnMixer.outputVolume = concertHallOverallReverb
+                    for node in trackNodes.values {
+                        node.setMicrophoneAuditionActive(false)
+                    }
+                } else {
+                    attachMicrophoneCaptures(for: track, format: format)
+                    updateMicrophoneCapture(for: track)
+                    trackNode.setMicrophoneAuditionActive(true)
+                }
+            }
+        }
+        print("[Track Audio] Installing meter")
         installTrackMeter(for: trackNode)
+        print("[Track Audio] Track node ready")
     }
 
     /// Meter after volume, mute and stereo positioning, without modifying audio.
     private func installTrackMeter(for trackNode: TrackAudioNode) {
         let id = trackNode.trackID
         let format = trackNode.outputMixer.outputFormat(forBus: 0)
-        guard format.channelCount >= 2, format.commonFormat == .pcmFormatFloat32 else { return }
-        var framesSinceUpdate: AVAudioFrameCount = 0
-        let refreshFrames = AVAudioFrameCount(max(1, format.sampleRate / 20))
-        trackNode.outputMixer.installTap(onBus: 0, bufferSize: 512, format: format) { [weak self] buffer, _ in
-            framesSinceUpdate += buffer.frameLength
-            guard framesSinceUpdate >= refreshFrames else { return }
-            framesSinceUpdate = 0
-            guard let channels = buffer.floatChannelData else { return }
-            let count = Int(buffer.frameLength)
-            guard count > 0 else { return }
-            var peaks: [Float] = [0, 0]
-            for channel in 0..<2 {
-                let samples = channels[channel]
-                var peak: Float = 0
-                for frame in 0..<count { peak = max(peak, abs(samples[frame])) }
-                peaks[channel] = min(1, peak)
-            }
-            DispatchQueue.main.async { [weak self] in
-                self?.trackPeakLevels[id] = peaks
+        guard format.channelCount > 0, format.commonFormat == .pcmFormatFloat32,
+              let meter = RealtimeStereoPeakMeter() else { return }
+        trackMeterStates[id] = meter
+        trackNode.outputMixer.installTap(onBus: 0, bufferSize: 512, format: format) { buffer, _ in
+            meter.measure(buffer)
+        }
+
+        // Poll all track meters on the UI run loop. This eliminates per-buffer
+        // heap allocations and main-queue dispatch from each track's tap.
+        if trackMeterTimer == nil {
+            trackMeterTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    for (trackID, meter) in self.trackMeterStates {
+                        let peak = meter.takePeaks()
+                        self.trackPeakLevels[trackID] = [
+                            min(1, peak.left), min(1, peak.right)
+                        ]
+                    }
+                }
             }
         }
     }
@@ -280,10 +497,32 @@ public final class AudioEngine: ObservableObject {
     /// Remove audio nodes for a track
     public func removeTrackNode(for trackID: TrackID) {
         guard let trackNode = trackNodes[trackID] else { return }
-        
+
+        // Match createTrackNode: graph changes are made while the engine is
+        // stopped to avoid stalls when disconnecting a live master mixer.
+        let wasRunning = engine.isRunning
+        if wasRunning { engine.stop() }
+        defer {
+            if wasRunning {
+                do {
+                    try engine.start()
+                } catch {
+                    print("[Track Audio] ERROR restarting engine after track removal: \(error)")
+                    isRunning = false
+                }
+            }
+        }
+
+        // Remove mic effects before detaching the pre-pan source node.
+        removeMicrophoneCaptures(for: trackID)
         // Remove metering tap before detaching the output node.
         trackNode.outputMixer.removeTap(onBus: 0)
+        trackMeterStates.removeValue(forKey: trackID)
         trackPeakLevels.removeValue(forKey: trackID)
+        if trackMeterStates.isEmpty {
+            trackMeterTimer?.invalidate()
+            trackMeterTimer = nil
+        }
         // Disconnect and detach all nodes
         engine.disconnectNodeOutput(trackNode.inputMixer)
         engine.disconnectNodeOutput(trackNode.gainNode)
@@ -291,6 +530,8 @@ public final class AudioEngine: ObservableObject {
         engine.disconnectNodeOutput(trackNode.pannerNode)
         engine.disconnectNodeOutput(trackNode.outputMixer)
         engine.disconnectNodeOutput(trackNode.concertHallSend)
+        if let send = trackNode.earlyReflectionSend { engine.disconnectNodeOutput(send) }
+        if let effect = trackNode.earlyReflectionNode { engine.disconnectNodeOutput(effect) }
         
         engine.detach(trackNode.inputMixer)
         engine.detach(trackNode.gainNode)
@@ -298,6 +539,8 @@ public final class AudioEngine: ObservableObject {
         engine.detach(trackNode.pannerNode)
         engine.detach(trackNode.outputMixer)
         engine.detach(trackNode.concertHallSend)
+        if let send = trackNode.earlyReflectionSend { engine.detach(send) }
+        if let effect = trackNode.earlyReflectionNode { engine.detach(effect) }
         
         // Detach plugin nodes
         for auNode in trackNode.pluginNodes {
@@ -315,16 +558,588 @@ public final class AudioEngine: ObservableObject {
         trackNode.setVolume(track.volume)
         trackNode.setPan(track.pan)
         trackNode.setMuted(track.isMuted)
+        // Keep the acoustic send synchronized with all track edits, including undo/redo.
+        setConcertHallDepth(track.stageReverbZone ?? 2, wetTrim: track.stageWetTrim ?? 1, for: track.id)
+        updateMicrophoneCapture(for: track)
     }
     
     /// Set Concert Hall ambience according to orchestral stage depth.
     /// Depth 0 = conductor; depth 5 = back row.
-    public func setConcertHallDepth(_ depth: Int, for trackID: TrackID) {
-        let sendLevels: [Float] = [0.0, 0.12, 0.20, 0.30, 0.43, 0.58]
+    public func setConcertHallDepth(_ depth: Int, wetTrim: Float = 1, for trackID: TrackID) {
         let safeDepth = max(0, min(5, depth))
+        let trim = wetTrim.isFinite ? min(2, max(0, wetTrim)) : 1
+        trackNodes[trackID]?.setStageAcoustics(
+            directLevel: Self.stageDirectLevels[safeDepth],
+            hallSendLevel: Self.concertHallSendLevels[safeDepth] * trim,
+            zone: safeDepth
+        )
+    }
 
-        trackNodes[trackID]?.concertHallSend.outputVolume =
-            sendLevels[safeDepth]
+    /// Real-time mixer gain only: no AVAudioEngine topology changes.
+    /// The shared room is an approximation sourced from existing stage sends,
+    /// not an independently measured impulse response for each capsule.
+    public func setMicrophoneRoomWetLevel(_ level: Float) {
+        microphoneRoomWetLevel = level.isFinite ? min(1, max(0, level)) : 0.20
+        if isMicrophoneAuditionActive {
+            concertHallReturnMixer.outputVolume =
+                concertHallOverallReverb * microphoneRoomWetLevel
+        }
+    }
+
+    public func setConcertHallOverallReverb(_ level: Float) {
+        concertHallOverallReverb = level.isFinite ? min(2, max(0, level)) : 1
+        concertHallReturnMixer.outputVolume = isMicrophoneAuditionActive
+            ? concertHallOverallReverb * microphoneRoomWetLevel
+            : concertHallOverallReverb
+    }
+
+    /// Switch the single shared hall return to Studio's original algorithmic DSP.
+    ///
+    /// This is an opt-in prototype. It leaves track sends, the dry signal chain,
+    /// stage-depth behavior and the master return unchanged. Graph edits happen
+    /// only with the engine stopped; failed restarts restore the previous route.
+    /// Call from UI/control code, never from an audio render callback.
+    public func setNativeConcertHallReverbEnabled(_ enabled: Bool) throws {
+        guard enabled != usesNativeConcertHallReverb else { return }
+        let wasRunning = engine.isRunning
+        if wasRunning { engine.stop() }
+
+        if enabled && nativeConcertHallReverb == nil {
+            NativeRoomReverbAudioUnit.registerIfNeeded()
+            let effect = AVAudioUnitEffect(
+                audioComponentDescription: NativeRoomReverbAudioUnit.componentDescription
+            )
+            engine.attach(effect)
+            (effect.auAudioUnit as? NativeRoomReverbAudioUnit)?
+                .configureDesignedRoom(designedRoom)
+            nativeConcertHallReverb = effect
+        }
+
+        let previous: AVAudioNode = usesNativeConcertHallReverb
+            ? (nativeConcertHallReverb ?? concertHallReverb) : concertHallReverb
+        let target: AVAudioNode = enabled
+            ? (nativeConcertHallReverb ?? concertHallReverb) : concertHallReverb
+        let format = AVAudioFormat(
+            standardFormatWithSampleRate: sampleRate, channels: 2
+        )!
+
+        // Install source-positioned ER only if native room processing is selected.
+        if enabled {
+            NativeStageEarlyReflectionAudioUnit.registerIfNeeded()
+            if !nativeEarlyReflectionMixerConnected {
+                nativeEarlyReflectionMixer.outputVolume = 0
+                engine.attach(nativeEarlyReflectionMixer)
+                engine.connect(nativeEarlyReflectionMixer, to: concertHallReturnMixer,
+                               format: format)
+                nativeEarlyReflectionMixerConnected = true
+            }
+            for node in trackNodes.values {
+                installStageEarlyReflections(for: node, format: format)
+            }
+        }
+
+        func route(_ effect: AVAudioNode) {
+            engine.disconnectNodeOutput(concertHallSendMixer)
+            engine.disconnectNodeOutput(concertHallReverb)
+            if let nativeConcertHallReverb {
+                engine.disconnectNodeOutput(nativeConcertHallReverb)
+            }
+            engine.connect(concertHallSendMixer, to: effect, format: format)
+            engine.connect(effect, to: concertHallReturnMixer, format: format)
+        }
+
+        route(target)
+        nativeEarlyReflectionMixer.outputVolume = enabled ? 1 : 0
+        do {
+            if wasRunning { try engine.start() }
+            usesNativeConcertHallReverb = enabled
+            for node in trackNodes.values {
+                node.setVirtualMicrophone(virtualMicrophoneSettings, nativeEnabled: enabled)
+            }
+            isRunning = engine.isRunning
+        } catch {
+            // The original Concert Hall routing is the rollback boundary.
+            engine.stop()
+            route(previous)
+            nativeEarlyReflectionMixer.outputVolume = usesNativeConcertHallReverb ? 1 : 0
+            for node in trackNodes.values {
+                node.setVirtualMicrophone(virtualMicrophoneSettings,
+                                          nativeEnabled: usesNativeConcertHallReverb)
+            }
+            if wasRunning { try? engine.start() }
+            isRunning = engine.isRunning
+            throw AudioEngineError.failedToStart(underlying: error)
+        }
+    }
+
+    /// The virtual stereo microphone alters native early reflections and
+    /// direct-to-room balance without rebuilding the graph.
+    public func setVirtualMicrophone(_ settings: StudioVirtualMicrophoneSettings) {
+        let safe = StudioVirtualMicrophoneSettings(
+            perspective: settings.perspective, stereoWidth: settings.safeWidth
+        )
+        virtualMicrophoneSettings = safe
+        for node in trackNodes.values {
+            node.setVirtualMicrophone(safe, nativeEnabled: usesNativeConcertHallReverb)
+        }
+    }
+
+    /// Prepare six-band decay and dimension-derived early reflections outside
+    /// the audio callback. Graph topology and legacy Apple reverb are unchanged.
+    /// Render resources are rebuilt only while AVAudioEngine is stopped.
+    public func configureDesignedRoom(_ design: StudioAcousticRoomDesign) throws {
+        let oldDesign = designedRoom
+        let running = engine.isRunning
+        if running { engine.stop() }
+
+        func install(_ settings: StudioAcousticRoomDesign) {
+            (nativeConcertHallReverb?.auAudioUnit as? NativeRoomReverbAudioUnit)?
+                .configureDesignedRoom(settings)
+            for track in trackNodes.values {
+                (track.earlyReflectionNode?.auAudioUnit as?
+                    NativeStageEarlyReflectionAudioUnit)?.configureDesignedRoom(settings)
+            }
+        }
+
+        install(design)
+        do {
+            if running { try engine.start() }
+            designedRoom = design
+            isRunning = engine.isRunning
+        } catch {
+            install(oldDesign)
+            if running { try? engine.start() }
+            isRunning = engine.isRunning
+            throw AudioEngineError.failedToStart(underlying: error)
+        }
+    }
+
+    /// Select a prepared native room by stable identifier. Audio Unit parameters
+    /// are applied without rebuilding the graph or allocating on the render thread.
+    /// Returns false if the room is unknown; does not modify the saved choice.
+    @discardableResult
+    public func selectNativeRoomProfile(id: String) -> Bool {
+        guard let index = StudioRoomAcousticProfile.index(forID: id) else {
+            return false
+        }
+        selectedNativeRoomProfileID = id
+        if let roomParameter = nativeConcertHallReverb?.auAudioUnit.parameterTree?
+            .parameter(withAddress: NativeRoomReverbAudioUnit.roomParameterAddress) {
+            roomParameter.value = AUValue(index)
+        }
+        for node in trackNodes.values { node.setNativeRoomProfileIndex(index) }
+        return true
+    }
+
+    /// One optional wet-only early-reflection Audio Unit per instrument.
+    /// Called only with the audio engine stopped, with the dry edges intact.
+    private func installStageEarlyReflections(for node: TrackAudioNode,
+                                              format: AVAudioFormat) {
+        guard node.earlyReflectionNode == nil else { return }
+        let send = AVAudioMixerNode()
+        let effect = AVAudioUnitEffect(
+            audioComponentDescription: NativeStageEarlyReflectionAudioUnit.componentDescription
+        )
+        engine.attach(send)
+        engine.attach(effect)
+        (effect.auAudioUnit as? NativeStageEarlyReflectionAudioUnit)?
+            .configureDesignedRoom(designedRoom)
+        engine.connect(send, to: effect, format: format)
+        engine.connect(effect, to: nativeEarlyReflectionMixer, format: format)
+        node.installEarlyReflection(send: send, effect: effect)
+        node.setVirtualMicrophone(virtualMicrophoneSettings, nativeEnabled: true)
+        node.setNativeRoomProfileIndex(
+            StudioRoomAcousticProfile.index(forID: selectedNativeRoomProfileID) ?? 0
+        )
+        engine.connect(node.pannerNode, to: [
+            AVAudioConnectionPoint(node: node.outputMixer, bus: 0),
+            AVAudioConnectionPoint(node: node.concertHallSend, bus: 0),
+            AVAudioConnectionPoint(node: send, bus: 0)
+        ], fromBus: 0, format: format)
+    }
+
+    // MARK: - Original Virtual Microphone Capture Graph
+
+    /// Alternate monitoring mode, NEVER a parallel loud copy of the original
+    /// orchestra. Explicit opt-in and limited to 4 channels x 16 sources for
+    /// this first direct/spill capture graph. Graph changes happen stopped.
+    /// The experimental backend reduces the AU count to one per source
+    /// while preserving the original 16-source safety cap.
+    public func setMicrophoneAuditionEnabled(
+        _ enabled: Bool, tracks: [Track],
+        microphones: [StudioVirtualMicrophone],
+        room: StudioAcousticRoomDesign
+    ) throws {
+        if enabled == isMicrophoneAuditionActive {
+            if enabled {
+                refreshMicrophoneRouting(tracks: tracks, microphones: microphones,
+                                         room: room)
+            }
+            return
+        }
+        let sources = tracks.filter {
+            Self.isIndependentMicrophoneSource($0) && trackNodes[$0.id] != nil
+        }
+        let rackSourceIncluded = hasVRackCaptureSource && vRackSourceMixer != nil
+        if enabled {
+            guard !microphones.isEmpty else {
+                throw AudioEngineError.microphoneRoutingUnavailable(
+                    "Add a microphone in Rooms → Microphones first.")
+            }
+            guard !sources.isEmpty || rackSourceIncluded else {
+                throw AudioEngineError.microphoneRoutingUnavailable(
+                    "No instrument, audio, or V-Rack sources are available.")
+            }
+            guard sources.count + (rackSourceIncluded ? 1 : 0) <= Self.maximumAuditionSources else {
+                throw AudioEngineError.microphoneRoutingUnavailable(
+                    "Mic audition supports up to 16 total sources, including one V-Rack aggregate. The original mix remains unchanged.")
+            }
+        }
+
+        let running = engine.isRunning
+        if running { engine.stop() }
+        let format = AVAudioFormat(
+            standardFormatWithSampleRate: sampleRate, channels: 2
+        )!
+        do {
+            if enabled {
+                if usesSharedMicrophoneMatrix {
+                    NativeMicrophoneMatrixAudioUnit.registerIfNeeded()
+                } else {
+                    NativeMicrophoneSpillAudioUnit.registerIfNeeded()
+                }
+                routedMicrophones = Array(microphones.prefix(
+                    Self.maximumAuditionMicrophones))
+                microphoneRoom = room
+                for microphone in routedMicrophones {
+                    let bus = AVAudioMixerNode()
+                    engine.attach(bus)
+                    engine.connect(bus, to: microphoneMasterMixer, format: format)
+                    microphoneChannelMixers[microphone.id] = bus
+                }
+                for source in sources {
+                    attachMicrophoneCaptures(for: source, format: format)
+                    updateMicrophoneCapture(for: source)
+                }
+                if rackSourceIncluded {
+                    attachVRackMicrophoneCaptures(format: format)
+                    updateVRackMicrophoneCapture()
+                }
+                applyMicrophoneChannelMix()
+                isMicrophoneAuditionActive = true
+            } else {
+                dismantleMicrophoneCaptures(format: format)
+                isMicrophoneAuditionActive = false
+            }
+            for node in trackNodes.values {
+                node.setMicrophoneAuditionActive(enabled)
+            }
+            microphoneMasterMixer.outputVolume = enabled ? 1 : 0
+            vRackDirectMonitorMixer.outputVolume = enabled ? 0 : 1
+            concertHallReturnMixer.outputVolume = enabled
+                ? concertHallOverallReverb * microphoneRoomWetLevel
+                : concertHallOverallReverb
+            if running { try engine.start() }
+            isRunning = engine.isRunning
+        } catch {
+            // Preserve the original dry + hall path whenever setup fails.
+            engine.stop()
+            dismantleMicrophoneCaptures(format: format)
+            isMicrophoneAuditionActive = false
+            microphoneMasterMixer.outputVolume = 0
+            vRackDirectMonitorMixer.outputVolume = 1
+            concertHallReturnMixer.outputVolume = concertHallOverallReverb
+            for node in trackNodes.values {
+                node.setMicrophoneAuditionActive(false)
+            }
+            if running { try? engine.start() }
+            isRunning = engine.isRunning
+            throw AudioEngineError.failedToStart(underlying: error)
+        }
+    }
+
+    /// Only parameter writes: safe while the engine runs, no topology changes.
+    /// Array insertions/removals are deliberately handled with audition OFF.
+    public func refreshMicrophoneRouting(
+        tracks: [Track], microphones: [StudioVirtualMicrophone],
+        room: StudioAcousticRoomDesign
+    ) {
+        guard isMicrophoneAuditionActive else { return }
+        microphoneRoom = room
+        routedMicrophones = routedMicrophones.compactMap { existing in
+            microphones.first(where: { $0.id == existing.id })
+        }
+        applyMicrophoneChannelMix()
+        for track in tracks { updateMicrophoneCapture(for: track) }
+        updateVRackMicrophoneCapture()
+    }
+
+    private func applyMicrophoneChannelMix() {
+        let anySolo = routedMicrophones.contains { $0.mixer.isSolo }
+        for mic in routedMicrophones {
+            guard let bus = microphoneChannelMixers[mic.id] else { continue }
+            let mixer = mic.mixer
+            bus.outputVolume = mixer.isMuted || (anySolo && !mixer.isSolo)
+                ? 0 : mixer.safeLevel
+            bus.pan = mixer.safePan
+        }
+    }
+
+    /// Uses the existing PRE-PAN gain node, after inserts but before any
+    /// legacy stereo positioning. A source is sent to EVERY active mic bus.
+    private func attachMicrophoneCaptures(for track: Track,
+                                          format: AVAudioFormat) {
+        guard let source = trackNodes[track.id] else { return }
+        if usesSharedMicrophoneMatrix {
+            // One effect per source, with four independently addressable
+            // capsule output busses. The AU pulls the upstream stream once
+            // per timestamp and shares its single delay history.
+            let capture = AVAudioUnitEffect(
+                audioComponentDescription: NativeMicrophoneMatrixAudioUnit.componentDescription
+            )
+            engine.attach(capture)
+            for (index, mic) in routedMicrophones.enumerated() {
+                guard let bus = microphoneChannelMixers[mic.id] else { continue }
+                engine.connect(
+                    capture, to: bus, fromBus: AVAudioNodeBus(index),
+                    toBus: bus.nextAvailableInputBus, format: format
+                )
+                microphoneRoutes.append(MicrophoneRoute(
+                    sourceID: track.id, microphoneID: mic.id,
+                    capture: capture, microphoneBus: index
+                ))
+            }
+        } else {
+            // Original proven per-pair backend remains available.
+            for mic in routedMicrophones {
+                guard let bus = microphoneChannelMixers[mic.id] else { continue }
+                let capture = AVAudioUnitEffect(
+                    audioComponentDescription: NativeMicrophoneSpillAudioUnit.componentDescription
+                )
+                engine.attach(capture)
+                engine.connect(capture, to: bus, format: format)
+                microphoneRoutes.append(MicrophoneRoute(
+                    sourceID: track.id, microphoneID: mic.id,
+                    capture: capture, microphoneBus: 0
+                ))
+            }
+        }
+        connectMicrophoneSourceFanout(for: source, format: format)
+    }
+
+    /// The original pre-pan connection stays intact; a single connection
+    /// into the matrix AU replaces up to four per-microphone fanouts.
+    private func connectMicrophoneSourceFanout(for node: TrackAudioNode,
+                                               format: AVAudioFormat) {
+        let original: AVAudioNode = node.stereoPositionNode ?? node.pannerNode
+        var destinations = [AVAudioConnectionPoint(node: original, bus: 0)]
+        if usesSharedMicrophoneMatrix {
+            if let route = microphoneRoutes.first(where: { $0.sourceID == node.trackID }) {
+                destinations.append(AVAudioConnectionPoint(
+                    node: route.capture, bus: 0
+                ))
+            }
+        } else {
+            for route in microphoneRoutes where route.sourceID == node.trackID {
+                destinations.append(AVAudioConnectionPoint(
+                    node: route.capture, bus: 0
+                ))
+            }
+        }
+        engine.connect(node.gainNode, to: destinations,
+                       fromBus: 0, format: format)
+    }
+
+    private func updateMicrophoneCapture(for track: Track) {
+        guard isMicrophoneAuditionActive || !microphoneRoutes.isEmpty,
+              let sourceNode = trackNodes[track.id] else { return }
+        let sourcePosition = StudioMicrophoneGeometry.approximateTrackPosition(
+            pan: track.pan, zone: track.stageReverbZone ?? 2,
+            room: microphoneRoom
+        )
+        for route in microphoneRoutes where route.sourceID == track.id {
+            guard let mic = routedMicrophones.first(where: {
+                $0.id == route.microphoneID
+            }) else { continue }
+            let capture = StudioMicrophoneGeometry.capture(
+                source: sourcePosition, microphone: mic
+            )
+            // -12 dB source headroom to reduce clipping with multiple sections.
+            // Track fader, mute and solo still apply independently to every mic.
+            let gain = Float(capture.estimatedDirectAmplitude) *
+                sourceNode.microphoneSourceGain * 0.25
+            let cutoff = max(1_800, min(17_000,
+                17_000 - 75 * capture.distanceMeters))
+            let alpha = Float(1 - exp(-2 * Double.pi * cutoff / sampleRate))
+            let tree = route.capture.auAudioUnit.parameterTree
+            let gainAddress = usesSharedMicrophoneMatrix
+                ? NativeMicrophoneMatrixAudioUnit.gainAddress(route.microphoneBus)
+                : NativeMicrophoneSpillAudioUnit.signedGainAddress
+            let delayAddress = usesSharedMicrophoneMatrix
+                ? NativeMicrophoneMatrixAudioUnit.delayAddress(route.microphoneBus)
+                : NativeMicrophoneSpillAudioUnit.delayMillisecondsAddress
+            let filterAddress = usesSharedMicrophoneMatrix
+                ? NativeMicrophoneMatrixAudioUnit.filterAddress(route.microphoneBus)
+                : NativeMicrophoneSpillAudioUnit.lowPassAlphaAddress
+            tree?.parameter(withAddress: gainAddress)?.value =
+                gain.isFinite ? min(2, max(-2, gain)) : 0
+            tree?.parameter(withAddress: delayAddress)?.value = Float(min(
+                Double(NativeMicrophoneSpillProcessor.maximumDelayMilliseconds),
+                max(0, capture.propagationDelayMilliseconds +
+                    Double(mic.mixer.safeAlignmentMilliseconds))
+            ))
+            tree?.parameter(withAddress: filterAddress)?.value =
+                alpha.isFinite ? max(0.00001, min(1, alpha)) : 1
+        }
+    }
+
+    private func removeMicrophoneCaptures(for sourceID: TrackID) {
+        var detached = Set<ObjectIdentifier>()
+        for route in microphoneRoutes where route.sourceID == sourceID {
+            guard detached.insert(ObjectIdentifier(route.capture)).inserted else { continue }
+            engine.disconnectNodeOutput(route.capture)
+            engine.disconnectNodeInput(route.capture)
+            engine.detach(route.capture)
+        }
+        microphoneRoutes.removeAll { $0.sourceID == sourceID }
+    }
+
+    /// Stop engine before calling. Original gain->panner graph is restored
+    /// exactly, with no output from the audition return.
+    private func dismantleMicrophoneCaptures(format: AVAudioFormat) {
+        var detached = Set<ObjectIdentifier>()
+        for route in microphoneRoutes {
+            guard detached.insert(ObjectIdentifier(route.capture)).inserted else { continue }
+            engine.disconnectNodeOutput(route.capture)
+            engine.disconnectNodeInput(route.capture)
+            engine.detach(route.capture)
+        }
+        microphoneRoutes.removeAll()
+        removeVRackMicrophoneCaptures(format: format)
+        for node in trackNodes.values {
+            let original: AVAudioNode = node.stereoPositionNode ?? node.pannerNode
+            engine.connect(node.gainNode, to: original, format: format)
+        }
+        for bus in microphoneChannelMixers.values {
+            engine.disconnectNodeOutput(bus)
+            engine.disconnectNodeInput(bus)
+            engine.detach(bus)
+        }
+        microphoneChannelMixers.removeAll()
+        routedMicrophones.removeAll()
+    }
+
+    /// A V-Rack's many MIDI channels are already mixed by PlaybackEngine.
+    /// This is an explicitly labeled aggregate source at the center of the
+    /// stage. Per-instrument rack positioning is not yet represented here.
+    private func attachVRackMicrophoneCaptures(format: AVAudioFormat) {
+        guard vRackSourceMixer != nil, hasVRackCaptureSource else { return }
+        if usesSharedMicrophoneMatrix {
+            let capture = AVAudioUnitEffect(
+                audioComponentDescription: NativeMicrophoneMatrixAudioUnit.componentDescription
+            )
+            engine.attach(capture)
+            for (index, mic) in routedMicrophones.enumerated() {
+                guard let bus = microphoneChannelMixers[mic.id] else { continue }
+                engine.connect(capture, to: bus,
+                               fromBus: AVAudioNodeBus(index),
+                               toBus: bus.nextAvailableInputBus, format: format)
+                vRackMicrophoneRoutes.append(VRackMicrophoneRoute(
+                    microphoneID: mic.id, capture: capture, microphoneBus: index
+                ))
+            }
+        } else {
+            for mic in routedMicrophones {
+                guard let bus = microphoneChannelMixers[mic.id] else { continue }
+                let capture = AVAudioUnitEffect(
+                    audioComponentDescription: NativeMicrophoneSpillAudioUnit.componentDescription
+                )
+                engine.attach(capture)
+                engine.connect(capture, to: bus, format: format)
+                vRackMicrophoneRoutes.append(VRackMicrophoneRoute(
+                    microphoneID: mic.id, capture: capture, microphoneBus: 0
+                ))
+            }
+        }
+        connectVRackMicrophoneFanout(format: format)
+    }
+
+    /// A stopped-engine source split to an always-connected dry monitor plus
+    /// the explicit mic capture. Never turn down the V-Rack sum mixer itself:
+    /// doing that would silence the inputs to both mics and recording taps.
+    private func connectVRackMicrophoneFanout(format: AVAudioFormat) {
+        guard let source = vRackSourceMixer else { return }
+        var destinations = [AVAudioConnectionPoint(
+            node: vRackDirectMonitorMixer, bus: 0
+        )]
+        var seen = Set<ObjectIdentifier>()
+        for route in vRackMicrophoneRoutes {
+            if seen.insert(ObjectIdentifier(route.capture)).inserted {
+                destinations.append(AVAudioConnectionPoint(
+                    node: route.capture, bus: 0
+                ))
+            }
+        }
+        if destinations.count == 1 {
+            // AVAudioEngine's connection-point fanout API requires two or
+            // more destinations. Normal rack monitoring has only one.
+            engine.connect(source, to: vRackDirectMonitorMixer, format: format)
+        } else {
+            engine.connect(source, to: destinations, fromBus: 0, format: format)
+        }
+    }
+
+    private func updateVRackMicrophoneCapture() {
+        guard hasVRackCaptureSource, !vRackMicrophoneRoutes.isEmpty else { return }
+        let position = StudioMicrophoneGeometry.approximateTrackPosition(
+            pan: 0, zone: 2, room: microphoneRoom
+        )
+        for route in vRackMicrophoneRoutes {
+            guard let mic = routedMicrophones.first(where: {
+                $0.id == route.microphoneID
+            }) else { continue }
+            let capture = StudioMicrophoneGeometry.capture(
+                source: position, microphone: mic
+            )
+            let gain = Float(capture.estimatedDirectAmplitude) * 0.25
+            let cutoff = max(1_800, min(17_000,
+                17_000 - 75 * capture.distanceMeters))
+            let alpha = Float(1 - exp(-2 * Double.pi * cutoff / sampleRate))
+            let gainAddress = usesSharedMicrophoneMatrix
+                ? NativeMicrophoneMatrixAudioUnit.gainAddress(route.microphoneBus)
+                : NativeMicrophoneSpillAudioUnit.signedGainAddress
+            let delayAddress = usesSharedMicrophoneMatrix
+                ? NativeMicrophoneMatrixAudioUnit.delayAddress(route.microphoneBus)
+                : NativeMicrophoneSpillAudioUnit.delayMillisecondsAddress
+            let filterAddress = usesSharedMicrophoneMatrix
+                ? NativeMicrophoneMatrixAudioUnit.filterAddress(route.microphoneBus)
+                : NativeMicrophoneSpillAudioUnit.lowPassAlphaAddress
+            let parameters = route.capture.auAudioUnit.parameterTree
+            parameters?.parameter(withAddress: gainAddress)?.value =
+                gain.isFinite ? min(2, max(-2, gain)) : 0
+            parameters?.parameter(withAddress: delayAddress)?.value = Float(min(
+                Double(NativeMicrophoneSpillProcessor.maximumDelayMilliseconds),
+                max(0, capture.propagationDelayMilliseconds +
+                    Double(mic.mixer.safeAlignmentMilliseconds))
+            ))
+            parameters?.parameter(withAddress: filterAddress)?.value =
+                alpha.isFinite ? min(1, max(0.00001, alpha)) : 1
+        }
+    }
+
+    /// Called with the engine stopped, before the mic channel busses detach.
+    private func removeVRackMicrophoneCaptures(format: AVAudioFormat) {
+        var detached = Set<ObjectIdentifier>()
+        for route in vRackMicrophoneRoutes {
+            if detached.insert(ObjectIdentifier(route.capture)).inserted {
+                engine.disconnectNodeOutput(route.capture)
+                engine.disconnectNodeInput(route.capture)
+                engine.detach(route.capture)
+            }
+        }
+        vRackMicrophoneRoutes.removeAll()
+        connectVRackMicrophoneFanout(format: format)
+        vRackDirectMonitorMixer.outputVolume = 1
     }
 
     /// Get track node for external access
@@ -347,6 +1162,7 @@ public final class AudioEngine: ObservableObject {
                 // Respect individual mute states
                 trackNode.setMuted(track.isMuted)
             }
+            updateMicrophoneCapture(for: track)
         }
     }
     
@@ -361,7 +1177,8 @@ public final class AudioEngine: ObservableObject {
         try insertPlugin(audioUnit, at: slotIndex, in: trackID)
     }
     
-    /// Insert an Audio Unit at a slot in a track (alternate signature)
+    /// Insert an Audio Unit at a slot in a track (alternate signature).
+    /// Stop the engine for graph changes, as for track creation/removal.
     public func insertPlugin(
         _ audioUnit: AVAudioUnit,
         at slotIndex: Int,
@@ -370,33 +1187,84 @@ public final class AudioEngine: ObservableObject {
         guard let trackNode = trackNodes[trackID] else {
             throw AudioEngineError.nodeNotFound(trackID)
         }
-        
-        // Attach the audio unit to the engine
+        guard slotIndex >= 0 && slotIndex <= trackNode.pluginNodes.count else {
+            throw AudioEngineError.invalidPluginSlot(slotIndex)
+        }
+
+        let wasRunning = engine.isRunning
+        if wasRunning { engine.stop() }
+        defer {
+            if wasRunning && !engine.isRunning {
+                do { try engine.start() }
+                catch { print("[AudioEngine] Failed to restore engine after insert: \(error)") }
+            }
+        }
         engine.attach(audioUnit)
-        
-        // Rebuild the plugin chain
-        try rebuildPluginChain(for: trackNode, inserting: audioUnit, at: slotIndex)
+        do {
+            try rebuildPluginChain(
+                for: trackNode, inserting: audioUnit, at: slotIndex
+            )
+            if wasRunning { try engine.start() }
+        } catch {
+            // Keep the original graph if the inserted AU cannot be connected.
+            trackNode.pluginNodes.removeAll { $0 === audioUnit }
+            engine.disconnectNodeOutput(audioUnit)
+            engine.detach(audioUnit)
+            try? rebuildPluginChain(for: trackNode)
+            throw error
+        }
     }
-    
-    /// Remove a plugin from a track
+
+    /// Remove an insert effect, preserving the other slots and hall send.
     public func removePlugin(at slotIndex: Int, from trackID: TrackID) throws {
         guard let trackNode = trackNodes[trackID] else {
             throw AudioEngineError.nodeNotFound(trackID)
         }
-        
-        guard slotIndex < trackNode.pluginNodes.count else { return }
-        
-        let auNode = trackNode.pluginNodes[slotIndex]
-        
-        // Disconnect and detach
-        engine.disconnectNodeOutput(auNode)
-        engine.detach(auNode)
-        
-        // Rebuild chain without this plugin
-        trackNode.pluginNodes.remove(at: slotIndex)
-        try rebuildPluginChain(for: trackNode)
+        guard trackNode.pluginNodes.indices.contains(slotIndex) else {
+            throw AudioEngineError.invalidPluginSlot(slotIndex)
+        }
+
+        let wasRunning = engine.isRunning
+        if wasRunning { engine.stop() }
+        defer {
+            if wasRunning && !engine.isRunning {
+                do { try engine.start() }
+                catch { print("[AudioEngine] Failed to restore engine after remove: \(error)") }
+            }
+        }
+
+        let oldNode = trackNode.pluginNodes.remove(at: slotIndex)
+        engine.disconnectNodeOutput(oldNode)
+        var detached = false
+        do {
+            try rebuildPluginChain(for: trackNode)
+            // Detach only while stopped; never mutate the live graph.
+            engine.detach(oldNode)
+            detached = true
+            if wasRunning { try engine.start() }
+        } catch {
+            if detached { engine.attach(oldNode) }
+            trackNode.pluginNodes.insert(oldNode, at: slotIndex)
+            try? rebuildPluginChain(for: trackNode)
+            throw error
+        }
     }
-    
+
+    /// Number of currently hosted insert effects, independent of placeholder
+    /// slots in the project model. Used to keep insert order and persisted
+    /// slot indices aligned with the actual audio graph.
+    public func pluginCount(on trackID: TrackID) -> Int {
+        trackNodes[trackID]?.pluginNodes.count ?? 0
+    }
+
+    /// Return the actual effect Audio Unit connected at a track's insert slot.
+    /// Read-only: does not rebuild or otherwise modify the audio graph.
+    public func pluginNode(on trackID: TrackID, at slotIndex: Int) -> AVAudioUnit? {
+        guard let trackNode = trackNodes[trackID],
+              trackNode.pluginNodes.indices.contains(slotIndex) else { return nil }
+        return trackNode.pluginNodes[slotIndex]
+    }
+
     private func rebuildPluginChain(
         for trackNode: TrackAudioNode,
         inserting newPlugin: AVAudioUnit? = nil,
@@ -433,9 +1301,25 @@ public final class AudioEngine: ObservableObject {
         } else {
             engine.connect(trackNode.gainNode, to: trackNode.pannerNode, format: format)
         }
-        engine.connect(trackNode.pannerNode, to: trackNode.outputMixer, format: format)
+        // An insert change must preserve mic audition's PRE-PAN source tap.
+        // Otherwise an AVAudioEngine.connect call would silently drop spill.
+        if isMicrophoneAuditionActive {
+            connectMicrophoneSourceFanout(for: trackNode, format: format)
+        }
+        // Rebuilding an insert chain must preserve the same post-panner
+        // dry / Concert Hall split established when the track was created.
+        // Connecting only to outputMixer previously disconnected its wet send.
+        var destinations = [
+            AVAudioConnectionPoint(node: trackNode.outputMixer, bus: 0),
+            AVAudioConnectionPoint(node: trackNode.concertHallSend, bus: 0)
+        ]
+        if let early = trackNode.earlyReflectionSend {
+            destinations.append(AVAudioConnectionPoint(node: early, bus: 0))
+        }
+        engine.connect(trackNode.pannerNode, to: destinations,
+                       fromBus: 0, format: format)
     }
-    
+
     // MARK: - Audio Playback
     
     /// Schedule audio file playback on a track
@@ -475,6 +1359,7 @@ public final class AudioEngine: ObservableObject {
     public func startPlayback(from samplePosition: Int64) {
         playbackStartSamplePosition = samplePosition
         currentSamplePosition = samplePosition
+        realtimeSamplePosition.publish(samplePosition)
         playbackStartHostTime = mach_absolute_time()
         isPlaying = true
         
@@ -509,6 +1394,7 @@ public final class AudioEngine: ObservableObject {
     /// Set the current sample position (for seeking)
     public func setSamplePosition(_ position: Int64) {
         currentSamplePosition = position
+        realtimeSamplePosition.publish(position)
         playbackStartSamplePosition = position
         playbackStartHostTime = mach_absolute_time()
         samplePositionSubject.send(position)
@@ -529,9 +1415,10 @@ public final class AudioEngine: ObservableObject {
         // Update our sample rate
         sampleRate = format.sampleRate
         
-        // Install tap on main mixer - this fires every buffer
-        // This is the MASTER CLOCK for all timing-critical operations
-        masterMixer.installTap(onBus: 0, bufferSize: bufferSize, format: format) { [weak self] buffer, time in
+        // Keep the MIDI clock calculation unchanged. UI receives only a
+        // lock-free position snapshot, not a new Task for every buffer.
+        let publishedPosition = realtimeSamplePosition
+        masterMixer.installTap(onBus: 0, bufferSize: bufferSize, format: format) { [weak self] buffer, _ in
             guard let self = self, self.isPlaying else { return }
             
             // Calculate current sample position based on elapsed time
@@ -543,14 +1430,21 @@ public final class AudioEngine: ObservableObject {
             // This processes MIDI events that fall within this buffer window
             self.midiEventCallback?(bufferStartSample, buffer.frameLength, self.currentTempo)
             
-            // Update position on main thread (for UI only, not for timing)
-            let newPosition = bufferStartSample + Int64(buffer.frameLength)
-            Task { @MainActor in
-                self.currentSamplePosition = newPosition
-                self.samplePositionSubject.send(newPosition)
-            }
+            // Constant-time render callback publication, no actor hop.
+            publishedPosition.publish(bufferStartSample + Int64(buffer.frameLength))
         }
         
+        timingPositionUITimer?.invalidate()
+        timingPositionUITimer = Timer.scheduledTimer(
+            withTimeInterval: 1.0 / 30.0, repeats: true
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.isPlaying else { return }
+                let position = self.realtimeSamplePosition.load()
+                self.currentSamplePosition = position
+                self.samplePositionSubject.send(position)
+            }
+        }
         timingTapInstalled = true
         print("[AudioEngine] Timing tap installed, sample rate: \(sampleRate), buffer size: \(bufferSize)")
     }
@@ -601,6 +1495,8 @@ public final class AudioEngine: ObservableObject {
     public func removeTimingTap() {
         guard timingTapInstalled else { return }
         masterMixer.removeTap(onBus: 0)
+        timingPositionUITimer?.invalidate()
+        timingPositionUITimer = nil
         timingTapInstalled = false
     }
     
@@ -804,6 +1700,12 @@ public final class TrackAudioNode {
     public var stereoPositionNode: AVAudioUnitEffect?
     public let outputMixer: AVAudioMixerNode
     public let concertHallSend: AVAudioMixerNode
+    public private(set) var earlyReflectionSend: AVAudioMixerNode?
+    public private(set) var earlyReflectionNode: AVAudioUnitEffect?
+    private var stagePan: Float = 0
+    private var stageZone = 2
+    private var nativeMicrophoneDirectGain: Float = 1
+    private var isMicrophoneAuditionActive = false
     
     // Plugin chain (Audio Units)
     public var pluginNodes: [AVAudioUnit] = []
@@ -816,7 +1718,9 @@ public final class TrackAudioNode {
     
     private var isMuted: Bool = false
     private var volume: Float = 1.0
-    
+    private var concertHallSendLevel: Float = 0.20
+    private var stageDirectLevel: Float = 1.0
+
     public init(trackID: TrackID, channelCount: Int, sampleRate: Double) {
         self.trackID = trackID
         self.inputMixer = AVAudioMixerNode()
@@ -831,8 +1735,52 @@ public final class TrackAudioNode {
         self.volume = volume
         updateOutputVolume()
     }
+
+    /// Apply distance-dependent direct level and room send together.
+    /// This does not change the user's saved track volume.
+    public func setStageAcoustics(directLevel: Float, hallSendLevel: Float,
+                                  zone: Int = 2) {
+        stageDirectLevel = directLevel.isFinite ? min(1, max(0, directLevel)) : 1
+        concertHallSendLevel = hallSendLevel.isFinite ? max(0, hallSendLevel) : 0
+        stageZone = min(5, max(0, zone))
+        earlyReflectionNode?.auAudioUnit.parameterTree?
+            .parameter(withAddress: NativeStageEarlyReflectionAudioUnit.zoneAddress)?
+            .value = AUValue(stageZone)
+        updateOutputVolume()
+    }
+
+    public func installEarlyReflection(send: AVAudioMixerNode,
+                                       effect: AVAudioUnitEffect) {
+        earlyReflectionSend = send
+        earlyReflectionNode = effect
+        setPan(stagePan)
+        setStageAcoustics(directLevel: stageDirectLevel,
+                         hallSendLevel: concertHallSendLevel, zone: stageZone)
+    }
+
+    public func setNativeRoomProfileIndex(_ index: Int) {
+        earlyReflectionNode?.auAudioUnit.parameterTree?
+            .parameter(withAddress: NativeStageEarlyReflectionAudioUnit.roomAddress)?
+            .value = AUValue(index)
+    }
+
+    public func setVirtualMicrophone(_ settings: StudioVirtualMicrophoneSettings,
+                                     nativeEnabled: Bool) {
+        earlyReflectionNode?.auAudioUnit.parameterTree?
+            .parameter(withAddress: NativeStageEarlyReflectionAudioUnit.microphoneAddress)?
+            .value = AUValue(settings.perspective.parameterIndex)
+        earlyReflectionNode?.auAudioUnit.parameterTree?
+            .parameter(withAddress: NativeStageEarlyReflectionAudioUnit.microphoneWidthAddress)?
+            .value = settings.safeWidth
+        nativeMicrophoneDirectGain = nativeEnabled ? settings.perspective.directLevel : 1
+        updateOutputVolume()
+    }
     
     public func setPan(_ pan: Float) {
+        stagePan = pan.isFinite ? min(1, max(-1, pan)) : 0
+        earlyReflectionNode?.auAudioUnit.parameterTree?
+            .parameter(withAddress: NativeStageEarlyReflectionAudioUnit.panAddress)?
+            .value = stagePan
         if let parameter = stereoPositionNode?.auAudioUnit.parameterTree?.parameter(withAddress: 0) {
             // The mixer must remain centered: otherwise its stereo balance
             // would undo the processor's stereo-preserving position.
@@ -847,9 +1795,26 @@ public final class TrackAudioNode {
         self.isMuted = muted
         updateOutputVolume()
     }
+
+    /// Post-track-fader and mute/solo level used for every microphone send.
+    /// Source audio is branched BEFORE the legacy panner, so its pan is never
+    /// incorrectly applied a second time inside a virtual microphone.
+    public var microphoneSourceGain: Float { isMuted ? 0 : volume }
+
+    public func setMicrophoneAuditionActive(_ active: Bool) {
+        isMicrophoneAuditionActive = active
+        updateOutputVolume()
+    }
     
     private func updateOutputVolume() {
-        outputMixer.outputVolume = isMuted ? 0.0 : volume
+        let dryGain: Float = isMuted ? 0.0 : volume
+        outputMixer.outputVolume = isMicrophoneAuditionActive
+            ? 0 : dryGain * stageDirectLevel * nativeMicrophoneDirectGain
+        // The hall send branches before outputMixer, so it must explicitly
+        // follow volume and mute (including solo) to prevent wet-only audio.
+        // Keep the room send separate from direct-sound distance attenuation.
+        concertHallSend.outputVolume = dryGain * concertHallSendLevel
+        earlyReflectionSend?.outputVolume = dryGain * concertHallSendLevel
     }
 }
 
