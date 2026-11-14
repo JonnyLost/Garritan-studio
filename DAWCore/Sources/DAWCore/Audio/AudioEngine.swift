@@ -825,6 +825,11 @@ public final class AudioEngine: ObservableObject {
                     attachVRackMicrophoneCaptures(format: format)
                     updateVRackMicrophoneCapture()
                 }
+                // A graph reconfiguration can drop the microphone return
+                // when the V-Rack fanout and mic buses are built. Repair only
+                // the missing return edge before the engine restarts; keep
+                // existing dry instrument and hall routes untouched.
+                ensureMicrophoneMasterReturnConnected(format: format)
                 applyMicrophoneChannelMix()
                 isMicrophoneAuditionActive = true
             } else {
@@ -856,6 +861,20 @@ public final class AudioEngine: ObservableObject {
             isRunning = engine.isRunning
             throw AudioEngineError.failedToStart(underlying: error)
         }
+    }
+
+    /// Keep the one shared microphone return connected to the original
+    /// master. Only call while the AVAudioEngine is stopped, during graph
+    /// setup; never edit the graph from an audio render callback.
+    private func ensureMicrophoneMasterReturnConnected(format: AVAudioFormat) {
+        let existing = engine.outputConnectionPoints(
+            for: microphoneMasterMixer, outputBus: 0
+        )
+        guard !existing.contains(where: { $0.node === masterMixer }) else {
+            return
+        }
+        engine.connect(microphoneMasterMixer, to: masterMixer, format: format)
+        print("[Studio Microphones] Restored shared microphone return to main mixer")
     }
 
     /// Only parameter writes: safe while the engine runs, no topology changes.
