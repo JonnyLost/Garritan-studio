@@ -684,6 +684,13 @@ public final class RenderGraph {
         publishRenderSnapshot()
     }
 
+    /// Control-only diagnostics for fade ownership and integration tests.
+    var pendingInstrumentTransitionCount: Int {
+        tracks.values.reduce(0) { count, track in
+            count + (track.processing.transition == nil ? 0 : 1)
+        }
+    }
+
     /// Control-only: retire the outgoing instrument once the callback has
     /// finished its ramp. No AudioUnit or Swift reference is released from
     /// the real-time thread; old snapshots still hold their own references.
