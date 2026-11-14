@@ -15,9 +15,9 @@ The GPO5 manual explicitly defines **C4 = MIDI note 60**. Studio uses that conve
 
 | Exact GPO5 Standard patch | Keyswitch labels from the owner's manual | MIDI note numbers |
 |---|---|---|
-| Violins 1 KS | C2 sustain, C#2 heavy vibrato, D2 grand détaché, D#2 marcato, E2 martelé, F2 pizzicato, F#2 portato, G2 col legno, G#2 sautillé, A2 spiccato, A#2 staccato, B2 sul tasto | 36–47 |
-| Violins 2 KS | Same documented keyswitch set as Violins 1 KS | 36–47 |
-| Cellos 1 KS | C1 sustain vibrato, D1 tremolo, E1 détaché, F1 pizzicato, G1 spiccato short, A1 snap | 24, 26, 28, 29, 31, 33 |
+| Violin 1 KS | C2 sustain vibrato, C#2 lush forte, D2 sforzando, D#2 détaché, E2 martelé, F2 pizzicato, F#2 col legno, G2 spiccato, G#2 staccato | 36–44 |
+| Cello 1 KS | C1 sustain vibrato, D1 tremolo, E1 détaché, F1 pizzicato, G1 spiccato short, A1 snap | 24, 26, 28, 29, 31, 33 |
+| Violins 1 KS / Violins 2 KS (reference only) | The **KS Groups** listing documents C2 sustain, C#2 heavy vibrato, D2 grand détaché, D#2 marcato, E2 martelé, F2 pizzicato, F#2 portato, G2 col legno, G#2 sautillé, A2 spiccato, A#2 staccato, B2 sul tasto. A second section-string listing with these *same names* instead documents sustain+short, muted bowing, pizzicato, tremolo, and trills. | **Not auto-armed** until ARIA bank paths distinguish the two |
 | Full Strings KS | C0 sustain+short, C#0 muted sustain+short, D0 alternating bow, D#0 upbow, E0 downbow, F0 pizzicato, F#0 muted tremolo, G0 tremolo, G#0 muted half-step trill, A0 half-step trill, A#0 muted whole-step trill, B0 whole-step trill | 12–23 |
 | SAM Trumpet Solo KS | C2 sustain, D2 marcato, E2 staccato | 36, 38, 40 |
 | Flute Solo KS | C3 vibrato, D3 non-vibrato, E3 flutter | 48, 50, 52 |
@@ -29,7 +29,7 @@ Not all libraries/presets share these assignments. The Standard violin, solo cel
 
 ## Important manual ambiguity: never auto-arm these without validation
 
-The GPO5 directory repeats `Violas KS`, `Cellos KS`, and `Basses KS` in different string sections, with materially different articulation lists. The `Basses KS` name also appears in a choir section. Matching only on basename is unsafe. These names are blocked from automatic factory triggers pending patch-path-specific verification.
+The GPO5 directory repeats `Violins 1 KS`, `Violins 2 KS`, `Violas KS`, `Cellos KS`, and `Basses KS` in different string sections, with materially different articulation lists. The `Basses KS` name also appears in a choir section. Matching only on basename is unsafe. These names are blocked from automatic factory triggers pending patch-path-specific verification.
 
 `Percussion Accessories KS`, `Snares KS`, and `Timpani 1/2/3 KS` include playable percussion note zones/ranges in the earlier extracted JSON. Those notes must not be repurposed as musical articulation switches without patch-by-patch separation. Their catalog entries remain visible as **references only**.
 
