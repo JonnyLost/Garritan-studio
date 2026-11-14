@@ -134,6 +134,8 @@ public struct AdvancedPianoRollView: View {
     @State private var snapMode: SnapMode = .sixteenth
     @State private var showVelocityLane: Bool = true
     @State private var showCCLane: Bool = false
+    @State private var showArticulationLane = false
+    @State private var showArticulationMapEditor = false
     @State private var selectedCCType: CCType = .modulation
     @State private var expressionChannel = 0
     @State private var expressionStroke: [StudioMIDIExpressionPoint] = []
@@ -199,6 +201,7 @@ public struct AdvancedPianoRollView: View {
     private let pianoKeyWidth: CGFloat = 60
     private let velocityLaneHeight: CGFloat = 80
     private let ccLaneHeight: CGFloat = 80
+    private let articulationLaneHeight: CGFloat = 42
     
     public init(viewModel: ProjectViewModel, clipID: ClipID) {
         self.viewModel = viewModel
@@ -247,6 +250,14 @@ public struct AdvancedPianoRollView: View {
                                 .frame(width: pianoKeyWidth, height: ccLaneHeight)
                                 .background(Color(nsColor: .windowBackgroundColor))
                         }
+                        if showArticulationLane {
+                            Divider()
+                            Text("Art")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .frame(width: pianoKeyWidth, height: articulationLaneHeight)
+                                .background(Color(nsColor: .windowBackgroundColor))
+                        }
                     }
                     .frame(width: pianoKeyWidth)
                     
@@ -277,6 +288,25 @@ public struct AdvancedPianoRollView: View {
                                 Divider()
                                 ccLaneContent
                                     .frame(width: totalWidth, height: ccLaneHeight)
+                            }
+                            if showArticulationLane {
+                                Divider()
+                                StudioArticulationLane(
+                                    notes: noteEvents.map { event in
+                                        var absolute = event
+                                        absolute.beatPosition += clipStartBeat
+                                        return absolute
+                                    },
+                                    assignments: articulationAssignments,
+                                    map: currentArticulationMap,
+                                    pixelsPerBeat: pixelsPerBeat,
+                                    width: totalWidth,
+                                    height: articulationLaneHeight,
+                                    onAssign: { noteID, articulationID in
+                                        assignArticulation(articulationID, to: [noteID])
+                                    }
+                                )
+                                .frame(width: totalWidth, height: articulationLaneHeight)
                             }
                         }
                         .frame(width: totalWidth)
@@ -351,6 +381,15 @@ public struct AdvancedPianoRollView: View {
                     showOffsetDialog = false
                 }
             )
+        }
+        .sheet(isPresented: $showArticulationMapEditor) {
+            StudioArticulationMapEditor(map: currentArticulationMap) { map in
+                guard let trackID = viewModel.selectedTrackID,
+                      var track = viewModel.project.track(withID: trackID) else { return }
+                track.articulationMap = map
+                viewModel.updateTrack(track, description: "Edit Articulation Map")
+                showArticulationLane = true
+            }
         }
     }
     
@@ -479,6 +518,32 @@ public struct AdvancedPianoRollView: View {
             .pickerStyle(.menu)
             .frame(width: 75)
             .help("MIDI channel for expression drawing and keyswitch insertion")
+
+            Toggle(isOn: $showArticulationLane) {
+                Text("Art")
+            }
+            .toggleStyle(.button)
+            .help("Show musical articulation lane")
+
+            Menu("Articulation") {
+                if let map = currentArticulationMap {
+                    ForEach(map.articulations) { definition in
+                        Button(definition.name) {
+                            assignArticulation(definition.id, to: selectedNoteIDs)
+                        }
+                        .disabled(selectedNoteIDs.isEmpty)
+                    }
+                    Divider()
+                    Button("Clear Selected") {
+                        assignArticulation(nil, to: selectedNoteIDs)
+                    }
+                    .disabled(selectedNoteIDs.isEmpty)
+                    Divider()
+                }
+                Button("Edit Articulation Map…") {
+                    showArticulationMapEditor = true
+                }
+            }
 
             Button("Keyswitch") { showKeyswitchControls = true }
                 .buttonStyle(.bordered)
@@ -1293,6 +1358,29 @@ public struct AdvancedPianoRollView: View {
             updateClip(extendingClip(clip, toInclude: selectedNoteIDs),
                        description: "Edit MIDI Notes")
         }
+    }
+
+    // MARK: - Musical Articulation Assignments
+
+    private var currentArticulationMap: StudioArticulationMap? {
+        guard let trackID = viewModel.selectedTrackID else { return nil }
+        return viewModel.project.track(withID: trackID)?.articulationMap
+    }
+
+    private var articulationAssignments: [UUID: String] {
+        guard let clip = currentClip, case .midi(let midi) = clip.content else { return [:] }
+        return StudioArticulationAssignmentEditing.byNoteID(in: midi)
+    }
+
+    private func assignArticulation(_ articulationID: String?, to noteIDs: Set<UUID>) {
+        guard var clip = currentClip, case .midi(var midi) = clip.content,
+              !noteIDs.isEmpty else { return }
+        if let articulationID,
+           currentArticulationMap?.definition(for: articulationID) == nil { return }
+        guard StudioArticulationAssignmentEditing.assign(articulationID,
+                                                         to: noteIDs, in: &midi) else { return }
+        clip.content = .midi(midi)
+        updateClip(clip, description: "Assign Musical Articulation")
     }
 
     // MARK: - MIDI Expression / Articulation
