@@ -767,6 +767,31 @@ public final class ProjectViewModel: ObservableObject {
         return true
     }
 
+    @discardableResult
+    public func setStudioSynthAutomationPoint(
+        for trackID: TrackID, laneID: UUID,
+        normalized: Float, atBeat beat: Double
+    ) -> Bool {
+        guard normalized.isFinite, (0...1).contains(normalized),
+              beat.isFinite, beat >= 0,
+              let track = project.track(withID: trackID),
+              let index = track.automationLanes.firstIndex(where: {
+                  $0.id == laneID
+              }),
+              case .studioSynth(let layerID, let destination) =
+                  track.automationLanes[index].parameter,
+              let patch = track.studioSynthPatch,
+              patch.layers.contains(where: {
+                  $0.id == layerID && $0.enabled &&
+                  $0.engine == destination.engine
+              }) else { return false }
+        var updated = track
+        updated.automationLanes[index].setPoint(
+            at: beat, value: normalized)
+        updateTrack(updated, description: "Edit Studio Synth Automation")
+        return true
+    }
+
     public func updateStudioSynthPatch(_ patch: StudioSynthPatch,
                                        for trackID: TrackID) throws {
         guard patch.validate(),
