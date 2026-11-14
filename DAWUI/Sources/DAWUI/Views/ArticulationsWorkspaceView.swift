@@ -71,9 +71,29 @@ struct ArticulationsWorkspaceView: View {
     }
 
     private var suggestedPatch: GPOKeyswitchCatalog.Patch? {
-        guard let catalog, !suggestedName.isEmpty else { return nil }
-        let needle = normalized(suggestedName.replacingOccurrences(of: ".sfz", with: "", options: .caseInsensitive))
-        // Match only unambiguous, exact patch names; never guess an articulation map.
+        guard !suggestedName.isEmpty else { return nil }
+        // An identically named Section Strings patch may have a completely
+        // different table from KS Groups or Choir. The verified factory,
+        // keyed by the REAL ARIA bank path, is the only playable source.
+        if let programID = viewModel.selectedTrack?.garritanProgramID,
+           case .ready(let map) =
+            StudioGarritanArticulationFactory.resolve(programID: programID) {
+            let switches = map.articulations.compactMap { definition -> GPOKeyswitchCatalog.Assignment? in
+                guard let action = definition.actions.first(where: {
+                    $0.kind == .keyswitch && (0...127).contains($0.number)
+                }) else { return nil }
+                return GPOKeyswitchCatalog.Assignment(
+                    note: NoteData(pitch: UInt8(action.number)).noteName,
+                    articulation: definition.name)
+            }
+            return switches.isEmpty ? nil :
+                GPOKeyswitchCatalog.Patch(patch: suggestedName, keyswitches: switches)
+        }
+        guard let catalog else { return nil }
+        let needle = normalized(suggestedName.replacingOccurrences(
+            of: ".sfz", with: "", options: .caseInsensitive))
+        // Unverified programs can still browse the reference catalog, but
+        // may NOT trigger MIDI by name matching alone.
         let matches = catalog.patches.filter { normalized($0.patch) == needle }
         return matches.count == 1 ? matches.first : nil
     }
@@ -88,6 +108,11 @@ struct ArticulationsWorkspaceView: View {
     private var activePatch: GPOKeyswitchCatalog.Patch? {
         guard let catalog else { return nil }
         if let selectedPatchName {
+            // Explicit selection of the loaded patch must show its
+            // context-correct factory table, not the flattened JSON entry.
+            if suggestedPatch?.patch == selectedPatchName {
+                return suggestedPatch
+            }
             return catalog.patches.first { $0.patch == selectedPatchName }
         }
         return suggestedPatch
@@ -109,8 +134,15 @@ struct ArticulationsWorkspaceView: View {
     }
 
     private var canSendKeyswitch: Bool {
-        guard let activePatch, let suggestedPatch, viewModel.selectedTrack != nil else { return false }
-        return activePatch.patch == suggestedPatch.patch
+        guard let activePatch, let suggestedPatch,
+              let programID = viewModel.selectedTrack?.garritanProgramID,
+              activePatch.patch == suggestedPatch.patch else { return false }
+        // A name match alone is insufficient: the GPO5 manual lists
+        // different Notation octaves and duplicate names for some programs.
+        if case .ready = StudioGarritanArticulationFactory.resolve(programID: programID) {
+            return true
+        }
+        return false
     }
 
     private func selectArticulation(_ assignment: GPOKeyswitchCatalog.Assignment) {
@@ -427,6 +459,11 @@ struct ArticulationsWorkspaceView: View {
         }
     }
 
+    private var isInstantOrchestraSelected: Bool {
+        viewModel.selectedTrack?.garritanProgramID?
+            .hasPrefix("Garritan Instant Orchestra:") == true
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             StudioWorkspaceHeader(
@@ -448,7 +485,20 @@ struct ArticulationsWorkspaceView: View {
                     .buttonStyle(.borderless)
             }
 
-            if let catalog {
+            if isInstantOrchestraSelected {
+                VStack(alignment: .leading, spacing: 14) {
+                    Label("Instant Orchestra uses performance controllers, not keyswitches",
+                          systemImage: "slider.horizontal.3")
+                        .font(.headline)
+                    Text("The Instant Orchestra owner’s manual explicitly confirms that this library contains no keyswitches. Select CC1, CC2 or CC11 in the piano-roll controller lane to shape dynamics; CC104 changes GM/GPO expression mode. Blending Textures patches use CC1/CC11 crossfades and CC30–32 layer levels.")
+                        .font(.body)
+                    Text("These are per-patch performance options, not interchangeable string pizzicato / staccato switches.")
+                        .font(.caption)
+                        .foregroundStyle(palette.secondaryText)
+                }
+                .padding(22)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else if let catalog {
                 HStack(spacing: 0) {
                     VStack(alignment: .leading, spacing: 10) {
                         StudioSectionHeading("Keyswitch Programs", symbol: "list.bullet")
@@ -533,8 +583,8 @@ struct ArticulationsWorkspaceView: View {
                                         .foregroundStyle(canSendKeyswitch ?
                                                          Color.green : palette.accent)
                                     Text(canSendKeyswitch
-                                         ? "Keyswitches control the loaded Garritan instrument."
-                                         : "Manual reference only. Load the matching KS instrument to enable MIDI.")
+                                         ? "Verified GPO5 Standard-set MIDI notes; keyswitches control the loaded Garritan instrument."
+                                         : "Manual reference only. Load a verified exact Standard KS patch; Notation and ambiguous mappings require manual calibration.")
                                         .foregroundStyle(palette.secondaryText)
                                 }
                                 .font(.system(size: 11))

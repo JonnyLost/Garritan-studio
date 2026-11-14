@@ -1,0 +1,186 @@
+import Foundation
+import DAWCore
+
+/// Stateless MIDI-note transformations shared by both Studio piano-roll editors.
+/// Callers commit the returned events exactly once through ProjectViewModel.updateTrack,
+/// never during a pointer-drag update.
+enum StudioMIDINoteEditing {
+    enum ResizeEdge { case start, end }
+
+    static func selectedNotes(in events: [MIDIEvent], ids: Set<UUID>) -> [MIDIEvent] {
+        events.filter { event in
+            guard ids.contains(event.id), case .note = event.type else { return false }
+            return true
+        }.sorted { $0.beatPosition < $1.beatPosition }
+    }
+
+    /// Source positions and anchor use the same time domain (either clip-relative
+    /// or track-absolute). CC and other non-note events are never copied.
+    @discardableResult
+    static func paste(_ notes: [MIDIEvent], into events: inout [MIDIEvent],
+                      at anchor: Double) -> Set<UUID> {
+        Set(pasteWithIDMapping(notes, into: &events, at: anchor).values)
+    }
+
+    /// Mapping old IDs to new IDs lets sidecar musical articulations follow
+    /// duplicated/pasted notes without ever baking transport triggers into MIDI.
+    @discardableResult
+    static func pasteWithIDMapping(_ notes: [MIDIEvent], into events: inout [MIDIEvent],
+                                   at anchor: Double) -> [UUID: UUID] {
+        guard anchor.isFinite, anchor >= 0, !notes.isEmpty else { return [:] }
+        let source = notes.filter {
+            if case .note = $0.type { return $0.beatPosition.isFinite }
+            return false
+        }
+        guard let earliest = source.map(\.beatPosition).min() else { return [:] }
+        var mapping: [UUID: UUID] = [:]
+        for note in source {
+            var copy = note
+            copy.id = UUID()
+            copy.beatPosition = anchor + (note.beatPosition - earliest)
+            events.append(copy)
+            mapping[note.id] = copy.id
+        }
+        return mapping
+    }
+
+    /// Repeat immediately after the last selected note ends, preserving spacing.
+    @discardableResult
+    static func duplicateSelected(in events: inout [MIDIEvent],
+                                  ids: Set<UUID>) -> Set<UUID> {
+        let source = selectedNotes(in: events, ids: ids)
+        guard !source.isEmpty else { return [] }
+        let end = source.compactMap { event -> Double? in
+            guard case .note(let note) = event.type else { return nil }
+            return event.beatPosition + note.duration
+        }.max() ?? 0
+        return paste(source, into: &events, at: max(0, end))
+    }
+
+    static func deletingSelected(in events: [MIDIEvent], ids: Set<UUID>) -> [MIDIEvent] {
+        events.filter { event in
+            guard ids.contains(event.id), case .note = event.type else { return true }
+            return false
+        }
+    }
+
+    /// The delta is shared across selected notes so moving a chord against the
+    /// beginning of the timeline does not collapse its internal timing offsets.
+    static func moving(_ events: [MIDIEvent], selectedIDs: Set<UUID>,
+                       beatDelta: Double, pitchDelta: Int, division: Double,
+                       bypassSnap: Bool = false, clipStartBeat: Double = 0) -> [MIDIEvent] {
+        let notes = selectedNotes(in: events, ids: selectedIDs)
+        guard !notes.isEmpty, beatDelta.isFinite else { return events }
+        let earliestAbsolute = (notes.map(\.beatPosition).min() ?? 0) + clipStartBeat
+        // Vertical-only edits must not move unsnapped notes horizontally.
+        let intendedAnchor = abs(beatDelta) < 0.000001
+            ? earliestAbsolute
+            : StudioMusicalGrid.snap(
+                earliestAbsolute + beatDelta, division: division, bypass: bypassSnap
+              )
+        // Clip-local positions must remain non-negative even when the region
+        // itself begins well after bar 1.
+        let appliedDelta = max(clipStartBeat, intendedAnchor) - earliestAbsolute
+        let pitches = notes.compactMap { event -> Int? in
+            guard case .note(let data) = event.type else { return nil }
+            return Int(data.pitch)
+        }
+        let minPitch = pitches.min() ?? 0
+        let maxPitch = pitches.max() ?? 127
+        let safePitchDelta = max(-minPitch, min(127 - maxPitch, pitchDelta))
+
+        return events.map { event in
+            guard selectedIDs.contains(event.id),
+                  case .note(var data) = event.type else { return event }
+            var modified = event
+            modified.beatPosition = event.beatPosition + appliedDelta
+            data.pitch = UInt8(Int(data.pitch) + safePitchDelta)
+            modified.type = .note(data)
+            return modified
+        }
+    }
+
+    /// Arrow-key nudging preserves every selected note's relative rhythm and
+    /// chord voicing, including originally unsnapped performance timing.
+    /// Unlike pointer dragging, it advances by exactly the requested increment,
+    /// without silently quantizing notes to the editor's current snap grid.
+    static func nudging(_ events: [MIDIEvent], selectedIDs: Set<UUID>,
+                        beatDelta: Double = 0, pitchDelta: Int = 0) -> [MIDIEvent] {
+        guard beatDelta.isFinite, !selectedIDs.isEmpty else { return events }
+        let selected = selectedNotes(in: events, ids: selectedIDs)
+        guard !selected.isEmpty else { return events }
+
+        let earliest = selected.map(\.beatPosition).min() ?? 0
+        let appliedBeat = max(-earliest, beatDelta)
+        let pitches = selected.compactMap { event -> Int? in
+            guard case .note(let note) = event.type else { return nil }
+            return Int(note.pitch)
+        }
+        let minPitch = pitches.min() ?? 0
+        let maxPitch = pitches.max() ?? 127
+        let appliedPitch = max(-minPitch, min(127 - maxPitch, pitchDelta))
+        guard appliedBeat != 0 || appliedPitch != 0 else { return events }
+
+        return events.map { event in
+            guard selectedIDs.contains(event.id),
+                  case .note(var note) = event.type else { return event }
+            var moved = event
+            moved.beatPosition += appliedBeat
+            note.pitch = UInt8(Int(note.pitch) + appliedPitch)
+            moved.type = .note(note)
+            return moved
+        }
+    }
+
+    /// Prevent empty undo entries when a nudge reaches the start of a
+    /// region or the top/bottom of the MIDI pitch range.
+    static func hasPitchOrTimingChanges(before: [MIDIEvent],
+                                        after: [MIDIEvent]) -> Bool {
+        guard before.count == after.count else { return true }
+        for index in before.indices {
+            let old = before[index]
+            let new = after[index]
+            guard old.id == new.id else { return true }
+            if old.beatPosition != new.beatPosition { return true }
+            if case .note(let oldNote) = old.type,
+               case .note(let newNote) = new.type,
+               oldNote.pitch != newNote.pitch { return true }
+        }
+        return false
+    }
+
+    /// Keep the opposite edge fixed and never produce zero/negative length notes.
+    static func resizing(_ events: [MIDIEvent], noteID: UUID, edge: ResizeEdge,
+                         beatDelta: Double, division: Double, bypassSnap: Bool = false,
+                         minimumDuration: Double = 0.0625,
+                         clipStartBeat: Double = 0) -> [MIDIEvent] {
+        guard beatDelta.isFinite, abs(beatDelta) >= 0.000001 else { return events }
+        return events.map { event in
+            guard event.id == noteID, case .note(var note) = event.type else {
+                return event
+            }
+            let minLength = max(0.001, minimumDuration)
+            let start = event.beatPosition + clipStartBeat
+            let end = start + note.duration
+            var updated = event
+
+            switch edge {
+            case .start:
+                let intended = StudioMusicalGrid.snap(
+                    start + beatDelta, division: division, bypass: bypassSnap
+                )
+                let newStart = min(max(clipStartBeat, intended),
+                                   max(clipStartBeat, end - minLength))
+                updated.beatPosition = newStart - clipStartBeat
+                note.duration = end - newStart
+            case .end:
+                let intended = StudioMusicalGrid.snap(
+                    end + beatDelta, division: division, bypass: bypassSnap
+                )
+                note.duration = max(minLength, intended - start)
+            }
+            updated.type = .note(note)
+            return updated
+        }
+    }
+}

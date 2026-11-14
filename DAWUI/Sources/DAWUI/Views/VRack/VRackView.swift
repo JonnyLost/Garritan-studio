@@ -268,7 +268,7 @@ public struct VRackView: View {
         var name: String { String(path.split(separator: "/").last ?? Substring(path)) }
         var family: String {
             let parts = path.split(separator: "/").map(String.init)
-            let index = parts.first == "Standard" ? 1 : 0
+            let index = (parts.first == "Standard" || parts.first == "Notation") ? 1 : 0
             return parts.count > index + 1 ? parts[index] : "Other"
         }
         var category: String {
@@ -286,7 +286,7 @@ public struct VRackView: View {
         }
         var instrumentType: String {
             let components = path.split(separator: "/").map(String.init)
-            let familyIndex = components.first == "Standard" ? 1 : 0
+            let familyIndex = (components.first == "Standard" || components.first == "Notation") ? 1 : 0
             if components.count > familyIndex + 2 {
                 return components[familyIndex + 1]
             }
@@ -363,6 +363,11 @@ public struct VRackView: View {
         let banks: [(String, String, String?)] = [
             ("Garritan Personal Orchestra 5",
              "/Library/Application Support/Garritan/Garritan Personal Orchestra 5/Banks/Standard/Personal Orchestra 5.bank.xml", "Standard/"),
+            // Optional: when the GPO5 Notation bank is installed, expose
+            // its n- programs explicitly. Their keyswitch octaves differ;
+            // no Standard-set triggers will ever be auto-installed.
+            ("Garritan Personal Orchestra 5",
+             "/Library/Application Support/Garritan/Garritan Personal Orchestra 5/Banks/Notation/Personal Orchestra 5.bank.xml", "Notation/"),
             ("Garritan Instant Orchestra",
              "/Library/Application Support/Garritan/Garritan Instant Orchestra/Banks/Standard/Instant Orchestra.bank.xml", nil)
         ]
@@ -470,6 +475,20 @@ public struct VRackView: View {
                         updated.name = instrument.name
                     }
                     updated.garritanProgramID = instrument.id
+                    // Install factory switches only for an exact GPO5 Standard
+                    // KS patch. Never synthesize Instant Orchestra keyswitches,
+                    // infer Notation offsets, or overwrite user-edited maps.
+                    if updated.articulationMap == nil ||
+                        updated.articulationMap?.isFactoryDefault == true {
+                        if case .ready(let factory) =
+                            StudioGarritanArticulationFactory.resolve(programID: instrument.id) {
+                            updated.articulationMap = factory
+                        } else if oldProgram != instrument.id {
+                            // An obsolete factory map must not emit keyswitches
+                            // into a newly selected patch that does not use them.
+                            updated.articulationMap = nil
+                        }
+                    }
                     updated.instrumentSlot?.stateData = try PropertyListSerialization.data(
                         fromPropertyList: unit.auAudioUnit.fullState ?? [:],
                         format: .binary, options: 0)

@@ -72,6 +72,8 @@ public final class TransportState: ObservableObject {
     // MARK: - Internal State
     
     private var playStartTime: Date?
+    private var loopWrapPending = false
+    private var lastLoopWrapFinishedAt: Date = .distantPast
     private var playStartPosition: TimePosition = TimePosition()
     private var playbackTimer: Timer?
     private var lastToggleTime: Date = .distantPast
@@ -144,11 +146,15 @@ public final class TransportState: ObservableObject {
         // Handle looping
         if isLoopEnabled {
             let loopEndBeat = loopEnd.beats(atTempo: tempo.bpm)
-            if playheadBeats >= loopEndBeat {
-                let loopStartBeat = loopStart.beats(atTempo: tempo.bpm)
-                setPlayheadBeats(loopStartBeat)
-                // Snap smooth playhead after loop
-                syncSmoothPlayhead(to: loopStartBeat)
+            let loopStartBeat = loopStart.beats(atTempo: tempo.bpm)
+            let length = loopEndBeat - loopStartBeat
+            if length.isFinite, length > 0.001, playheadBeats >= loopEndBeat {
+                // Reset the AUDIO/MIDI session, not only the playhead UI.
+                // Keep the fractional overshoot so a 30 Hz UI callback
+                // cannot cause loop starts to drift later on each pass.
+                let offset = (playheadBeats - loopEndBeat)
+                    .truncatingRemainder(dividingBy: length)
+                rebaseForLoop(to: loopStartBeat + offset)
             }
         }
         
@@ -182,6 +188,7 @@ public final class TransportState: ObservableObject {
         
         // CRITICAL: Capture the EXACT position BEFORE anything else
         // This is the position that audio/MIDI playback must use
+        loopWrapPending = false
         playbackStartBeat = playheadBeats
         playStartPosition = playheadPosition
         playbackStartSamplePosition = playheadPosition.samples
@@ -219,6 +226,7 @@ public final class TransportState: ObservableObject {
         isPlaying = false
         isPaused = false
         isRecording = false
+        loopWrapPending = false
         
         // Stop audio engine playback
         audioEngine?.stopPlayback()
@@ -403,20 +411,47 @@ public final class TransportState: ObservableObject {
         // Handle looping
         if isLoopEnabled {
             let loopEndBeat = loopEnd.beats(atTempo: tempo.bpm)
-            if playheadBeats >= loopEndBeat {
-                let loopStartBeat = loopStart.beats(atTempo: tempo.bpm)
-                playheadBeats = loopStartBeat
-                playheadPosition = loopStart
+            let loopStartBeat = loopStart.beats(atTempo: tempo.bpm)
+            let length = loopEndBeat - loopStartBeat
+            if length.isFinite, length > 0.001, playheadBeats >= loopEndBeat {
+                let offset = (playheadBeats - loopEndBeat)
+                    .truncatingRemainder(dividingBy: length)
+                rebaseForLoop(to: loopStartBeat + offset)
                 playStartTime = Date()
-                playStartPosition = loopStart
-                // Snap smooth playhead after loop
-                syncSmoothPlayhead(to: loopStartBeat)
+                playStartPosition = playheadPosition
             }
         }
         
         playheadSubject.send(playheadPosition)
     }
     
+    /// The transport publishes the new session anchor before notifying
+    /// Studio's coordinator. ProjectViewModel then stops, recompiles and
+    /// restarts the audio/MIDI engines from this exact position.
+    private func rebaseForLoop(to beat: Double) {
+        // The control thread needs to finish rebuilding the MIDI/audio
+        // session before accepting another tap notification from the
+        // previous loop. Debounce stale publications immediately afterward.
+        guard beat.isFinite, beat >= 0, !loopWrapPending,
+              Date().timeIntervalSince(lastLoopWrapFinishedAt) > 0.075 else {
+            return
+        }
+        loopWrapPending = true
+        playbackStartBeat = beat
+        let position = TimePosition(beats: beat, tempo: tempo.bpm,
+                                    sampleRate: sampleRate)
+        playbackStartSamplePosition = position.samples
+        setPlayheadPosition(position)
+        transportEventSubject.send(.loopWrapped)
+    }
+
+    /// Called by the playback coordinator after the new audio session is
+    /// installed; never called from an audio render callback.
+    public func finishLoopWrap() {
+        loopWrapPending = false
+        lastLoopWrapFinishedAt = Date()
+    }
+
     public func togglePlayPause() {
         // Debounce rapid clicks (ignore if less than 200ms since last toggle)
         let now = Date()
@@ -560,6 +595,8 @@ public enum TransportEvent: Sendable {
     case returnToZero
     case loopEnabled
     case loopDisabled
+    /// An actual audio/MIDI session wrap, not merely a UI ruler movement.
+    case loopWrapped
     case tempoChanged(Tempo)
     case timeSignatureChanged(TimeSignature)
 }
