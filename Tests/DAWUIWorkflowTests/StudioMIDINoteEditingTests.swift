@@ -49,7 +49,8 @@ final class StudioMIDINoteEditingTests: XCTestCase {
     func testResizeStartKeepsEndAndClampsToPositiveLength() {
         let note = MIDIEvent.note(at: 2, pitch: 60, duration: 2)
         let grown = StudioMIDINoteEditing.resizing([note], noteID: note.id,
-                        edge: .start, beatDelta: 10, division: 0.25)
+                        edge: .start, beatDelta: 10, division: 0.25,
+                        minimumDuration: 0.25)
         XCTAssertEqual(grown[0].beatPosition, 3.75)
         if case .note(let data) = grown[0].type {
             XCTAssertEqual(data.duration, 0.25)
@@ -59,7 +60,7 @@ final class StudioMIDINoteEditingTests: XCTestCase {
     func testResizeEndSnapsAbsoluteEndInsteadOfDuration() {
         let note = MIDIEvent.note(at: 0.375, pitch: 60, duration: 0.5)
         let result = StudioMIDINoteEditing.resizing([note], noteID: note.id,
-                      edge: .end, beatDelta: 0.25, division: 0.25)
+                      edge: .end, beatDelta: 0, division: 0.25)
         if case .note(let data) = result[0].type {
             XCTAssertEqual(data.duration, 0.625, accuracy: 0.000001)
         } else { XCTFail("Expected note") }
