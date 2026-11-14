@@ -23,7 +23,7 @@ public struct StudioMIDIExportMessage: Sendable, Equatable {
     }
 }
 
-public enum StudioMIDIExportPlanningError: Error, Equatable {
+public enum StudioMIDIExportPlanningError: Error, Equatable, LocalizedError {
     case invalidTempo
     case invalidClipRange
     case invalidEvent
@@ -31,6 +31,25 @@ public enum StudioMIDIExportPlanningError: Error, Equatable {
     case invalidNoteDuration
     case positionOutOfRange
     case loopedRegionRequiresConsolidation
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidTempo:
+            return "MIDI export needs a finite, positive project tempo."
+        case .invalidClipRange:
+            return "A MIDI region has invalid or reversed start/end positions."
+        case .invalidEvent:
+            return "A MIDI event has an invalid position or channel."
+        case .invalidMIDIData:
+            return "A MIDI event contains a value outside the MIDI file format."
+        case .invalidNoteDuration:
+            return "A MIDI note has an invalid duration."
+        case .positionOutOfRange:
+            return "A MIDI event is outside the Standard MIDI File tick range."
+        case .loopedRegionRequiresConsolidation:
+            return "Consolidate looped MIDI regions before exporting a MIDI file."
+        }
+    }
 }
 
 /// Pure, offline adaptation of the *same* articulation and trim model used by
