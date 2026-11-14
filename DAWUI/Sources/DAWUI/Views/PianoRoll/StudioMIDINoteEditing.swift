@@ -64,9 +64,12 @@ enum StudioMIDINoteEditing {
         let notes = selectedNotes(in: events, ids: selectedIDs)
         guard !notes.isEmpty, beatDelta.isFinite else { return events }
         let earliestAbsolute = (notes.map(\.beatPosition).min() ?? 0) + clipStartBeat
-        let intendedAnchor = StudioMusicalGrid.snap(
-            earliestAbsolute + beatDelta, division: division, bypass: bypassSnap
-        )
+        // Vertical-only edits must not move unsnapped notes horizontally.
+        let intendedAnchor = abs(beatDelta) < 0.000001
+            ? earliestAbsolute
+            : StudioMusicalGrid.snap(
+                earliestAbsolute + beatDelta, division: division, bypass: bypassSnap
+              )
         let appliedDelta = intendedAnchor - earliestAbsolute
         let pitches = notes.compactMap { event -> Int? in
             guard case .note(let data) = event.type else { return nil }
@@ -92,7 +95,7 @@ enum StudioMIDINoteEditing {
                          beatDelta: Double, division: Double, bypassSnap: Bool = false,
                          minimumDuration: Double = 0.0625,
                          clipStartBeat: Double = 0) -> [MIDIEvent] {
-        guard beatDelta.isFinite else { return events }
+        guard beatDelta.isFinite, abs(beatDelta) >= 0.000001 else { return events }
         return events.map { event in
             guard event.id == noteID, case .note(var note) = event.type else {
                 return event
