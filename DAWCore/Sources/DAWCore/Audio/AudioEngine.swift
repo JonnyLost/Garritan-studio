@@ -84,6 +84,21 @@ public final class AudioEngine: ObservableObject {
     public static let maximumAuditionSources = 16
     private let microphoneMasterMixer = AVAudioMixerNode()
     private var microphoneChannelMixers: [UUID: AVAudioMixerNode] = [:]
+
+    // V-Rack is a separate audio graph, not part of the track input mixers.
+    // Keep its recording sum at unity and control only a dedicated dry
+    // monitor return. Microphone audition may receive this sum as ONE
+    // aggregate source without changing existing rack recording taps.
+    private weak var vRackSourceMixer: AVAudioMixerNode?
+    private let vRackDirectMonitorMixer = AVAudioMixerNode()
+    private var vRackDirectMonitorAttached = false
+    @Published public private(set) var hasVRackCaptureSource = false
+    private struct VRackMicrophoneRoute {
+        let microphoneID: UUID
+        let capture: AVAudioUnitEffect
+        let microphoneBus: Int
+    }
+    private var vRackMicrophoneRoutes: [VRackMicrophoneRoute] = []
     private struct MicrophoneRoute {
         let sourceID: TrackID
         let microphoneID: UUID
@@ -104,6 +119,39 @@ public final class AudioEngine: ObservableObject {
         guard !isMicrophoneAuditionActive else { return }
         usesSharedMicrophoneMatrix = enabled
     }
+    /// Register the V-Rack sum as an independent audio source. PlaybackEngine
+    /// calls this after attaching its sum mixer, with graph edits stopped.
+    /// Re-registration is idempotent while the monitor edge is intact.
+    public func registerVRackSumMixer(_ sumMixer: AVAudioMixerNode) {
+        let format = AVAudioFormat(
+            standardFormatWithSampleRate: sampleRate, channels: 2
+        )!
+        if !vRackDirectMonitorAttached {
+            engine.attach(vRackDirectMonitorMixer)
+            engine.connect(vRackDirectMonitorMixer, to: masterMixer, format: format)
+            vRackDirectMonitorAttached = true
+        }
+        let existing = engine.outputConnectionPoints(for: sumMixer, outputBus: 0)
+        if vRackSourceMixer !== sumMixer || existing.isEmpty {
+            vRackSourceMixer = sumMixer
+            connectVRackMicrophoneFanout(format: format)
+        }
+        vRackDirectMonitorMixer.outputVolume = isMicrophoneAuditionActive ? 0 : 1
+    }
+
+    /// V-Rack graph cardinality changes while a mic audition is active are
+    /// deliberately resolved by returning to the original complete mix.
+    /// This avoids a new rack instrument playing without a mic capture.
+    public func setVRackCaptureSourcePresent(_ present: Bool) {
+        guard hasVRackCaptureSource != present else { return }
+        if isMicrophoneAuditionActive {
+            try? setMicrophoneAuditionEnabled(
+                false, tracks: [], microphones: [], room: microphoneRoom
+            )
+        }
+        hasVRackCaptureSource = present
+    }
+
     /// Temporary wet trim for the existing shared hall while auditioning capsules.
     /// This is one room field for the whole orchestra, never one reverb per mic.
     @Published public private(set) var microphoneRoomWetLevel: Float = 0.20
