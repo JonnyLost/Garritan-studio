@@ -36,9 +36,11 @@ public final class RenderGraph {
     private final class RenderSnapshot {
         let generation: UInt64
         let routes: [TrackNode]
+        let byID: [TrackID: TrackNode]
         init(generation: UInt64, routes: [TrackNode]) {
             self.generation = generation
             self.routes = routes
+            self.byID = Dictionary(uniqueKeysWithValues: routes.map { ($0.id, $0) })
         }
     }
 
@@ -411,7 +413,8 @@ public final class RenderGraph {
     private var renderErrorCount = 0
     
     func sendMIDI(to trackID: TrackID, status: UInt8, data1: UInt8, data2: UInt8, sampleOffset: UInt32) {
-        guard let track = tracks[trackID] else { return }
+        withRenderSnapshot { snapshot in
+        guard let track = snapshot.byID[trackID] else { return }
 
         // Called by the real-time scheduler: never log or format strings here.
         if let auAudioUnit = track.auAudioUnit,
@@ -424,6 +427,7 @@ public final class RenderGraph {
             _ = MusicDeviceMIDIEvent(
                 unit, UInt32(status), UInt32(data1), UInt32(data2), sampleOffset
             )
+        }
         }
     }
 
