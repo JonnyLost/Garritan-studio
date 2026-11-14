@@ -580,7 +580,7 @@ public final class CoreAudioBackend: AudioBackend {
                 let status = AudioOutputUnitStop(outputUnit)
                 guard status == noErr else {
                     throw AudioBackendError.configurationError(
-                        "Cannot drain hardware output before bounce: \\(status)"
+                        "Cannot drain hardware output before bounce: \(status)"
                     )
                 }
             }
@@ -612,6 +612,7 @@ public final class CoreAudioBackend: AudioBackend {
             to: endSample,
             outputURL: outputURL,
             sampleRate: _sampleRate,
+            bufferSize: _bufferSize,
             progress: progress
         )
     }
