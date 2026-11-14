@@ -1981,10 +1981,8 @@ public final class PlaybackEngine: ObservableObject {
                 switch clip.content {
                 case .midi(let midiData):
                     print("[PlaybackEngine] MIDI clip with \(midiData.events.count) events")
-                    scheduleMIDIClip(
-                        midiData, clip: clip, track: track, project: project,
-                        into: &localScheduledMIDIEvents
-                    )
+                    // Track-wide MIDI is compiled below once, across clips,
+                    // to reconstruct persistent switches and expression state.
 
                 case .audio(let audioData):
                     // Use simple AVAudioPlayer for reliable playback
@@ -1997,6 +1995,21 @@ public final class PlaybackEngine: ObservableObject {
             }
         }
         
+        // Compile exactly one session for each track. Old musical notes
+        // stay silent after seeking; the most recent keyswitch and expression
+        // state are reconstructed at playbackStartBeat.
+        for track in project.tracks where !track.isMuted {
+            for entry in StudioMIDISessionPlanner.events(
+                for: track, tempo: project.tempo.bpm, from: playbackStartBeat
+            ) {
+                localScheduledMIDIEvents.append(ScheduledEvent(
+                    trackID: track.id, clipID: entry.clipID,
+                    absoluteBeat: entry.absoluteBeat, event: entry.event,
+                    midiOutput: track.midiOutput
+                ))
+            }
+        }
+
         // Precompile complete Studio Analog scores off the render thread.
         // ARIA and other AU instruments remain on the unchanged MIDI worker.
         // If native preparation fails, retain those events for fallback.
@@ -2189,37 +2202,6 @@ public final class PlaybackEngine: ObservableObject {
             
         } catch {
             print("[PlaybackEngine] ERROR preparing audio clip: \(error)")
-        }
-    }
-    
-    private func scheduleMIDIClip(
-        _ midiData: MIDIClipData,
-        clip: Clip,
-        track: Track,
-        project: Project,
-        into events: inout [ScheduledEvent]
-    ) {
-        let clipStartBeat = clip.timeRange.start.beats(atTempo: project.tempo.bpm)
-        let clipEndBeat = clip.timeRange.end.beats(atTempo: project.tempo.bpm)
-
-        for event in StudioArticulationRenderer.events(for: midiData, map: track.articulationMap) {
-            // Match the same filter used by the hybrid backend and live input.
-            guard track.acceptsMIDIChannel(event.channel) else { continue }
-
-            let absoluteBeat = clipStartBeat + event.beatPosition
-
-            // Skip events outside clip bounds
-            guard absoluteBeat >= clipStartBeat && absoluteBeat < clipEndBeat else { continue }
-
-            let scheduled = ScheduledEvent(
-                trackID: track.id,
-                clipID: clip.id,
-                absoluteBeat: absoluteBeat,
-                event: event,
-                midiOutput: track.midiOutput  // Capture the track's routing
-            )
-
-            events.append(scheduled)
         }
     }
     
