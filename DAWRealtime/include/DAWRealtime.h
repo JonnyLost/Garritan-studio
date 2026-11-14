@@ -131,6 +131,18 @@ bool daw_route_exchange_try_enter_render(DAWRenderRouteExchange *exchange);
 void daw_route_exchange_leave_render(DAWRenderRouteExchange *exchange);
 
 
+// Render-owned, C11-atomic progress for a short instrument crossfade.
+// Created/destroyed only on the control thread. The callback advances progress
+// without allocating, waiting, or retaining/releasing the previous AudioUnit.
+typedef struct DAWAudioTransitionProgress DAWAudioTransitionProgress;
+DAWAudioTransitionProgress *daw_transition_create(uint32_t totalFrames);
+void daw_transition_destroy(DAWAudioTransitionProgress *progress);
+// Return the previous completed frame count, clamped to totalFrames.
+uint32_t daw_transition_advance(DAWAudioTransitionProgress *progress, uint32_t frames);
+uint32_t daw_transition_completed(const DAWAudioTransitionProgress *progress);
+uint32_t daw_transition_total(const DAWAudioTransitionProgress *progress);
+void daw_transition_force_complete(DAWAudioTransitionProgress *progress);
+
 #ifdef __cplusplus
 }
 #endif
