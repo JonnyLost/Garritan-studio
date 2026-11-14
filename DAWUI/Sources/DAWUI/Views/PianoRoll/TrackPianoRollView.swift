@@ -1719,7 +1719,7 @@ public struct TrackPianoRollView: View {
             events: originalData.events, lane: selectedCCType,
             points: expressionStroke, clipStartBeat: start,
             division: step, channel: UInt8(expressionChannel),
-            mode: expressionDrawMode)
+            mode: expressionDrawMode, clipEndBeat: end)
         if expressionDrawMode == .erase &&
             edited.events.count == originalData.events.count {
             previewTrack = nil
