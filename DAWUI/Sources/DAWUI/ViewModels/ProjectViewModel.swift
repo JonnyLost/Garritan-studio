@@ -808,7 +808,11 @@ public final class ProjectViewModel: ObservableObject {
             throw StudioSynthError.invalidPatch
         }
         try playbackEngine.loadStudioSynth(for: trackID, patch: patch)
-        project.tracks[index].studioSynthPatch = patch
+        var updated = project.tracks[index]
+        updated.studioSynthPatch = patch
+        updated.automationLanes = StudioSynthAutomationConsistency.reconcile(
+            updated.automationLanes, for: patch)
+        updateTrack(updated, description: "Replace Studio Synth Sound")
     }
 
     /// Apply routing/settings in place, without stopping the audio graph or
