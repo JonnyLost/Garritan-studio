@@ -1,4 +1,5 @@
 import XCTest
+import AudioToolbox
 @testable import DAWCore
 
 /// No audio hardware is needed: topology snapshots are prepared on the
@@ -51,5 +52,25 @@ final class StudioRenderGraphSnapshotTests: XCTestCase {
         graph.setBufferSize(1024)
         XCTAssertEqual(graph.renderSnapshotTrackIDs, members)
         XCTAssertEqual(graph.renderSnapshotGeneration, revision)
+    }
+
+    func testFailedEffectPreparationDoesNotMutateActiveRouting() {
+        let graph = RenderGraph(sampleRate: 48_000, bufferSize: 512)
+        let track = TrackID()
+        graph.createTrack(id: track)
+        let revision = graph.renderSnapshotGeneration
+        let members = graph.renderSnapshotTrackIDs
+
+        // An invalid component must fail during preparation, before install.
+        let invalid = AudioComponentDescription(
+            componentType: 0,
+            componentSubType: 0,
+            componentManufacturer: 0,
+            componentFlags: 0,
+            componentFlagsMask: 0
+        )
+        XCTAssertThrowsError(try graph.prepareEffect(invalid))
+        XCTAssertEqual(graph.renderSnapshotGeneration, revision)
+        XCTAssertEqual(graph.renderSnapshotTrackIDs, members)
     }
 }
