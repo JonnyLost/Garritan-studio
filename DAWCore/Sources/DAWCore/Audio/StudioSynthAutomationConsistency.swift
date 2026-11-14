@@ -32,7 +32,7 @@ public enum StudioSynthAutomationConsistency {
         fileManager: FileManager = .default
     ) -> [String] {
         patch.layers.compactMap { layer -> String? in
-            guard layer.engine == .granular,
+            guard layer.enabled, layer.engine == .granular,
                   let path = layer.granularPatch?.importedAudioPath,
                   !fileManager.fileExists(atPath: path) else { return nil }
             return path
