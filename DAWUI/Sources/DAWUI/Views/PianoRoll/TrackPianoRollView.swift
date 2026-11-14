@@ -831,8 +831,12 @@ public struct TrackPianoRollView: View {
                     let noteRect = CGRect(x: noteX, y: noteY + 1, width: noteWidth, height: Double(noteHeight) - 2)
                     let notePath = Path(roundedRect: noteRect, cornerRadius: 2)
                     
-                    context.fill(notePath, with: .color(trackColor))
-                    context.fill(notePath, with: .color(Color.white.opacity(Double(noteData.velocity) / 127.0 * 0.3)))
+                    // Muted notes remain selectable and editable but are
+                    // visually subdued in both piano-roll implementations.
+                    let noteOpacity = noteData.isMuted == true ? 0.28 : 1.0
+                    context.fill(notePath, with: .color(trackColor.opacity(noteOpacity)))
+                    context.fill(notePath, with: .color(Color.white.opacity(
+                        Double(noteData.velocity) / 127.0 * 0.3 * noteOpacity)))
                     
                     if isSelected {
                         context.stroke(notePath, with: .color(Color.white), lineWidth: 1.5)
