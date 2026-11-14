@@ -12,6 +12,8 @@ struct BandComparison: Codable {
     let measuredT20Seconds: Double?
     let legacyWideBandT20Seconds: Double?
     let legacyWideBandT20ErrorPercent: Double?
+    let uncalibratedT20Seconds: Double?
+    let uncalibratedT20ErrorPercent: Double?
     let measuredT30Seconds: Double?
     let t20DifferenceSeconds: Double?
     let t20ErrorPercent: Double?
@@ -27,6 +29,7 @@ struct RoomComparison: Codable {
     let validT20Bands: Int
     let meanAbsoluteT20ErrorPercent: Double?
     let legacyMeanAbsoluteT20ErrorPercent: Double?
+    let uncalibratedMeanAbsoluteT20ErrorPercent: Double?
     let maximumAbsoluteT20ErrorPercent: Double?
     let roomID: String
     let roomName: String
@@ -123,6 +126,20 @@ let results: [RoomComparison] = cases.map { item in
         left: left, right: right, sampleRate: sampleRate, roomID: room.id,
         filter: .legacyWideBand
     )
+    // If spectral fitting activated, compare against the original playback
+    // DSP with the SAME new measurement filter and room geometry. This
+    // isolates a genuine sound-engine change from analysis-only differences.
+    let uncalibrated: NativeRoomCalibrationResult?
+    if room.shortRoomFeedbackCalibration == true {
+        var baseline = room
+        baseline.shortRoomFeedbackCalibration = false
+        uncalibrated = NativeRoomImpulseAnalyzer.measure(
+            room: baseline, sampleRate: sampleRate, seconds: seconds,
+            filter: .cascadedButterworth
+        )
+    } else {
+        uncalibrated = nil
+    }
 
     // The four factory presets expose three frequency regions, NOT measured
     // octave-band targets. The interpolated values below are only a rough
@@ -151,6 +168,7 @@ let results: [RoomComparison] = cases.map { item in
         let (measuredBand, target) = pair
         let t20 = measuredBand.t20Seconds
         let legacyT20 = legacy.bands[index].t20Seconds
+        let uncalibratedT20 = uncalibrated?.bands[index].t20Seconds
         let proposed: Double?
         if let t20, t20 > 0.1 {
             // First-order offline suggestion, NOT automatically applied:
@@ -166,6 +184,10 @@ let results: [RoomComparison] = cases.map { item in
             measuredT20Seconds: t20,
             legacyWideBandT20Seconds: legacyT20,
             legacyWideBandT20ErrorPercent: legacyT20.map { 100 * ($0 - target) / target },
+            uncalibratedT20Seconds: uncalibratedT20,
+            uncalibratedT20ErrorPercent: uncalibratedT20.map {
+                100 * ($0 - target) / target
+            },
             measuredT30Seconds: measuredBand.t30Seconds,
             t20DifferenceSeconds: t20.map { $0 - target },
             t20ErrorPercent: t20.map { 100 * ($0 - target) / target },
@@ -178,6 +200,9 @@ let results: [RoomComparison] = cases.map { item in
     }
     let errors = bands.compactMap { $0.t20ErrorPercent.map(abs) }
     let legacyErrors = bands.compactMap { $0.legacyWideBandT20ErrorPercent.map(abs) }
+    let uncalibratedErrors = bands.compactMap {
+        $0.uncalibratedT20ErrorPercent.map(abs)
+    }
     return RoomComparison(
         scenarioID: item.scenarioID,
         designVolumeCubicMeters: item.volumeCubicMeters,
@@ -186,6 +211,8 @@ let results: [RoomComparison] = cases.map { item in
             errors.reduce(0, +) / Double(errors.count),
         legacyMeanAbsoluteT20ErrorPercent: legacyErrors.isEmpty ? nil :
             legacyErrors.reduce(0, +) / Double(legacyErrors.count),
+        uncalibratedMeanAbsoluteT20ErrorPercent: uncalibratedErrors.isEmpty ? nil :
+            uncalibratedErrors.reduce(0, +) / Double(uncalibratedErrors.count),
         maximumAbsoluteT20ErrorPercent: errors.max(),
         roomID: room.id, roomName: room.name,
         sampleRate: sampleRate, impulseLengthSeconds: seconds,
@@ -200,7 +227,7 @@ let report = Report(
     generatedAtISO8601: ISO8601DateFormatter().string(from: Date()),
     scenarioSuiteEnabled: runSuite,
     profileCount: results.count,
-    note: "The new octave-edge Butterworth analysis is compared against the old wide-Q analysis on identical native DSP output, across four factory and four custom room scenarios. Improving measured consistency is NOT the same as changing or validating audible DSP output. Filters are not IEC/ISO-certified. Factory targets are interpolated, custom RT bounded, finite-time limits apply. No external impulse references, no automatic retuning.",
+    note: "The new octave-edge Butterworth and legacy wide-Q analyzers compare identical renders. Separately, strongly treated short rooms may use bounded, offline-precomputed spectral feedback correction; only those rooms are also rendered with correction disabled to expose the real DSP difference. No automatic calibration during playback, no external room IRs, no ISO/IEC conformance claim. Factory targets are interpolated diagnostics.",
     rooms: results
 )
 let encoder = JSONEncoder()
