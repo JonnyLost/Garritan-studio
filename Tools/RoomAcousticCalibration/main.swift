@@ -10,6 +10,8 @@ struct BandComparison: Codable {
     let intendedRT60Seconds: Double
     let measuredEDTSeconds: Double?
     let measuredT20Seconds: Double?
+    let legacyWideBandT20Seconds: Double?
+    let legacyWideBandT20ErrorPercent: Double?
     let measuredT30Seconds: Double?
     let t20DifferenceSeconds: Double?
     let t20ErrorPercent: Double?
@@ -24,6 +26,7 @@ struct RoomComparison: Codable {
     let designVolumeCubicMeters: Double?
     let validT20Bands: Int
     let meanAbsoluteT20ErrorPercent: Double?
+    let legacyMeanAbsoluteT20ErrorPercent: Double?
     let maximumAbsoluteT20ErrorPercent: Double?
     let roomID: String
     let roomName: String
@@ -107,8 +110,18 @@ if runSuite {
 }
 let results: [RoomComparison] = cases.map { item in
     let room = item.room
-    let measured = NativeRoomImpulseAnalyzer.measure(
+    // Run both analyzers over the EXACT same synthesized impulse. Any
+    // difference is measurement-band leakage, not a change in Studio's DSP.
+    let (left, right) = NativeRoomImpulseAnalyzer.render(
         room: room, sampleRate: sampleRate, seconds: seconds
+    )
+    let measured = NativeRoomImpulseAnalyzer.analyze(
+        left: left, right: right, sampleRate: sampleRate, roomID: room.id,
+        filter: .cascadedButterworth
+    )
+    let legacy = NativeRoomImpulseAnalyzer.analyze(
+        left: left, right: right, sampleRate: sampleRate, roomID: room.id,
+        filter: .legacyWideBand
     )
 
     // The four factory presets expose three frequency regions, NOT measured
@@ -137,6 +150,7 @@ let results: [RoomComparison] = cases.map { item in
     let bands: [BandComparison] = zip(measured.bands, targets).enumerated().map { index, pair in
         let (measuredBand, target) = pair
         let t20 = measuredBand.t20Seconds
+        let legacyT20 = legacy.bands[index].t20Seconds
         let proposed: Double?
         if let t20, t20 > 0.1 {
             // First-order offline suggestion, NOT automatically applied:
@@ -150,6 +164,8 @@ let results: [RoomComparison] = cases.map { item in
             intendedRT60Seconds: target,
             measuredEDTSeconds: measuredBand.edtSeconds,
             measuredT20Seconds: t20,
+            legacyWideBandT20Seconds: legacyT20,
+            legacyWideBandT20ErrorPercent: legacyT20.map { 100 * ($0 - target) / target },
             measuredT30Seconds: measuredBand.t30Seconds,
             t20DifferenceSeconds: t20.map { $0 - target },
             t20ErrorPercent: t20.map { 100 * ($0 - target) / target },
@@ -161,17 +177,20 @@ let results: [RoomComparison] = cases.map { item in
         )
     }
     let errors = bands.compactMap { $0.t20ErrorPercent.map(abs) }
+    let legacyErrors = bands.compactMap { $0.legacyWideBandT20ErrorPercent.map(abs) }
     return RoomComparison(
         scenarioID: item.scenarioID,
         designVolumeCubicMeters: item.volumeCubicMeters,
         validT20Bands: errors.count,
         meanAbsoluteT20ErrorPercent: errors.isEmpty ? nil :
             errors.reduce(0, +) / Double(errors.count),
+        legacyMeanAbsoluteT20ErrorPercent: legacyErrors.isEmpty ? nil :
+            legacyErrors.reduce(0, +) / Double(legacyErrors.count),
         maximumAbsoluteT20ErrorPercent: errors.max(),
         roomID: room.id, roomName: room.name,
         sampleRate: sampleRate, impulseLengthSeconds: seconds,
         targetProvenance: provenance,
-        method: "Offline wet-only native early reflections + 16-line FDN; six approximate octave bandpass filters; Schroeder backward energy integration; no room IR reference",
+        method: "Wet-only native ER + 16-line FDN; new cascaded Butterworth octave-edge HP2/LP2 filter versus legacy wide-Q bandpass (same impulse); Schroeder backward energy integration; not an ISO-calibrated measurement",
         wetOnlyC80dB: measured.wetOnlyC80dB,
         bands: bands
     )
@@ -181,7 +200,7 @@ let report = Report(
     generatedAtISO8601: ISO8601DateFormatter().string(from: Date()),
     scenarioSuiteEnabled: runSuite,
     profileCount: results.count,
-    note: "Synthetic six-band T20 validation of Studio's own DSP at several deliberately different room sizes/materials. Four factory profile targets are interpolated approximations. Custom targets are bounded RT predictions; raw predictions and clamping are reported separately. Short dry tails or long reverberation beyond the finite measurement window may make some measurements unreliable. No reference room IR data, no ISO 3382 claim, no runtime calibration. Suggestions are never applied automatically.",
+    note: "The new octave-edge Butterworth analysis is compared against the old wide-Q analysis on identical native DSP output, across four factory and four custom room scenarios. Improving measured consistency is NOT the same as changing or validating audible DSP output. Filters are not IEC/ISO-certified. Factory targets are interpolated, custom RT bounded, finite-time limits apply. No external impulse references, no automatic retuning.",
     rooms: results
 )
 let encoder = JSONEncoder()
