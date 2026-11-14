@@ -59,7 +59,7 @@ enum StudioGarritanArticulationFactory {
         let patchName = last.replacingOccurrences(
             of: ".sfz", with: "", options: .caseInsensitive)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard patchName.uppercased().contains("KS") else {
+        guard patchName.uppercased().hasSuffix(" KS") else {
             return .notKeyswitchInstrument
         }
         // Notation uses different octave offsets. GPO5's published directory
@@ -102,7 +102,7 @@ enum StudioGarritanArticulationFactory {
             let canonical = stableArticulationID(switchValue.articulation)
             var key = canonical
             if !usedIDs.insert(key).inserted {
-                key += "-\\(Int(pitch))"
+                key += "-\(Int(pitch))"
                 guard usedIDs.insert(key).inserted else {
                     return .needsReview("The published articulations are not uniquely named")
                 }
@@ -119,7 +119,7 @@ enum StudioGarritanArticulationFactory {
             ))
         }
         return .ready(StudioArticulationMap(
-            name: "GPO5 • \\(patchName)",
+            name: "GPO5 • \(patchName)",
             articulations: definitions,
             factoryProgramID: programID,
             isFactoryDefault: true))
