@@ -39,6 +39,8 @@ public struct TrackPianoRollView: View {
     @State private var selectedNoteIDs: Set<UUID> = []
     @State private var selectionRect: CGRect? = nil
     @State private var isMarqueeSelecting: Bool = false
+    @State private var didToggleShiftNote = false
+    @State private var eraserPendingIDs: Set<UUID> = []
     
     // Pencil tool preview state
     @State private var pencilPreviewStart: Double? = nil
@@ -626,7 +628,7 @@ public struct TrackPianoRollView: View {
             }
             
             // Draw existing notes (with drag offset for selected notes being dragged)
-            for event in noteEvents {
+            for event in noteEvents where !eraserPendingIDs.contains(event.id) {
                 if case .note(let noteData) = event.type {
                     let noteX = event.beatPosition * pixelsPerBeat
                     let notePitch = Int(noteData.pitch)
@@ -858,11 +860,13 @@ public struct TrackPianoRollView: View {
                         if let clicked = noteAt(x: value.startLocation.x,
                                                 y: value.startLocation.y) {
                             if NSEvent.modifierFlags.contains(.shift) {
-                                // Shift-click selection does not start a move.
-                                if !selectedNoteIDs.contains(clicked.id) {
-                                    selectedNoteIDs.insert(clicked.id)
-                                } else {
-                                    selectedNoteIDs.remove(clicked.id)
+                                if !didToggleShiftNote {
+                                    if selectedNoteIDs.contains(clicked.id) {
+                                        selectedNoteIDs.remove(clicked.id)
+                                    } else {
+                                        selectedNoteIDs.insert(clicked.id)
+                                    }
+                                    didToggleShiftNote = true
                                 }
                                 return
                             }
@@ -897,7 +901,9 @@ public struct TrackPianoRollView: View {
                     }
 
                 case .eraser:
-                    eraseNoteAt(beat: beat, pitch: pitch)
+                    if let hovered = noteAt(x: value.location.x, y: value.location.y) {
+                        eraserPendingIDs.insert(hovered.id)
+                    }
                 default:
                     break
                 }
@@ -922,8 +928,13 @@ public struct TrackPianoRollView: View {
                     }
                     isMarqueeSelecting = false
                     selectionRect = nil
+                    didToggleShiftNote = false
                 case .eraser:
-                    eraseNoteAt(beat: beat, pitch: pitch)
+                    if let hovered = noteAt(x: value.location.x, y: value.location.y) {
+                        eraserPendingIDs.insert(hovered.id)
+                    }
+                    deleteNoteIDs(eraserPendingIDs, description: "Erase MIDI Notes")
+                    eraserPendingIDs.removeAll()
                 default:
                     break
                 }
@@ -1149,64 +1160,27 @@ public struct TrackPianoRollView: View {
         insertNotes([note], at: beat, description: "Add MIDI Note")
     }
 
-    private func eraseNoteAt(beat: Double, pitch: Int) {
-        guard var track = currentTrack else { return }
-        var modified = false
-        
-        for clipIndex in 0..<track.clips.count {
-            if case .midi(var midiData) = track.clips[clipIndex].content {
-                let clipStartBeat = track.clips[clipIndex].timeRange.start.beats(atTempo: viewModel.transportState.tempo.bpm)
-                
-                let countBefore = midiData.events.count
-                midiData.events.removeAll { event in
-                    if case .note(let noteData) = event.type {
-                        let absoluteBeat = clipStartBeat + event.beatPosition
-                        let noteEnd = absoluteBeat + noteData.duration
-                        return Int(noteData.pitch) == pitch &&
-                               beat >= absoluteBeat &&
-                               beat <= noteEnd
-                    }
-                    return false
-                }
-                
-                if midiData.events.count != countBefore {
-                    track.clips[clipIndex].content = .midi(midiData)
-                    modified = true
-                }
+    private func deleteNoteIDs(_ ids: Set<UUID>, description: String) {
+        guard !ids.isEmpty, var track = currentTrack else { return }
+        var changed = false
+        for index in track.clips.indices {
+            guard case .midi(var midi) = track.clips[index].content else { continue }
+            let edited = StudioMIDINoteEditing.deletingSelected(in: midi.events, ids: ids)
+            if edited.count != midi.events.count {
+                midi.events = edited
+                track.clips[index].content = .midi(midi)
+                changed = true
             }
         }
-        
-        if modified {
-            viewModel.updateTrack(track, description: "Erase Note")
-        }
+        guard changed else { return }
+        viewModel.updateTrack(track, description: description)
+        selectedNoteIDs.subtract(ids)
     }
-    
+
     private func deleteSelectedNotes() {
-        guard var track = currentTrack else { return }
-        guard !selectedNoteIDs.isEmpty else { return }
-        
-        var modified = false
-        
-        for clipIndex in 0..<track.clips.count {
-            if case .midi(var midiData) = track.clips[clipIndex].content {
-                let countBefore = midiData.events.count
-                midiData.events.removeAll { event in
-                    selectedNoteIDs.contains(event.id)
-                }
-                
-                if midiData.events.count != countBefore {
-                    track.clips[clipIndex].content = .midi(midiData)
-                    modified = true
-                }
-            }
-        }
-        
-        if modified {
-            viewModel.updateTrack(track, description: "Delete Notes")
-            selectedNoteIDs.removeAll()
-        }
+        deleteNoteIDs(selectedNoteIDs, description: "Delete MIDI Notes")
     }
-    
+
     private func updateNoteVelocity(_ id: UUID, velocity: UInt8) {
         guard var track = currentTrack else { return }
         
