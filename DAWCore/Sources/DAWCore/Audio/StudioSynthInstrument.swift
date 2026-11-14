@@ -299,9 +299,9 @@ public final class StudioSynthInstrument {
     public func setAutomation(layerID: UUID,
                               destination: StudioSynthModDestination,
                               normalized: Float) -> Bool {
-        guard destination.engine == runtime.first(where: {
-            $0.id == layerID
-        })?.engine,
+        guard runtime.contains(where: { $0.id == layerID }),
+              patch.layers.first(where: { $0.id == layerID })?.engine ==
+                  destination.engine,
               destination.isContinuouslyModulatable,
               normalized.isFinite, (0...1).contains(normalized) else {
             return false
