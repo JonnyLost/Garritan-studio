@@ -133,6 +133,26 @@ final class StudioArticulationMapTests: XCTestCase {
         XCTAssertEqual(decodedMIDI.articulations, midi.articulations)
     }
 
+    func testPastedAndDuplicatedNotesInheritTheirMusicalArticulations() {
+        let note = MIDIEvent.note(at: 0, pitch: 64)
+        var original = MIDIClipData(events: [note])
+        _ = StudioArticulationAssignmentEditing.assign("pizzicato",
+                                                        to: [note.id], in: &original)
+        var destination = MIDIClipData()
+        let mapping = StudioMIDINoteEditing.pasteWithIDMapping(
+            [note], into: &destination.events, at: 4)
+        XCTAssertEqual(mapping.count, 1)
+        StudioArticulationAssignmentEditing.transfer(
+            from: StudioArticulationAssignmentEditing.byNoteID(in: original),
+            idMapping: mapping, into: &destination)
+        let newID = try! XCTUnwrap(mapping[note.id])
+        XCTAssertNotEqual(newID, note.id)
+        XCTAssertEqual(destination.articulations?.first?.noteID, newID)
+        XCTAssertEqual(destination.articulations?.first?.articulationID, "pizzicato")
+        XCTAssertEqual(destination.events.first?.beatPosition, 4)
+        XCTAssertEqual(original.events.count, 1)
+    }
+
     func testOldMIDIFilesDecodeWithoutArticulations() throws {
         let note = MIDIEvent.note(at: 0, pitch: 60)
         let modern = MIDIClipData(events: [note])
