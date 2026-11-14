@@ -110,6 +110,18 @@ if runSuite {
             volumeCubicMeters: scenario.design.volumeCubicMeters
         ))
     }
+    // Explicit offline-only experiment. This algorithm substantially
+    // worsened the short-room bass response and MUST NOT be used by
+    // Studio's saved custom room, stage, or audio engine.
+    let shortCase = StudioAcousticCalibrationScenario.contrastingRooms[0]
+    var experimental = shortCase.design.makeProfile()
+    experimental.shortRoomFeedbackCalibration = true
+    cases.append(CalibrationCase(
+        scenarioID: "small-treated-experimental-fit",
+        room: experimental,
+        rawDesignRT60: shortCase.design.predictedRT60,
+        volumeCubicMeters: shortCase.design.volumeCubicMeters
+    ))
 }
 let results: [RoomComparison] = cases.map { item in
     let room = item.room
@@ -227,7 +239,7 @@ let report = Report(
     generatedAtISO8601: ISO8601DateFormatter().string(from: Date()),
     scenarioSuiteEnabled: runSuite,
     profileCount: results.count,
-    note: "The new octave-edge Butterworth and legacy wide-Q analyzers compare identical renders. Separately, strongly treated short rooms may use bounded, offline-precomputed spectral feedback correction; only those rooms are also rendered with correction disabled to expose the real DSP difference. No automatic calibration during playback, no external room IRs, no ISO/IEC conformance claim. Factory targets are interpolated diagnostics.",
+    note: "Eight production profiles retain original native playback DSP. A ninth explicitly labeled experiment tests a bounded spectral feedback fit that FAILED acoustic validation and is disabled in all production room designs. The two analyzers compare identical renders; only the experimental entry changes DSP, and it includes an untuned audio baseline. No auto-tuning during playback, no external IR, no ISO/IEC conformance claim.",
     rooms: results
 )
 let encoder = JSONEncoder()
