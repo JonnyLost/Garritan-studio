@@ -1,0 +1,50 @@
+name: Studio Room and Microphone Combined Gate
+
+on:
+  push:
+    branches:
+      - integration/studio-mic-merge-candidate-2026-11-14
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: Reconcile exactly one UI file, then build and test on macOS
+    runs-on: macos-15
+    timeout-minutes: 55
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Rehearse and verify guarded Rooms/Ostinato merge
+        run: bash Tools/merge-studio-rooms-ostinato-safe.sh
+      - name: Resolve, build and test ALL Studio targets
+        run: |
+          swift package resolve
+          swift build
+          swift test --parallel
+      - name: Build optimized Studio application
+        run: swift build -c release --product DAWApp
+  publish:
+    name: Publish to disposable candidate only after green macOS verification
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Repeat exact pinned and conflict-guarded merge
+        run: bash Tools/merge-studio-rooms-ostinato-safe.sh
+      - name: Fast-forward candidate, never modify shared integration or feature refs
+        run: |
+          set -euo pipefail
+          if [[ "${STUDIO_MIC_ALREADY_MERGED:-}" == "true" ]]; then
+            echo "Already integrated in candidate."
+            exit 0
+          fi
+          git diff --cached --check
+          git commit -m "Integrate virtual microphone and Rooms acoustics alongside Ostinato"
+          git push origin HEAD:refs/heads/integration/studio-mic-merge-candidate-2026-11-14
