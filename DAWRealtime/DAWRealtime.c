@@ -495,6 +495,7 @@ uint64_t daw_pcm_page_cache_underrun_frames(const DAWPCMPageCache *cache) {
 struct DAWRenderRouteExchange {
     _Atomic(void *) current;
     _Atomic(uint32_t) readers;
+    _Atomic(bool) rendering;
 };
 
 DAWRenderRouteExchange *daw_route_exchange_create(void *initialSnapshot) {
@@ -503,6 +504,7 @@ DAWRenderRouteExchange *daw_route_exchange_create(void *initialSnapshot) {
     if (!exchange) return NULL;
     atomic_init(&exchange->current, initialSnapshot);
     atomic_init(&exchange->readers, 0);
+    atomic_init(&exchange->rendering, false);
     return exchange;
 }
 
@@ -540,3 +542,19 @@ void *daw_route_exchange_take_current_quiescent(DAWRenderRouteExchange *exchange
                                     memory_order_seq_cst);
 }
 
+
+// Enforce one active DSP/MIDI render frame per graph. A contended callback
+// must emit silence rather than render a non-reentrant plugin concurrently.
+bool daw_route_exchange_try_enter_render(DAWRenderRouteExchange *exchange) {
+    if (!exchange) return false;
+    bool expected = false;
+    return atomic_compare_exchange_strong_explicit(
+        &exchange->rendering, &expected, true,
+        memory_order_acquire, memory_order_relaxed
+    );
+}
+
+void daw_route_exchange_leave_render(DAWRenderRouteExchange *exchange) {
+    if (!exchange) return;
+    atomic_store_explicit(&exchange->rendering, false, memory_order_release);
+}
