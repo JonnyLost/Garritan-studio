@@ -14,6 +14,7 @@ struct StudioRoomAcousticsWorkspaceView: View {
         case library = "Room Library"
         case designer = "Room Designer"
         case microphones = "Microphones"
+        case mixer = "Mic Mixer"
         case controls = "Acoustic Controls"
         var id: String { rawValue }
     }
@@ -99,6 +100,9 @@ struct StudioRoomAcousticsWorkspaceView: View {
                     case .microphones:
                         microphonePanel
                             .frame(maxWidth: 800, alignment: .leading)
+                    case .mixer:
+                        microphoneMixer
+                            .frame(maxWidth: 850, alignment: .leading)
                     case .controls:
                         acousticControls
                             .frame(maxWidth: 660, alignment: .leading)
@@ -194,12 +198,12 @@ struct StudioRoomAcousticsWorkspaceView: View {
         .accessibilityIdentifier("room-profile-" + id)
     }
 
-    /// Mic objects are real saved Stage geometry, but deliberately do not
-    /// create audio signals until the spill/mic-mixer routing milestone.
+    /// The mic objects are project-persistent. The first audition renderer
+    /// supports only four live microphone channels and sixteen sources.
     private var microphonePanel: some View {
         VStack(alignment: .leading, spacing: 14) {
             StudioSectionHeading("Virtual Recording Microphones", symbol: "mic.fill")
-            Text("Add and move individual microphone capsules in Stage. Arrays start with editable, conventional spacing; source pickup is a geometry preview, not live audio.")
+            Text("Add and move individual microphone capsules in Stage. Arrays have editable spacing, and the Mic Mixer lets you hear direct sound and simulated spill.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -214,7 +218,8 @@ struct StudioRoomAcousticsWorkspaceView: View {
                 Button("Add Microphones") {
                     viewModel.addVirtualMicrophoneArray(arrayToAdd)
                 }
-                .disabled(microphoneObjects.count + arrayToAdd.microphoneCount > 32)
+                .disabled(microphoneObjects.count + arrayToAdd.microphoneCount > 32 ||
+                          viewModel.audioEngine.isMicrophoneAuditionActive)
                 .accessibilityIdentifier("add-stage-microphones")
                 Spacer()
                 Text("\(microphoneObjects.count)/32 capsules")
@@ -272,6 +277,7 @@ struct StudioRoomAcousticsWorkspaceView: View {
                         viewModel.removeVirtualMicrophone(id: mic.id)
                     }
                     .buttonStyle(.bordered)
+                    .disabled(viewModel.audioEngine.isMicrophoneAuditionActive)
                 }
                 TextField("Name", text: Binding(
                     get: { selectedMic?.name ?? "" },
@@ -304,7 +310,7 @@ struct StudioRoomAcousticsWorkspaceView: View {
                 sourcePickupPreview(microphone: mic)
             }
             Divider()
-            Text("Routing status: Geometry preview only. These microphone objects do not yet add audio channels or change the current mix. The next milestone will connect a preallocated source-to-microphone matrix and a separate mic mixer.")
+            Text("The Mic Mixer offers explicit direct/spill audition for up to four capsules and sixteen sources. Add/remove capsules with audition off; position and pickup changes are live while auditioning. The normal mix remains the default.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -337,7 +343,7 @@ struct StudioRoomAcousticsWorkspaceView: View {
     private func sourcePickupPreview(microphone: StudioVirtualMicrophone) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             StudioSectionHeading("Estimated Section Spill", symbol: "waveform")
-            Text("Idealized directional and distance estimates only—no instrument audio is routed through these microphones yet.")
+            Text("Estimated direction, distance and travel time. During Mic Mixer audition, these values drive each source-to-microphone Audio Unit.")
                 .font(.caption2).foregroundStyle(.secondary)
 
             let tracks = viewModel.project.tracks.filter {
@@ -376,6 +382,115 @@ struct StudioRoomAcousticsWorkspaceView: View {
         }
         .padding(12)
         .background(palette.panel, in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func editMixer(_ mic: StudioVirtualMicrophone,
+                           _ mutate: (inout StudioMicrophoneChannelSettings) -> Void) {
+        var copy = mic
+        var settings = mic.mixer
+        mutate(&settings)
+        copy.mixerSettings = settings
+        viewModel.updateVirtualMicrophone(copy)
+    }
+
+    private var microphoneMixer: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            StudioSectionHeading("Virtual Microphone Mixer", symbol: "slider.horizontal.3")
+            Text("Every live microphone receives each participating source, with its own directional gain and sound-travel delay. Auditioning replaces the original dry/hall mix temporarily; it never layers a second full orchestra over it.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            let sourceCount = viewModel.project.tracks.filter {
+                $0.type == .midi || $0.type == .instrument || $0.type == .audio
+            }.count
+            HStack(spacing: 12) {
+                Button(viewModel.audioEngine.isMicrophoneAuditionActive ?
+                        "Return to Original Mix" : "Audition Microphones") {
+                    viewModel.setMicrophoneAuditionEnabled(
+                        !viewModel.audioEngine.isMicrophoneAuditionActive)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!canChangeRoom ||
+                          (!viewModel.audioEngine.isMicrophoneAuditionActive &&
+                           microphoneObjects.isEmpty))
+                .accessibilityIdentifier("toggle-microphone-audition")
+                Spacer()
+                Text("\(min(4, microphoneObjects.count)) live mic channels · \(sourceCount) sources")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            if let error = viewModel.microphoneAuditionError {
+                Text(error).font(.caption).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if microphoneObjects.isEmpty {
+                Button("Add a Spot Microphone") {
+                    viewModel.addVirtualMicrophoneArray(.spot)
+                    selectedTab = .microphones
+                }
+                .buttonStyle(.bordered)
+            } else {
+                if microphoneObjects.count > AudioEngine.maximumAuditionMicrophones {
+                    Text("This first live-audio implementation auditions the first four microphones. All other microphone objects remain saved and editable.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                ForEach(Array(microphoneObjects.prefix(AudioEngine.maximumAuditionMicrophones))) { mic in
+                    micMixerStrip(mic)
+                }
+            }
+            Divider()
+            Text("Experimental direct-and-spill monitoring: capsule pickup, distance attenuation, air damping and propagation delay are audible. The shared room return and legacy dry route are bypassed while auditioning, so room reflections, independent mic stems and larger orchestral matrices remain future audio milestones.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func micMixerStrip(_ mic: StudioVirtualMicrophone) -> some View {
+        let settings = mic.mixer
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "mic.fill")
+                Text(mic.name).font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Spacer()
+                Text(mic.pattern.displayName)
+                    .font(.caption2).foregroundStyle(.secondary)
+                Button(settings.isMuted ? "Unmute" : "Mute") {
+                    editMixer(mic) { $0.isMuted.toggle() }
+                }
+                .buttonStyle(.bordered)
+                Button(settings.isSolo ? "Unsolo" : "Solo") {
+                    editMixer(mic) { $0.isSolo.toggle() }
+                }
+                .buttonStyle(.bordered)
+            }
+            HStack {
+                Text("Level").frame(width: 42, alignment: .leading)
+                Slider(value: Binding(
+                    get: { Double(mic.mixer.safeLevel) },
+                    set: { level in
+                        editMixer(mic) { $0.level = Float(level) }
+                    }
+                ), in: 0...2)
+                Text(String(format: "%.0f%%", settings.safeLevel * 100))
+                    .monospacedDigit().frame(width: 53)
+            }
+            HStack {
+                Text("Pan").frame(width: 42, alignment: .leading)
+                Slider(value: Binding(
+                    get: { Double(mic.mixer.safePan) },
+                    set: { value in
+                        editMixer(mic) { $0.pan = Float(value) }
+                    }
+                ), in: -1...1)
+                Text(String(format: "%+.0f", settings.safePan * 100))
+                    .monospacedDigit().frame(width: 53)
+            }
+        }
+        .font(.caption)
+        .padding(12)
+        .background(palette.panel, in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityIdentifier("mic-mixer-" + mic.id.uuidString)
     }
 
     private var acousticControls: some View {
