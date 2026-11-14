@@ -443,23 +443,22 @@ public final class AudioEngine: ObservableObject {
                 // when audition is already in progress.
                 trackNode.setMicrophoneAuditionActive(true)
             } else {
-            let sourceCount = Set(microphoneRoutes.map(\.sourceID)).count
-            if sourceCount + (hasVRackCaptureSource ? 1 : 0) >= Self.maximumAuditionSources {
-                // A newly created track must NEVER become inaudible just
-                // because the bounded mic graph has reached its source cap.
-                // Restore the original mix instead of creating a silent track.
-                dismantleMicrophoneCaptures(format: format)
-                isMicrophoneAuditionActive = false
-                microphoneMasterMixer.outputVolume = 0
-                concertHallReturnMixer.outputVolume = concertHallOverallReverb
-                for node in trackNodes.values {
-                    node.setMicrophoneAuditionActive(false)
+                let sourceCount = Set(microphoneRoutes.map(\.sourceID)).count
+                if sourceCount + (hasVRackCaptureSource ? 1 : 0) >= Self.maximumAuditionSources {
+                    // Never hide a newly created source when the bounded
+                    // microphone audition graph reaches its safety cap.
+                    dismantleMicrophoneCaptures(format: format)
+                    isMicrophoneAuditionActive = false
+                    microphoneMasterMixer.outputVolume = 0
+                    concertHallReturnMixer.outputVolume = concertHallOverallReverb
+                    for node in trackNodes.values {
+                        node.setMicrophoneAuditionActive(false)
+                    }
+                } else {
+                    attachMicrophoneCaptures(for: track, format: format)
+                    updateMicrophoneCapture(for: track)
+                    trackNode.setMicrophoneAuditionActive(true)
                 }
-            } else {
-                attachMicrophoneCaptures(for: track, format: format)
-                updateMicrophoneCapture(for: track)
-                trackNode.setMicrophoneAuditionActive(true)
-            }
             }
         }
         print("[Track Audio] Installing meter")
