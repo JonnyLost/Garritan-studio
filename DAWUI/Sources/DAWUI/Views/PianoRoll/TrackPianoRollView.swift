@@ -493,28 +493,28 @@ public struct TrackPianoRollView: View {
     private var barRulerCanvas: some View {
         Canvas { context, size in
             let timeSignature = viewModel.transportState.timeSignature
-            let beatsPerBar = timeSignature.beatsPerBar
+            let beatsPerBar = StudioMusicalGrid.beatsPerBar(timeSignature)
             let totalBeats = Int(totalWidth / pixelsPerBeat) + 1
             
             for beat in 0...totalBeats {
                 let x = Double(beat) * pixelsPerBeat
-                let isBarLine = beat % beatsPerBar == 0
-                
-                let linePath = Path { path in
+                let line = Path { path in
                     path.move(to: CGPoint(x: x, y: 0))
                     path.addLine(to: CGPoint(x: x, y: size.height))
                 }
-                
-                if isBarLine {
-                    context.stroke(linePath, with: .color(Color.gray.opacity(0.5)), lineWidth: 1)
-                    let barNumber = (beat / beatsPerBar) + 1
-                    let barText = Text("\(barNumber)")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.primary)
-                    context.draw(barText, at: CGPoint(x: x + 8, y: size.height / 2))
-                } else {
-                    context.stroke(linePath, with: .color(Color.gray.opacity(0.3)), lineWidth: 0.5)
+                context.stroke(line, with: .color(Color.gray.opacity(0.3)), lineWidth: 0.5)
+            }
+            for bar in 0...Int(ceil(Double(totalBeats) / beatsPerBar)) {
+                let x = Double(bar) * beatsPerBar * pixelsPerBeat
+                let line = Path { path in
+                    path.move(to: CGPoint(x: x, y: 0))
+                    path.addLine(to: CGPoint(x: x, y: size.height))
                 }
+                context.stroke(line, with: .color(Color.gray.opacity(0.5)), lineWidth: 1)
+                let text = Text("\(bar + 1)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.primary)
+                context.draw(text, at: CGPoint(x: x + 8, y: size.height / 2))
             }
             
             // Playhead
@@ -556,7 +556,7 @@ public struct TrackPianoRollView: View {
     private var noteGridCanvas: some View {
         Canvas { context, size in
             let timeSignature = viewModel.transportState.timeSignature
-            let beatsPerBar = timeSignature.beatsPerBar
+            let beatsPerBar = StudioMusicalGrid.beatsPerBar(timeSignature)
             let totalBeats = Int(totalWidth / pixelsPerBeat) + 1
             let pitchRange = visibleOctaveRange.lowerBound * 12...visibleOctaveRange.upperBound * 12 + 11
             
@@ -578,16 +578,22 @@ public struct TrackPianoRollView: View {
                 context.stroke(linePath, with: .color(palette.separator.opacity(pitch % 12 == 0 ? 0.65 : 0.25)), lineWidth: pitch % 12 == 0 ? 1 : 0.5)
             }
             
-            // Vertical lines (beat/bar)
+            // Draw quarter-note beats and true measure boundaries independently.
             for beat in 0...totalBeats {
                 let x = Double(beat) * pixelsPerBeat
-                let isBarLine = beat % beatsPerBar == 0
-                
-                let linePath = Path { path in
+                let line = Path { path in
                     path.move(to: CGPoint(x: x, y: 0))
                     path.addLine(to: CGPoint(x: x, y: size.height))
                 }
-                context.stroke(linePath, with: .color(palette.separator.opacity(isBarLine ? 0.9 : 0.35)), lineWidth: isBarLine ? 1 : 0.5)
+                context.stroke(line, with: .color(palette.separator.opacity(0.35)), lineWidth: 0.5)
+            }
+            for bar in 0...Int(ceil(Double(totalBeats) / beatsPerBar)) {
+                let x = Double(bar) * beatsPerBar * pixelsPerBeat
+                let line = Path { path in
+                    path.move(to: CGPoint(x: x, y: 0))
+                    path.addLine(to: CGPoint(x: x, y: size.height))
+                }
+                context.stroke(line, with: .color(palette.separator.opacity(0.9)), lineWidth: 1)
             }
             
             // Draw existing notes (with drag offset for selected notes being dragged)
@@ -666,19 +672,25 @@ public struct TrackPianoRollView: View {
     private var velocityCanvas: some View {
         Canvas { context, size in
             let timeSignature = viewModel.transportState.timeSignature
-            let beatsPerBar = timeSignature.beatsPerBar
+            let beatsPerBar = StudioMusicalGrid.beatsPerBar(timeSignature)
             let totalBeats = Int(totalWidth / pixelsPerBeat) + 1
             
-            // Vertical lines
+            // Quarter-note beat lines plus compound-meter bar boundaries.
             for beat in 0...totalBeats {
                 let x = Double(beat) * pixelsPerBeat
-                let isBarLine = beat % beatsPerBar == 0
-                
-                let linePath = Path { path in
+                let line = Path { path in
                     path.move(to: CGPoint(x: x, y: 0))
                     path.addLine(to: CGPoint(x: x, y: size.height))
                 }
-                context.stroke(linePath, with: .color(Color.gray.opacity(isBarLine ? 0.5 : 0.2)), lineWidth: isBarLine ? 1 : 0.5)
+                context.stroke(line, with: .color(Color.gray.opacity(0.2)), lineWidth: 0.5)
+            }
+            for bar in 0...Int(ceil(Double(totalBeats) / beatsPerBar)) {
+                let x = Double(bar) * beatsPerBar * pixelsPerBeat
+                let line = Path { path in
+                    path.move(to: CGPoint(x: x, y: 0))
+                    path.addLine(to: CGPoint(x: x, y: size.height))
+                }
+                context.stroke(line, with: .color(Color.gray.opacity(0.5)), lineWidth: 1)
             }
             
             // Velocity bars for existing notes
@@ -725,19 +737,25 @@ public struct TrackPianoRollView: View {
     private var ccCanvas: some View {
         Canvas { context, size in
             let timeSignature = viewModel.transportState.timeSignature
-            let beatsPerBar = timeSignature.beatsPerBar
+            let beatsPerBar = StudioMusicalGrid.beatsPerBar(timeSignature)
             let totalBeats = Int(totalWidth / pixelsPerBeat) + 1
             
-            // Vertical lines
+            // Quarter-note beat lines plus compound-meter bar boundaries.
             for beat in 0...totalBeats {
                 let x = Double(beat) * pixelsPerBeat
-                let isBarLine = beat % beatsPerBar == 0
-                
-                let linePath = Path { path in
+                let line = Path { path in
                     path.move(to: CGPoint(x: x, y: 0))
                     path.addLine(to: CGPoint(x: x, y: size.height))
                 }
-                context.stroke(linePath, with: .color(Color.gray.opacity(isBarLine ? 0.5 : 0.2)), lineWidth: isBarLine ? 1 : 0.5)
+                context.stroke(line, with: .color(Color.gray.opacity(0.2)), lineWidth: 0.5)
+            }
+            for bar in 0...Int(ceil(Double(totalBeats) / beatsPerBar)) {
+                let x = Double(bar) * beatsPerBar * pixelsPerBeat
+                let line = Path { path in
+                    path.move(to: CGPoint(x: x, y: 0))
+                    path.addLine(to: CGPoint(x: x, y: size.height))
+                }
+                context.stroke(line, with: .color(Color.gray.opacity(0.5)), lineWidth: 1)
             }
             
             // CC points
