@@ -2580,7 +2580,9 @@ public final class ProjectViewModel: ObservableObject {
     // MARK: - Plugin State Management
     
     /// Save all loaded plugin states to project before saving
-    public func saveAllPluginStates() {
+    @discardableResult
+    public func saveAllPluginStates() -> [String] {
+        var captureFailures: [String] = []
         print("[PluginState] ========================================")
         print("[PluginState] SAVING ALL PLUGIN STATES")
         print("[PluginState] Rack instruments count: \(project.vRack.instruments.count)")
@@ -2603,6 +2605,7 @@ public final class ProjectViewModel: ObservableObject {
                 print("[PluginState] Saved track \(track.name): \(stateData.count) bytes")
             } catch {
                 print("[PluginState] Could not save track \(track.name): \(error)")
+                captureFailures.append("\(track.name): instrument preset could not be captured (\(error.localizedDescription))")
             }
         }
 
@@ -2625,6 +2628,7 @@ public final class ProjectViewModel: ObservableObject {
                         try pluginHost.savePreset(pluginID: loaded.id)
                 } catch {
                     print("[PluginState] Could not save insert \(slotIndex) on \(track.name): \(error)")
+                    captureFailures.append("\(track.name): insert \(slotIndex + 1) preset could not be captured (\(error.localizedDescription))")
                 }
             }
         }
@@ -2653,10 +2657,12 @@ public final class ProjectViewModel: ObservableObject {
                 print("[PluginState]   ✅ Saved \(stateData.count) bytes")
             } catch {
                 print("[PluginState]   ❌ Failed to save: \(error)")
+                captureFailures.append("\(instrument.name): V-Rack preset could not be captured (\(error.localizedDescription))")
             }
         }
         
         print("[PluginState] ========================================")
+        return captureFailures
     }
     
     /// Restore all plugin states after loading a project

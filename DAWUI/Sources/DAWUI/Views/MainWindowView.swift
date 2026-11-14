@@ -299,11 +299,25 @@ public struct MainWindowView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .requestProjectForSave)) { _ in
-            // Send current project back for saving
-            NotificationCenter.default.post(name: .projectDataForSave, object: viewModel.project)
+            captureProjectForSave()
         }
     }
-    
+
+    /// Synchronously snapshot the editor, its workspace controls and all
+    /// active instrument/effect Audio Unit presets for manual and autosave.
+    private func captureProjectForSave() {
+        syncDAWState()
+        let failures = viewModel.saveAllPluginStates()
+        guard failures.isEmpty else {
+            NotificationCenter.default.post(
+                name: .projectStateCaptureFailed,
+                object: failures.joined(separator: "\n")
+            )
+            return
+        }
+        NotificationCenter.default.post(name: .projectDataForSave, object: viewModel.project)
+    }
+
     /// Sync current UI state to project.dawState for persistence
     private func syncDAWState() {
         viewModel.project.dawState.showVRack = showVRack
