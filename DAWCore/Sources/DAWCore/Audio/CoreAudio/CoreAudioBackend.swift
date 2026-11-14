@@ -350,6 +350,13 @@ public final class CoreAudioBackend: AudioBackend {
         // stop/restart. Removal and AU changes still require hardware drain.
         try controlGate.perform {
             try controlGate.ensureMutationAvailable()
+            // Cap retained route versions to keep MacBook memory usage bounded.
+            // Only the exceptional pressure path drains the hardware output.
+            if renderGraph.pendingRouteRetirementCount >= 48 {
+                try withDrainedOutputResult {
+                    renderGraph.reclaimRetiredRoutesWhileQuiescent()
+                }
+            }
             renderGraph.createTrack(id: id)
         }
     }
