@@ -123,6 +123,22 @@ public final class AudioEngine: ObservableObject {
     /// calls this after attaching its sum mixer, with graph edits stopped.
     /// Re-registration is idempotent while the monitor edge is intact.
     public func registerVRackSumMixer(_ sumMixer: AVAudioMixerNode) {
+        let existing = engine.outputConnectionPoints(for: sumMixer, outputBus: 0)
+        let needsConnection = !vRackDirectMonitorAttached ||
+            vRackSourceMixer !== sumMixer || existing.isEmpty
+        if !needsConnection {
+            vRackDirectMonitorMixer.outputVolume = isMicrophoneAuditionActive ? 0 : 1
+            return
+        }
+        // A replaced/disconnected source invalidates any previous mic
+        // capture fanout. Restore the dry path before rewiring.
+        if isMicrophoneAuditionActive {
+            try? setMicrophoneAuditionEnabled(
+                false, tracks: [], microphones: [], room: microphoneRoom
+            )
+        }
+        let wasRunning = engine.isRunning
+        if wasRunning { engine.stop() }
         let format = AVAudioFormat(
             standardFormatWithSampleRate: sampleRate, channels: 2
         )!
@@ -131,19 +147,18 @@ public final class AudioEngine: ObservableObject {
             engine.connect(vRackDirectMonitorMixer, to: masterMixer, format: format)
             vRackDirectMonitorAttached = true
         }
-        let existing = engine.outputConnectionPoints(for: sumMixer, outputBus: 0)
-        if vRackSourceMixer !== sumMixer || existing.isEmpty {
-            // If a source was replaced/disconnected during audition, avoid
-            // muted dry monitoring with stale capture edges. Fall back first.
-            if isMicrophoneAuditionActive {
-                try? setMicrophoneAuditionEnabled(
-                    false, tracks: [], microphones: [], room: microphoneRoom
-                )
+        vRackSourceMixer = sumMixer
+        connectVRackMicrophoneFanout(format: format)
+        vRackDirectMonitorMixer.outputVolume = 1
+        if wasRunning {
+            do {
+                try engine.start()
+                isRunning = engine.isRunning
+            } catch {
+                isRunning = false
+                print("[V-Rack] Could not restart audio engine after monitor reconnect: \(error)")
             }
-            vRackSourceMixer = sumMixer
-            connectVRackMicrophoneFanout(format: format)
         }
-        vRackDirectMonitorMixer.outputVolume = isMicrophoneAuditionActive ? 0 : 1
     }
 
     /// V-Rack graph cardinality changes while a mic audition is active are
