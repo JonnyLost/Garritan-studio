@@ -79,12 +79,19 @@ public struct StudioVirtualMicrophone: Codable, Equatable, Identifiable, Sendabl
     public var pattern: StudioMicrophonePolarPattern
     public var arrayID: UUID?
     public var arrayName: String?
+    /// Nil means the default channel settings; preserves old saved capsules.
+    public var mixerSettings: StudioMicrophoneChannelSettings?
+
+    public var mixer: StudioMicrophoneChannelSettings {
+        mixerSettings ?? StudioMicrophoneChannelSettings()
+    }
 
     public init(id: UUID = UUID(), name: String = "Spot Microphone",
                 position: StudioRoomPosition3D = .init(),
                 azimuthDegrees: Double = 0, elevationDegrees: Double = 0,
                 pattern: StudioMicrophonePolarPattern = .cardioid,
-                arrayID: UUID? = nil, arrayName: String? = nil) {
+                arrayID: UUID? = nil, arrayName: String? = nil,
+                mixerSettings: StudioMicrophoneChannelSettings? = nil) {
         self.id = id
         self.name = name
         self.position = position
@@ -93,6 +100,7 @@ public struct StudioVirtualMicrophone: Codable, Equatable, Identifiable, Sendabl
         self.pattern = pattern
         self.arrayID = arrayID
         self.arrayName = arrayName
+        self.mixerSettings = mixerSettings
     }
 
     public func clamped(to room: StudioAcousticRoomDesign) -> Self {
@@ -144,7 +152,8 @@ public enum StudioMicrophoneArrayPreset: String, CaseIterable,
         let groupID = UUID()
 
         func mic(_ suffix: String, dx: Double, dy: Double, yaw: Double,
-                 pattern: StudioMicrophonePolarPattern) -> StudioVirtualMicrophone {
+                 pattern: StudioMicrophonePolarPattern,
+                 pan: Float = 0) -> StudioVirtualMicrophone {
             StudioVirtualMicrophone(
                 name: "\(displayName) — \(suffix)",
                 position: StudioRoomPosition3D(
@@ -153,7 +162,8 @@ public enum StudioMicrophoneArrayPreset: String, CaseIterable,
                     zMeters: origin.zMeters
                 ).clamped(to: room),
                 azimuthDegrees: yaw, pattern: pattern,
-                arrayID: groupID, arrayName: displayName
+                arrayID: groupID, arrayName: displayName,
+                mixerSettings: StudioMicrophoneChannelSettings(pan: pan)
             )
         }
 
@@ -162,19 +172,19 @@ public enum StudioMicrophoneArrayPreset: String, CaseIterable,
             return [mic("Spot", dx: 0, dy: 0, yaw: 0, pattern: .cardioid)]
         case .xyPair:
             return [
-                mic("Left", dx: 0, dy: 0, yaw: -45, pattern: .cardioid),
-                mic("Right", dx: 0, dy: 0, yaw: 45, pattern: .cardioid)
+                mic("Left", dx: 0, dy: 0, yaw: -45, pattern: .cardioid, pan: -0.7),
+                mic("Right", dx: 0, dy: 0, yaw: 45, pattern: .cardioid, pan: 0.7)
             ]
         case .ortfPair:
             return [
-                mic("Left", dx: -0.085, dy: 0, yaw: -55, pattern: .cardioid),
-                mic("Right", dx: 0.085, dy: 0, yaw: 55, pattern: .cardioid)
+                mic("Left", dx: -0.085, dy: 0, yaw: -55, pattern: .cardioid, pan: -0.7),
+                mic("Right", dx: 0.085, dy: 0, yaw: 55, pattern: .cardioid, pan: 0.7)
             ]
         case .deccaTree:
             return [
-                mic("Left", dx: -1, dy: 0, yaw: 0, pattern: .omnidirectional),
-                mic("Center", dx: 0, dy: 0.75, yaw: 0, pattern: .omnidirectional),
-                mic("Right", dx: 1, dy: 0, yaw: 0, pattern: .omnidirectional)
+                mic("Left", dx: -1, dy: 0, yaw: 0, pattern: .omnidirectional, pan: -0.8),
+                mic("Center", dx: 0, dy: 0.75, yaw: 0, pattern: .omnidirectional, pan: 0),
+                mic("Right", dx: 1, dy: 0, yaw: 0, pattern: .omnidirectional, pan: 0.8)
             ]
         }
     }
