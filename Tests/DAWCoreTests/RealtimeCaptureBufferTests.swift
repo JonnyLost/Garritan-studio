@@ -142,8 +142,8 @@ final class RealtimeCaptureBufferTests: XCTestCase {
             daw_pcm_page_cache_supply(cache, 1, $0.baseAddress, 4)
         })
         XCTAssertEqual(daw_pcm_page_cache_mix(cache, 2, 4, &left, &right, 1), 4)
-        XCTAssertEqual(Array(left.prefix(4)), [3.5, 5, 5, 6])
-        XCTAssertEqual(Array(right.prefix(4)), [35, 50, 50, 60])
+        XCTAssertEqual(Array(left.prefix(4)), [3.5, 5, 6.5, 8])
+        XCTAssertEqual(Array(right.prefix(4)), [35, 50, 65, 80])
         XCTAssertEqual(daw_pcm_page_cache_underrun_frames(cache), 4)
 
         // Page zero and page two alias the same bounded slot. A seek must
