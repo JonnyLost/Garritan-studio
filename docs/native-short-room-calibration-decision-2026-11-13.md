@@ -82,10 +82,10 @@ hall/preset is retuned.
 ## CI verification
 
 The earlier [A/B experiment run 43553162641](https://github.com/JonnyLost/Garritan-studio/actions/runs/43553162641)
-passed builds, regression tests and the nine-band (eight normal plus
-experimental candidate) offline research steps **while the candidate
-was temporarily auto-enabled**. The candidate therefore passed code
-tests **but failed acoustic acceptance**. The subsequent code changes
+passed builds, regression tests and an eight-profile offline calibration
+**while the candidate was temporarily auto-enabled** for the small
+treated room. The candidate therefore passed code tests **but failed
+acoustic acceptance**. The subsequent code changes
 explicitly disable automatic enablement and update regression guards.
 Refer to the latest workflow run on the feature branch for the final
 compile and safety check. Do not label that run as passing until it has
