@@ -78,6 +78,15 @@ public final class RenderGraph {
         retiredSnapshots.removeAll(keepingCapacity: true)
     }
 
+    /// Control-domain-only count, used to bound deferred snapshot retention.
+    /// If this reaches the cap, the backend briefly drains callbacks before
+    /// publishing more routes. Reclamation must never run on the callback.
+    var pendingRouteRetirementCount: Int { retiredSnapshots.count }
+
+    func reclaimRetiredRoutesWhileQuiescent() {
+        retireQuiescentSnapshots()
+    }
+
     private func withRenderSnapshot<T>(_ body: (RenderSnapshot) -> T) -> T {
         guard let raw = daw_route_exchange_begin_read(routeExchange) else {
             preconditionFailure("No render snapshot published")
