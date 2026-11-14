@@ -182,6 +182,29 @@ final class StudioMIDISessionPlannerTests: XCTestCase {
         XCTAssertFalse(first.contains { $0.event.id == noteA.id })
     }
 
+    func testHeldControllerReleasesAtTrimmedRegionEnd() {
+        let noteEvent = note(0, 60, duration: 8)
+        let map = StudioArticulationMap(articulations: [
+            StudioArticulationDefinition(id: "legato", name: "Legato",
+                actions: [StudioArticulationAction(
+                    kind: .controller, number: 68, value: 127,
+                    holdForNote: true)])])
+        let track = trackWithClip(start: 4, length: 2,
+            events: [noteEvent],
+            assignments: [.init(noteID: noteEvent.id, articulationID: "legato")],
+            map: map)
+        let rendered = StudioMIDISessionPlanner.events(
+            for: track, tempo: 120, from: 4)
+        let release = rendered.first { item in
+            if case .controlChange(68, 0) = item.event.type { return true }
+            return false
+        }
+        XCTAssertNotNil(release)
+        XCTAssertLessThan(release?.absoluteBeat ?? 999, 6)
+        XCTAssertGreaterThan(release?.absoluteBeat ?? 0, 5.99)
+        XCTAssertFalse(rendered.contains { $0.absoluteBeat >= 6 })
+    }
+
     func testDifferentMIDIChannelsMaintainIndependentArticulationStates() {
         let a = note(0, 60, channel: 0)
         let b = note(1, 64, channel: 1)
