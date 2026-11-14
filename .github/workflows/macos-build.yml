@@ -53,10 +53,18 @@ jobs:
           import json, os
           report = json.load(open("native-room-calibration.json"))
           assert report["scenarioSuiteEnabled"] is True
-          assert report["profileCount"] == 8, "Expected four factory plus four custom designs"
+          assert report["profileCount"] == 9, "Expected eight unchanged profiles plus one offline experiment"
           scenarios = {r["scenarioID"]: r for r in report["rooms"]}
-          expected = {"small-treated", "medium-wood", "large-reflective", "default-holdout"}
+          expected = {"small-treated", "medium-wood", "large-reflective",
+                      "default-holdout", "small-treated-experimental-fit"}
           assert expected.issubset(scenarios)
+          # Explicit regression guard: a failed experimental algorithm must
+          # never modify the normal native room chosen in Studio.
+          normal = scenarios["small-treated"]
+          candidate = scenarios["small-treated-experimental-fit"]
+          assert all(b["uncalibratedT20Seconds"] is None for b in normal["bands"])
+          assert any(b["uncalibratedT20Seconds"] is not None
+                     for b in candidate["bands"])
           summary = ["## Six-band acoustic calibration suite", "",
                      "Synthetic Studio DSP only; same rendered impulse, old versus new octave filters.",
                      "", "| Scenario | Valid T20 bands | Current error | Before short-room fit | Legacy analysis | Worst current error |",
