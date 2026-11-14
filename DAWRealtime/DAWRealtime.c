@@ -102,6 +102,33 @@ void daw_spsc_reset_quiescent(DAWSPSCCursor *cursor) {
     atomic_store_explicit(&cursor->head, 0, memory_order_release);
 }
 
+
+struct DAWRenderTransport {
+    _Atomic(bool) playing;
+    _Atomic(int64_t) position;
+};
+DAWRenderTransport *daw_render_transport_create(void) {
+    DAWRenderTransport *state = calloc(1, sizeof(*state));
+    if (state) {
+        atomic_init(&state->playing, false);
+        atomic_init(&state->position, 0);
+    }
+    return state;
+}
+void daw_render_transport_destroy(DAWRenderTransport *state) { free(state); }
+bool daw_render_transport_is_playing(const DAWRenderTransport *state) {
+    return state ? atomic_load_explicit(&state->playing, memory_order_acquire) : false;
+}
+void daw_render_transport_set_playing(DAWRenderTransport *state, bool playing) {
+    if (state) atomic_store_explicit(&state->playing, playing, memory_order_release);
+}
+int64_t daw_render_transport_position(const DAWRenderTransport *state) {
+    return state ? atomic_load_explicit(&state->position, memory_order_acquire) : 0;
+}
+void daw_render_transport_set_position(DAWRenderTransport *state, int64_t frame) {
+    if (state) atomic_store_explicit(&state->position, frame, memory_order_release);
+}
+
 static void updatePeak(struct DAWAudioPeakMeter *meter, float value) {
     if (!meter || !isfinite(value)) return;
     value = fabsf(value);
