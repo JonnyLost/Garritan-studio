@@ -100,7 +100,15 @@ public final class OfflineBounce {
         guard status == noErr, let outFile = outputFile else {
             throw AudioBackendError.bounceError("Could not create output file: \(status)")
         }
-        defer { ExtAudioFileDispose(outFile) }
+        // Never leave a truncated export masquerading as a finished WAV
+        // after cancellation or a failed write.
+        var completedSuccessfully = false
+        defer {
+            ExtAudioFileDispose(outFile)
+            if !completedSuccessfully {
+                try? FileManager.default.removeItem(at: outputURL)
+            }
+        }
         
         // Set client format
         status = ExtAudioFileSetProperty(
@@ -203,6 +211,8 @@ public final class OfflineBounce {
             }
         }
         
+
+        completedSuccessfully = true
 
         // Final progress update
         progress?(1.0)
