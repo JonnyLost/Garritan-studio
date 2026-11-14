@@ -559,6 +559,8 @@ public final class ProjectViewModel: ObservableObject {
         track.studioSynthEnabled = true
         track.studioSamplerPatch = nil
         track.studioSynthPatch = patch
+        track.automationLanes = StudioSynthAutomationConsistency.reconcile(
+            track.automationLanes, for: patch)
         updateTrack(track, description: "Load Studio Synth")
     }
 
