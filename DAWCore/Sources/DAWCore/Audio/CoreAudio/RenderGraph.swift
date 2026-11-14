@@ -15,7 +15,7 @@ public final class RenderGraph {
         var instrumentUnit: AudioUnit?
         var auAudioUnit: AUAudioUnit?  // For AUv3 rendering
         var renderBlock: AURenderBlock?  // AUv3 render callback
-        var effectUnits: [AudioUnit] = []
+        var effectUnits: [AudioUnit?] = []
         var volume: Float = 1.0
         var pan: Float = 0.0
         var isMuted: Bool = false
@@ -99,7 +99,7 @@ public final class RenderGraph {
         avAudioUnits.removeValue(forKey: id)
         
         // Dispose of effect units
-        for unit in track.effectUnits {
+        for case let unit? in track.effectUnits {
             AudioComponentInstanceDispose(unit)
         }
         
@@ -147,11 +147,8 @@ public final class RenderGraph {
             throw AudioBackendError.trackNotFound(trackID)
         }
         
-        // Unload existing instrument
-        if let existingUnit = track.instrumentUnit {
-            AudioComponentInstanceDispose(existingUnit)
-        }
-        avAudioUnits.removeValue(forKey: trackID)
+        // Keep the previous AVAudioUnit alive until replacement succeeds.
+        // AVAudioUnit owns its AudioUnit; never dispose that handle ourselves.
         
         // Use AVAudioUnit to properly instantiate AUv3 plugins
         // This ensures proper initialization that raw AudioComponentInstanceNew might miss
@@ -234,7 +231,10 @@ public final class RenderGraph {
         guard var track = tracks[trackID] else {
             throw AudioBackendError.trackNotFound(trackID)
         }
-        
+        guard slot >= 0 && slot < 64 else {
+            throw AudioBackendError.configurationError("Effect slot must be between 0 and 63")
+        }
+
         // Find and instantiate component
         var desc = description
         guard let component = AudioComponentFindNext(nil, &desc) else {
@@ -264,11 +264,19 @@ public final class RenderGraph {
         AudioUnitSetProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &streamFormat, UInt32(MemoryLayout<AudioStreamBasicDescription>.size))
         AudioUnitSetProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 0, &streamFormat, UInt32(MemoryLayout<AudioStreamBasicDescription>.size))
         
-        AudioUnitInitialize(unit)
+        let initializeStatus = AudioUnitInitialize(unit)
+        guard initializeStatus == noErr else {
+            AudioComponentInstanceDispose(unit)
+            throw AudioBackendError.pluginLoadFailed("Effect initialization failed: \(initializeStatus)")
+        }
         
-        // Insert at slot
+        // Sparse effect slots must not alias the same AudioUnit instance.
+        // Replace only the selected slot; dispose its previous owner once.
         while track.effectUnits.count <= slot {
-            track.effectUnits.append(unit) // Placeholder
+            track.effectUnits.append(nil)
+        }
+        if let previous = track.effectUnits[slot] {
+            AudioComponentInstanceDispose(previous)
         }
         track.effectUnits[slot] = unit
         tracks[trackID] = track
@@ -284,10 +292,13 @@ public final class RenderGraph {
             // Unload instrument - release AVAudioUnit (don't dispose directly)
             avAudioUnits.removeValue(forKey: trackID)
             track.instrumentUnit = nil
+            track.auAudioUnit = nil
+            track.renderBlock = nil
         } else if slot < track.effectUnits.count {
-            let unit = track.effectUnits[slot]
-            AudioComponentInstanceDispose(unit)
-            track.effectUnits.remove(at: slot)
+            if let unit = track.effectUnits[slot] {
+                AudioComponentInstanceDispose(unit)
+            }
+            track.effectUnits[slot] = nil
         }
         
         tracks[trackID] = track
@@ -419,7 +430,7 @@ public final class RenderGraph {
             }
             
             // Process through effects
-            for effect in track.effectUnits {
+            for case let effect? in track.effectUnits {
                 var effectTimeStamp = timeStamp
                 var effectFlags = AudioUnitRenderActionFlags()
                 withUnsafeMutablePointer(to: &stereoList) { stereoPtr in
