@@ -24,16 +24,6 @@ enum StudioGarritanArticulationFactory {
         let patches: [Patch]
     }
 
-    /// Names reused for DIFFERENT patches in the official GPO5 directory,
-    /// or containing percussion playback-note ranges mixed with KS triggers.
-    /// These are shown in the reference browser, not armed automatically.
-    private static let manualReviewPatches: Set<String> = [
-        "Violins 1 KS", "Violins 2 KS",
-        "Violas KS", "Cellos KS", "Basses KS",
-        "Percussion Accessories KS", "Snares KS",
-        "Timpani 1 KS", "Timpani 2 KS", "Timpani 3 KS"
-    ]
-
     private static func bundledCatalog() -> Data? {
         guard let url = Bundle.module.url(forResource: "GPO5_keyswitch_catalog",
                                           withExtension: "json") else { return nil }
@@ -72,27 +62,36 @@ enum StudioGarritanArticulationFactory {
         guard components.first?.caseInsensitiveCompare("Standard") == .orderedSame else {
             return .needsReview("The selected GPO5 program is not confirmed to be from the Standard set")
         }
-        if manualReviewPatches.contains(patchName) {
-            return .needsReview("This GPO5 patch name is ambiguous or mixes playback-note ranges and keyswitches in the manual")
-        }
         guard let data = catalogData ?? bundledCatalog(),
               let catalog = try? JSONDecoder().decode(Catalog.self, from: data) else {
             return .needsReview("The bundled GPO5 manual keyswitch catalog is missing or invalid")
         }
-        let matches = catalog.patches.filter {
-            $0.patch.caseInsensitiveCompare(patchName) == .orderedSame
+        let switches: [Catalog.Assignment]
+        switch StudioGarritanVerifiedSwitchTables.lookup(
+            patch: patchName, components: components
+        ) {
+        case .verified(let entries):
+            switches = entries.map { Catalog.Assignment(
+                note: $0.note, articulation: $0.label) }
+        case .needsReview(let reason):
+            return .needsReview(reason)
+        case .notSpecial:
+            let matches = catalog.patches.filter {
+                $0.patch.caseInsensitiveCompare(patchName) == .orderedSame
+            }
+            guard matches.count == 1, let match = matches.first else {
+                return .needsReview("No unique keyswitch entry exists for this exact GPO5 program")
+            }
+            switches = match.keyswitches
         }
-        guard matches.count == 1, let match = matches.first else {
-            return .needsReview("No unique keyswitch entry exists for this exact GPO5 program")
-        }
-        guard !match.keyswitches.isEmpty else {
+        guard !switches.isEmpty else {
             return .needsReview("No documented keyswitches for this program")
         }
 
         var usedIDs = Set<String>()
         var usedNumbers = Set<Int>()
         var definitions: [StudioArticulationDefinition] = []
-        for switchValue in match.keyswitches {
+        for switchValue in switches {
             guard let pitch = NoteData.pitch(from: switchValue.note),
                   !switchValue.articulation.isEmpty,
                   switchValue.articulation.count <= 70,
@@ -124,6 +123,45 @@ enum StudioGarritanArticulationFactory {
             articulations: definitions,
             factoryProgramID: programID,
             isFactoryDefault: true))
+    }
+
+    /// The GPO5 manual supplies no universal Notation-set KS octave table.
+    /// Build a *triggerless* reference from the corresponding Standard patch
+    /// so a composer can enter verified MIDI pitches for their installed ARIA
+    /// bank. This is never auto-installed as a factory keyswitch map.
+    static func notationTemplate(programID: String?,
+                                 catalogData: Data? = nil) -> StudioArticulationMap? {
+        guard let programID,
+              let separator = programID.firstIndex(of: ":"),
+              String(programID[..<separator]) == "Garritan Personal Orchestra 5"
+        else { return nil }
+
+        var path = String(programID[programID.index(after: separator)...])
+            .split(separator: "/").map(String.init)
+        guard path.count >= 2,
+              path[0].caseInsensitiveCompare("Notation") == .orderedSame,
+              let last = path.last,
+              last.lowercased().hasPrefix("n-"),
+              last.uppercased().hasSuffix(" KS") else { return nil }
+        path[0] = "Standard"
+        path[path.count - 1] = String(last.dropFirst(2))
+        let corresponding = "Garritan Personal Orchestra 5:" + path.joined(separator: "/")
+        guard case .ready(var standard) = resolve(
+            programID: corresponding, catalogData: catalogData
+        ) else { return nil }
+
+        standard.id = UUID()
+        standard.name = "GPO5 Notation (calibrate) • " + path[path.count - 1]
+        standard.factoryProgramID = programID
+        standard.isFactoryDefault = false
+        standard.articulations = standard.articulations.map { source in
+            var definition = source
+            // Any unverified MIDI pitch would play the wrong articulation
+            // in a Notation bank. Labels alone are harmless and editable.
+            definition.actions = []
+            return definition
+        }
+        return standard
     }
 
     private static func stableArticulationID(_ label: String) -> String {
