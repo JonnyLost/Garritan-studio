@@ -27,6 +27,8 @@ jobs:
         run: |
           set -euo pipefail
           git fetch origin '+refs/heads/*:refs/remotes/origin/*'
+          git config user.name "Studio CI Merge Rehearsal"
+          git config user.email "studio-ci@users.noreply.github.com"
           original="$(git rev-parse HEAD)"
           echo '## Consolidation: read-only merge rehearsals' >> "$GITHUB_STEP_SUMMARY"
           echo '| Feature source | Actual Git merge conflicts |' >> "$GITHUB_STEP_SUMMARY"
