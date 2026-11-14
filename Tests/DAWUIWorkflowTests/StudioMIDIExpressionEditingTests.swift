@@ -101,6 +101,39 @@ final class StudioMIDIExpressionEditingTests: XCTestCase {
         }
     }
 
+    func testOffsetRegionRetainsEventIDWhenFirstGridCellIsFractional() {
+        let existing = MIDIEvent.controlChange(at: 0, controller: 11, value: 44)
+        let edited = StudioMIDIExpressionEditing.draw(
+            events: [existing], lane: .expression,
+            points: [.init(beat: 2.125, value: 0.75)],
+            clipStartBeat: 2.125, division: 0.25, mode: .pencil)
+        XCTAssertEqual(edited.count, 1)
+        XCTAssertEqual(edited[0].id, existing.id)
+        XCTAssertEqual(edited[0].beatPosition, 0)
+    }
+
+    func testExpressionCurveCannotWriteEventsOutsideTrimmedRegion() {
+        let result = StudioMIDIExpressionEditing.draw(
+            events: [], lane: .modulation,
+            points: [.init(beat: 3.75, value: 0.2),
+                     .init(beat: 4.1, value: 0.9)],
+            clipStartBeat: 2, division: 0.25, mode: .curve,
+            clipEndBeat: 4.2)
+        XCTAssertTrue(result.allSatisfy { $0.beatPosition + 2 < 4.2 })
+        XCTAssertEqual(result.last?.beatPosition, 2)
+    }
+
+    func testDensePencilStrokeRespectsControllerEventBudget() {
+        let stroke = (0..<2000).map { i in
+            StudioMIDIExpressionPoint(beat: Double(i) * 0.25,
+                                      value: Double(i % 7) / 6)
+        }
+        let events = StudioMIDIExpressionEditing.draw(
+            events: [], lane: .expression, points: stroke,
+            clipStartBeat: 0, division: 0.25, mode: .pencil)
+        XCTAssertLessThanOrEqual(events.count, 4096)
+    }
+
     func testCC1AndCC11AreIndependent() {
         let cc1 = MIDIEvent.controlChange(at: 1, controller: 1, value: 48)
         let cc11 = MIDIEvent.controlChange(at: 1.5, controller: 11, value: 83)
