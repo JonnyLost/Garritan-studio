@@ -35,3 +35,5 @@ jobs:
         run: swift build
       - name: Test Studio (including musical grid and editing)
         run: swift test --parallel
+      - name: Build optimized DAWApp
+        run: swift build -c release --product DAWApp
