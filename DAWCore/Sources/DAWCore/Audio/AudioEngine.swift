@@ -818,11 +818,11 @@ public final class AudioEngine: ObservableObject {
                     microphoneChannelMixers[microphone.id] = bus
                 }
                 for source in sources {
-                    attachMicrophoneCaptures(for: source, format: format)
+                    try attachMicrophoneCaptures(for: source, format: format)
                     updateMicrophoneCapture(for: source)
                 }
                 if rackSourceIncluded {
-                    attachVRackMicrophoneCaptures(format: format)
+                    try attachVRackMicrophoneCaptures(format: format)
                     updateVRackMicrophoneCapture()
                 }
                 // A graph reconfiguration can drop the microphone return
@@ -904,10 +904,27 @@ public final class AudioEngine: ObservableObject {
         }
     }
 
+    /// Native mic Audio Units start with 44.1 kHz default busses, but the
+    /// running Mac audio device may be 48/96 kHz. Configure *every* AU bus
+    /// while detached and stopped, before AVAudioEngine connects or allocates
+    /// its render resources. The AU's own DSP then uses that negotiated rate.
+    /// Failure throws back to the audition setup's dry-path rollback.
+    private func configureMicrophoneCapture(
+        _ capture: AVAudioUnitEffect, format: AVAudioFormat
+    ) throws {
+        let unit = capture.auAudioUnit
+        for index in 0..<unit.inputBusses.count {
+            try unit.inputBusses[index].setFormat(format)
+        }
+        for index in 0..<unit.outputBusses.count {
+            try unit.outputBusses[index].setFormat(format)
+        }
+    }
+
     /// Uses the existing PRE-PAN gain node, after inserts but before any
     /// legacy stereo positioning. A source is sent to EVERY active mic bus.
     private func attachMicrophoneCaptures(for track: Track,
-                                          format: AVAudioFormat) {
+                                          format: AVAudioFormat) throws {
         guard let source = trackNodes[track.id] else { return }
         if usesSharedMicrophoneMatrix {
             // One effect per source, with four independently addressable
@@ -916,6 +933,7 @@ public final class AudioEngine: ObservableObject {
             let capture = AVAudioUnitEffect(
                 audioComponentDescription: NativeMicrophoneMatrixAudioUnit.componentDescription
             )
+            try configureMicrophoneCapture(capture, format: format)
             engine.attach(capture)
             for (index, mic) in routedMicrophones.enumerated() {
                 guard let bus = microphoneChannelMixers[mic.id] else { continue }
@@ -935,6 +953,7 @@ public final class AudioEngine: ObservableObject {
                 let capture = AVAudioUnitEffect(
                     audioComponentDescription: NativeMicrophoneSpillAudioUnit.componentDescription
                 )
+                try configureMicrophoneCapture(capture, format: format)
                 engine.attach(capture)
                 engine.connect(capture, to: bus, format: format)
                 microphoneRoutes.append(MicrophoneRoute(
@@ -1051,12 +1070,13 @@ public final class AudioEngine: ObservableObject {
     /// A V-Rack's many MIDI channels are already mixed by PlaybackEngine.
     /// This is an explicitly labeled aggregate source at the center of the
     /// stage. Per-instrument rack positioning is not yet represented here.
-    private func attachVRackMicrophoneCaptures(format: AVAudioFormat) {
+    private func attachVRackMicrophoneCaptures(format: AVAudioFormat) throws {
         guard vRackSourceMixer != nil, hasVRackCaptureSource else { return }
         if usesSharedMicrophoneMatrix {
             let capture = AVAudioUnitEffect(
                 audioComponentDescription: NativeMicrophoneMatrixAudioUnit.componentDescription
             )
+            try configureMicrophoneCapture(capture, format: format)
             engine.attach(capture)
             for (index, mic) in routedMicrophones.enumerated() {
                 guard let bus = microphoneChannelMixers[mic.id] else { continue }
@@ -1073,6 +1093,7 @@ public final class AudioEngine: ObservableObject {
                 let capture = AVAudioUnitEffect(
                     audioComponentDescription: NativeMicrophoneSpillAudioUnit.componentDescription
                 )
+                try configureMicrophoneCapture(capture, format: format)
                 engine.attach(capture)
                 engine.connect(capture, to: bus, format: format)
                 vRackMicrophoneRoutes.append(VRackMicrophoneRoute(
