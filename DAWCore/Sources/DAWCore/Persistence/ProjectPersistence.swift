@@ -514,6 +514,14 @@ public actor ProjectFileManager {
     /// Read a MIDI file into a completely new project. The caller decides
     /// whether to replace the active document; import never edits it in place.
     public func importMIDI(from url: URL) async throws -> Project {
+        // Check on-disk size *before* mapping file contents into memory.
+        // This protects MacBook sessions from unexpectedly huge SMF inputs.
+        let values = try url.resourceValues(forKeys: [.fileSizeKey])
+        if let byteCount = values.fileSize, byteCount > 64 * 1024 * 1024 {
+            throw PersistenceError.invalidFormat(
+                "MIDI import is limited to 64 MB per file"
+            )
+        }
         let data = try Data(contentsOf: url)
         let suggestedName = url.deletingPathExtension().lastPathComponent
         return try StandardMIDIFileImporter.decode(
