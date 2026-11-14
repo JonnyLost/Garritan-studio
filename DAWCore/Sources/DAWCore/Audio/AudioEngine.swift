@@ -760,6 +760,17 @@ public final class AudioEngine: ObservableObject {
         concertHallReverb.auAudioUnit.reset()
     }
 
+    /// Reset each insert's accumulated delay/compressor state too. Muting
+    /// another track does not necessarily erase its active effect tail.
+    /// Only call between passes, when the transport is stopped.
+    public func resetExportTrackEffects() {
+        for node in trackNodes.values {
+            for effect in node.pluginNodes {
+                effect.auAudioUnit.reset()
+            }
+        }
+    }
+
     // MARK: - Timing Tap
     
     /// Install a tap on the main mixer to track sample position and trigger MIDI events
