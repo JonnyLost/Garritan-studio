@@ -73,11 +73,14 @@ enum StudioMIDIExpressionEditing {
     static func draw(events: [MIDIEvent], lane: CCType,
                      points: [StudioMIDIExpressionPoint], clipStartBeat: Double,
                      division: Double, channel: UInt8 = 0,
-                     mode: StudioExpressionDrawMode = .pencil) -> [MIDIEvent] {
+                     mode: StudioExpressionDrawMode = .pencil,
+                     clipEndBeat: Double? = nil) -> [MIDIEvent] {
         guard clipStartBeat.isFinite, clipStartBeat >= 0,
               division.isFinite, division > 0, channel < 16 else { return events }
+        let end = clipEndBeat.flatMap { $0.isFinite && $0 > clipStartBeat ? $0 : nil }
         let valid = points.filter { $0.beat.isFinite && $0.value.isFinite &&
-            $0.beat >= clipStartBeat && $0.beat < 1_000_000 }
+            $0.beat >= clipStartBeat && $0.beat < 1_000_000 &&
+            (end == nil || $0.beat < end!) }
         guard !valid.isEmpty else { return events }
 
         // The grid index bounds keep accidental offscreen mouse gestures
@@ -100,6 +103,11 @@ enum StudioMIDIExpressionEditing {
             }
             let strideValue = first <= last ? 1 : -1
             for i in stride(from: first, through: last, by: strideValue) {
+                // Cap the ENTIRE stroke, not just each segment. High zoom
+                // and quick stylus scribbles must remain MacBook-friendly.
+                if sampled.count >= sampleCap && sampled[i] == nil && i != last {
+                    continue
+                }
                 let t = first == last ? 1.0 : Double(i - first) / Double(last - first)
                 let shapedT = shaped ? t * t * (3.0 - 2.0 * t) : t
                 sampled[i] = a.value + (b.value - a.value) * shapedT
@@ -144,7 +152,8 @@ enum StudioMIDIExpressionEditing {
                                                   channel: channel) != nil {
             let absolute = event.beatPosition + clipStartBeat
             let key = index(absolute)
-            if bounds.contains(key) && abs(absolute - Double(key) * division) <= tolerance {
+            if bounds.contains(key) &&
+                abs(absolute - max(clipStartBeat, Double(key) * division)) <= tolerance {
                 existing[key] = event.id
             }
         }
@@ -157,7 +166,9 @@ enum StudioMIDIExpressionEditing {
                      absolute <= Double(bounds.upperBound) * division + tolerance)
         }
         for (key, value) in sampled.sorted(by: { $0.key < $1.key }) {
-            let beat = max(clipStartBeat, Double(key) * division) - clipStartBeat
+            let absolute = max(clipStartBeat, Double(key) * division)
+            if let end, absolute >= end { continue }
+            let beat = absolute - clipStartBeat
             guard var event = makeEvent(at: beat, lane: lane, normalized: value,
                                         channel: channel) else { continue }
             if let id = existing[key] { event.id = id }
