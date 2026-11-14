@@ -57,6 +57,7 @@ public struct StudioExportView: View {
     @State private var tailSeconds: Double = 3
     @State private var errorMessage: String?
     @State private var completed = false
+    @State private var exportTask: Task<Void, Never>?
     private let close: () -> Void
 
     public init(viewModel: ProjectViewModel, close: @escaping () -> Void) {
@@ -215,6 +216,12 @@ public struct StudioExportView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 6)
+                if coordinator.isExporting {
+                    Button("Cancel Export") {
+                        exportTask?.cancel()
+                    }
+                    .buttonStyle(.bordered)
+                }
                 Button("Export") {
                     beginExport()
                 }
@@ -277,13 +284,16 @@ public struct StudioExportView: View {
         errorMessage = nil
         completed = false
         let settings = exportSettings
-        Task {
+        exportTask = Task {
+            defer { exportTask = nil }
             do {
                 _ = try await coordinator.export(
                     projectViewModel: viewModel,
                     settings: settings, to: folder
                 )
                 completed = true
+            } catch is CancellationError {
+                errorMessage = "Export canceled. No incomplete WAV files were committed."
             } catch {
                 errorMessage = error.localizedDescription
             }
