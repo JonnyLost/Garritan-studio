@@ -313,8 +313,10 @@ final class StudioRenderGraphSnapshotTests: XCTestCase {
         let secondToken = try graph.beginInstrumentReplacement(for: id)
         let second = try await graph.prepareInstrument(description, maximumFrames: 512)
         let secondUnit = try graph.installInstrument(
-            second, for: id, expectedRequestID: secondToken
+            second, for: id, expectedRequestID: secondToken,
+            enableCrossfade: true
         )
+        XCTAssertEqual(graph.pendingInstrumentTransitionCount, 1)
         XCTAssertNotEqual(firstUnit, secondUnit)
         XCTAssertEqual(graph.getInstrumentUnit(for: id), secondUnit)
         XCTAssertNotEqual(graph.publishedProcessingIdentity(for: id), firstProcessing)
@@ -322,6 +324,9 @@ final class StudioRenderGraphSnapshotTests: XCTestCase {
         XCTAssertThrowsError(try graph.validateInstrumentReplacement(
             for: id, requestID: firstToken
         ))
+        XCTAssertTrue(graph.reapInstrumentTransitions())
+        XCTAssertFalse(graph.reapInstrumentTransitions(force: true))
+        XCTAssertEqual(graph.pendingInstrumentTransitionCount, 0)
     }
 
     func testEffectReplacementTicketsAreIndependentPerSlot() throws {
