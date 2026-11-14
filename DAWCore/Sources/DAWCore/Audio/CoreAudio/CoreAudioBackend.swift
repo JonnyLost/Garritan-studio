@@ -344,9 +344,14 @@ public final class CoreAudioBackend: AudioBackend {
     // MARK: - Track Management
     
     public func createTrack(id: TrackID) throws {
-        // This protocol method can report an occupied offline graph; avoid
-        // silently losing a track-creation request during export.
-        try withDrainedOutputResult { renderGraph.createTrack(id: id) }
+        // Adding an empty route publishes a new immutable membership list.
+        // The active render callback still holds its old snapshot until its
+        // read epoch ends, so this one topology operation needs no output
+        // stop/restart. Removal and AU changes still require hardware drain.
+        try controlGate.perform {
+            try controlGate.ensureMutationAvailable()
+            renderGraph.createTrack(id: id)
+        }
     }
     
     public func removeTrack(id: TrackID) {
