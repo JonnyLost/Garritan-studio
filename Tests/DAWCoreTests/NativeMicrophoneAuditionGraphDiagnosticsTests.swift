@@ -7,7 +7,8 @@ import AVFoundation
 /// in VRackMicrophoneRoutingTests. Both backends must produce real PCM.
 @MainActor
 final class NativeMicrophoneAuditionGraphDiagnosticsTests: XCTestCase {
-    private func checkAudible(shared: Bool, rackFanout: Bool) throws {
+    private func checkAudible(shared: Bool, rackFanout: Bool,
+                              sampleRate: Double) throws {
         if shared {
             NativeMicrophoneMatrixAudioUnit.registerIfNeeded()
         } else {
@@ -15,12 +16,20 @@ final class NativeMicrophoneAuditionGraphDiagnosticsTests: XCTestCase {
         }
         let engine = AVAudioEngine()
         let format = try XCTUnwrap(
-            AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2)
+            AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2)
         )
         let player = AVAudioPlayerNode()
         let capture = AVAudioUnitEffect(audioComponentDescription: shared
             ? NativeMicrophoneMatrixAudioUnit.componentDescription
             : NativeMicrophoneSpillAudioUnit.componentDescription)
+        // Exercise 44.1 and 48 kHz, including every output bus of the shared
+        // microphone matrix. This is the format negotiation used in Studio.
+        for index in 0..<capture.auAudioUnit.inputBusses.count {
+            try capture.auAudioUnit.inputBusses[index].setFormat(format)
+        }
+        for index in 0..<capture.auAudioUnit.outputBusses.count {
+            try capture.auAudioUnit.outputBusses[index].setFormat(format)
+        }
         engine.attach(player)
         engine.attach(capture)
 
@@ -97,18 +106,24 @@ final class NativeMicrophoneAuditionGraphDiagnosticsTests: XCTestCase {
             }
         }
         XCTAssertGreaterThan(peak, 0.01,
-            "Mic AU silent: shared=\(shared), rackFanout=\(rackFanout)")
+            "Mic AU silent: shared=\(shared), rackFanout=\(rackFanout), sampleRate=\(sampleRate)")
     }
 
     func testIsolatedCapsulesProduceAudio() throws {
-        for shared in [false, true] {
-            try checkAudible(shared: shared, rackFanout: false)
+        for rate in [44_100.0, 48_000.0] {
+            for shared in [false, true] {
+                try checkAudible(shared: shared, rackFanout: false,
+                                 sampleRate: rate)
+            }
         }
     }
 
     func testFanoutCapsulesProduceAudioWithoutDryMonitor() throws {
-        for shared in [false, true] {
-            try checkAudible(shared: shared, rackFanout: true)
+        for rate in [44_100.0, 48_000.0] {
+            for shared in [false, true] {
+                try checkAudible(shared: shared, rackFanout: true,
+                                 sampleRate: rate)
+            }
         }
     }
 }
