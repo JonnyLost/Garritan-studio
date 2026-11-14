@@ -1198,7 +1198,10 @@ public final class ProjectViewModel: ObservableObject {
             description: description
         )
         undoManager.registerAction(action, project: &project)
-        
+        // Control-rate Synth automation responds immediately to edits made
+        // while playing; no audio graph rebuild or render-thread work.
+        playbackEngine.updateSynthAutomation(for: track)
+
         // Update audio engine
         audioEngine.updateTrackParameters(for: track)
         audioEngine.updateSoloState(tracks: project.tracks)
