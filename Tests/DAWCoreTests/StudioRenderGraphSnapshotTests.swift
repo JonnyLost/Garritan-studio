@@ -110,4 +110,66 @@ final class StudioRenderGraphSnapshotTests: XCTestCase {
         XCTAssertEqual(graph.renderSnapshotTrackIDs.count, 64)
         XCTAssertEqual(graph.renderSnapshotGeneration, 64)
     }
+
+    func testPerTrackResourcesRemainOwnedUntilRouteRetires() {
+        let graph = RenderGraph(sampleRate: 48_000, bufferSize: 256)
+        let track = TrackID()
+        graph.createTrack(id: track)
+        XCTAssertTrue(graph.canRemoveEmptyTrackLive(id: track))
+        XCTAssertEqual(graph.renderSnapshotTrackIDs, [track])
+
+        graph.removeTrack(id: track)
+        XCTAssertTrue(graph.renderSnapshotTrackIDs.isEmpty)
+        XCTAssertEqual(graph.renderSnapshotGeneration, 2)
+        XCTAssertFalse(graph.canRemoveEmptyTrackLive(id: track))
+
+        // A new track with the same identity obtains a new scratch owner;
+        // old snapshot resources are not reused by the new generation.
+        graph.createTrack(id: track)
+        XCTAssertEqual(graph.renderSnapshotTrackIDs, [track])
+        XCTAssertEqual(graph.renderSnapshotGeneration, 3)
+        graph.setBufferSize(1024)
+        XCTAssertEqual(graph.renderSnapshotTrackIDs, [track])
+        XCTAssertEqual(graph.renderSnapshotGeneration, 3)
+    }
+
+    func testLiveEmptyTrackRemovalAndAdditionDuringRender() {
+        struct StereoList {
+            var mNumberBuffers: UInt32 = 2
+            var left = AudioBuffer()
+            var right = AudioBuffer()
+        }
+        let graph = RenderGraph(sampleRate: 44_100, bufferSize: 128)
+        let initial = TrackID()
+        graph.createTrack(id: initial)
+        let complete = expectation(description: "reader completed")
+        DispatchQueue.global(qos: .userInitiated).async {
+            let left = UnsafeMutablePointer<Float>.allocate(capacity: 128)
+            let right = UnsafeMutablePointer<Float>.allocate(capacity: 128)
+            defer { left.deallocate(); right.deallocate() }
+            left.initialize(repeating: 0, count: 128)
+            right.initialize(repeating: 0, count: 128)
+            var list = StereoList()
+            list.left = AudioBuffer(mNumberChannels: 1, mDataByteSize: 512, mData: left)
+            list.right = AudioBuffer(mNumberChannels: 1, mDataByteSize: 512, mData: right)
+            for index in 0..<300 {
+                withUnsafeMutablePointer(to: &list) { pointer in
+                    pointer.withMemoryRebound(to: AudioBufferList.self, capacity: 1) {
+                        graph.render(frameCount: 128,
+                                     currentSample: Int64(index * 128),
+                                     outputBuffer: $0)
+                    }
+                }
+            }
+            complete.fulfill()
+        }
+        for _ in 0..<64 {
+            let id = TrackID()
+            graph.createTrack(id: id)
+            XCTAssertTrue(graph.canRemoveEmptyTrackLive(id: id))
+            graph.removeTrack(id: id)
+        }
+        wait(for: [complete], timeout: 10)
+        XCTAssertEqual(graph.renderSnapshotTrackIDs, [initial])
+    }
 }
