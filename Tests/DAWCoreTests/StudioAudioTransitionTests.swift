@@ -27,8 +27,10 @@ final class StudioAudioTransitionTests: XCTestCase {
         XCTAssertEqual(newR[0], 0.5, accuracy: 0.0001)
         let endFirst = newL[63]
 
-        newL.initialize(repeating: -1, count: 64)
-        newR.initialize(repeating: -0.5, count: 64)
+        for i in 0..<64 {
+            newL[i] = -1
+            newR[i] = -0.5
+        }
         StudioInstrumentCrossfade.blend(
             oldLeft: UnsafePointer(oldL), oldRight: UnsafePointer(oldR),
             newLeft: newL, newRight: newR,
@@ -73,6 +75,8 @@ final class StudioAudioTransitionTests: XCTestCase {
             sourceL.deallocate(); sourceR.deallocate()
             outputL.deallocate(); outputR.deallocate()
         }
+        sourceL.initialize(repeating: 0, count: 8)
+        sourceR.initialize(repeating: 0, count: 8)
         for i in 0..<8 {
             sourceL[i] = Float(i) / 8
             sourceR[i] = -Float(i) / 8
