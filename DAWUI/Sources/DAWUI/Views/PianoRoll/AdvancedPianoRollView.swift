@@ -144,6 +144,10 @@ public struct AdvancedPianoRollView: View {
 
     // Editing state
     @State private var draggedNoteID: UUID? = nil
+    // Drag previews never modify the project; one undoable change is committed
+    // only when the gesture completes.
+    @State private var previewMIDI: MIDIClipData? = nil
+    @State private var dragHasMaterialChange = false
     @State private var dragMode: NoteDragMode = .none
     @State private var dragStartBeat: Double = 0
     @State private var dragStartPitch: Int = 0
@@ -275,6 +279,16 @@ public struct AdvancedPianoRollView: View {
         .background(Color(nsColor: .controlBackgroundColor))
         .focusable()
         .onKeyPress { keyPress in
+            if keyPress.modifiers.contains(.command) {
+                switch keyPress.characters.lowercased() {
+                case "a": selectAll(); return .handled
+                case "c": copySelected(); return .handled
+                case "x": copySelected(); deleteSelected(); return .handled
+                case "v": paste(); return .handled
+                case "d": duplicateSelected(); return .handled
+                default: return .ignored
+                }
+            }
             // Tool shortcuts (when no modifier keys are held)
             switch keyPress.characters.lowercased() {
             case "a":
@@ -288,15 +302,6 @@ public struct AdvancedPianoRollView: View {
                 return .handled
             case "v":
                 currentTool = .velocity
-                return .handled
-            case "s":
-                currentTool = .split
-                return .handled
-            case "g":
-                currentTool = .glue
-                return .handled
-            case "m":
-                currentTool = .mute
                 return .handled
             case "q":
                 // Quantize shortcut - only if notes are selected
@@ -354,7 +359,7 @@ public struct AdvancedPianoRollView: View {
             Divider().frame(height: 20)
             
             // Tool selection with keyboard shortcuts
-            ForEach(MIDIEditorTool.allCases, id: \.self) { tool in
+            ForEach([MIDIEditorTool.select, .pencil, .eraser, .velocity], id: \.self) { tool in
                 Button(action: { currentTool = tool }) {
                     Image(systemName: tool.icon)
                         .foregroundColor(currentTool == tool ? .accentColor : .primary)
@@ -974,49 +979,45 @@ public struct AdvancedPianoRollView: View {
     }
     
     private func deleteSelected() {
-        guard var clip = currentClip, case .midi(var midiData) = clip.content else { return }
-        
-        midiData.events.removeAll { selectedNoteIDs.contains($0.id) }
+        guard !selectedNoteIDs.isEmpty,
+              var clip = currentClip, case .midi(var midiData) = clip.content else { return }
+        let edited = StudioMIDINoteEditing.deletingSelected(in: midiData.events,
+                                                            ids: selectedNoteIDs)
+        guard edited.count != midiData.events.count else { return }
+        midiData.events = edited
         clip.content = .midi(midiData)
-        
-        updateClip(clip)
+        updateClip(clip, description: "Delete MIDI Notes")
         selectedNoteIDs.removeAll()
     }
-    
+
     private func copySelected() {
-        copiedNotes = noteEvents.filter { selectedNoteIDs.contains($0.id) }
+        copiedNotes = StudioMIDINoteEditing.selectedNotes(in: noteEvents,
+                                                           ids: selectedNoteIDs)
     }
-    
+
     private func paste() {
-        guard var clip = currentClip, case .midi(var midiData) = clip.content else { return }
-        
-        let playheadBeat = viewModel.transportState.playheadBeats
-        let clipStartBeat = clip.timeRange.start.beats(atTempo: viewModel.transportState.tempo.bpm)
-        let insertBeat = playheadBeat - clipStartBeat
-        
-        // Find the earliest note in copied selection
-        let minBeat = copiedNotes.map { $0.beatPosition }.min() ?? 0
-        
-        var newSelection: Set<UUID> = []
-        
-        for note in copiedNotes {
-            var newNote = note
-            newNote.id = UUID()
-            newNote.beatPosition = insertBeat + (note.beatPosition - minBeat)
-            midiData.events.append(newNote)
-            newSelection.insert(newNote.id)
-        }
-        
+        guard !copiedNotes.isEmpty,
+              var clip = currentClip, case .midi(var midiData) = clip.content else { return }
+        let insertion = max(0, viewModel.transportState.playheadBeats - clipStartBeat)
+        let newIDs = StudioMIDINoteEditing.paste(copiedNotes, into: &midiData.events,
+                                                at: insertion)
+        guard !newIDs.isEmpty else { return }
         clip.content = .midi(midiData)
-        updateClip(clip)
-        selectedNoteIDs = newSelection
+        updateClip(clip, description: "Paste MIDI Notes")
+        selectedNoteIDs = newIDs
     }
-    
+
     private func duplicateSelected() {
-        copySelected()
-        paste()
+        guard !selectedNoteIDs.isEmpty,
+              var clip = currentClip, case .midi(var midiData) = clip.content else { return }
+        let ids = StudioMIDINoteEditing.duplicateSelected(in: &midiData.events,
+                                                          ids: selectedNoteIDs)
+        guard !ids.isEmpty else { return }
+        clip.content = .midi(midiData)
+        updateClip(clip, description: "Duplicate MIDI Notes")
+        selectedNoteIDs = ids
     }
-    
+
     /// Create a note at an absolute beat position
     private func createNote(at absoluteBeat: Double, pitch: Int, duration: Double, velocity: UInt8 = 100) {
         guard var clip = currentClip, case .midi(var midiData) = clip.content else { return }
@@ -1130,183 +1131,114 @@ public struct AdvancedPianoRollView: View {
         draggedNoteID = event.id
         dragMode = mode
         dragStartBeat = event.beatPosition
-        if case .note(let noteData) = event.type {
-            dragStartPitch = Int(noteData.pitch)
-            dragStartDuration = noteData.duration
+        if case .note(let data) = event.type {
+            dragStartPitch = Int(data.pitch)
+            dragStartDuration = data.duration
         }
-        
-        // Check for Option key at start of drag - if held, we'll copy instead of move
-        isCopyingNotes = NSEvent.modifierFlags.contains(.option) && mode == .move
-
-        // If the dragged note is selected and we're moving, capture all selected note positions
-        if mode == .move && selectedNoteIDs.contains(event.id) {
-            dragStartPositions.removeAll()
-            for noteEvent in noteEvents {
-                if selectedNoteIDs.contains(noteEvent.id) {
-                    if case .note(let data) = noteEvent.type {
-                        dragStartPositions[noteEvent.id] = (
-                            beat: noteEvent.beatPosition,
-                            pitch: Int(data.pitch),
-                            duration: data.duration
-                        )
-                    }
-                }
+        if !selectedNoteIDs.contains(event.id) {
+            selectedNoteIDs = [event.id]
+        }
+        dragStartPositions.removeAll()
+        for selected in noteEvents where selectedNoteIDs.contains(selected.id) {
+            if case .note(let data) = selected.type {
+                dragStartPositions[selected.id] = (
+                    beat: selected.beatPosition, pitch: Int(data.pitch),
+                    duration: data.duration
+                )
             }
-        } else {
-            dragStartPositions.removeAll()
         }
+        isCopyingNotes = NSEvent.modifierFlags.contains(.option) && mode == .move
+        dragHasMaterialChange = false
+        previewMIDI = nil
     }
-    
+
     private func handleNoteDrag(_ delta: CGSize) {
-        guard let noteID = draggedNoteID,
-              var clip = currentClip,
-              case .midi(var midiData) = clip.content
-        else { return }
-
-        let beatDelta = delta.width / pixelsPerBeat
-        let pitchDelta = -Int(delta.height / noteHeight)
-        let minDuration = snapMode.division(for: viewModel.transportState.timeSignature) > 0 ? snapMode.division(for: viewModel.transportState.timeSignature) : 0.0625  // 1/16th note minimum
-
+        guard let id = draggedNoteID,
+              let clip = currentClip,
+              case .midi(let original) = clip.content else { return }
+        let beatDelta = Double(delta.width) / pixelsPerBeat
+        let pitchDelta = Int((-delta.height / noteHeight).rounded())
+        let division = snapMode.division(for: viewModel.transportState.timeSignature)
+        let bypass = NSEvent.modifierFlags.contains(.command)
+        let edited: [MIDIEvent]
         switch dragMode {
         case .move:
-            // Calculate the new pitch for audition
-            let newPitch = max(0, min(127, dragStartPitch + pitchDelta))
-            
-            // Audition note when pitch changes
-            if newPitch != lastAuditionedPitch {
-                viewModel.playNotePreview(pitch: UInt8(newPitch))
-                lastAuditionedPitch = newPitch
-            }
-            
-            // Check if we're moving multiple selected notes
-            if !dragStartPositions.isEmpty {
-                // Move all selected notes together
-                for (id, startPos) in dragStartPositions {
-                    guard let index = midiData.events.firstIndex(where: { $0.id == id }),
-                          case .note(var noteData) = midiData.events[index].type else { continue }
-
-                    let newBeat = max(0, snapBeat(startPos.beat + beatDelta))
-                    midiData.events[index].beatPosition = newBeat
-                    noteData.pitch = UInt8(max(0, min(127, startPos.pitch + pitchDelta)))
-                    midiData.events[index].type = .note(noteData)
+            edited = StudioMIDINoteEditing.moving(
+                original.events, selectedIDs: selectedNoteIDs, beatDelta: beatDelta,
+                pitchDelta: pitchDelta, division: division, bypassSnap: bypass)
+            let previewPitch = max(0, min(127, dragStartPitch + pitchDelta))
+            if previewPitch != lastAuditionedPitch {
+                if let previous = lastAuditionedPitch {
+                    viewModel.stopNotePreview(pitch: UInt8(previous))
                 }
-            } else {
-                // Move single note (the dragged one)
-                guard let index = midiData.events.firstIndex(where: { $0.id == noteID }),
-                      case .note(var noteData) = midiData.events[index].type else { return }
-
-                let newBeat = max(0, snapBeat(dragStartBeat + beatDelta))
-                midiData.events[index].beatPosition = newBeat
-                noteData.pitch = UInt8(max(0, min(127, dragStartPitch + pitchDelta)))
-                midiData.events[index].type = .note(noteData)
+                if pitchDelta != 0 {
+                    viewModel.playNotePreview(pitch: UInt8(previewPitch))
+                    lastAuditionedPitch = previewPitch
+                } else {
+                    lastAuditionedPitch = nil
+                }
             }
-            
         case .resizeStart:
-            // Resize from start: move start position, adjust duration to keep end fixed
-            guard let index = midiData.events.firstIndex(where: { $0.id == noteID }),
-                  case .note(var noteData) = midiData.events[index].type else { return }
-            
-            let originalEnd = dragStartBeat + dragStartDuration
-            let newStart = snapBeat(dragStartBeat + beatDelta)
-            let newDuration = max(minDuration, originalEnd - newStart)
-            midiData.events[index].beatPosition = max(0, originalEnd - newDuration)
-            noteData.duration = newDuration
-            midiData.events[index].type = .note(noteData)
-            
+            edited = StudioMIDINoteEditing.resizing(
+                original.events, noteID: id, edge: .start, beatDelta: beatDelta,
+                division: division, bypassSnap: bypass,
+                minimumDuration: max(0.0625, division))
         case .resizeEnd:
-            // Resize from end: just change duration
-            guard let index = midiData.events.firstIndex(where: { $0.id == noteID }),
-                  case .note(var noteData) = midiData.events[index].type else { return }
-            
-            let newDuration = max(minDuration, snapBeat(dragStartDuration + beatDelta))
-            noteData.duration = newDuration
-            midiData.events[index].type = .note(noteData)
-            
+            edited = StudioMIDINoteEditing.resizing(
+                original.events, noteID: id, edge: .end, beatDelta: beatDelta,
+                division: division, bypassSnap: bypass,
+                minimumDuration: max(0.0625, division))
         case .none:
-            break
+            return
         }
-        
-        clip.content = .midi(midiData)
-        
-        // Update without registering undo during drag
-        if let trackID = viewModel.selectedTrackID,
-           var track = viewModel.project.track(withID: trackID),
-           let clipIndex = track.clips.firstIndex(where: { $0.id == clipID }) {
-            track.clips[clipIndex] = clip
-            viewModel.project.updateTrack(track)
+        dragHasMaterialChange = zip(original.events, edited).contains { before, after in
+            guard selectedNoteIDs.contains(before.id),
+                  case .note(let old) = before.type,
+                  case .note(let new) = after.type else { return false }
+            return before.beatPosition != after.beatPosition ||
+                old.pitch != new.pitch || old.duration != new.duration
         }
+        var draft = original
+        draft.events = edited
+        previewMIDI = draft
     }
-    
+
     private func endNoteDrag() {
-        if draggedNoteID != nil {
-            // Check if we're copying (Option key held during drag)
-            if isCopyingNotes && dragMode == .move {
-                // Copy mode: restore originals and create new notes at current positions
-                if var clip = currentClip, case .midi(var midiData) = clip.content {
-                    // Get current positions of moved notes
-                    var newNotes: [MIDIEvent] = []
-                    
-                    if !dragStartPositions.isEmpty {
-                        // Multiple notes being copied
-                        for (id, startPos) in dragStartPositions {
-                            if let index = midiData.events.firstIndex(where: { $0.id == id }),
-                               case .note(let noteData) = midiData.events[index].type {
-                                // Create new note at current position
-                                let newNote = MIDIEvent(
-                                    beatPosition: midiData.events[index].beatPosition,
-                                    type: .note(noteData),
-                                    channel: midiData.events[index].channel
-                                )
-                                newNotes.append(newNote)
-                                
-                                // Restore original position
-                                var restoredData = noteData
-                                restoredData.pitch = UInt8(startPos.pitch)
-                                midiData.events[index].beatPosition = startPos.beat
-                                midiData.events[index].type = .note(restoredData)
-                            }
-                        }
-                    } else if let noteID = draggedNoteID,
-                              let index = midiData.events.firstIndex(where: { $0.id == noteID }),
-                              case .note(let noteData) = midiData.events[index].type {
-                        // Single note being copied
-                        let newNote = MIDIEvent(
-                            beatPosition: midiData.events[index].beatPosition,
-                            type: .note(noteData),
-                            channel: midiData.events[index].channel
-                        )
-                        newNotes.append(newNote)
-                        
-                        // Restore original position
-                        var restoredData = noteData
-                        restoredData.pitch = UInt8(dragStartPitch)
-                        midiData.events[index].beatPosition = dragStartBeat
-                        midiData.events[index].type = .note(restoredData)
-                    }
-                    
-                    // Add new copies
-                    midiData.events.append(contentsOf: newNotes)
-                    clip.content = .midi(midiData)
-                    
-                    // Select the new copies
-                    selectedNoteIDs = Set(newNotes.map { $0.id })
-                    
-                    updateClip(clip)
-                }
-            } else {
-                // Normal move: register the final state with undo
-                if let clip = currentClip {
-                    updateClip(clip)
-                }
+        defer {
+            if let last = lastAuditionedPitch {
+                viewModel.stopNotePreview(pitch: UInt8(last))
             }
+            draggedNoteID = nil
+            dragMode = .none
+            dragStartPositions.removeAll()
+            lastAuditionedPitch = nil
+            previewMIDI = nil
+            dragHasMaterialChange = false
+            isCopyingNotes = false
         }
-        draggedNoteID = nil
-        dragMode = .none
-        dragStartPositions.removeAll()
-        lastAuditionedPitch = nil
-        isCopyingNotes = false
+        guard dragHasMaterialChange, let draft = previewMIDI,
+              var clip = currentClip, case .midi(let original) = clip.content else { return }
+
+        if isCopyingNotes && dragMode == .move {
+            var copied = original
+            var selectedCopies: Set<UUID> = []
+            for moved in draft.events where selectedNoteIDs.contains(moved.id) {
+                guard case .note = moved.type else { continue }
+                var copy = moved
+                copy.id = UUID()
+                copied.events.append(copy)
+                selectedCopies.insert(copy.id)
+            }
+            guard !selectedCopies.isEmpty else { return }
+            clip.content = .midi(copied)
+            updateClip(clip, description: "Copy MIDI Notes")
+            selectedNoteIDs = selectedCopies
+        } else {
+            clip.content = .midi(draft)
+            updateClip(clip, description: "Edit MIDI Notes")
+        }
     }
-    
+
     // MARK: - CC Operations
     
     private func addCCPoint(at beat: Double, value: UInt8) {
@@ -1346,7 +1278,8 @@ public struct AdvancedPianoRollView: View {
     
     private var noteEvents: [MIDIEvent] {
         guard let clip = currentClip, case .midi(let midiData) = clip.content else { return [] }
-        return midiData.events.filter { if case .note = $0.type { return true } else { return false } }
+        let displayed = previewMIDI ?? midiData
+        return displayed.events.filter { if case .note = $0.type { return true } else { return false } }
     }
     
     private var ccEvents: [MIDIEvent] {
@@ -1404,13 +1337,13 @@ public struct AdvancedPianoRollView: View {
         return CGRect(x: x, y: y, width: width, height: noteHeight)
     }
     
-    private func updateClip(_ clip: Clip) {
+    private func updateClip(_ clip: Clip, description: String = "Edit MIDI") {
         guard let trackID = viewModel.selectedTrackID,
               var track = viewModel.project.track(withID: trackID),
               let clipIndex = track.clips.firstIndex(where: { $0.id == clipID }) else { return }
         
         track.clips[clipIndex] = clip
-        viewModel.updateTrack(track, description: "Edit MIDI")
+        viewModel.updateTrack(track, description: description)
     }
     
     private func setupInitialView() {
