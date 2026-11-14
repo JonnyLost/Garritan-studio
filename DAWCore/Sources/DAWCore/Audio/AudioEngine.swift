@@ -71,6 +71,24 @@ public final class AudioEngine: ObservableObject {
     private let concertHallReturnMixer = AVAudioMixerNode()
     private let nativeEarlyReflectionMixer = AVAudioMixerNode()
     private var nativeEarlyReflectionMixerConnected = false
+
+    // Mic audition is an alternate, explicitly selected mix. The original dry
+    // tracks and hall always remain wired and can be restored immediately.
+    // Only four mics x sixteen source tracks are supported in this first
+    // per-pair Audio Unit graph. A consolidated matrix is a later optimization.
+    public static let maximumAuditionMicrophones = 4
+    public static let maximumAuditionSources = 16
+    private let microphoneMasterMixer = AVAudioMixerNode()
+    private var microphoneChannelMixers: [UUID: AVAudioMixerNode] = [:]
+    private struct MicrophoneRoute {
+        let sourceID: TrackID
+        let microphoneID: UUID
+        let capture: AVAudioUnitEffect
+    }
+    private var microphoneRoutes: [MicrophoneRoute] = []
+    private var routedMicrophones: [StudioVirtualMicrophone] = []
+    private var microphoneRoom = StudioAcousticRoomDesign()
+    @Published public private(set) var isMicrophoneAuditionActive = false
     /// Shared hall return level, independent of individual instrument sends.
     @Published public private(set) var concertHallOverallReverb: Float = 1.0
 
@@ -124,6 +142,8 @@ public final class AudioEngine: ObservableObject {
 
         // Dedicated Concert Hall return; existing dry routes stay untouched.
         engine.attach(concertHallReturnMixer)
+        engine.attach(microphoneMasterMixer)
+        microphoneMasterMixer.outputVolume = 0
 
         let hallFormat = AVAudioFormat(
             standardFormatWithSampleRate: engine.outputNode.outputFormat(forBus: 0).sampleRate,
@@ -133,6 +153,7 @@ public final class AudioEngine: ObservableObject {
         engine.connect(concertHallSendMixer, to: concertHallReverb, format: hallFormat)
         engine.connect(concertHallReverb, to: concertHallReturnMixer, format: hallFormat)
         engine.connect(concertHallReturnMixer, to: masterMixer, format: hallFormat)
+        engine.connect(microphoneMasterMixer, to: masterMixer, format: hallFormat)
 
         print("[ConcertHall] Dedicated reverb return connected")
         
@@ -312,6 +333,12 @@ public final class AudioEngine: ObservableObject {
                                        nativeEnabled: usesNativeConcertHallReverb)
 
         trackNodes[track.id] = trackNode
+        if isMicrophoneAuditionActive,
+           (track.type == .midi || track.type == .instrument || track.type == .audio) {
+            attachMicrophoneCaptures(for: track, format: format)
+            updateMicrophoneCapture(for: track)
+            trackNode.setMicrophoneAuditionActive(true)
+        }
         print("[Track Audio] Installing meter")
         installTrackMeter(for: trackNode)
         print("[Track Audio] Track node ready")
@@ -364,6 +391,8 @@ public final class AudioEngine: ObservableObject {
             }
         }
 
+        // Remove mic effects before detaching the pre-pan source node.
+        removeMicrophoneCaptures(for: trackID)
         // Remove metering tap before detaching the output node.
         trackNode.outputMixer.removeTap(onBus: 0)
         trackMeterStates.removeValue(forKey: trackID)
@@ -409,6 +438,7 @@ public final class AudioEngine: ObservableObject {
         trackNode.setMuted(track.isMuted)
         // Keep the acoustic send synchronized with all track edits, including undo/redo.
         setConcertHallDepth(track.stageReverbZone ?? 2, wetTrim: track.stageWetTrim ?? 1, for: track.id)
+        updateMicrophoneCapture(for: track)
     }
     
     /// Set Concert Hall ambience according to orchestral stage depth.
@@ -425,7 +455,8 @@ public final class AudioEngine: ObservableObject {
 
     public func setConcertHallOverallReverb(_ level: Float) {
         concertHallOverallReverb = level.isFinite ? min(2, max(0, level)) : 1
-        concertHallReturnMixer.outputVolume = concertHallOverallReverb
+        concertHallReturnMixer.outputVolume = isMicrophoneAuditionActive
+            ? 0 : concertHallOverallReverb
     }
 
     /// Switch the single shared hall return to Studio's original algorithmic DSP.
@@ -613,6 +644,7 @@ public final class AudioEngine: ObservableObject {
                 // Respect individual mute states
                 trackNode.setMuted(track.isMuted)
             }
+            updateMicrophoneCapture(for: track)
         }
     }
     
@@ -751,18 +783,23 @@ public final class AudioEngine: ObservableObject {
         } else {
             engine.connect(trackNode.gainNode, to: trackNode.pannerNode, format: format)
         }
+        // An insert change must preserve mic audition's PRE-PAN source tap.
+        // Otherwise an AVAudioEngine.connect call would silently drop spill.
+        if isMicrophoneAuditionActive {
+            connectMicrophoneSourceFanout(for: trackNode, format: format)
+        }
         // Rebuilding an insert chain must preserve the same post-panner
         // dry / Concert Hall split established when the track was created.
         // Connecting only to outputMixer previously disconnected its wet send.
-        engine.connect(
-            trackNode.pannerNode,
-            to: [
-                AVAudioConnectionPoint(node: trackNode.outputMixer, bus: 0),
-                AVAudioConnectionPoint(node: trackNode.concertHallSend, bus: 0)
-            ],
-            fromBus: 0,
-            format: format
-        )
+        var destinations = [
+            AVAudioConnectionPoint(node: trackNode.outputMixer, bus: 0),
+            AVAudioConnectionPoint(node: trackNode.concertHallSend, bus: 0)
+        ]
+        if let early = trackNode.earlyReflectionSend {
+            destinations.append(AVAudioConnectionPoint(node: early, bus: 0))
+        }
+        engine.connect(trackNode.pannerNode, to: destinations,
+                       fromBus: 0, format: format)
     }
 
     // MARK: - Audio Playback
@@ -1150,6 +1187,7 @@ public final class TrackAudioNode {
     private var stagePan: Float = 0
     private var stageZone = 2
     private var nativeMicrophoneDirectGain: Float = 1
+    private var isMicrophoneAuditionActive = false
     
     // Plugin chain (Audio Units)
     public var pluginNodes: [AVAudioUnit] = []
@@ -1239,10 +1277,21 @@ public final class TrackAudioNode {
         self.isMuted = muted
         updateOutputVolume()
     }
+
+    /// Post-track-fader and mute/solo level used for every microphone send.
+    /// Source audio is branched BEFORE the legacy panner, so its pan is never
+    /// incorrectly applied a second time inside a virtual microphone.
+    public var microphoneSourceGain: Float { isMuted ? 0 : volume }
+
+    public func setMicrophoneAuditionActive(_ active: Bool) {
+        isMicrophoneAuditionActive = active
+        updateOutputVolume()
+    }
     
     private func updateOutputVolume() {
         let dryGain: Float = isMuted ? 0.0 : volume
-        outputMixer.outputVolume = dryGain * stageDirectLevel * nativeMicrophoneDirectGain
+        outputMixer.outputVolume = isMicrophoneAuditionActive
+            ? 0 : dryGain * stageDirectLevel * nativeMicrophoneDirectGain
         // The hall send branches before outputMixer, so it must explicitly
         // follow volume and mute (including solo) to prevent wet-only audio.
         // Keep the room send separate from direct-sound distance attenuation.
