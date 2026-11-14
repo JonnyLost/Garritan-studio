@@ -1,0 +1,42 @@
+name: Studio Microphone Integration Rehearsal
+
+on:
+  push:
+    branches:
+      - fix/studio-virtual-microphone-routing-2026-11-14
+  pull_request:
+    branches:
+      - integration/studio-safe-consolidation-2026-11-14
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-conflicts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Rehearse merge without changing original refs
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Studio CI"
+          git config user.email "studio-ci@users.noreply.github.com"
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*'
+          source_sha="$(git rev-parse origin/fix/studio-virtual-microphone-routing-2026-11-14)"
+          git switch -C __rehearsal origin/integration/studio-safe-consolidation-2026-11-14
+          if git merge --no-commit --no-ff "$source_sha" >/tmp/mic-merge.log 2>&1; then
+            echo "Mic branch merges cleanly at tested refs." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## Mic integration: true Git conflicts" >> "$GITHUB_STEP_SUMMARY"
+            echo '~~~' >> "$GITHUB_STEP_SUMMARY"
+            git diff --name-only --diff-filter=U | tee -a "$GITHUB_STEP_SUMMARY"
+            echo '~~~' >> "$GITHUB_STEP_SUMMARY"
+            echo "Source branch preserved; requires hand reconciliation." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [[ -f .git/MERGE_HEAD ]]; then git merge --abort; fi
+          git reset --hard origin/integration/studio-safe-consolidation-2026-11-14
