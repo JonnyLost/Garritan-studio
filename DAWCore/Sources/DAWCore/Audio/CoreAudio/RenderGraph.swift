@@ -163,37 +163,45 @@ public final class RenderGraph {
     
     // MARK: - Plugin Loading
     
-    func loadInstrument(
-        _ description: AudioComponentDescription,
-        for trackID: TrackID
-    ) async throws -> AudioUnit {
-        guard var track = tracks[trackID] else {
-            throw AudioBackendError.trackNotFound(trackID)
+    /// Prepared off the active graph, so asynchronous plugin instantiation and
+    /// render-resource setup do not hold the hardware output stopped.
+    struct PreparedInstrument {
+        let owner: AVAudioUnit
+        let unit: AudioUnit
+        let auAudioUnit: AUAudioUnit
+        let renderBlock: AURenderBlock
+    }
+
+    /// Owns a newly initialized effect until install or explicit cleanup.
+    /// Effect creation never touches the active track graph.
+    final class PreparedEffect {
+        private(set) var unit: AudioUnit?
+        init(unit: AudioUnit) { self.unit = unit }
+        func takeUnit() -> AudioUnit? {
+            let result = unit
+            unit = nil
+            return result
         }
-        
-        // Keep the previous AVAudioUnit alive until replacement succeeds.
-        // AVAudioUnit owns its AudioUnit; never dispose that handle ourselves.
-        
-        // Use AVAudioUnit to properly instantiate AUv3 plugins
-        // This ensures proper initialization that raw AudioComponentInstanceNew might miss
-        let avAudioUnit = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AVAudioUnit, Error>) in
+        deinit {
+            if let unit { AudioComponentInstanceDispose(unit) }
+        }
+    }
+
+    func prepareInstrument(_ description: AudioComponentDescription) async throws -> PreparedInstrument {
+        let avAudioUnit = try await withCheckedThrowingContinuation {
+            (continuation: CheckedContinuation<AVAudioUnit, Error>) in
             AVAudioUnit.instantiate(with: description, options: []) { avUnit, error in
-                if let error = error {
+                if let error {
                     continuation.resume(throwing: error)
-                } else if let avUnit = avUnit {
+                } else if let avUnit {
                     continuation.resume(returning: avUnit)
                 } else {
                     continuation.resume(throwing: AudioBackendError.pluginLoadFailed("Unknown error"))
                 }
             }
         }
-        
-        // Keep the old unit alive until the new one has allocated
-        // resources and is ready to replace it.
-        // Get the underlying AudioUnit
+
         let unit = avAudioUnit.audioUnit
-        
-        // Set up the audio unit with our format
         var streamFormat = AudioStreamBasicDescription(
             mSampleRate: sampleRate,
             mFormatID: kAudioFormatLinearPCM,
@@ -205,75 +213,61 @@ public final class RenderGraph {
             mBitsPerChannel: 32,
             mReserved: 0
         )
-        
-        let formatStatus = AudioUnitSetProperty(
-            unit,
-            kAudioUnitProperty_StreamFormat,
-            kAudioUnitScope_Output,
-            0,
-            &streamFormat,
-            UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        let status = AudioUnitSetProperty(
+            unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output,
+            0, &streamFormat, UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
         )
-        
-        if formatStatus != noErr {
-            print("[RenderGraph] Warning: Could not set stream format: \(formatStatus)")
+        guard status == noErr else {
+            throw AudioBackendError.pluginLoadFailed("Instrument stream format failed: \(status)")
         }
-        
-        // Set maximum frames per slice (important for proper rendering)
-        var maxFrames: UInt32 = UInt32(bufferSize)
-        AudioUnitSetProperty(
-            unit,
-            kAudioUnitProperty_MaximumFramesPerSlice,
-            kAudioUnitScope_Global,
-            0,
-            &maxFrames,
-            UInt32(MemoryLayout<UInt32>.size)
+        var maxFrames = UInt32(bufferSize)
+        let maxStatus = AudioUnitSetProperty(
+            unit, kAudioUnitProperty_MaximumFramesPerSlice, kAudioUnitScope_Global,
+            0, &maxFrames, UInt32(MemoryLayout<UInt32>.size)
         )
-        
-        // Allocate render resources
+        guard maxStatus == noErr else {
+            throw AudioBackendError.pluginLoadFailed("Instrument slice limit failed: \(maxStatus)")
+        }
         let auAudioUnit = avAudioUnit.auAudioUnit
         try auAudioUnit.allocateRenderResources()
-        
-        // Get the render block for AUv3 rendering
-        let renderBlock = auAudioUnit.renderBlock
-        
-        track.instrumentUnit = unit
-        track.auAudioUnit = auAudioUnit
-        track.renderBlock = renderBlock
-        avAudioUnits[trackID] = avAudioUnit
-        tracks[trackID] = track
-        publishRenderSnapshot()
-        
-        print("[RenderGraph] Loaded instrument for track \(trackID.rawValue) using AVAudioUnit (renderBlock: \(renderBlock != nil ? "✓" : "nil"))")
-        return unit
+        return PreparedInstrument(
+            owner: avAudioUnit, unit: unit,
+            auAudioUnit: auAudioUnit, renderBlock: auAudioUnit.renderBlock
+        )
     }
-    
-    func loadEffect(
-        _ description: AudioComponentDescription,
-        for trackID: TrackID,
-        slot: Int
-    ) async throws -> AudioUnit {
-        guard var track = tracks[trackID] else {
+
+    /// Call only after the output callback is fully drained.
+    /// The old AVAudioUnit remains retained until this synchronous swap.
+    func installInstrument(_ prepared: PreparedInstrument, for trackID: TrackID) throws -> AudioUnit {
+        guard let track = tracks[trackID] else {
             throw AudioBackendError.trackNotFound(trackID)
         }
-        guard slot >= 0 && slot < 64 else {
-            throw AudioBackendError.configurationError("Effect slot must be between 0 and 63")
-        }
+        track.instrumentUnit = prepared.unit
+        track.auAudioUnit = prepared.auAudioUnit
+        track.renderBlock = prepared.renderBlock
+        avAudioUnits[trackID] = prepared.owner
+        publishRenderSnapshot()
+        return prepared.unit
+    }
 
-        // Find and instantiate component
+    /// Convenience method for non-running graph usage. The backend calls the
+    /// two stages separately to minimize hardware disruption.
+    func loadInstrument(_ description: AudioComponentDescription, for trackID: TrackID) async throws -> AudioUnit {
+        let prepared = try await prepareInstrument(description)
+        return try installInstrument(prepared, for: trackID)
+    }
+
+    func prepareEffect(_ description: AudioComponentDescription) throws -> PreparedEffect {
         var desc = description
         guard let component = AudioComponentFindNext(nil, &desc) else {
             throw AudioBackendError.pluginLoadFailed("Effect component not found")
         }
-        
         var audioUnit: AudioComponentInstance?
         let status = AudioComponentInstanceNew(component, &audioUnit)
-        
         guard status == noErr, let unit = audioUnit else {
             throw AudioBackendError.pluginLoadFailed("Failed to instantiate effect: \(status)")
         }
-        
-        // Configure effect
+        let prepared = PreparedEffect(unit: unit)
         var streamFormat = AudioStreamBasicDescription(
             mSampleRate: sampleRate,
             mFormatID: kAudioFormatLinearPCM,
@@ -285,32 +279,53 @@ public final class RenderGraph {
             mBitsPerChannel: 32,
             mReserved: 0
         )
-        
-        AudioUnitSetProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &streamFormat, UInt32(MemoryLayout<AudioStreamBasicDescription>.size))
-        AudioUnitSetProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 0, &streamFormat, UInt32(MemoryLayout<AudioStreamBasicDescription>.size))
-        
+        let formatSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        let inputStatus = AudioUnitSetProperty(
+            unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input,
+            0, &streamFormat, formatSize
+        )
+        let outputStatus = AudioUnitSetProperty(
+            unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output,
+            0, &streamFormat, formatSize
+        )
+        guard inputStatus == noErr && outputStatus == noErr else {
+            throw AudioBackendError.pluginLoadFailed("Effect format configuration failed")
+        }
         let initializeStatus = AudioUnitInitialize(unit)
         guard initializeStatus == noErr else {
-            AudioComponentInstanceDispose(unit)
             throw AudioBackendError.pluginLoadFailed("Effect initialization failed: \(initializeStatus)")
         }
-        
-        // Sparse effect slots must not alias the same AudioUnit instance.
-        // Replace only the selected slot; dispose its previous owner once.
+        return prepared
+    }
+
+    /// Call only after the output callback is fully drained. The prepared
+    /// effect owns cleanup automatically if the track was removed meanwhile.
+    func installEffect(_ prepared: PreparedEffect, for trackID: TrackID, slot: Int) throws -> AudioUnit {
+        guard let track = tracks[trackID] else {
+            throw AudioBackendError.trackNotFound(trackID)
+        }
+        guard (0..<64).contains(slot) else {
+            throw AudioBackendError.configurationError("Effect slot must be between 0 and 63")
+        }
+        guard let unit = prepared.takeUnit() else {
+            throw AudioBackendError.configurationError("Effect was already installed")
+        }
         while track.effectUnits.count <= slot {
             track.effectUnits.append(nil)
         }
-        if let previous = track.effectUnits[slot] {
-            AudioComponentInstanceDispose(previous)
+        if let old = track.effectUnits[slot] {
+            AudioComponentInstanceDispose(old)
         }
         track.effectUnits[slot] = unit
-        tracks[trackID] = track
         publishRenderSnapshot()
-        
-        print("[RenderGraph] Loaded effect at slot \(slot) for track \(trackID.rawValue)")
         return unit
     }
-    
+
+    func loadEffect(_ description: AudioComponentDescription, for trackID: TrackID, slot: Int) async throws -> AudioUnit {
+        let prepared = try prepareEffect(description)
+        return try installEffect(prepared, for: trackID, slot: slot)
+    }
+
     func unloadPlugin(for trackID: TrackID, slot: Int) {
         guard var track = tracks[trackID] else { return }
         
