@@ -22,6 +22,7 @@ public final class NativeMicrophoneSpillProcessor {
     private var currentLowPassAlpha: Float = 1
     private var targetLowPassAlpha: Float = 1
     private var lowPassState: Float = 0
+    private var preparedFirstTargets = false
 
     public init(sampleRate: Double) {
         let rate = sampleRate.isFinite && (8_000...192_000).contains(sampleRate)
@@ -48,6 +49,16 @@ public final class NativeMicrophoneSpillProcessor {
         targetDelayFrames = safeDelay * sampleRate / 1_000
         targetLowPassAlpha = lowPassAlpha.isFinite
             ? min(1, max(0.00001, lowPassAlpha)) : 1
+        if !preparedFirstTargets {
+            // The first sound must arrive at the actual propagation delay.
+            // Starting the smoothing filter at zero would produce an
+            // unphysical early sound burst before a distant microphone's
+            // first reflection arrives.
+            currentGain = targetGain
+            currentDelayFrames = targetDelayFrames
+            currentLowPassAlpha = targetLowPassAlpha
+            preparedFirstTargets = true
+        }
     }
 
     /// In-place, deinterleaved Float32 stereo buffer, no allocation or lock.
