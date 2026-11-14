@@ -45,4 +45,38 @@ final class StudioGraphControlGateTests: XCTestCase {
         let result = gate.perform { 42 }
         XCTAssertEqual(result, 42)
     }
+
+    func testBounceLeaseRejectsMutationsAndDoubleAcquisition() {
+        let gate = StudioGraphControlGate()
+        var mutations = 0
+        XCTAssertTrue(gate.beginBounceLease())
+        XCTAssertTrue(gate.isBounceActive)
+        XCTAssertFalse(gate.beginBounceLease())
+        XCTAssertFalse(gate.mutateIfAvailable { mutations += 1 })
+        XCTAssertThrowsError(try gate.ensureMutationAvailable()) { error in
+            XCTAssertEqual(error as? StudioGraphLeaseError, .exportInProgress)
+        }
+        XCTAssertEqual(mutations, 0)
+        gate.endBounceLease()
+        XCTAssertFalse(gate.isBounceActive)
+        XCTAssertTrue(gate.mutateIfAvailable { mutations += 1 })
+        XCTAssertNoThrow(try gate.ensureMutationAvailable())
+        XCTAssertEqual(mutations, 1)
+    }
+
+    func testBounceLeaseIsVisibleAcrossControlThreads() {
+        let gate = StudioGraphControlGate()
+        XCTAssertTrue(gate.beginBounceLease())
+        let finished = expectation(description: "cross-thread lease read")
+        let observer = DispatchQueue(label: "studio.graph.bounce-gate")
+        observer.async {
+            XCTAssertTrue(gate.isBounceActive)
+            XCTAssertFalse(gate.mutateIfAvailable {
+                XCTFail("Control mutation ran during bounce")
+            })
+            finished.fulfill()
+        }
+        wait(for: [finished], timeout: 5)
+        gate.endBounceLease()
+    }
 }
