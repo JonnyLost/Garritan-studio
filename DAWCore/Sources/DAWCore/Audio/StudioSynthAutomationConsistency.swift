@@ -16,7 +16,10 @@ public enum StudioSynthAutomationConsistency {
             guard case .studioSynth(let layerID, let destination) = lane.parameter
             else { return true }
             guard let layer = valid[layerID] else { return false }
-            return layer.enabled && layer.engine == destination.engine &&
+            // Muting a layer must not destroy the automation a composer
+            // created for that sound. Only deleted or retargeted layers
+            // become orphaned; PlaybackEngine skips muted layers at runtime.
+            return layer.engine == destination.engine &&
                 destination.isContinuouslyModulatable
         }
     }
