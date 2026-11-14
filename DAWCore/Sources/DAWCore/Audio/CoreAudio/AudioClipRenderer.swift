@@ -142,7 +142,8 @@ public final class AudioClipRenderer {
         workerQueue.sync {
             stopTimer()
             for clip in scheduledClips {
-                let clipFrame = max(Int64(0), playheadSample - clip.startSample)
+                let clipFrame = playheadSample <= clip.startSample
+                    ? Int64(0) : playheadSample - clip.startSample
                 daw_pcm_page_cache_request(clip.cache, UInt64(clipFrame))
                 let firstPage = UInt64(clipFrame) / UInt64(Self.pageFrames)
                 fillPage(clip, page: firstPage)
