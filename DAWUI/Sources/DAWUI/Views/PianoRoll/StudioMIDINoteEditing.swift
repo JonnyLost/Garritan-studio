@@ -19,21 +19,29 @@ enum StudioMIDINoteEditing {
     @discardableResult
     static func paste(_ notes: [MIDIEvent], into events: inout [MIDIEvent],
                       at anchor: Double) -> Set<UUID> {
-        guard anchor.isFinite, anchor >= 0, !notes.isEmpty else { return [] }
+        Set(pasteWithIDMapping(notes, into: &events, at: anchor).values)
+    }
+
+    /// Mapping old IDs to new IDs lets sidecar musical articulations follow
+    /// duplicated/pasted notes without ever baking transport triggers into MIDI.
+    @discardableResult
+    static func pasteWithIDMapping(_ notes: [MIDIEvent], into events: inout [MIDIEvent],
+                                   at anchor: Double) -> [UUID: UUID] {
+        guard anchor.isFinite, anchor >= 0, !notes.isEmpty else { return [:] }
         let source = notes.filter {
             if case .note = $0.type { return $0.beatPosition.isFinite }
             return false
         }
-        guard let earliest = source.map(\.beatPosition).min() else { return [] }
-        var inserted = Set<UUID>()
+        guard let earliest = source.map(\.beatPosition).min() else { return [:] }
+        var mapping: [UUID: UUID] = [:]
         for note in source {
             var copy = note
             copy.id = UUID()
             copy.beatPosition = anchor + (note.beatPosition - earliest)
             events.append(copy)
-            inserted.insert(copy.id)
+            mapping[note.id] = copy.id
         }
-        return inserted
+        return mapping
     }
 
     /// Repeat immediately after the last selected note ends, preserving spacing.
