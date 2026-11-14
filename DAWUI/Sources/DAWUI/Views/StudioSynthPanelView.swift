@@ -171,7 +171,7 @@ public struct StudioSynthPanelView: View {
                     Menu {
                         ForEach(StudioSynthModDestination.available(
                             for: targetLayer.engine), id: \.self) { destination in
-                            Button(destination.name) {
+                            Button(destination.title) {
                                 if !viewModel.addStudioSynthAutomationLane(
                                     for: trackID, layerID: targetLayer.id,
                                     destination: destination) {
