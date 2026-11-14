@@ -8,41 +8,42 @@ final class NativeMicrophoneCaptureMatrixTests: XCTestCase {
         _ matrix: NativeMicrophoneCaptureMatrix,
         sourceAudio: [[Float]], chunkSize: Int
     ) -> [[Float]] {
-        var stereo = sourceAudio
-        var results = Array(
-            repeating: Array(repeating: Float(0), count: sourceAudio[0].count),
-            count: matrix.microphoneCount
-        )
         let length = sourceAudio[0].count
+        let inputs = sourceAudio.map { audio -> UnsafeMutablePointer<Float> in
+            let ptr = UnsafeMutablePointer<Float>.allocate(capacity: length)
+            ptr.initialize(from: audio, count: length)
+            return ptr
+        }
+        let outputPointers = (0..<matrix.microphoneCount).map { _ -> UnsafeMutablePointer<Float> in
+            let ptr = UnsafeMutablePointer<Float>.allocate(capacity: length)
+            ptr.initialize(repeating: 0, count: length)
+            return ptr
+        }
+        defer {
+            for pointer in inputs {
+                pointer.deinitialize(count: length)
+                pointer.deallocate()
+            }
+            for pointer in outputPointers {
+                pointer.deinitialize(count: length)
+                pointer.deallocate()
+            }
+        }
         var offset = 0
         while offset < length {
             let count = min(chunkSize, length - offset)
-            stereo.withUnsafeMutableBufferPointer { sourceBuffers in
-                let inputs: [NativeMicrophoneCaptureMatrix.Source] =
-                    sourceBuffers.map { samples in
-                        samples.withUnsafeBufferPointer { buffer in
-                            // Underlying storage remains stable for the call
-                            // because no array mutation occurs during render.
-                            return NativeMicrophoneCaptureMatrix.Source(
-                                left: buffer.baseAddress!.advanced(by: offset),
-                                right: buffer.baseAddress!.advanced(by: offset)
-                            )
-                        }
-                    }
-                results.withUnsafeMutableBufferPointer { resultBuffers in
-                    let outputs: [UnsafeMutablePointer<Float>] =
-                        resultBuffers.map { samples in
-                            samples.withUnsafeMutableBufferPointer { buffer in
-                                buffer.baseAddress!.advanced(by: offset)
-                            }
-                        }
-                    XCTAssertTrue(matrix.render(sources: inputs, outputs: outputs,
-                                                frameCount: count))
-                }
+            let sources = inputs.map { pointer in
+                NativeMicrophoneCaptureMatrix.Source(
+                    left: UnsafePointer(pointer.advanced(by: offset)),
+                    right: UnsafePointer(pointer.advanced(by: offset))
+                )
             }
+            let outputs = outputPointers.map { $0.advanced(by: offset) }
+            XCTAssertTrue(matrix.render(sources: sources, outputs: outputs,
+                                        frameCount: count))
             offset += count
         }
-        return results
+        return outputPointers.map { Array(UnsafeBufferPointer(start: $0, count: length)) }
     }
 
     func testSharedHistoryScalesWithSourcesNotMicrophonePairs() throws {
