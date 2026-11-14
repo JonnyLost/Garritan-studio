@@ -12,6 +12,7 @@
 - Track removal simply removes its control-side dictionary entry and atomically publishes updated route membership; cleanup is delayed by the existing reader-counted snapshot exchange, and happens on the control thread.
 - Introduced `canRemoveEmptyTrackLive` and updated `CoreAudioBackend.removeTrack` to publish removal **without hardware restart** only if a track has neither instrument nor effects. A nonempty processing route still uses the guarded callback drain to protect shared plugin state.
 - Buffer-size changes swap each track's owned scratch storage only inside the preexisting hardware-drained control boundary. Rendering checks scratch frame capacity before writing.
+- Fixed an additional live-removal data race by recording the global solo-active state in each published immutable snapshot instead of updating a shared callback-visible Boolean. Solo changes themselves still require callback drain.
 - Added tests for generation changes and empty-track resource recreation, plus creating/removing empty routes while render callbacks read snapshots.
 
 ## Architectural safety boundary
