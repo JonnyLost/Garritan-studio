@@ -228,4 +228,62 @@ final class VRackMicrophoneRoutingTests: XCTestCase {
             "The independent dry-monitor connection must survive rollback"
         )
     }
+
+    /// Diagnostic only: bypass the AU but keep the microphone's complete
+    /// mix-bus path. If audible, the AU source/input edge is the culprit;
+    /// if silent, the mic channel/master return is not reaching main output.
+    func testDirectRackProbeThroughMicrophoneMixers() throws {
+        let studio = AudioEngine()
+        let engine = studio.engine
+        let format = try XCTUnwrap(AVAudioFormat(
+            standardFormatWithSampleRate: studio.sampleRate, channels: 2
+        ))
+        let rackSum = AVAudioMixerNode()
+        let player = AVAudioPlayerNode()
+        engine.attach(rackSum)
+        engine.attach(player)
+        engine.connect(player, to: rackSum, format: format)
+        studio.registerVRackSumMixer(rackSum)
+        studio.setVRackCaptureSourcePresent(true)
+
+        let mic = StudioVirtualMicrophone()
+        try studio.setMicrophoneAuditionEnabled(
+            true, tracks: [], microphones: [mic], room: StudioAcousticRoomDesign()
+        )
+        let connections = engine.outputConnectionPoints(for: rackSum, outputBus: 0)
+        let monitor = try XCTUnwrap(connections.compactMap {
+            $0.node as? AVAudioMixerNode
+        }.first)
+        let capture = try XCTUnwrap(connections.compactMap {
+            $0.node as? AVAudioUnitEffect
+        }.first)
+        let micChannel = try XCTUnwrap(engine.outputConnectionPoints(
+            for: capture, outputBus: 0
+        ).first?.node as? AVAudioMixerNode)
+
+        engine.stop()
+        engine.connect(rackSum, to: [
+            AVAudioConnectionPoint(node: monitor, bus: 0),
+            AVAudioConnectionPoint(node: micChannel,
+                                   bus: micChannel.nextAvailableInputBus)
+        ], fromBus: 0, format: format)
+
+        // Only the mic bus may sound; the dry monitor stays off.
+        monitor.outputVolume = 0
+        micChannel.outputVolume = 1
+        try engine.enableManualRenderingMode(
+            .offline, format: format, maximumFrameCount: 512
+        )
+        try engine.start()
+        defer { engine.stop() }
+
+        let input = try makeInput(format)
+        player.scheduleBuffer(input, at: nil, options: [.loops])
+        player.play()
+        let directThroughMicPeak = try renderPeak(engine)
+        XCTAssertGreaterThan(directThroughMicPeak, 0.05,
+            "Bypassing capture AU must reach mic channel/master return")
+        player.stop()
+    }
+
 }
