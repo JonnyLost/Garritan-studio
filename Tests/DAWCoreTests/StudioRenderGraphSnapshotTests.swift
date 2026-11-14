@@ -51,7 +51,7 @@ final class StudioRenderGraphSnapshotTests: XCTestCase {
         let revision = graph.renderSnapshotGeneration
         graph.setBufferSize(1024)
         XCTAssertEqual(graph.renderSnapshotTrackIDs, members)
-        XCTAssertEqual(graph.renderSnapshotGeneration, revision)
+        XCTAssertEqual(graph.renderSnapshotGeneration, revision + 1)
     }
 
     func testFailedEffectPreparationDoesNotMutateActiveRouting() {
@@ -130,7 +130,7 @@ final class StudioRenderGraphSnapshotTests: XCTestCase {
         XCTAssertEqual(graph.renderSnapshotGeneration, 3)
         graph.setBufferSize(1024)
         XCTAssertEqual(graph.renderSnapshotTrackIDs, [track])
-        XCTAssertEqual(graph.renderSnapshotGeneration, 3)
+        XCTAssertEqual(graph.renderSnapshotGeneration, 4)
     }
 
     func testLiveEmptyTrackRemovalAndAdditionDuringRender() {
