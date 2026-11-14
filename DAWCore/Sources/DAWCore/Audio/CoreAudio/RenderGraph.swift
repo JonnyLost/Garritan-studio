@@ -16,21 +16,31 @@ public final class RenderGraph {
     final class TrackScratchBuffers {
         let left: UnsafeMutablePointer<Float>
         let right: UnsafeMutablePointer<Float>
+        let effectInputLeft: UnsafeMutablePointer<Float>
+        let effectInputRight: UnsafeMutablePointer<Float>
         let frameCapacity: Int
 
         init(frameCapacity: Int) {
             self.frameCapacity = frameCapacity
             left = .allocate(capacity: frameCapacity)
             right = .allocate(capacity: frameCapacity)
+            effectInputLeft = .allocate(capacity: frameCapacity)
+            effectInputRight = .allocate(capacity: frameCapacity)
             left.initialize(repeating: 0, count: frameCapacity)
             right.initialize(repeating: 0, count: frameCapacity)
+            effectInputLeft.initialize(repeating: 0, count: frameCapacity)
+            effectInputRight.initialize(repeating: 0, count: frameCapacity)
         }
 
         deinit {
             left.deinitialize(count: frameCapacity)
             right.deinitialize(count: frameCapacity)
+            effectInputLeft.deinitialize(count: frameCapacity)
+            effectInputRight.deinitialize(count: frameCapacity)
             left.deallocate()
             right.deallocate()
+            effectInputLeft.deallocate()
+            effectInputRight.deallocate()
         }
     }
 
@@ -38,7 +48,11 @@ public final class RenderGraph {
     /// Snapshot-held tracks retain this owner until render readers finish.
     final class EffectLifetime {
         let unit: AudioUnit
-        init(_ unit: AudioUnit) { self.unit = unit }
+        let input: StudioEffectInputContext
+        init(_ unit: AudioUnit, input: StudioEffectInputContext) {
+            self.unit = unit
+            self.input = input
+        }
         deinit { AudioComponentInstanceDispose(unit) }
     }
 
@@ -331,7 +345,11 @@ public final class RenderGraph {
     /// Effect creation never touches the active track graph.
     final class PreparedEffect {
         private(set) var unit: AudioUnit?
-        init(unit: AudioUnit) { self.unit = unit }
+        let input: StudioEffectInputContext
+        init(unit: AudioUnit, input: StudioEffectInputContext) {
+            self.unit = unit
+            self.input = input
+        }
         func takeUnit() -> AudioUnit? {
             let result = unit
             unit = nil
@@ -487,7 +505,8 @@ public final class RenderGraph {
         guard status == noErr, let unit = audioUnit else {
             throw AudioBackendError.pluginLoadFailed("Failed to instantiate effect: \(status)")
         }
-        let prepared = PreparedEffect(unit: unit)
+        let inputContext = StudioEffectInputContext()
+        let prepared = PreparedEffect(unit: unit, input: inputContext)
         var streamFormat = AudioStreamBasicDescription(
             mSampleRate: sampleRate,
             mFormatID: kAudioFormatLinearPCM,
@@ -510,6 +529,31 @@ public final class RenderGraph {
         )
         guard inputStatus == noErr && outputStatus == noErr else {
             throw AudioBackendError.pluginLoadFailed("Effect format configuration failed")
+        }
+        // Set the effect's real upstream input. Without an input render
+        // callback, AudioUnitRender cannot receive the preceding stage.
+        var inputCallback = AURenderCallbackStruct(
+            inputProc: studioEffectInputRenderCallback,
+            inputProcRefCon: Unmanaged.passUnretained(inputContext).toOpaque()
+        )
+        let callbackStatus = AudioUnitSetProperty(
+            unit, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input,
+            0, &inputCallback, UInt32(MemoryLayout<AURenderCallbackStruct>.size)
+        )
+        guard callbackStatus == noErr else {
+            throw AudioBackendError.pluginLoadFailed(
+                "Effect input callback unavailable: \(callbackStatus)"
+            )
+        }
+        var maximumFrames = UInt32(bufferSize)
+        let sliceStatus = AudioUnitSetProperty(
+            unit, kAudioUnitProperty_MaximumFramesPerSlice, kAudioUnitScope_Global,
+            0, &maximumFrames, UInt32(MemoryLayout<UInt32>.size)
+        )
+        guard sliceStatus == noErr else {
+            throw AudioBackendError.pluginLoadFailed(
+                "Effect maximum slice configuration failed: \(sliceStatus)"
+            )
         }
         let initializeStatus = AudioUnitInitialize(unit)
         guard initializeStatus == noErr else {
@@ -540,7 +584,7 @@ public final class RenderGraph {
         let previous = track.processing
         var effects = previous.effects
         while effects.count <= slot { effects.append(nil) }
-        effects[slot] = EffectLifetime(unit)
+        effects[slot] = EffectLifetime(unit, input: prepared.input)
         track.processing = ProcessingResources(
             instrumentOwner: previous.instrumentOwner,
             instrumentUnit: previous.instrumentUnit,
@@ -780,14 +824,33 @@ public final class RenderGraph {
                 continue
             }
             
-            // Process through effects
+            // Process a real serial chain: each effect's input callback
+            // reads the previous stage from its own nonaliased scratch, and
+            // AudioUnitRender writes the next stage into bufferL/bufferR.
+            // Never feed an effect from the same buffer it is overwriting.
+            let byteCount = Int(frameCount) * MemoryLayout<Float>.size
             for case let effect? in track.processing.effects {
+                let inputL = track.processing.scratch.effectInputLeft
+                let inputR = track.processing.scratch.effectInputRight
+                memcpy(inputL, bufferL, byteCount)
+                memcpy(inputR, bufferR, byteCount)
+                effect.input.setSource(
+                    left: UnsafePointer(inputL), right: UnsafePointer(inputR),
+                    sampleTime: Float64(currentSample), frames: frameCount
+                )
                 var effectTimeStamp = timeStamp
                 var effectFlags = AudioUnitRenderActionFlags()
-                withUnsafeMutablePointer(to: &stereoList) { stereoPtr in
+                let effectStatus = withUnsafeMutablePointer(to: &stereoList) { stereoPtr in
                     stereoPtr.withMemoryRebound(to: AudioBufferList.self, capacity: 1) { ablPtr in
-                        AudioUnitRender(effect.unit, &effectFlags, &effectTimeStamp, 0, frameCount, ablPtr)
+                        AudioUnitRender(effect.unit, &effectFlags,
+                                        &effectTimeStamp, 0, frameCount, ablPtr)
                     }
+                }
+                if effectStatus != noErr {
+                    // Bypass a failed effect, preserving the upstream signal.
+                    memcpy(bufferL, inputL, byteCount)
+                    memcpy(bufferR, inputR, byteCount)
+                    renderErrorCount += 1
                 }
             }
             
