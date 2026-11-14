@@ -28,7 +28,9 @@ The existing native Standard MIDI File format-1 writer and File > Export MIDI co
 - trimmed notes, stable same-tick note-off / retrigger ordering, original duration unchanged;
 - full 14-bit pitch bend on independent MIDI channels;
 - muted track and output-channel filtering;
-- rejection of unsupported loops and invalid tempo.
+- rejection of unsupported loops and invalid tempo;
+- one held-CC release at the trimmed region boundary, despite overlapping notes;
+- triggerless Notation-style maps never invent keyswitch MIDI.
 
 ### Required bridge to native exporter (not yet integrated)
 
