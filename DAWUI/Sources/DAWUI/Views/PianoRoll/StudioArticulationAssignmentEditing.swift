@@ -29,6 +29,23 @@ enum StudioArticulationAssignmentEditing {
         return true
     }
 
+    /// Preserve articulations when MIDI notes are duplicated or pasted.
+    @discardableResult
+    static func transfer(from source: [UUID: String], idMapping: [UUID: UUID],
+                         into midi: inout MIDIClipData) -> Bool {
+        guard !source.isEmpty, !idMapping.isEmpty else { return false }
+        var assignments = midi.articulations ?? []
+        var added = false
+        for (oldID, newID) in idMapping {
+            guard let key = source[oldID] else { continue }
+            assignments.removeAll { $0.noteID == newID }
+            assignments.append(StudioNoteArticulation(noteID: newID, articulationID: key))
+            added = true
+        }
+        if added { midi.articulations = assignments }
+        return added
+    }
+
     static func byNoteID(in midi: MIDIClipData) -> [UUID: String] {
         var dictionary: [UUID: String] = [:]
         for assignment in midi.articulations ?? [] {
