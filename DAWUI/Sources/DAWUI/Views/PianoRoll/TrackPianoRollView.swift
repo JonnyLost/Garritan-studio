@@ -433,24 +433,26 @@ public struct TrackPianoRollView: View {
                     break
                 }
             }
+            // Controller shape keys must not intercept Command shortcuts
+            // or the system's Option/Control combinations.
+            if showCCLane &&
+               !keyPress.modifiers.contains(.command) &&
+               !keyPress.modifiers.contains(.option) &&
+               !keyPress.modifiers.contains(.control) {
+                switch keyPress.characters.lowercased() {
+                case "1": expressionDrawMode = .pencil; return .handled
+                case "2": expressionDrawMode = .line; return .handled
+                case "3": expressionDrawMode = .curve; return .handled
+                case "4": expressionDrawMode = .erase; return .handled
+                default: break
+                }
+            }
             // Tool shortcuts (without modifiers)
             switch keyPress.characters.lowercased() {
             case "a": currentTool = .select; return .handled
             case "p": currentTool = .pencil; return .handled
             case "e": currentTool = .eraser; return .handled
             case "v": currentTool = .velocity; return .handled
-            case "1" where showCCLane:
-                expressionDrawMode = .pencil
-                return .handled
-            case "2" where showCCLane:
-                expressionDrawMode = .line
-                return .handled
-            case "3" where showCCLane:
-                expressionDrawMode = .curve
-                return .handled
-            case "4" where showCCLane:
-                expressionDrawMode = .erase
-                return .handled
             case "q":
                 if !selectedNoteIDs.isEmpty { showQuantizeDialog = true }
                 return .handled
