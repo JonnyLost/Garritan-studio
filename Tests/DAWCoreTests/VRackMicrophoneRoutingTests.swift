@@ -74,6 +74,9 @@ final class VRackMicrophoneRoutingTests: XCTestCase {
             )
             XCTAssertTrue(studio.isMicrophoneAuditionActive)
 
+            // AudioEngine prepares its device graph during initialization.
+            // Offline rendering may only be enabled after a full stop.
+            engine.stop()
             try engine.enableManualRenderingMode(
                 .offline, format: format, maximumFrameCount: 512
             )
@@ -139,7 +142,10 @@ final class VRackMicrophoneRoutingTests: XCTestCase {
             standardFormatWithSampleRate: studio.sampleRate, channels: 2
         ))
         let rackSum = AVAudioMixerNode()
+        let player = AVAudioPlayerNode()
         engine.attach(rackSum)
+        engine.attach(player)
+        engine.connect(player, to: rackSum, format: format)
         studio.registerVRackSumMixer(rackSum)
         studio.setVRackCaptureSourcePresent(true)
         try studio.setMicrophoneAuditionEnabled(
