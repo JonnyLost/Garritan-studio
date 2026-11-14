@@ -654,6 +654,20 @@ public struct TrackPianoRollView: View {
                 }
             }
             
+            // Pencil gestures provide immediate note-length and pitch feedback
+            // before the edit is committed to the undo history.
+            if currentTool == .pencil,
+               let start = pencilPreviewStart,
+               let pitch = pencilPreviewPitch {
+                let x = start * pixelsPerBeat
+                let y = Double(pitchOffset - pitch) * Double(noteHeight)
+                let preview = CGRect(x: x, y: y + 1,
+                    width: max(4, pencilPreviewDuration * pixelsPerBeat),
+                    height: Double(noteHeight) - 2)
+                context.fill(Path(roundedRect: preview, cornerRadius: 2),
+                             with: .color(trackColor.opacity(0.65)))
+            }
+
             // Draw LIVE recording notes (in real-time as they're played)
             if isRecordingOnThisTrack {
                 let recordStartX = liveRecordingStartBeat * pixelsPerBeat
