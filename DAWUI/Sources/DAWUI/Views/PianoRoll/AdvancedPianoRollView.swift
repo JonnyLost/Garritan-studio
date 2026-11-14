@@ -131,6 +131,10 @@ public struct AdvancedPianoRollView: View {
     @State private var showVelocityLane: Bool = true
     @State private var showCCLane: Bool = false
     @State private var selectedCCType: CCType = .modulation
+    @State private var expressionChannel = 0
+    @State private var expressionStroke: [StudioMIDIExpressionPoint] = []
+    @State private var keyswitchPitch = 24
+    @State private var showKeyswitchControls = false
     
     // Selection state
     @State private var selectedNoteIDs: Set<UUID> = []
@@ -460,9 +464,39 @@ public struct AdvancedPianoRollView: View {
                     }
                 }
                 .pickerStyle(.menu)
-                .frame(width: 100)
+                .frame(width: 120)
             }
-            
+
+            Picker("Ch", selection: $expressionChannel) {
+                ForEach(0..<16, id: \.self) { channel in
+                    Text("\(channel + 1)").tag(channel)
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(width: 75)
+            .help("MIDI channel for expression drawing and keyswitch insertion")
+
+            Button("Keyswitch") { showKeyswitchControls = true }
+                .buttonStyle(.bordered)
+                .help("Insert a manual instrument keyswitch note")
+                .popover(isPresented: $showKeyswitchControls) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Insert Articulation Keyswitch").font(.headline)
+                        Text("Use the MIDI pitch assigned by your instrument. Studio does not assume an articulation map.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Stepper("Trigger note: \(NoteData(pitch: UInt8(keyswitchPitch)).noteName) (\(keyswitchPitch))",
+                                value: $keyswitchPitch, in: 0...127)
+                        Button("Insert at Playhead") {
+                            insertKeyswitch()
+                            showKeyswitchControls = false
+                        }
+                        .disabled(currentClip == nil)
+                    }
+                    .padding()
+                    .frame(width: 300)
+                }
+
             Spacer()
             
             // Zoom controls
@@ -850,27 +884,24 @@ public struct AdvancedPianoRollView: View {
     
     /// CC lane content for unified scroll (no separate ScrollView)
     private var ccLaneContent: some View {
-        ZStack(alignment: .bottomLeading) {
-            CCLaneEditor(
-                events: ccEvents,
-                ccType: selectedCCType,
-                pixelsPerBeat: pixelsPerBeat,
-                width: totalWidth,
-                height: ccLaneHeight - 4,
-                currentTool: currentTool,
-                onAddPoint: addCCPoint,
-                onUpdatePoint: updateCCPoint
-            )
-            
-            // Playhead line
-            Rectangle()
-                .fill(Color.accentColor)
-                .frame(width: 1, height: ccLaneHeight)
-                .offset(x: playheadX)
-        }
-        .background(Color(nsColor: .controlBackgroundColor))
+        StudioExpressionLaneCanvas(
+            events: ccEvents.map { event in
+                var absolute = event
+                absolute.beatPosition += clipStartBeat
+                return absolute
+            },
+            lane: selectedCCType,
+            channel: UInt8(expressionChannel),
+            pixelsPerBeat: pixelsPerBeat,
+            width: totalWidth,
+            height: ccLaneHeight,
+            beatsPerBar: StudioMusicalGrid.beatsPerBar(viewModel.transportState.timeSignature),
+            playheadBeat: currentPlayheadBeat,
+            onDraw: previewExpression,
+            onFinish: commitExpression
+        )
     }
-    
+
     // MARK: - Gestures
     
     private var editingGesture: some Gesture {
@@ -1260,35 +1291,56 @@ public struct AdvancedPianoRollView: View {
         }
     }
 
-    // MARK: - CC Operations
-    
-    private func addCCPoint(at beat: Double, value: UInt8) {
-        guard var clip = currentClip, case .midi(var midiData) = clip.content else { return }
-        
-        let ccEvent = MIDIEvent.controlChange(
-            at: beat,
-            controller: UInt8(selectedCCType.rawValue),
-            value: value
-        )
-        
-        midiData.events.append(ccEvent)
-        clip.content = .midi(midiData)
-        updateClip(clip)
-    }
-    
-    private func updateCCPoint(_ id: UUID, value: UInt8) {
-        guard var clip = currentClip, case .midi(var midiData) = clip.content else { return }
-        
-        if let index = midiData.events.firstIndex(where: { $0.id == id }) {
-            if case .controlChange(_, _) = midiData.events[index].type {
-                midiData.events[index].type = .controlChange(controller: UInt8(selectedCCType.rawValue), value: value)
-            }
+    // MARK: - MIDI Expression / Articulation
+
+    private func previewExpression(_ point: StudioMIDIExpressionPoint) {
+        guard let clip = currentClip, case .midi(let original) = clip.content else { return }
+        let start = clipStartBeat
+        let end = start + clip.timeRange.duration.beats(atTempo: viewModel.transportState.tempo.bpm)
+        guard point.beat >= start, point.beat < end else { return }
+        let division = snapMode.division(for: viewModel.transportState.timeSignature)
+        let step = division > 0 ? division : 0.125
+        if let last = expressionStroke.last,
+           Int((last.beat / step).rounded()) == Int((point.beat / step).rounded()) {
+            expressionStroke[expressionStroke.count - 1] = point
+        } else if expressionStroke.count < 4096 {
+            expressionStroke.append(point)
         }
-        
-        clip.content = .midi(midiData)
-        updateClip(clip)
+
+        var draft = original
+        draft.events = StudioMIDIExpressionEditing.draw(
+            events: original.events, lane: selectedCCType, points: expressionStroke,
+            clipStartBeat: start, division: step, channel: UInt8(expressionChannel))
+        previewMIDI = draft
     }
-    
+
+    private func commitExpression() {
+        defer {
+            expressionStroke.removeAll()
+            previewMIDI = nil
+        }
+        guard !expressionStroke.isEmpty, let draft = previewMIDI,
+              var clip = currentClip else { return }
+        clip.content = .midi(draft)
+        updateClip(clip, description: "Draw \(selectedCCType.name) MIDI Expression")
+    }
+
+    /// A keyswitch is a short, ordinary MIDI note. Its meaning is determined
+    /// by the selected instrument's keyswitch mapping, not by Studio.
+    private func insertKeyswitch() {
+        guard var clip = currentClip, case .midi(var midi) = clip.content else { return }
+        let beat = viewModel.transportState.playheadBeats - clipStartBeat
+        guard beat.isFinite && beat >= 0 else { return }
+        let trigger = MIDIEvent.note(
+            at: beat, pitch: UInt8(keyswitchPitch), velocity: 100,
+            duration: 0.125, channel: UInt8(expressionChannel))
+        midi.events.append(trigger)
+        clip.content = .midi(midi)
+        updateClip(extendingClip(clip, toInclude: [trigger.id]),
+                   description: "Insert Articulation Keyswitch")
+        selectedNoteIDs = [trigger.id]
+    }
+
     // MARK: - Helpers
     
     private var currentClip: Clip? {
@@ -1305,11 +1357,9 @@ public struct AdvancedPianoRollView: View {
     
     private var ccEvents: [MIDIEvent] {
         guard let clip = currentClip, case .midi(let midiData) = clip.content else { return [] }
-        return midiData.events.filter {
-            if case .controlChange(let controller, _) = $0.type {
-                return controller == selectedCCType.rawValue
-            }
-            return false
+        return (previewMIDI ?? midiData).events.filter {
+            StudioMIDIExpressionEditing.normalizedValue(
+                of: $0, for: selectedCCType, channel: UInt8(expressionChannel)) != nil
         }
     }
     
@@ -1622,103 +1672,6 @@ struct VelocityBar: View {
                         onVelocityCommit()
                     }
             )
-    }
-}
-
-// MARK: - CC Lane Editor
-
-struct CCLaneEditor: View {
-    let events: [MIDIEvent]
-    let ccType: CCType
-    let pixelsPerBeat: Double
-    let width: CGFloat
-    let height: CGFloat
-    let currentTool: MIDIEditorTool
-    let onAddPoint: (Double, UInt8) -> Void
-    let onUpdatePoint: (UUID, UInt8) -> Void
-    
-    @State private var lastDrawBeat: Double? = nil
-
-    var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            // Background
-            Rectangle()
-                .fill(Color.black.opacity(0.2))
-
-            // CC curve
-            Path { path in
-                var lastPoint: CGPoint?
-
-                let sortedEvents = events.sorted { $0.beatPosition < $1.beatPosition }
-
-                for event in sortedEvents {
-                    if case .controlChange(_, let value) = event.type {
-                        let x = CGFloat(event.beatPosition) * pixelsPerBeat
-                        let y = height - (CGFloat(value) / 127 * height)
-
-                        if let last = lastPoint {
-                            path.move(to: last)
-                            path.addLine(to: CGPoint(x: x, y: y))
-                        }
-                        lastPoint = CGPoint(x: x, y: y)
-                    }
-                }
-            }
-            .stroke(Color.orange, lineWidth: 2)
-
-            // CC points
-            ForEach(events, id: \.id) { event in
-                if case .controlChange(_, let value) = event.type {
-                    let x = CGFloat(event.beatPosition) * pixelsPerBeat
-                    let y = height - (CGFloat(value) / 127 * height)
-
-                    Circle()
-                        .fill(Color.orange)
-                        .frame(width: 8, height: 8)
-                        .offset(x: x - 4, y: y - 4)
-                        .gesture(
-                            DragGesture()
-                                .onChanged { drag in
-                                    let newY = min(height, max(0, drag.location.y))
-                                    let newValue = UInt8(max(0, min(127, Int((1 - newY / height) * 127))))
-                                    onUpdatePoint(event.id, newValue)
-                                }
-                        )
-                }
-            }
-        }
-        .frame(width: width, height: height)
-        .contentShape(Rectangle())
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { value in
-                    if currentTool == .pencil {
-                        // Pencil tool: continuous drawing of CC values
-                        let beat = Double(value.location.x) / pixelsPerBeat
-                        let ccValue = UInt8(max(0, min(127, Int((1 - value.location.y / height) * 127))))
-                        
-                        // Only add a point if we've moved enough (every ~0.1 beat)
-                        if let lastBeat = lastDrawBeat {
-                            if abs(beat - lastBeat) >= 0.1 {
-                                onAddPoint(beat, ccValue)
-                                lastDrawBeat = beat
-                            }
-                        } else {
-                            onAddPoint(beat, ccValue)
-                            lastDrawBeat = beat
-                        }
-                    }
-                }
-                .onEnded { _ in
-                    lastDrawBeat = nil
-                }
-        )
-        .onTapGesture { location in
-            // Single tap to add a point
-            let beat = Double(location.x) / pixelsPerBeat
-            let value = UInt8(max(0, min(127, Int((1 - location.y / height) * 127))))
-            onAddPoint(beat, value)
-        }
     }
 }
 
