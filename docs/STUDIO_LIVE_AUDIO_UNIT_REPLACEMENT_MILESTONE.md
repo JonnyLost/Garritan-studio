@@ -15,7 +15,7 @@
 
 **One consistent callback generation:** Reworked scheduled MIDI delivery and track rendering to borrow one immutable snapshot for each buffer, instead of resolving an instrument for MIDI and another for audio. The native backend also claims a C11 atomic, nonblocking render admission guard **before** consuming the SPSC mixer mailbox. A reentrant callback produces silence and never processes concurrent MIDI, Audio Units, clips or metronome. The renderer and exclusive offline bounce use the same generation-pinning logic.
 
-**Memory pressure:** The normal path is uninterrupted; an exceptional backlog of 48 unreclaimed snapshots triggers the existing guarded hardware drain to reclaim owners before publishing more. This limits memory retention on a MacBook without reference-count releases inside the audio callback.
+**Memory pressure:** The normal path is uninterrupted; an exceptional backlog of eight unreclaimed processing-route snapshots (48 for empty track creation) triggers the existing guarded hardware drain to reclaim owners before publishing more. This limits memory retention on a MacBook without reference-count releases inside the audio callback.
 
 ## Tests
 
