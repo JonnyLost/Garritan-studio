@@ -171,3 +171,37 @@ matrix renderer is implemented, benchmarked, and tested. V-Rack inputs
 remain outside this proof-of-concept path. New code is not counted as
 macOS-build verified until the matching GitHub workflow succeeds; device
 listening and orchestral load tests are still a consolidated Mac milestone.
+
+## Shared-history matrix DSP foundation (November 14, 2026)
+
+The native `NativeMicrophoneCaptureMatrix` and its dedicated XCTest
+regressions are now available on this feature branch. The processor prepares
+a single ring buffer per participating source, then independently evaluates
+each microphone's signed gain, fractional time of flight, low-pass damping,
+and smoothed automation. It supports bounded configurations of 1–64
+sources and 1–4 microphones and rejects out-of-range cardinalities.
+
+At the same sample rate and source count, the **history storage** scales as
+`sourceCount × delayCapacity` rather than
+`sourceCount × microphoneCount × delayCapacity`. For 64 sources and four
+microphones, this is a theoretical fourfold reduction in historical samples
+compared with separate source/mic processors. This is NOT a benchmark or a
+claim of fourfold overall RAM or CPU improvement. Per-pair filter state and
+source-to-mic calculations still scale with the number of pairs.
+
+**Integration gate:** This is an offline-ready DSP foundation, not yet a
+replacement for the live mic audition Audio Units. The current live system
+still allows only 16 sources × 4 microphone channels, and it retains its
+existing rollback to the original dry/hall mix. A future integration must
+transport distinct pre-pan track streams to a single render callback with
+explicit bus ordering, cross-block synchronization, and sample-accurate
+timing. It must not use asynchronous AVAudioNode taps as if they were
+real-time-safe, synchronous audio inputs. It must also preserve
+mic mute/solo/pan, live stage movement, the shared hall return,
+per-track insert routing, track creation/removal and V-Rack isolation.
+
+**Validation gate:** Run the macOS app build and the added matrix
+regressions on this exact commit, then compare offline output against the
+existing per-pair renderer and benchmark realistic 16/32/64-source sessions
+before switching any live signal path. Device listening and larger
+orchestral performance remain unverified until the consolidated Mac test.
