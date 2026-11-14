@@ -207,4 +207,76 @@ final class StudioRenderGraphSnapshotTests: XCTestCase {
         XCTAssertTrue(graph.canRemoveEmptyTrackLive(id: b))
     }
 
+    func testLatestInstrumentSelectionWinsOverSlowEarlierLoad() throws {
+        let graph = RenderGraph(sampleRate: 48_000, bufferSize: 256)
+        let track = TrackID()
+        graph.createTrack(id: track)
+        let older = try graph.beginInstrumentReplacement(for: track)
+        let newer = try graph.beginInstrumentReplacement(for: track)
+        XCTAssertNotEqual(older, newer)
+        XCTAssertThrowsError(try graph.validateInstrumentReplacement(
+            for: track, requestID: older
+        ))
+        XCTAssertNoThrow(try graph.validateInstrumentReplacement(
+            for: track, requestID: newer
+        ))
+
+        // Unloading an instrument invalidates all in-flight preparations.
+        graph.unloadPlugin(for: track, slot: -1)
+        XCTAssertThrowsError(try graph.validateInstrumentReplacement(
+            for: track, requestID: newer
+        ))
+    }
+
+    func testTrackRecreationCannotAcceptStaleInstrumentRequest() throws {
+        let graph = RenderGraph(sampleRate: 44_100, bufferSize: 512)
+        let id = TrackID()
+        graph.createTrack(id: id)
+        let oldRequest = try graph.beginInstrumentReplacement(for: id)
+        graph.removeTrack(id: id)
+        graph.createTrack(id: id)
+        let newRequest = try graph.beginInstrumentReplacement(for: id)
+        XCTAssertNotEqual(oldRequest, newRequest)
+        XCTAssertThrowsError(try graph.validateInstrumentReplacement(
+            for: id, requestID: oldRequest
+        ))
+        XCTAssertNoThrow(try graph.validateInstrumentReplacement(
+            for: id, requestID: newRequest
+        ))
+    }
+
+    func testRenderAndMIDIPassWithNoInstrument() {
+        // Even an empty route can receive scheduled MIDI events. The
+        // scheduler must consume the event without a plugin or crash.
+        struct StereoList {
+            var mNumberBuffers: UInt32 = 2
+            var left = AudioBuffer()
+            var right = AudioBuffer()
+        }
+        let graph = RenderGraph(sampleRate: 48_000, bufferSize: 128)
+        let scheduler = MIDIScheduler(capacity: 16)
+        let id = TrackID()
+        graph.createTrack(id: id)
+        scheduler.schedule(.noteOn(trackID: id, samplePosition: 0,
+                                   note: 60, velocity: 100))
+        let left = UnsafeMutablePointer<Float>.allocate(capacity: 128)
+        let right = UnsafeMutablePointer<Float>.allocate(capacity: 128)
+        defer { left.deallocate(); right.deallocate() }
+        left.initialize(repeating: 0, count: 128)
+        right.initialize(repeating: 0, count: 128)
+        var list = StereoList()
+        list.left = AudioBuffer(mNumberChannels: 1, mDataByteSize: 512, mData: left)
+        list.right = AudioBuffer(mNumberChannels: 1, mDataByteSize: 512, mData: right)
+        let delivered = withUnsafeMutablePointer(to: &list) { ptr in
+            ptr.withMemoryRebound(to: AudioBufferList.self, capacity: 1) { buffers in
+                graph.renderWithScheduledMIDI(
+                    scheduler: scheduler, startSample: 0, endSample: 128,
+                    frameCount: 128, outputBuffer: buffers
+                )
+            }
+        }
+        XCTAssertTrue(delivered)
+        XCTAssertTrue(scheduler.isEmpty)
+    }
+
 }
