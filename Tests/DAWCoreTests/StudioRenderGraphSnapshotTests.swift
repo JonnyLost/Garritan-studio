@@ -172,4 +172,39 @@ final class StudioRenderGraphSnapshotTests: XCTestCase {
         wait(for: [complete], timeout: 10)
         XCTAssertEqual(graph.renderSnapshotTrackIDs, [initial])
     }
+    func testProcessingResourcesAreVersionedIndependentlyOfMixerControls() {
+        let graph = RenderGraph(sampleRate: 48_000, bufferSize: 128)
+        let id = TrackID()
+        graph.createTrack(id: id)
+
+        let initialGeneration = graph.renderSnapshotGeneration
+        let initialResource = try? XCTUnwrap(graph.publishedProcessingIdentity(for: id))
+        XCTAssertEqual(graph.publishedScratchCapacity(for: id), 128)
+
+        graph.setTrackVolume(0.25, for: id)
+        graph.setTrackPan(-0.5, for: id)
+        graph.setTrackMute(true, for: id)
+        XCTAssertEqual(graph.renderSnapshotGeneration, initialGeneration)
+        XCTAssertEqual(graph.publishedProcessingIdentity(for: id), initialResource)
+
+        graph.setBufferSize(1024)
+        XCTAssertEqual(graph.publishedScratchCapacity(for: id), 1024)
+        XCTAssertNotEqual(graph.publishedProcessingIdentity(for: id), initialResource)
+        XCTAssertEqual(graph.renderSnapshotGeneration, initialGeneration + 1)
+
+        graph.removeTrack(id: id)
+        XCTAssertNil(graph.publishedProcessingIdentity(for: id))
+    }
+
+    func testSeparateTracksOwnDistinctProcessingBundles() {
+        let graph = RenderGraph(sampleRate: 44_100, bufferSize: 256)
+        let a = TrackID(), b = TrackID()
+        graph.createTrack(id: a)
+        graph.createTrack(id: b)
+        XCTAssertNotEqual(graph.publishedProcessingIdentity(for: a),
+                          graph.publishedProcessingIdentity(for: b))
+        XCTAssertTrue(graph.canRemoveEmptyTrackLive(id: a))
+        XCTAssertTrue(graph.canRemoveEmptyTrackLive(id: b))
+    }
+
 }
