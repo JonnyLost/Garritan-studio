@@ -1795,60 +1795,52 @@ public final class ProjectViewModel: ObservableObject {
         print("[Edit] Pasted \(newClipIDs.count) clip(s) at beat \(playheadBeat)")
     }
 
-    /// Duplicate selected clips in place (offset by 1 beat)
+    /// Duplicate every selected region immediately after its source region.
     public func duplicateSelectedClips() {
-        guard let trackID = selectedTrackID,
-              let trackIndex = project.tracks.firstIndex(where: { $0.id == trackID }) else { return }
-        
-        let track = project.tracks[trackIndex]
-        let clipsTodup = track.clips.filter { selectedClipIDs.contains($0.id) }
-        
-        guard !clipsTodup.isEmpty else { return }
-        
+        let sources: [(trackID: TrackID, clip: Clip)] = project.tracks.flatMap { track in
+            track.clips.filter { selectedClipIDs.contains($0.id) }.map {
+                (trackID: track.id, clip: $0)
+            }
+        }
+        guard !sources.isEmpty else { return }
+
         var newClipIDs: [ClipID] = []
         undoManager.beginGrouping(name: "Duplicate Regions")
         defer { undoManager.endGrouping() }
 
-        for clip in clipsTodup {
-            // Place duplicate right after the original
-            let endBeat = clip.timeRange.end.beats(atTempo: transportState.tempo.bpm)
-            let duration = clip.timeRange.duration
-            
-            let newStart = TimePosition(beats: endBeat, tempo: transportState.tempo.bpm, sampleRate: transportState.sampleRate)
-            let newEnd = TimePosition(
-                samples: newStart.samples + duration.samples,
-                sampleRate: transportState.sampleRate
+        for source in sources {
+            let clip = source.clip
+            let start = TimePosition(beats: clip.timeRange.end.beats(atTempo: transportState.tempo.bpm),
+                                     tempo: transportState.tempo.bpm,
+                                     sampleRate: transportState.sampleRate)
+            var duplicate = clip
+            duplicate.id = ClipID()
+            duplicate.name = "\(clip.name) Copy"
+            duplicate.timeRange = TimeRange(start: start, duration: clip.timeRange.duration)
+            undoManager.registerAction(
+                AddClipAction(trackID: source.trackID, clip: duplicate),
+                project: &project
             )
-            
-            var newClip = clip
-            newClip.id = ClipID()
-            newClip.name = "\(clip.name) Copy"
-            newClip.timeRange = TimeRange(start: newStart, end: newEnd)
-            
-            undoManager.registerAction(AddClipAction(trackID: trackID, clip: newClip),
-                                       project: &project)
-            newClipIDs.append(newClip.id)
+            newClipIDs.append(duplicate.id)
         }
-        
+
         selectedClipIDs = Set(newClipIDs)
-        print("[Edit] Duplicated \(clipsTodup.count) clip(s)")
+        print("[Edit] Duplicated \(newClipIDs.count) clip(s)")
     }
-    
-    /// Delete all selected clips
+
+    /// Delete the entire multi-track selection in one undo step.
     public func deleteSelectedClips() {
-        let clipIDsToDelete = selectedClipIDs
-        
-        for clipID in clipIDsToDelete {
-            // Find which track contains this clip
-            for track in project.tracks {
-                if track.clips.contains(where: { $0.id == clipID }) {
-                    deleteClip(id: clipID, from: track.id)
-                    break
-                }
+        guard !selectedClipIDs.isEmpty else { return }
+        let ids = selectedClipIDs
+        undoManager.beginGrouping(name: "Delete Regions")
+        defer { undoManager.endGrouping() }
+        for track in project.tracks {
+            for clip in track.clips where ids.contains(clip.id) {
+                deleteClip(id: clip.id, from: track.id)
             }
         }
     }
-    
+
     /// Select all clips on the selected track
     public func selectAllClipsOnTrack() {
         guard let trackID = selectedTrackID,
@@ -1950,28 +1942,28 @@ public final class ProjectViewModel: ObservableObject {
     
     /// Nudge selected clips by a beat amount
     public func nudgeSelectedClips(byBeats: Double) {
-        guard let trackID = selectedTrackID,
-              let trackIndex = project.tracks.firstIndex(where: { $0.id == trackID }),
-              byBeats.isFinite, byBeats != 0 else { return }
-
+        guard byBeats.isFinite, byBeats != 0, !selectedClipIDs.isEmpty else { return }
+        let ids = selectedClipIDs
         undoManager.beginGrouping(name: "Nudge Regions")
         defer { undoManager.endGrouping() }
-        for clipID in selectedClipIDs {
-            guard let clipIndex = project.tracks[trackIndex].clips.firstIndex(where: { $0.id == clipID }) else { continue }
-            
-            let clip = project.tracks[trackIndex].clips[clipIndex]
-            let currentStart = clip.timeRange.start.beats(atTempo: transportState.tempo.bpm)
-            let newStart = max(0, currentStart + byBeats)
-            
-            let duration = clip.timeRange.duration
-            let newStartPos = TimePosition(beats: newStart, tempo: transportState.tempo.bpm, sampleRate: transportState.sampleRate)
-            guard newStartPos != clip.timeRange.start else { continue }
-            undoManager.registerAction(MoveClipAction(trackID: trackID, clipID: clipID,
-                                                      from: clip.timeRange.start, to: newStartPos),
-                                       project: &project)
+
+        for track in project.tracks {
+            for clip in track.clips where ids.contains(clip.id) {
+                let currentStart = clip.timeRange.start.beats(atTempo: transportState.tempo.bpm)
+                let newBeat = max(0, currentStart + byBeats)
+                let newStart = TimePosition(beats: newBeat,
+                                            tempo: transportState.tempo.bpm,
+                                            sampleRate: transportState.sampleRate)
+                guard newStart != clip.timeRange.start else { continue }
+                undoManager.registerAction(
+                    MoveClipAction(trackID: track.id, clipID: clip.id,
+                                   from: clip.timeRange.start, to: newStart),
+                    project: &project
+                )
+            }
         }
     }
-    
+
     // MARK: - Transport Operations
     
     public func play() {
