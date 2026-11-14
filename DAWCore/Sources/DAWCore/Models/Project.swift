@@ -279,7 +279,10 @@ public struct DAWState: Codable, Sendable {
     public var acousticRoomDesign: StudioAcousticRoomDesign?
     /// Nil preserves the original close-listening behavior on older projects.
     public var virtualMicrophoneSettings: StudioVirtualMicrophoneSettings?
-    
+    /// Independent microphone capsules and array membership. Optional:
+    /// previous projects have no mic objects and retain their existing audio.
+    public var virtualMicrophones: [StudioVirtualMicrophone]?
+
     // Zoom and scroll
     public var zoomLevel: Double
     public var horizontalScrollOffset: Double
@@ -310,6 +313,7 @@ public struct DAWState: Codable, Sendable {
         self.acousticRoomProfileID = nil
         self.acousticRoomDesign = nil
         self.virtualMicrophoneSettings = nil
+        self.virtualMicrophones = nil
         self.zoomLevel = zoomLevel
         self.horizontalScrollOffset = horizontalScrollOffset
         self.verticalScrollOffset = verticalScrollOffset
