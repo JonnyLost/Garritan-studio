@@ -517,7 +517,7 @@ public struct AdvancedPianoRollView: View {
         ZStack(alignment: .topLeading) {
             Canvas { context, size in
                 let timeSignature = viewModel.transportState.timeSignature
-                let beatsPerBar = Double(timeSignature.beatsPerBar)
+                let beatsPerBar = StudioMusicalGrid.beatsPerBar(timeSignature)
                 let totalBars = Int(ceil(totalWidth / (pixelsPerBeat * beatsPerBar))) + 1
 
                 for bar in 0..<totalBars {
@@ -641,25 +641,18 @@ public struct AdvancedPianoRollView: View {
                 }
             }
             
-            // Draw vertical beat lines
+            // Draw beat subdivisions and true bar starts separately.
             let totalBeats = Int(size.width / pixelsPerBeat) + 1
-            let timeSignature = viewModel.transportState.timeSignature
+            let barLength = StudioMusicalGrid.beatsPerBar(viewModel.transportState.timeSignature)
             
             for beat in 0..<totalBeats {
                 let x = CGFloat(beat) * pixelsPerBeat
-                let isBar = beat % timeSignature.beatsPerBar == 0
-                
                 let linePath = Path { path in
                     path.move(to: CGPoint(x: x, y: 0))
                     path.addLine(to: CGPoint(x: x, y: size.height))
                 }
-                
-                context.stroke(
-                    linePath,
-                    with: .color(isBar ? Color.gray.opacity(0.5) : Color.gray.opacity(0.2)),
-                    lineWidth: isBar ? 1 : 0.5
-                )
-                
+                context.stroke(linePath, with: .color(Color.gray.opacity(0.2)), lineWidth: 0.5)
+
                 // Subdivision lines
                 if snapMode == .sixteenth || snapMode == .thirtysecond {
                     for sub in 1..<4 {
@@ -671,6 +664,14 @@ public struct AdvancedPianoRollView: View {
                         context.stroke(subPath, with: .color(Color.gray.opacity(0.1)), lineWidth: 0.5)
                     }
                 }
+            }
+            for bar in 0...Int(ceil(Double(totalBeats) / barLength)) {
+                let x = CGFloat(Double(bar) * barLength) * pixelsPerBeat
+                let line = Path { path in
+                    path.move(to: CGPoint(x: x, y: 0))
+                    path.addLine(to: CGPoint(x: x, y: size.height))
+                }
+                context.stroke(line, with: .color(Color.gray.opacity(0.5)), lineWidth: 1)
             }
         }
     }
