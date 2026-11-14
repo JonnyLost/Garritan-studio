@@ -35,7 +35,8 @@ enum StudioMIDIExpressionEditing {
         guard lane.rawValue >= 0 && lane.rawValue < 128 else { return nil }
         let v: UInt8
         if lane == .sustain || lane == .sostenuto || lane == .soft ||
-           lane == .legato || lane == .portamento {
+           lane == .legato || lane == .portamento ||
+           lane == .autoLegato || lane == .expressionMode {
             v = fraction >= 0.5 ? 127 : 0
         } else {
             v = UInt8(max(0, min(127, Int((fraction * 127).rounded()))))
