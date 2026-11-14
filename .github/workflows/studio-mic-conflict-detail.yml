@@ -1,0 +1,37 @@
+name: Studio Mic Conflict Detail (Read Only)
+
+on:
+  push:
+    branches:
+      - integration/studio-mic-merge-candidate-2026-11-14
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  actual-three-way:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Show exact overlapping hunk, without altering remote branches
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Studio Merge Rehearsal"
+          git config user.email "studio-merge@users.noreply.github.com"
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*'
+          pinned="$(git rev-parse origin/fix/studio-virtual-microphone-routing-2026-11-14)"
+          echo "Merging microphone branch $pinned in disposable checkout"
+          if git merge --no-commit --no-ff "$pinned" >/tmp/merge.log 2>&1; then
+            echo 'CLEAN' 
+          else
+            echo 'CONFLICT FILES:'
+            git diff --name-only --diff-filter=U
+            echo 'MAIN WINDOW CONFLICT DETAIL:'
+            grep -n -C 20 -e '^<<<<<<<' -e '^=======' -e '^>>>>>>>' DAWUI/Sources/DAWUI/Views/MainWindowView.swift || true
+          fi
+          if [[ -f .git/MERGE_HEAD ]]; then git merge --abort; fi
