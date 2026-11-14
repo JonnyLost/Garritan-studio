@@ -82,6 +82,7 @@ public enum SnapMode: String, CaseIterable {
 public enum CCType: Int, CaseIterable, Identifiable {
     case modulation = 1
     case breath = 2
+    case foot = 4
     case volume = 7
     case pan = 10
     case expression = 11
@@ -89,6 +90,7 @@ public enum CCType: Int, CaseIterable, Identifiable {
     case portamento = 65
     case sostenuto = 66
     case soft = 67
+    case legato = 68
     case resonance = 71
     case release = 72
     case attack = 73
@@ -100,21 +102,23 @@ public enum CCType: Int, CaseIterable, Identifiable {
     
     var name: String {
         switch self {
-        case .modulation: return "Modulation"
-        case .breath: return "Breath"
-        case .volume: return "Volume"
-        case .pan: return "Pan"
-        case .expression: return "Expression"
-        case .sustain: return "Sustain"
+        case .modulation: return "CC1 Dynamics"
+        case .breath: return "CC2 Breath"
+        case .foot: return "CC4 Foot"
+        case .volume: return "CC7 Volume"
+        case .pan: return "CC10 Pan"
+        case .expression: return "CC11 Expression"
+        case .sustain: return "CC64 Sustain"
         case .portamento: return "Portamento"
         case .sostenuto: return "Sostenuto"
         case .soft: return "Soft Pedal"
+        case .legato: return "CC68 Legato"
         case .resonance: return "Resonance"
         case .release: return "Release"
         case .attack: return "Attack"
         case .cutoff: return "Cutoff"
         case .decay: return "Decay"
-        case .pitchBend: return "Pitch Bend"
+        case .pitchBend: return "Pitch Bend (14-bit)"
         }
     }
 }
