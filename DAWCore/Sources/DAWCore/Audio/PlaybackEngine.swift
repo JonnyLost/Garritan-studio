@@ -140,14 +140,15 @@ public final class PlaybackEngine: ObservableObject {
         let sumMixer = AVAudioMixerNode()
         audioEngine.engine.attach(sumMixer)
         
-        // Connect sum mixer to main mixer
-        // Use a standard format since the engine might not be started yet
-        let format = AVAudioFormat(standardFormatWithSampleRate: audioEngine.sampleRate, channels: 2)!
-        audioEngine.engine.connect(sumMixer, to: audioEngine.engine.mainMixerNode, format: format)
-        
+        // The rack sum remains at unity for recording and capture.
+        // AudioEngine owns a separate dry monitor mixer, enabling silent
+        // original rack monitoring during mic audition without silencing
+        // the signal offered to the virtual microphones.
+        audioEngine.registerVRackSumMixer(sumMixer)
+
         vRackSumMixer = sumMixer
         vRackSumMixerConnected = true
-        print("[PlaybackEngine] V-Rack sum mixer created and connected with format: \(format)")
+        print("[PlaybackEngine] V-Rack sum registered for isolated mic monitoring")
     }
     
     /// Ensure the V-Rack sum mixer is connected (call after engine restart)
@@ -161,9 +162,8 @@ public final class PlaybackEngine: ObservableObject {
         // If not attached, re-attach and connect
         if audioEngine.engine.outputConnectionPoints(for: sumMixer, outputBus: 0).isEmpty {
             print("[PlaybackEngine] V-Rack sum mixer disconnected, reconnecting...")
-            let format = AVAudioFormat(standardFormatWithSampleRate: audioEngine.sampleRate, channels: 2)!
-            audioEngine.engine.connect(sumMixer, to: audioEngine.engine.mainMixerNode, format: format)
-            print("[PlaybackEngine] V-Rack sum mixer reconnected")
+            audioEngine.registerVRackSumMixer(sumMixer)
+            print("[PlaybackEngine] V-Rack sum mixer reconnected through direct monitor")
         }
     }
     
@@ -535,6 +535,7 @@ public final class PlaybackEngine: ObservableObject {
         midiProcessingQueue.sync {
             midiQueueRackInstruments[rackID] = loadedInstrument
         }
+        audioEngine.setVRackCaptureSourcePresent(true)
 
         print("[PlaybackEngine] V-Rack instrument loaded successfully: \(audioUnit.name)")
         
@@ -595,6 +596,7 @@ public final class PlaybackEngine: ObservableObject {
         // They stay only in AVAudioEngine
         
         rackInstruments.removeValue(forKey: rackID)
+        audioEngine.setVRackCaptureSourcePresent(!rackInstruments.isEmpty)
         print("[PlaybackEngine] Removed V-Rack instrument: \(rackID)")
     }
     
