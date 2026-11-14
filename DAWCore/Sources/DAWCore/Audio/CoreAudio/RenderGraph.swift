@@ -183,6 +183,17 @@ public final class RenderGraph {
     /// One output render frame at a time. An unexpected overlapping callback
     /// leaves its already-cleared destination silent rather than invoking a
     /// shared legacy effect/AU concurrently. This never blocks or spins.
+    /// Native output callback admission covers mixer command consumption,
+    /// scheduled MIDI, graph DSP, disk clips and metronome together.
+    /// The render thread only performs a nonblocking atomic compare/exchange.
+    func tryBeginOutputRender() -> Bool {
+        daw_route_exchange_try_enter_render(routeExchange)
+    }
+
+    func endOutputRender() {
+        daw_route_exchange_leave_render(routeExchange)
+    }
+
     private func withRenderFrame(_ body: (RenderSnapshot) -> Void) {
         guard daw_route_exchange_try_enter_render(routeExchange) else { return }
         defer { daw_route_exchange_leave_render(routeExchange) }
@@ -666,12 +677,20 @@ public final class RenderGraph {
         startSample: Int64,
         endSample: Int64,
         frameCount: UInt32,
-        outputBuffer: UnsafeMutablePointer<AudioBufferList>
+        outputBuffer: UnsafeMutablePointer<AudioBufferList>,
+        alreadyAdmitted: Bool = false
     ) -> Bool {
-        guard daw_route_exchange_try_enter_render(routeExchange) else {
+        // The host callback claims the guard before touching the SPSC mixer
+        // queue. Offline bounce claims it here instead. Never claim twice.
+        let acquireHere = !alreadyAdmitted
+        if acquireHere && !daw_route_exchange_try_enter_render(routeExchange) {
             return false
         }
-        defer { daw_route_exchange_leave_render(routeExchange) }
+        defer {
+            if acquireHere {
+                daw_route_exchange_leave_render(routeExchange)
+            }
+        }
         withRenderSnapshot { snapshot in
             _ = scheduler.processEvents(startSample: startSample, endSample: endSample) {
                 event, offset in
