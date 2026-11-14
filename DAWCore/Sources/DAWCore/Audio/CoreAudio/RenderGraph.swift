@@ -196,15 +196,15 @@ public final class RenderGraph {
     }
     
     func setTrackVolume(_ volume: Float, for trackID: TrackID) {
-        tracks[trackID]?.volume = volume
+        withRenderSnapshot { $0.byID[trackID]?.volume = volume }
     }
     
     func setTrackPan(_ pan: Float, for trackID: TrackID) {
-        tracks[trackID]?.pan = pan
+        withRenderSnapshot { $0.byID[trackID]?.pan = pan }
     }
     
     func setTrackMute(_ muted: Bool, for trackID: TrackID) {
-        tracks[trackID]?.isMuted = muted
+        withRenderSnapshot { $0.byID[trackID]?.isMuted = muted }
     }
     
     func setTrackSolo(_ solo: Bool, for trackID: TrackID) {
