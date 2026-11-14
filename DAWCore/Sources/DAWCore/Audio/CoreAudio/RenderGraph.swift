@@ -762,7 +762,7 @@ public final class RenderGraph {
         }
     }
 
-    /// The outgoing AU receives All Notes Off before its short fade.
+    /// The outgoing AU receives All Notes Off when its short fade ends.
     /// Only the new AU receives newly scheduled MIDI events.
     private func releaseOutgoingNotes(_ outgoing: ProcessingResources) {
         for channel: UInt8 in 0..<16 {
@@ -936,7 +936,6 @@ public final class RenderGraph {
                    outgoing.instrumentUnit != nil {
                     let starting = transition.advance(frames: frameCount)
                     if starting < transition.totalFrames {
-                        if starting == 0 { releaseOutgoingNotes(outgoing) }
                         let bytes = Int(frameCount) * MemoryLayout<Float>.size
                         memset(oldScratch.left, 0, bytes)
                         memset(oldScratch.right, 0, bytes)
@@ -973,6 +972,12 @@ public final class RenderGraph {
                             frames: Int(frameCount),
                             startFrame: starting, totalFrames: transition.totalFrames
                         )
+                        // Keep the old patch sounding through the fade,
+                        // then release its MIDI voices after the final blend.
+                        // Releasing at the start can abruptly cut some AUs.
+                        if UInt64(starting) + UInt64(frameCount) >= UInt64(transition.totalFrames) {
+                            releaseOutgoingNotes(outgoing)
+                        }
                     }
                 } else {
                     transition.forceComplete()
