@@ -384,7 +384,12 @@ public struct AdvancedPianoRollView: View {
             )
         }
         .sheet(isPresented: $showArticulationMapEditor) {
-            StudioArticulationMapEditor(map: currentArticulationMap) { map in
+            StudioArticulationMapEditor(
+                map: currentArticulationMap,
+                garritanProgramID: viewModel.selectedTrackID.flatMap {
+                    viewModel.project.track(withID: $0)?.garritanProgramID
+                }
+            ) { map in
                 guard let trackID = viewModel.selectedTrackID,
                       var track = viewModel.project.track(withID: trackID) else { return }
                 track.articulationMap = map
