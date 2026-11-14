@@ -209,6 +209,7 @@ public final class CoreAudioBackend: AudioBackend {
         guard let unit = outputUnit, _isRunning else { return }
         AudioOutputUnitStop(unit)
         daw_render_transport_set_playing(transport, false)
+        drainGraphCommandsWhileQuiescent()
         audioClipRenderer.pauseStreaming()
         _isRunning = false
         
@@ -228,7 +229,7 @@ public final class CoreAudioBackend: AudioBackend {
                 return
             }
         }
-        applyPendingGraphCommands()
+        drainGraphCommandsWhileQuiescent()
         body()
         if restart, let outputUnit {
             let result = AudioOutputUnitStart(outputUnit)
@@ -258,7 +259,7 @@ public final class CoreAudioBackend: AudioBackend {
                 }
             }
         }
-        applyPendingGraphCommands()
+        drainGraphCommandsWhileQuiescent()
         return try await operation()
     }
 
@@ -266,8 +267,8 @@ public final class CoreAudioBackend: AudioBackend {
 
     /// Apply only at callback boundaries, or from a control thread AFTER
     /// hardware callbacks have drained. Does not alter graph topology.
-    private func applyPendingGraphCommands() {
-        graphCommands.consume(maximum: 128) { command in
+    private func applyPendingGraphCommands(maximum: Int = 128) {
+        graphCommands.consume(maximum: maximum) { command in
             switch command {
             case let .trackVolume(id, value):
                 renderGraph.setTrackVolume(value, for: id)
@@ -282,12 +283,20 @@ public final class CoreAudioBackend: AudioBackend {
         }
     }
 
+    /// Called only after the output callback has fully stopped.
+    /// Preserve ordering when a topology edit or queue overflow occurs.
+    private func drainGraphCommandsWhileQuiescent() {
+        while graphCommands.pendingCount > 0 {
+            applyPendingGraphCommands()
+        }
+    }
+
     /// The producer is the serialized backend control thread.
     /// A full queue uses the existing drained-output path on that thread;
     /// commands are never silently discarded.
     private func submitGraphCommand(_ command: StudioGraphParameterCommand) {
         if !_isRunning {
-            applyPendingGraphCommands()
+            drainGraphCommandsWhileQuiescent()
             applyGraphCommandImmediately(command)
             return
         }
