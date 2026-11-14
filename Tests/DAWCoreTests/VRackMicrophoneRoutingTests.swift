@@ -18,19 +18,26 @@ final class VRackMicrophoneRoutingTests: XCTestCase {
         return input
     }
 
-    private func renderPeak(_ engine: AVAudioEngine, count: Int = 6) throws -> Float {
+    private func renderPeak(_ engine: AVAudioEngine,
+                            count: Int = 72, settleBlocks: Int = 40) throws -> Float {
+        // AVAudioEngine can retain buffers queued across upstream mixer
+        // fanouts and AU/mixer gain changes. Measure only the settled
+        // signal, not stale buffers following a monitoring transition.
         let output = try XCTUnwrap(AVAudioPCMBuffer(
             pcmFormat: engine.manualRenderingFormat, frameCapacity: 512
         ))
         var peak: Float = 0
-        for _ in 0..<count {
+        for block in 0..<count {
             let status = try engine.renderOffline(512, to: output)
             XCTAssertEqual(status, .success)
             let channels = try XCTUnwrap(output.floatChannelData)
             for sample in 0..<512 {
                 XCTAssertTrue(channels[0][sample].isFinite)
                 XCTAssertTrue(channels[1][sample].isFinite)
-                peak = max(peak, abs(channels[0][sample]), abs(channels[1][sample]))
+                if block >= settleBlocks {
+                    peak = max(peak, abs(channels[0][sample]),
+                               abs(channels[1][sample]))
+                }
             }
         }
         return peak
