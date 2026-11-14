@@ -67,24 +67,57 @@ public final class RenderGraph {
         let renderBlock: AURenderBlock?
         let effects: [EffectLifetime?]
         let scratch: TrackScratchBuffers
+        let transition: InstrumentTransition?
 
         init(instrumentOwner: AVAudioUnit? = nil,
              instrumentUnit: AudioUnit? = nil,
              auAudioUnit: AUAudioUnit? = nil,
              renderBlock: AURenderBlock? = nil,
              effects: [EffectLifetime?] = [],
-             scratch: TrackScratchBuffers) {
+             scratch: TrackScratchBuffers,
+             transition: InstrumentTransition? = nil) {
             self.instrumentOwner = instrumentOwner
             self.instrumentUnit = instrumentUnit
             self.auAudioUnit = auAudioUnit
             self.renderBlock = renderBlock
             self.effects = effects
             self.scratch = scratch
+            self.transition = transition
         }
 
         var isEmpty: Bool {
             instrumentUnit == nil && effects.allSatisfy { $0 == nil }
         }
+    }
+
+    /// Short render-owned transition holding the outgoing Audio Unit and
+    /// its private scratch alive. Its C11 progress is readable by control
+    /// code without racing the audio callback; cleanup runs off-thread.
+    final class InstrumentTransition {
+        let outgoing: ProcessingResources
+        let totalFrames: UInt32
+        private let progress: OpaquePointer
+
+        init?(outgoing: ProcessingResources, totalFrames: UInt32) {
+            guard let state = daw_transition_create(totalFrames) else {
+                return nil
+            }
+            self.outgoing = outgoing
+            self.totalFrames = totalFrames
+            self.progress = state
+        }
+
+        deinit { daw_transition_destroy(progress) }
+
+        func advance(frames: UInt32) -> UInt32 {
+            daw_transition_advance(progress, frames)
+        }
+
+        var isComplete: Bool {
+            daw_transition_completed(progress) >= totalFrames
+        }
+
+        func forceComplete() { daw_transition_force_complete(progress) }
     }
 
     /// Shared gain/pan/mute controls are written solely by the render callback
@@ -276,7 +309,8 @@ public final class RenderGraph {
                 auAudioUnit: old.auAudioUnit,
                 renderBlock: old.renderBlock,
                 effects: old.effects,
-                scratch: TrackScratchBuffers(frameCapacity: size)
+                scratch: TrackScratchBuffers(frameCapacity: size),
+                transition: old.transition
             )
         }
         publishRenderSnapshot()
@@ -438,7 +472,8 @@ public final class RenderGraph {
     /// Install without draining the output. Previous AVAudioUnit ownership
     /// remains in retired immutable snapshots until active readers finish.
     func installInstrument(_ prepared: PreparedInstrument, for trackID: TrackID,
-                           expectedRequestID: UInt64? = nil) throws -> AudioUnit {
+                           expectedRequestID: UInt64? = nil,
+                           enableCrossfade: Bool = false) throws -> AudioUnit {
         guard let track = tracks[trackID] else {
             throw AudioBackendError.trackNotFound(trackID)
         }
@@ -446,13 +481,21 @@ public final class RenderGraph {
             try validateInstrumentReplacement(for: trackID, requestID: request)
         }
         let previous = track.processing
+        // A ~25 ms ramp avoids a discontinuous buffer-edge patch change.
+        // Only actual instrument replacements need to render two AUs.
+        let fadeFrames = UInt32(max(64, min(4096, Int(sampleRate * 0.025))))
+        let transition: InstrumentTransition? =
+            enableCrossfade && previous.instrumentUnit != nil
+            ? InstrumentTransition(outgoing: previous, totalFrames: fadeFrames)
+            : nil
         track.processing = ProcessingResources(
             instrumentOwner: prepared.owner,
             instrumentUnit: prepared.unit,
             auAudioUnit: prepared.auAudioUnit,
             renderBlock: prepared.renderBlock,
             effects: previous.effects,
-            scratch: TrackScratchBuffers(frameCapacity: bufferSize)
+            scratch: TrackScratchBuffers(frameCapacity: bufferSize),
+            transition: transition
         )
         publishRenderSnapshot()
         track.pendingInstrumentRequestID = 0
@@ -591,7 +634,8 @@ public final class RenderGraph {
             auAudioUnit: previous.auAudioUnit,
             renderBlock: previous.renderBlock,
             effects: effects,
-            scratch: TrackScratchBuffers(frameCapacity: bufferSize)
+            scratch: TrackScratchBuffers(frameCapacity: bufferSize),
+            transition: previous.transition
         )
         publishRenderSnapshot()
         track.pendingEffectRequests[slot] = nil
@@ -634,9 +678,39 @@ public final class RenderGraph {
             instrumentOwner: owner, instrumentUnit: unit,
             auAudioUnit: au, renderBlock: block,
             effects: effects,
-            scratch: TrackScratchBuffers(frameCapacity: bufferSize)
+            scratch: TrackScratchBuffers(frameCapacity: bufferSize),
+            transition: slot < 0 ? nil : old.transition
         )
         publishRenderSnapshot()
+    }
+
+    /// Control-only: retire the outgoing instrument once the callback has
+    /// finished its ramp. No AudioUnit or Swift reference is released from
+    /// the real-time thread; old snapshots still hold their own references.
+    @discardableResult
+    func reapInstrumentTransitions(force: Bool = false) -> Bool {
+        var modified = false
+        var unfinished = false
+        for track in tracks.values {
+            let old = track.processing
+            guard let transition = old.transition else { continue }
+            if force { transition.forceComplete() }
+            if !transition.isComplete {
+                unfinished = true
+                continue
+            }
+            track.processing = ProcessingResources(
+                instrumentOwner: old.instrumentOwner,
+                instrumentUnit: old.instrumentUnit,
+                auAudioUnit: old.auAudioUnit,
+                renderBlock: old.renderBlock,
+                effects: old.effects,
+                scratch: old.scratch
+            )
+            modified = true
+        }
+        if modified { publishRenderSnapshot() }
+        return unfinished
     }
 
     func getInstrumentUnit(for trackID: TrackID) -> AudioUnit? {
