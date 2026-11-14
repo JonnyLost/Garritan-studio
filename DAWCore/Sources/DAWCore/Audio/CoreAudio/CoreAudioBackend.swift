@@ -364,16 +364,17 @@ public final class CoreAudioBackend: AudioBackend {
     public func removeTrack(id: TrackID) {
         controlGate.perform {
             guard !controlGate.isBounceActive else { return }
-            // Only a track without an instrument or effects can retire
-            // live; its scratch remains owned by any older render snapshot.
-            if renderGraph.canRemoveEmptyTrackLive(id: id) {
-                renderGraph.removeTrack(id: id)
-            } else {
+            // Every published route now retains its exact AU/effect/buffer
+            // owners. Deleting a loaded track is as safe as deleting an empty
+            // one: older render frames finish with the retired snapshot.
+            if renderGraph.pendingRouteRetirementCount >= 48 {
                 withDrainedOutput { renderGraph.removeTrack(id: id) }
+            } else {
+                renderGraph.removeTrack(id: id)
             }
         }
     }
-    
+
     public func setTrackVolume(_ volume: Float, for trackID: TrackID) {
         submitGraphCommand(.trackVolume(trackID, volume))
     }
@@ -438,17 +439,41 @@ public final class CoreAudioBackend: AudioBackend {
         for trackID: TrackID,
         slot: Int
     ) async throws -> AudioUnit {
-        // Initialize the new effect before disturbing hardware playback.
+        // Per-slot request tickets also protect against out-of-order effect
+        // selection and unloading while an Audio Unit is being configured.
+        let requestID = try controlGate.perform { () throws -> UInt64 in
+            try controlGate.ensureMutationAvailable()
+            return try renderGraph.beginEffectReplacement(for: trackID, slot: slot)
+        }
+        // Raw AU creation and initialization are isolated from the live graph.
         let prepared = try renderGraph.prepareEffect(description)
-        return try withDrainedOutputResult {
-            try renderGraph.installEffect(prepared, for: trackID, slot: slot)
+        return try controlGate.perform { () throws -> AudioUnit in
+            try controlGate.ensureMutationAvailable()
+            try renderGraph.validateEffectReplacement(
+                for: trackID, slot: slot, requestID: requestID
+            )
+            if renderGraph.pendingRouteRetirementCount >= 48 {
+                try withDrainedOutputResult {
+                    renderGraph.reclaimRetiredRoutesWhileQuiescent()
+                }
+            }
+            return try renderGraph.installEffect(
+                prepared, for: trackID, slot: slot, expectedRequestID: requestID
+            )
         }
     }
-    
+
     public func unloadPlugin(for trackID: TrackID, slot: Int) {
-        withDrainedOutput { renderGraph.unloadPlugin(for: trackID, slot: slot) }
+        controlGate.perform {
+            guard !controlGate.isBounceActive else { return }
+            if renderGraph.pendingRouteRetirementCount >= 48 {
+                withDrainedOutput { renderGraph.unloadPlugin(for: trackID, slot: slot) }
+            } else {
+                renderGraph.unloadPlugin(for: trackID, slot: slot)
+            }
+        }
     }
-    
+
     public func getInstrumentAudioUnit(for trackID: TrackID) -> AudioUnit? {
         controlGate.perform {
         return renderGraph.getInstrumentUnit(for: trackID)
