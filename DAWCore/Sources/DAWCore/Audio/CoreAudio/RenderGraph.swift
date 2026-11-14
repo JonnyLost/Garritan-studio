@@ -623,8 +623,12 @@ public final class RenderGraph {
         endSample: Int64,
         frameCount: UInt32,
         outputBuffer: UnsafeMutablePointer<AudioBufferList>
-    ) {
-        withRenderFrame { snapshot in
+    ) -> Bool {
+        guard daw_route_exchange_try_enter_render(routeExchange) else {
+            return false
+        }
+        defer { daw_route_exchange_leave_render(routeExchange) }
+        withRenderSnapshot { snapshot in
             _ = scheduler.processEvents(startSample: startSample, endSample: endSample) {
                 event, offset in
                 sendMIDI(to: event.trackID, status: event.status,
@@ -634,6 +638,7 @@ public final class RenderGraph {
             renderRoutes(snapshot: snapshot, frameCount: frameCount,
                          currentSample: startSample, outputBuffer: outputBuffer)
         }
+        return true
     }
 
     private func renderRoutes(
