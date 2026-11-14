@@ -1358,14 +1358,19 @@ public struct AdvancedPianoRollView: View {
         if isCopyingNotes && dragMode == .move {
             var copied = original
             var selectedCopies: Set<UUID> = []
+            var idMapping: [UUID: UUID] = [:]
             for moved in draft.events where selectedNoteIDs.contains(moved.id) {
                 guard case .note = moved.type else { continue }
                 var copy = moved
                 copy.id = UUID()
                 copied.events.append(copy)
                 selectedCopies.insert(copy.id)
+                idMapping[moved.id] = copy.id
             }
             guard !selectedCopies.isEmpty else { return }
+            StudioArticulationAssignmentEditing.transfer(
+                from: StudioArticulationAssignmentEditing.byNoteID(in: original),
+                idMapping: idMapping, into: &copied)
             clip.content = .midi(copied)
             updateClip(extendingClip(clip, toInclude: selectedCopies),
                        description: "Copy MIDI Notes")
