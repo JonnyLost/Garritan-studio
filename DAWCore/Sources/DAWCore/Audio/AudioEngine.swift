@@ -832,7 +832,8 @@ public final class AudioEngine: ObservableObject {
                 withAddress: NativeMicrophoneSpillAudioUnit.delayMillisecondsAddress
             )?.value = Float(min(
                 Double(NativeMicrophoneSpillProcessor.maximumDelayMilliseconds),
-                capture.propagationDelayMilliseconds
+                max(0, capture.propagationDelayMilliseconds +
+                    Double(mic.mixer.safeAlignmentMilliseconds))
             ))
             tree?.parameter(
                 withAddress: NativeMicrophoneSpillAudioUnit.lowPassAlphaAddress
