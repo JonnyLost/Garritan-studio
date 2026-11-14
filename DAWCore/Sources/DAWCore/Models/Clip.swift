@@ -181,10 +181,14 @@ public struct MIDIClipData: Codable, Sendable {
     
     /// Original tempo the MIDI was recorded at (for tempo-relative playback)
     public var originalTempo: Double?
+    /// Semantic note articulations remain valid when MIDI triggers are remapped.
+    /// Optional for older project files with no articulation assignments.
+    public var articulations: [StudioNoteArticulation]?
     
     public init(events: [MIDIEvent] = [], originalTempo: Double? = nil) {
         self.events = events
         self.originalTempo = originalTempo
+        self.articulations = nil
     }
     
     /// Events sorted by time
