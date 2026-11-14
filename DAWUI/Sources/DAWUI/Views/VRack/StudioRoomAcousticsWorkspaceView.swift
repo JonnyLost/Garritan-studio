@@ -401,7 +401,7 @@ struct StudioRoomAcousticsWorkspaceView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             let sourceCount = viewModel.project.tracks.filter {
-                $0.type == .midi || $0.type == .instrument || $0.type == .audio
+                AudioEngine.isIndependentMicrophoneSource($0)
             }.count + (viewModel.audioEngine.hasVRackCaptureSource ? 1 : 0)
             HStack(spacing: 12) {
                 Button(viewModel.audioEngine.isMicrophoneAuditionActive ?
