@@ -345,7 +345,10 @@ public final class ProjectViewModel: ObservableObject {
             // voices before preparing the next lap prevents stuck keyswitch
             // notes and note-offs from the previous pass reaching new voices.
             // This is a control-thread transition, never render-thread work.
-            guard transportState.isPlaying, !isStudioExporting else { break }
+            guard transportState.isPlaying, !isStudioExporting else {
+                transportState.finishLoopWrap()
+                break
+            }
             audioEngine.stopPlayback()
             playbackEngine.stopPlayback()
             prepareForPlayback()
