@@ -97,6 +97,33 @@ final class StudioMIDINoteEditingTests: XCTestCase {
         } else { XCTFail("Expected note") }
     }
 
+    func testOffsetRegionUsesAbsoluteGridAndPreservesLocalBounds() {
+        let note = MIDIEvent.note(at: 0.375, pitch: 65, duration: 0.5)
+        let moved = StudioMIDINoteEditing.moving(
+            [note], selectedIDs: [note.id], beatDelta: 0.25,
+            pitchDelta: 0, division: 0.25, clipStartBeat: 2.125
+        )
+        // 2.125 + 0.375 = 2.5. Move one quarter beat to 2.75.
+        XCTAssertEqual(moved[0].beatPosition, 0.625)
+        let clamped = StudioMIDINoteEditing.moving(
+            [note], selectedIDs: [note.id], beatDelta: -10,
+            pitchDelta: 0, division: 0.25, clipStartBeat: 2.125
+        )
+        XCTAssertEqual(clamped[0].beatPosition, 0)
+    }
+
+    func testResizeRespectsOffsetRegionStart() {
+        let note = MIDIEvent.note(at: 0.25, pitch: 60, duration: 0.5)
+        let resized = StudioMIDINoteEditing.resizing(
+            [note], noteID: note.id, edge: .start,
+            beatDelta: -10, division: 0.25, clipStartBeat: 8
+        )
+        XCTAssertEqual(resized[0].beatPosition, 0)
+        if case .note(let data) = resized[0].type {
+            XCTAssertEqual(data.duration, 0.75)
+        } else { XCTFail("Expected note") }
+    }
+
     func testPitchTranspositionKeepsChordIntervalsWhenApproachingMIDIClamp() {
         let a = MIDIEvent.note(at: 0, pitch: 120)
         let b = MIDIEvent.note(at: 0, pitch: 127)
