@@ -436,24 +436,21 @@ public final class CoreAudioBackend: AudioBackend {
         endSample: Int64,
         volume: Float
     ) throws {
-        return try controlGate.perform {
-        guard !isPlaying else {
-            throw AudioBackendError.configurationError(
-                "Stop experimental Core Audio playback before editing audio clips"
-            )
+        try controlGate.perform {
+            guard !isPlaying else {
+                throw AudioBackendError.configurationError(
+                    "Stop experimental Core Audio playback before editing audio clips"
+                )
+            }
+            try withDrainedOutputResult {
+                try audioClipRenderer.scheduleClip(
+                    url: url, trackID: trackID, startSample: startSample,
+                    offsetSample: offsetSample, endSample: endSample, volume: volume
+                )
+            }
         }
-        try withDrainedOutputResult {
-            try audioClipRenderer.scheduleClip(
-            url: url,
-            trackID: trackID,
-            startSample: startSample,
-            offsetSample: offsetSample,
-            endSample: endSample,
-            volume: volume
-        )
-    
-        }}
-    
+    }
+
     public func clearAudioClips() {
         withDrainedOutput {
             daw_render_transport_set_playing(transport, false)
