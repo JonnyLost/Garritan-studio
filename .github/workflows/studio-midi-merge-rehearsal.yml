@@ -1,0 +1,64 @@
+name: Studio MIDI Conflict Rehearsal
+
+on:
+  push:
+    branches:
+      - feature/pro-midi-sequencer
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  merge-preflight:
+    name: Simulate downstream merges and report exact conflicts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Compare target branches without publishing a merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*'
+          midi_head="$(git rev-parse HEAD)"
+          echo '## Professional MIDI: merge rehearsal (no remote refs changed)' >> "${GITHUB_STEP_SUMMARY}"
+          echo '' >> "${GITHUB_STEP_SUMMARY}"
+          echo '| Target | Git merge result | Actual conflicting files |' >> "${GITHUB_STEP_SUMMARY}"
+          echo '| --- | --- | ---: |' >> "${GITHUB_STEP_SUMMARY}"
+          targets=(
+            feature/studio-export-engine
+            integration/studio-complete-mac-test
+          )
+          for target in "${targets[@]}"; do
+            target_ref="refs/remotes/origin/${target}"
+            git show-ref --verify --quiet "${target_ref}" || {
+              echo "Missing target branch ${target}" >&2
+              exit 1
+            }
+            # This runner creates only a disposable local branch. There are
+            # no pushes, no merge commits, and no updates to shared refs.
+            git switch -C __midi_merge_rehearsal "${target_ref}"
+            if git merge --no-commit --no-ff "${midi_head}" > /tmp/studio-midi-merge.log 2>&1; then
+              echo "| \`${target}\` | Clean in disposable checkout | 0 |" >> "${GITHUB_STEP_SUMMARY}"
+            else
+              conflicts="$(git diff --name-only --diff-filter=U)"
+              count="$(printf '%s\n' "${conflicts}" | sed '/^$/d' | wc -l | tr -d ' ')"
+              echo "| \`${target}\` | Needs manual reconciliation | ${count} |" >> "${GITHUB_STEP_SUMMARY}"
+              echo '' >> "${GITHUB_STEP_SUMMARY}"
+              echo "<details><summary>${target}: files with actual merge conflicts</summary>" >> "${GITHUB_STEP_SUMMARY}"
+              echo '' >> "${GITHUB_STEP_SUMMARY}"
+              echo '```text' >> "${GITHUB_STEP_SUMMARY}"
+              printf '%s\n' "${conflicts}" >> "${GITHUB_STEP_SUMMARY}"
+              echo '```' >> "${GITHUB_STEP_SUMMARY}"
+              echo '</details>' >> "${GITHUB_STEP_SUMMARY}"
+            fi
+            if [[ -f .git/MERGE_HEAD ]]; then
+              git merge --abort
+            fi
+            git reset --hard "${target_ref}"
+          done
+          echo '' >> "${GITHUB_STEP_SUMMARY}"
+          echo '**No shared branch was merged or modified.** The merge simulation is disposable and reports only genuine Git conflicts, not merely files touched by two branches.' >> "${GITHUB_STEP_SUMMARY}"
