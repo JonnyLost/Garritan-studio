@@ -735,6 +735,38 @@ public final class ProjectViewModel: ObservableObject {
 
     /// Topology changes happen on the main/control thread while the graph is
     /// stopped. This is not called from a MIDI callback or slider drag.
+    /// Add an editable native Synth automation lane without rebuilding the
+    /// instrument. Existing saved presets and modulation settings stay intact.
+    @discardableResult
+    public func addStudioSynthAutomationLane(
+        for trackID: TrackID, layerID: UUID,
+        destination: StudioSynthModDestination
+    ) -> Bool {
+        guard let track = project.track(withID: trackID),
+              track.studioSynthEnabled == true,
+              let patch = track.studioSynthPatch,
+              destination.isContinuouslyModulatable,
+              patch.layers.contains(where: {
+                  $0.id == layerID && $0.enabled &&
+                  $0.engine == destination.engine
+              }) else { return false }
+        let parameter = AutomationParameter.studioSynth(
+            layerID: layerID, destination: destination)
+        guard !track.automationLanes.contains(where: {
+            $0.parameter == parameter
+        }) else { return false }
+        var updated = track
+        let initial = Float(destination.position(
+            for: destination.defaultValue))
+        let startBeat = max(0, transportState.playheadBeats)
+        var lane = AutomationLane(parameter: parameter, isVisible: true)
+        lane.setPoint(at: startBeat, value: initial)
+        updated.automationLanes.append(lane)
+        updated.isAutomationVisible = true
+        updateTrack(updated, description: "Add Studio Synth Automation")
+        return true
+    }
+
     public func updateStudioSynthPatch(_ patch: StudioSynthPatch,
                                        for trackID: TrackID) throws {
         guard patch.validate(),
