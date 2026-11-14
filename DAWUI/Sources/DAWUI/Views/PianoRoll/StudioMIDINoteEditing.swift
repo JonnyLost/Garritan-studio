@@ -90,14 +90,15 @@ enum StudioMIDINoteEditing {
     /// Keep the opposite edge fixed and never produce zero/negative length notes.
     static func resizing(_ events: [MIDIEvent], noteID: UUID, edge: ResizeEdge,
                          beatDelta: Double, division: Double, bypassSnap: Bool = false,
-                         minimumDuration: Double = 0.0625) -> [MIDIEvent] {
+                         minimumDuration: Double = 0.0625,
+                         clipStartBeat: Double = 0) -> [MIDIEvent] {
         guard beatDelta.isFinite else { return events }
         return events.map { event in
             guard event.id == noteID, case .note(var note) = event.type else {
                 return event
             }
             let minLength = max(0.001, minimumDuration)
-            let start = event.beatPosition
+            let start = event.beatPosition + clipStartBeat
             let end = start + note.duration
             var updated = event
 
@@ -106,8 +107,10 @@ enum StudioMIDINoteEditing {
                 let intended = StudioMusicalGrid.snap(
                     start + beatDelta, division: division, bypass: bypassSnap
                 )
-                updated.beatPosition = min(max(0, intended), max(0, end - minLength))
-                note.duration = end - updated.beatPosition
+                let newStart = min(max(clipStartBeat, intended),
+                                   max(clipStartBeat, end - minLength))
+                updated.beatPosition = newStart - clipStartBeat
+                note.duration = end - newStart
             case .end:
                 let intended = StudioMusicalGrid.snap(
                     end + beatDelta, division: division, bypass: bypassSnap
