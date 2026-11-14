@@ -142,10 +142,14 @@ final class OstinatoPatternTests: XCTestCase {
 
     func testPreviewRenderingDoesNotMutateSavedPattern() throws {
         let original = OstinatoPattern.starter(mode: .rhythmic)
-        let before = try JSONEncoder().encode(original)
+        // Dictionary encoding order is not stable without sortedKeys, even when
+        // the value has not changed. Compare canonical JSON instead.
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let before = try encoder.encode(original)
         _ = original.midiEvents()
         _ = original.midiEvents()
-        XCTAssertEqual(try JSONEncoder().encode(original), before)
+        XCTAssertEqual(try encoder.encode(original), before)
     }
 
 }
