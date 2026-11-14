@@ -792,7 +792,7 @@ public final class ProjectViewModel: ObservableObject {
                   track.automationLanes[index].parameter,
               let patch = track.studioSynthPatch,
               patch.layers.contains(where: {
-                  $0.id == layerID && $0.enabled &&
+                  $0.id == layerID &&
                   $0.engine == destination.engine
               }) else { return false }
         var updated = track
