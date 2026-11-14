@@ -108,6 +108,17 @@ public struct StudioNoteArticulation: Codable, Sendable, Equatable {
 /// Build an ephemeral playback MIDI stream; never bake keyswitches into user
 /// note events. Safe to call again when a project, map, or instrument changes.
 public enum StudioArticulationRenderer {
+    private struct KeyswitchKey: Hashable {
+        let pitch: UInt8
+        let channel: UInt8
+        let beat: Double
+    }
+
+    private struct HeldControllerKey: Hashable {
+        let controller: UInt8
+        let channel: UInt8
+    }
+
     public static func events(for midi: MIDIClipData, map: StudioArticulationMap?) -> [MIDIEvent] {
         guard let map, let assignments = midi.articulations, !assignments.isEmpty else {
             return midi.events
@@ -115,6 +126,8 @@ public enum StudioArticulationRenderer {
         let byNote = Dictionary(assignments.map { ($0.noteID, $0.articulationID) },
                                 uniquingKeysWith: { _, new in new })
         var result: [(event: MIDIEvent, priority: Int, originalOrder: Int)] = []
+        var emittedSwitches = Set<KeyswitchKey>()
+        var heldControllerWindows: [HeldControllerKey: [(start: Double, end: Double)]] = [:]
         for (order, original) in midi.events.enumerated() {
             var noteEvent = original
             if case .note(let note) = original.type,
@@ -139,11 +152,20 @@ public enum StudioArticulationRenderer {
                         let duration = action.holdForNote
                             ? max(0.01, note.duration + original.beatPosition - switchBeat)
                             : 0.04
-                        let switchNote = MIDIEvent.note(
-                            at: switchBeat, pitch: UInt8(action.number),
-                            velocity: UInt8(action.value), duration: duration,
-                            channel: channel)
-                        result.append((switchNote, 0, order))
+                        // Same keyswitch at the same beat may be shared by
+                        // a chord. Send it once; repeated note-on/note-off
+                        // pairs could otherwise release a held switch early.
+                        let repeatKey = KeyswitchKey(
+                            pitch: UInt8(action.number), channel: channel,
+                            beat: switchBeat)
+                        if action.holdForNote ||
+                            emittedSwitches.insert(repeatKey).inserted {
+                            let switchNote = MIDIEvent.note(
+                                at: switchBeat, pitch: UInt8(action.number),
+                                velocity: UInt8(action.value),
+                                duration: duration, channel: channel)
+                            result.append((switchNote, 0, order))
+                        }
                     case .controller:
                         guard (0...127).contains(action.number),
                               (0...127).contains(action.value) else { continue }
@@ -151,11 +173,11 @@ public enum StudioArticulationRenderer {
                             at: switchBeat, controller: UInt8(action.number),
                             value: UInt8(action.value), channel: channel), 0, order))
                         if action.holdForNote {
-                            result.append((MIDIEvent.controlChange(
-                                at: max(original.beatPosition,
-                                        original.beatPosition + note.duration - 0.001),
-                                controller: UInt8(action.number), value: 0,
-                                channel: channel), -1, order))
+                            let controllerKey = HeldControllerKey(
+                                controller: UInt8(action.number), channel: channel)
+                            heldControllerWindows[controllerKey, default: []].append((
+                                start: switchBeat,
+                                end: original.beatPosition + note.duration))
                         }
                     case .programChange:
                         guard (0...127).contains(action.number) else { continue }
@@ -168,6 +190,30 @@ public enum StudioArticulationRenderer {
                 }
             }
             result.append((noteEvent, 1, order))
+        }
+        // A controller held by overlapping notes cannot be reset when
+        // the first note ends. Merge overlapping windows per channel/CC
+        // and emit ONE release after the last note in each active group.
+        // Allow 0.01 beat of switch lead-in for adjacent articulations.
+        for (key, windows) in heldControllerWindows {
+            let sorted = windows.sorted { $0.start < $1.start }
+            guard let first = sorted.first else { continue }
+            var activeEnd = first.end
+            for window in sorted.dropFirst() {
+                if window.start <= activeEnd + 0.001 {
+                    activeEnd = max(activeEnd, window.end)
+                } else {
+                    result.append((MIDIEvent.controlChange(
+                        at: max(0, activeEnd - 0.001),
+                        controller: key.controller, value: 0,
+                        channel: key.channel), -1, midi.events.count))
+                    activeEnd = window.end
+                }
+            }
+            result.append((MIDIEvent.controlChange(
+                at: max(0, activeEnd - 0.001),
+                controller: key.controller, value: 0,
+                channel: key.channel), -1, midi.events.count))
         }
         // Stable order is important for switches sharing the note's beat.
         return result.sorted {
