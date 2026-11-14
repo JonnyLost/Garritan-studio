@@ -829,6 +829,9 @@ public struct AdvancedPianoRollView: View {
                         height: velocityLaneHeight - 4,
                         onVelocityChange: { newVelocity in
                             updateNoteVelocity(event.id, velocity: newVelocity)
+                        },
+                        onVelocityCommit: {
+                            commitNoteVelocity()
                         }
                     )
                 }
@@ -1069,19 +1072,31 @@ public struct AdvancedPianoRollView: View {
     }
     
     private func updateNoteVelocity(_ id: UUID, velocity: UInt8) {
-        guard var clip = currentClip, case .midi(var midiData) = clip.content else { return }
-        
-        if let index = midiData.events.firstIndex(where: { $0.id == id }) {
-            if case .note(var noteData) = midiData.events[index].type {
-                noteData.velocity = velocity
-                midiData.events[index].type = .note(noteData)
-            }
-        }
-        
-        clip.content = .midi(midiData)
-        updateClip(clip)
+        guard let clip = currentClip, case .midi(let original) = clip.content else { return }
+        var draft = original
+        guard let index = draft.events.firstIndex(where: { $0.id == id }),
+              case .note(var data) = draft.events[index].type else { return }
+        data.velocity = velocity
+        draft.events[index].type = .note(data)
+        previewMIDI = draft
     }
-    
+
+    /// A velocity-bar drag is one undoable edit, not an undo step per pixel.
+    private func commitNoteVelocity() {
+        defer { previewMIDI = nil }
+        guard let draft = previewMIDI,
+              var clip = currentClip,
+              case .midi(let original) = clip.content else { return }
+        let changed = zip(original.events, draft.events).contains { before, after in
+            guard case .note(let a) = before.type,
+                  case .note(let b) = after.type else { return false }
+            return a.velocity != b.velocity
+        }
+        guard changed else { return }
+        clip.content = .midi(draft)
+        updateClip(clip, description: "Edit MIDI Velocity")
+    }
+
     private func quantizeSelectedNotes(to grid: QuantizeGrid) {
         guard var clip = currentClip, case .midi(var midiData) = clip.content else { return }
         guard !selectedNoteIDs.isEmpty else { return }
@@ -1548,7 +1563,8 @@ struct VelocityBar: View {
     let pixelsPerBeat: Double
     let height: CGFloat
     let onVelocityChange: (UInt8) -> Void
-    
+    let onVelocityCommit: () -> Void
+
     @State private var isDragging = false
     
     var body: some View {
@@ -1569,6 +1585,7 @@ struct VelocityBar: View {
                     }
                     .onEnded { _ in
                         isDragging = false
+                        onVelocityCommit()
                     }
             )
     }
