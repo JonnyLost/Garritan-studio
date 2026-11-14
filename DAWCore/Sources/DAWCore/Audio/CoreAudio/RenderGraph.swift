@@ -86,7 +86,7 @@ public final class RenderGraph {
     }
 
     var renderSnapshotGeneration: UInt64 { latestSnapshot.generation }
-    var renderSnapshotTrackIDs: [TrackID] { latestSnapshot.routes.map(\\.id) }
+    var renderSnapshotTrackIDs: [TrackID] { latestSnapshot.routes.map(\.id) }
 
     private var masterVolume: Float = 1.0
     private let sampleRate: Double
