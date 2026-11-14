@@ -1519,7 +1519,7 @@ public struct AdvancedPianoRollView: View {
         draft.events = StudioMIDIExpressionEditing.draw(
             events: original.events, lane: selectedCCType, points: expressionStroke,
             clipStartBeat: start, division: step, channel: UInt8(expressionChannel),
-            mode: expressionDrawMode)
+            mode: expressionDrawMode, clipEndBeat: end)
         previewMIDI = expressionDrawMode == .erase &&
                      draft.events.count == original.events.count ? nil : draft
     }
