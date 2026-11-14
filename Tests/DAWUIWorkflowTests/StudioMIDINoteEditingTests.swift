@@ -3,6 +3,67 @@ import DAWCore
 @testable import DAWUI
 
 final class StudioMIDINoteEditingTests: XCTestCase {
+    func testKeyboardNudgeDoesNotQuantizeUnsnappedPhrase() {
+        let a = MIDIEvent.note(at: 0.375, pitch: 60, duration: 0.7)
+        let b = MIDIEvent.note(at: 0.625, pitch: 64, duration: 1)
+        let cc = MIDIEvent.controlChange(at: 0.5, controller: 11, value: 91)
+        let result = StudioMIDINoteEditing.nudging(
+            [a, b, cc], selectedIDs: [a.id, b.id],
+            beatDelta: 0.25, pitchDelta: 0)
+        XCTAssertEqual(result[0].beatPosition, 0.625)
+        XCTAssertEqual(result[1].beatPosition, 0.875)
+        XCTAssertEqual(result[1].beatPosition - result[0].beatPosition, 0.25)
+        XCTAssertEqual(result[2].beatPosition, 0.5)
+        XCTAssertEqual(result[0].id, a.id)
+        XCTAssertEqual(result[1].id, b.id)
+        XCTAssertTrue(StudioMIDINoteEditing.hasPitchOrTimingChanges(
+            before: [a,b,cc], after: result))
+    }
+
+    func testPitchNudgePreservesChordIntervalsAtMIDILimit() {
+        let a = MIDIEvent.note(at: 1, pitch: 119)
+        let b = MIDIEvent.note(at: 1, pitch: 127)
+        let raised = StudioMIDINoteEditing.nudging(
+            [a,b], selectedIDs: [a.id,b.id], pitchDelta: 12)
+        XCTAssertFalse(StudioMIDINoteEditing.hasPitchOrTimingChanges(
+            before: [a,b], after: raised))
+        let lowered = StudioMIDINoteEditing.nudging(
+            [a,b], selectedIDs: [a.id,b.id], pitchDelta: -12)
+        if case .note(let low) = lowered[0].type,
+           case .note(let high) = lowered[1].type {
+            XCTAssertEqual(low.pitch, 107)
+            XCTAssertEqual(high.pitch, 115)
+            XCTAssertEqual(Int(high.pitch) - Int(low.pitch), 8)
+        } else { XCTFail("Expected pitched notes") }
+    }
+
+    func testNegativeNudgeClampsWholeSelectionWithoutCompression() {
+        let a = MIDIEvent.note(at: 0.125, pitch: 60)
+        let b = MIDIEvent.note(at: 0.875, pitch: 67)
+        let moved = StudioMIDINoteEditing.nudging(
+            [a,b], selectedIDs: [a.id,b.id], beatDelta: -2)
+        XCTAssertEqual(moved[0].beatPosition, 0)
+        XCTAssertEqual(moved[1].beatPosition, 0.75)
+        XCTAssertFalse(StudioMIDINoteEditing.hasPitchOrTimingChanges(
+            before: moved, after: moved))
+    }
+
+    func testNudgeDoesNotTouchUnselectedNotesOrControllers() {
+        let selected = MIDIEvent.note(at: 1, pitch: 60)
+        let other = MIDIEvent.note(at: 2, pitch: 67)
+        let cc = MIDIEvent.controlChange(at: 1, controller: 11, value: 55)
+        let moved = StudioMIDINoteEditing.nudging(
+            [selected,other,cc], selectedIDs: [selected.id],
+            beatDelta: 0.125, pitchDelta: 1)
+        XCTAssertEqual(moved[1].id, other.id)
+        XCTAssertEqual(moved[1].beatPosition, 2)
+        XCTAssertEqual(moved[2].id, cc.id)
+        XCTAssertEqual(moved[2].beatPosition, 1)
+        if case .note(let data) = moved[0].type {
+            XCTAssertEqual(data.pitch, 61)
+        } else { XCTFail("Expected edited note") }
+    }
+
     func testMovingChordRetainsRelativeTimingAndOtherEvents() {
         let a = MIDIEvent.note(at: 0.5, pitch: 60, duration: 0.75)
         let b = MIDIEvent.note(at: 0.75, pitch: 64, duration: 0.25)
