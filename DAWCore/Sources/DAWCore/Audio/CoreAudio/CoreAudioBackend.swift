@@ -241,9 +241,10 @@ public final class CoreAudioBackend: AudioBackend {
         }
     }
 
-    /// Control-thread-only graph edit. The render thread never waits on this.
-    /// The caller must serialize backend control commands, including async loads.
-    private func withDrainedOutputAsync<T>(_ operation: () async throws -> T) async throws -> T {
+    /// Install already prepared graph resources while callbacks are drained.
+    /// Unlike the old async helper, this never suspends with output stopped.
+    /// The caller must serialize all experimental backend control operations.
+    private func withDrainedOutputResult<T>(_ operation: () throws -> T) throws -> T {
         let restart = _isRunning
         if restart, let outputUnit {
             let status = AudioOutputUnitStop(outputUnit)
@@ -261,7 +262,7 @@ public final class CoreAudioBackend: AudioBackend {
             }
         }
         drainGraphCommandsWhileQuiescent()
-        return try await operation()
+        return try operation()
     }
 
     // MARK: - Render-owned parameter commands
@@ -351,8 +352,11 @@ public final class CoreAudioBackend: AudioBackend {
         _ description: AudioComponentDescription,
         for trackID: TrackID
     ) async throws -> AudioUnit {
-        return try await withDrainedOutputAsync {
-            try await renderGraph.loadInstrument(description, for: trackID)
+        // The new AU is isolated from the active graph until preparation ends.
+        // The hardware drain now covers only the synchronous owner swap.
+        let prepared = try await renderGraph.prepareInstrument(description)
+        return try withDrainedOutputResult {
+            try renderGraph.installInstrument(prepared, for: trackID)
         }
     }
     
@@ -361,8 +365,10 @@ public final class CoreAudioBackend: AudioBackend {
         for trackID: TrackID,
         slot: Int
     ) async throws -> AudioUnit {
-        return try await withDrainedOutputAsync {
-            try await renderGraph.loadEffect(description, for: trackID, slot: slot)
+        // Initialize the new effect before disturbing hardware playback.
+        let prepared = try renderGraph.prepareEffect(description)
+        return try withDrainedOutputResult {
+            try renderGraph.installEffect(prepared, for: trackID, slot: slot)
         }
     }
     
