@@ -256,6 +256,14 @@ public struct VRackView: View {
     private struct DrawerInstrument: Identifiable {
         let library: String
         let path: String
+        let nativePresetID: String?
+
+        init(library: String, path: String, nativePresetID: String? = nil) {
+            self.library = library
+            self.path = path
+            self.nativePresetID = nativePresetID
+        }
+
         var id: String { library + ":" + path }
         var name: String { String(path.split(separator: "/").last ?? Substring(path)) }
         var family: String {
@@ -264,6 +272,7 @@ public struct VRackView: View {
             return parts.count > index + 1 ? parts[index] : "Other"
         }
         var category: String {
+            if nativePresetID != nil { return "Synth" }
             let f = family.lowercased()
             if f.contains("woodwind") || f.contains("flute") || f.contains("clarinet") { return "Woodwinds" }
             if f.contains("brass") { return "Brass" }
@@ -362,12 +371,43 @@ public struct VRackView: View {
                 DrawerInstrument(library: library, path: $0.name)
             }
         }
-        Self.cachedCatalog = loaded
-        catalog = loaded
+        let nativeSounds = StudioSynthFactoryCatalog.sounds.map { sound in
+            DrawerInstrument(
+                library: StudioSynthFactoryCatalog.libraryName,
+                path: sound.instrumentPath, nativePresetID: sound.id
+            )
+        }
+        let combined = loaded + nativeSounds
+        Self.cachedCatalog = combined
+        catalog = combined
     }
 
     private func chooseInstrument(_ instrument: DrawerInstrument, targetTrackID: TrackID? = nil) {
         guard !isLoadingInstrument else { return }
+        if let soundID = instrument.nativePresetID {
+            guard let sound = StudioSynthFactoryCatalog.sound(id: soundID),
+                  let trackID = targetTrackID ?? viewModel.selectedTrackID else {
+                pickerError = "Select an instrument track first."
+                return
+            }
+            do {
+                // Native presets embed their entire synthesis patch.
+                try viewModel.loadStudioSynth(for: trackID, patch: sound.instantiatePatch())
+                if var track = viewModel.project.track(withID: trackID) {
+                    if track.name.range(
+                        of: #"^(?:MIDI|Instrument|Synth) \d+$"#,
+                        options: [.regularExpression, .caseInsensitive]
+                    ) != nil {
+                        track.name = sound.name
+                        viewModel.updateTrack(track, description: "Name Synth Preset Track")
+                    }
+                }
+                pickerError = nil
+            } catch {
+                pickerError = error.localizedDescription
+            }
+            return
+        }
         guard let trackID = targetTrackID ?? viewModel.selectedTrackID,
               let track = viewModel.project.track(withID: trackID),
               track.type == .midi || track.type == .instrument else {
@@ -453,7 +493,7 @@ public struct VRackView: View {
             pickerError = "Could not create the instrument track."
             return
         }
-        print("[Instrument Picker] Add as New Track: beginning ARIA load for \(newTrackID)")
+        print("[Instrument Picker] Add as New Track: loading \(instrument.name) for \(newTrackID)")
         chooseInstrument(instrument, targetTrackID: newTrackID)
     }
 
@@ -629,7 +669,7 @@ public struct VRackView: View {
         VStack(spacing: 0) {
             StudioWorkspaceHeader(
                 "Instrument Browser",
-                subtitle: "Explore Garritan libraries and choose a patch",
+                subtitle: "Garritan instruments and Studio's native Synth sounds",
                 symbol: "music.note.list"
             ) {
                 Text("\(filteredCatalog.count) patches")
@@ -654,10 +694,14 @@ public struct VRackView: View {
                     Button("Garritan Instant Orchestra") {
                         libraryFilter = "Garritan Instant Orchestra"
                     }
+                    Button("Studio Synth") {
+                        libraryFilter = StudioSynthFactoryCatalog.libraryName
+                    }
                 } label: {
                     HStack(spacing: 6) {
                         Text(libraryFilter == "All Libraries" ? "All Libraries" :
-                             libraryFilter == "Garritan Personal Orchestra 5" ? "GPO5" : "Instant Orchestra")
+                             libraryFilter == "Garritan Personal Orchestra 5" ? "GPO5" :
+                             libraryFilter == StudioSynthFactoryCatalog.libraryName ? "Synth" : "Instant Orchestra")
                             .lineLimit(1)
                         Spacer(minLength: 2)
                         Image(systemName: "chevron.down")
@@ -778,7 +822,8 @@ public struct VRackView: View {
                                         Text(instrument.name)
                                             .font(.subheadline.weight(.medium))
                                         Text(instrument.category + " · " +
-                                             (instrument.library == "Garritan Personal Orchestra 5" ? "GPO5" : "Instant Orchestra"))
+                                             (instrument.library == "Garritan Personal Orchestra 5" ? "GPO5" :
+                                              instrument.library == StudioSynthFactoryCatalog.libraryName ? instrument.instrumentType : "Instant Orchestra"))
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
@@ -943,6 +988,45 @@ public struct VRackView: View {
         }
     }
 
+    /// Synth lives in the same family hierarchy as the orchestra, with
+    /// independent expandable engine-type folders beneath it.
+    private func compactSynthFolder(_ instruments: [DrawerInstrument]) -> some View {
+        DisclosureGroup {
+            ForEach([
+                "Analog", "FM", "Wavetable", "Additive", "Granular",
+                "Physical Modeling", "Hybrid"
+            ], id: \.self) { engine in
+                let sounds = instruments.filter { $0.instrumentType == engine }
+                if !sounds.isEmpty {
+                    DisclosureGroup("\(engine) (\(sounds.count))") {
+                        ForEach(sounds) { sound in
+                            Button {
+                                chooseInstrument(sound)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "waveform").frame(width: 20)
+                                    Text(sound.name).font(.system(size: 12))
+                                        .lineLimit(1)
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.vertical, 5)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .padding(.leading, 6)
+                }
+            }
+        } label: {
+            Label("SYNTH", systemImage: "waveform")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+    }
+
     private var instrumentsPanel: some View {
         VStack(spacing: 0) {
             HStack {
@@ -990,6 +1074,7 @@ public struct VRackView: View {
                         Text("All").tag("All Libraries")
                         Text("GPO5").tag("Garritan Personal Orchestra 5")
                         Text("Instant").tag("Garritan Instant Orchestra")
+                        Text("Synth").tag(StudioSynthFactoryCatalog.libraryName)
                     }
                     .help("Instrument library")
                     Picker("Family", selection: $familyFilter) {
@@ -1025,6 +1110,9 @@ public struct VRackView: View {
                     ForEach(scoreFamilies, id: \.self) { family in
                         let instruments = filteredCatalog.filter { $0.category == family }
                         if !instruments.isEmpty {
+                            if family == "Synth" {
+                                compactSynthFolder(instruments)
+                            } else {
                             Text(family.uppercased())
                                 .font(.system(size: 10, weight: .semibold))
                                 .foregroundColor(.secondary)
@@ -1045,7 +1133,8 @@ public struct VRackView: View {
                                             Text(instrument.name)
                                                 .font(.system(size: 12, weight: .medium))
                                                 .lineLimit(1)
-                                            Text(instrument.library == "Garritan Personal Orchestra 5" ? "GPO5" : "Instant Orchestra")
+                                            Text(instrument.library == "Garritan Personal Orchestra 5" ? "GPO5" :
+                                                 instrument.library == StudioSynthFactoryCatalog.libraryName ? instrument.instrumentType : "Instant Orchestra")
                                                 .font(.system(size: 10))
                                                 .foregroundColor(.secondary)
                                         }
@@ -1060,10 +1149,11 @@ public struct VRackView: View {
                                 }
                                 .buttonStyle(.plain)
                             }
+                            }
                         }
                     }
                     if catalog.isEmpty {
-                        Text("No Garritan banks found on this Mac.")
+                        Text("No instruments match the current filters.")
                             .font(.caption).foregroundColor(.secondary).padding(16)
                     }
                 }

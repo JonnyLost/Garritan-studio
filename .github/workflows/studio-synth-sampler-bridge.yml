@@ -4,13 +4,14 @@ on:
   push:
     branches:
       - integration/studio-synth-sampler-bridge
+      - feature/studio-track-workflow
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: studio-synth-sampler-bridge
+  group: studio-synth-sampler-bridge-${{ github.ref_name }}
   cancel-in-progress: true
 
 jobs:

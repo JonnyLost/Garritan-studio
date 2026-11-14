@@ -199,6 +199,11 @@ let package = Package(
             name: "DAWCoreTests",
             dependencies: ["DAWCore", "DAWRealtime"],
             path: "Tests/DAWCoreTests"
+        ),
+        .testTarget(
+            name: "DAWUIWorkflowTests",
+            dependencies: ["DAWUI", "DAWCore"],
+            path: "Tests/DAWUIWorkflowTests"
         )
     ]
 )
