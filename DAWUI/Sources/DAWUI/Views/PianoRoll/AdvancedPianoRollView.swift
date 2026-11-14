@@ -380,6 +380,20 @@ public struct AdvancedPianoRollView: View {
                     break
                 }
             }
+            // Controller shape keys must not intercept Command shortcuts
+            // or the system's Option/Control combinations.
+            if showCCLane &&
+               !keyPress.modifiers.contains(.command) &&
+               !keyPress.modifiers.contains(.option) &&
+               !keyPress.modifiers.contains(.control) {
+                switch keyPress.characters.lowercased() {
+                case "1": expressionDrawMode = .pencil; return .handled
+                case "2": expressionDrawMode = .line; return .handled
+                case "3": expressionDrawMode = .curve; return .handled
+                case "4": expressionDrawMode = .erase; return .handled
+                default: break
+                }
+            }
             // Tool shortcuts (when no modifier keys are held)
             switch keyPress.characters.lowercased() {
             case "a":
@@ -393,18 +407,6 @@ public struct AdvancedPianoRollView: View {
                 return .handled
             case "v":
                 currentTool = .velocity
-                return .handled
-            case "1" where showCCLane:
-                expressionDrawMode = .pencil
-                return .handled
-            case "2" where showCCLane:
-                expressionDrawMode = .line
-                return .handled
-            case "3" where showCCLane:
-                expressionDrawMode = .curve
-                return .handled
-            case "4" where showCCLane:
-                expressionDrawMode = .erase
                 return .handled
             case "q":
                 // Quantize shortcut - only if notes are selected
