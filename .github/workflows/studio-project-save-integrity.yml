@@ -1,0 +1,42 @@
+name: Studio Project Save Integrity Gate
+
+on:
+  push:
+    branches:
+      - integration/studio-save-integrity-2026-11-14
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-project-save-integrity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos-save-and-app:
+    name: Revision saves, full Studio regression and release build
+    runs-on: macos-15
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - name: Identify snapshot
+        run: |
+          git log -1 --format='%H %s'
+          swift --version
+      - name: Resolve packages
+        run: swift package resolve
+      - name: Compile Studio
+        run: swift build
+      - name: Test full Studio regression suite
+        run: swift test --parallel
+      - name: Build release DAWApp
+        run: swift build -c release --product DAWApp
+      - name: Verify MIDI and audio-export menu retained
+        run: |
+          grep -q 'func importMIDI()' DAWApp/Sources/DAWApp/DAWApp.swift
+          grep -q 'func exportMIDI()' DAWApp/Sources/DAWApp/DAWApp.swift
+          grep -q 'Export Audio & Stems' DAWApp/Sources/DAWApp/DAWApp.swift
+          grep -q 'StudioRoomAcousticsWorkspaceView' DAWUI/Sources/DAWUI/Views/MainWindowView.swift
+          grep -q 'OstinatoWorkspaceView' DAWUI/Sources/DAWUI/Views/MainWindowView.swift
+          grep -q 'ProjectSaveRevision' DAWApp/Sources/DAWApp/DAWApp.swift
