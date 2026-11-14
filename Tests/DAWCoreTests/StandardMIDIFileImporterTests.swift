@@ -190,7 +190,8 @@ final class StandardMIDIFileImporterTests: XCTestCase {
         let project = Project(name: "Empty")
         try await manager.export(project: project, to: url, format: .midi)
         let validBytes = try Data(contentsOf: url)
-        XCTAssertEqual((try await manager.importMIDI(from: url)).name, "Score")
+        let importedProject = try await manager.importMIDI(from: url)
+        XCTAssertEqual(importedProject.name, "Score")
         let broken = folder.appendingPathComponent("broken.mid")
         try Data([0, 1, 2, 3]).write(to: broken)
         do {
