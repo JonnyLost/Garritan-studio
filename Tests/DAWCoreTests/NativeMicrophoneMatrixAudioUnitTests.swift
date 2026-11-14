@@ -73,8 +73,7 @@ final class NativeMicrophoneMatrixAudioUnitTests: XCTestCase {
         input.frameLength = 512
         let samples = try XCTUnwrap(input.floatChannelData)
         for channel in 0..<2 {
-            for index in 0..<512 { samples[channel][index] = 0 }
-            samples[channel][0] = 0.5
+            for index in 0..<512 { samples[channel][index] = 0.125 }
         }
         player.scheduleBuffer(input, at: nil, options: [])
         player.play()
@@ -82,11 +81,19 @@ final class NativeMicrophoneMatrixAudioUnitTests: XCTestCase {
         let output = try XCTUnwrap(AVAudioPCMBuffer(
             pcmFormat: engine.manualRenderingFormat, frameCapacity: 512
         ))
-        let result = try engine.renderOffline(512, to: output)
-        XCTAssertEqual(result, .success)
-        let channels = try XCTUnwrap(output.floatChannelData)
-        XCTAssertTrue((0..<512).allSatisfy { index in
-            channels[0][index].isFinite && channels[1][index].isFinite
-        })
+        var peak: Float = 0
+        for _ in 0..<8 {
+            let result = try engine.renderOffline(512, to: output)
+            XCTAssertEqual(result, .success)
+            let channels = try XCTUnwrap(output.floatChannelData)
+            for index in 0..<512 {
+                let left = channels[0][index]
+                let right = channels[1][index]
+                XCTAssertTrue(left.isFinite && right.isFinite)
+                peak = max(peak, abs(left), abs(right))
+            }
+        }
+        // A graph that renders silence is NOT an audible integration.
+        XCTAssertGreaterThan(peak, 0.01)
     }
 }
