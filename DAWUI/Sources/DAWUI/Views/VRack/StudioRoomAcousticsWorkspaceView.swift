@@ -396,7 +396,7 @@ struct StudioRoomAcousticsWorkspaceView: View {
     private var microphoneMixer: some View {
         VStack(alignment: .leading, spacing: 14) {
             StudioSectionHeading("Virtual Microphone Mixer", symbol: "slider.horizontal.3")
-            Text("Every live microphone receives each participating source, with its own directional gain and sound-travel delay. Auditioning replaces the original dry/hall mix temporarily; it never layers a second full orchestra over it.")
+            Text("Every live microphone receives each participating source, with its own directional gain and sound-travel delay. Auditioning replaces the original dry mix temporarily; an adjustable shared room return adds ambience without a second dry orchestra.")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -418,6 +418,21 @@ struct StudioRoomAcousticsWorkspaceView: View {
                 Text("\(min(4, microphoneObjects.count)) live mic channels · \(sourceCount) sources")
                     .font(.caption2).foregroundStyle(.secondary)
             }
+            HStack(spacing: 12) {
+                Text("Shared room return").font(.caption)
+                Slider(value: Binding(
+                    get: { Double(viewModel.audioEngine.microphoneRoomWetLevel) },
+                    set: { viewModel.audioEngine.setMicrophoneRoomWetLevel(Float($0)) }
+                ), in: 0...1)
+                .accessibilityIdentifier("microphone-shared-room-wet")
+                Text(String(format: "%.0f%%",
+                            viewModel.audioEngine.microphoneRoomWetLevel * 100))
+                    .font(.caption.monospacedDigit())
+                    .frame(width: 45, alignment: .trailing)
+            }
+            Text("One shared hall field is blended into microphone audition. It uses existing stage sends, not measured reflections at each capsule. Set to 0% for direct/spill-only comparison.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             if let error = viewModel.microphoneAuditionError {
                 Text(error).font(.caption).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
