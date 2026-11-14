@@ -418,6 +418,19 @@ struct StudioRoomAcousticsWorkspaceView: View {
                 Text("\(min(4, microphoneObjects.count)) live mic channels · \(sourceCount) sources")
                     .font(.caption2).foregroundStyle(.secondary)
             }
+            Toggle("Experimental shared-history capture (one Audio Unit per source)",
+                   isOn: Binding(
+                       get: { viewModel.audioEngine.usesSharedMicrophoneMatrix },
+                       set: { viewModel.audioEngine.setSharedMicrophoneMatrixEnabled($0) }
+                   ))
+                .toggleStyle(.switch)
+                .font(.caption)
+                .disabled(viewModel.audioEngine.isMicrophoneAuditionActive ||
+                          !canChangeRoom)
+                .accessibilityIdentifier("experimental-microphone-matrix")
+            Text("Switch back to original capture with audition stopped. The experimental path still has the 16-source limit; both retain independent mic level, pan, mute, solo and alignment controls.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 12) {
                 Text("Shared room return").font(.caption)
                 Slider(value: Binding(
