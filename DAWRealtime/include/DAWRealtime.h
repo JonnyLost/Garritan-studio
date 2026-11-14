@@ -123,6 +123,13 @@ void daw_route_exchange_end_read(DAWRenderRouteExchange *exchange);
 void *daw_route_exchange_publish(DAWRenderRouteExchange *exchange, void *newSnapshot);
 bool daw_route_exchange_is_quiescent(const DAWRenderRouteExchange *exchange);
 void *daw_route_exchange_take_current_quiescent(DAWRenderRouteExchange *exchange);
+    
+// A single native output may not process the same AU/effect chain from two
+// overlapping render callbacks. Contended callbacks must return silence;
+// they must never spin, block, log, or access MIDI/AU processing resources.
+bool daw_route_exchange_try_enter_render(DAWRenderRouteExchange *exchange);
+void daw_route_exchange_leave_render(DAWRenderRouteExchange *exchange);
+
 
 #ifdef __cplusplus
 }
