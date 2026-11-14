@@ -550,7 +550,7 @@ public struct MainWindowView: View {
             } else if let track = viewModel.selectedTrack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(track.name).font(.subheadline.weight(.semibold))
-                    Text(track.instrumentSlot?.pluginID?.name ?? "No instrument loaded")
+                    Text(track.studioAnalogEnabled == true ? "Studio Analog" : (track.instrumentSlot?.pluginID?.name ?? "No instrument loaded"))
                         .font(.caption).foregroundColor(.secondary)
                 }
                 Spacer()
@@ -575,7 +575,11 @@ public struct MainWindowView: View {
     @ViewBuilder
     private var bottomPanel: some View {
         if showInstrumentWorkspace {
-            VRackView(viewModel: viewModel, expandedOnly: true)
+            if let track = viewModel.selectedTrack, track.studioAnalogEnabled == true {
+                StudioAnalogPanelView(viewModel: viewModel, trackID: track.id)
+            } else {
+                VRackView(viewModel: viewModel, expandedOnly: true)
+            }
         } else if showChannelWorkspace {
             ChannelWorkspaceView(viewModel: viewModel)
         } else if showArticulationsWorkspace {
@@ -2212,6 +2216,7 @@ struct TrackInspectorSection: View {
     @ObservedObject var audioRecorder: AudioRecorder
     @State private var trackName: String = ""
     @State private var showGarritanBrowser = false
+    @State private var showStudioAnalogPanel = false
     @State private var availableInputs: [AudioInputDevice] = []
     @State private var selectedInputID: AudioDeviceID = 0
     @State private var selectedChannelID: String = "default-stereo"
@@ -2280,12 +2285,14 @@ struct TrackInspectorSection: View {
                               ? "pianokeys" : "waveform")
                             .foregroundColor(.accentColor)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(track.instrumentSlot?.pluginID?.name ?? "No instrument loaded")
+                            Text(track.studioAnalogEnabled == true ? "Studio Analog" : (track.instrumentSlot?.pluginID?.name ?? "No instrument loaded"))
                                 .font(.subheadline.weight(.medium))
                                 .lineLimit(2)
-                            Text(track.instrumentSlot?.pluginID == nil
-                                 ? "Choose a Garritan instrument for this track."
-                                 : "Instrument assigned to this track")
+                            Text(track.studioAnalogEnabled == true
+                                 ? "Built-in modular virtual-analog synthesizer"
+                                 : (track.instrumentSlot?.pluginID == nil
+                                    ? "Choose an instrument for this track."
+                                    : "Instrument assigned to this track"))
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                         }
@@ -2299,7 +2306,15 @@ struct TrackInspectorSection: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    if track.instrumentSlot?.pluginID != nil {
+                    if track.studioAnalogEnabled == true {
+                        Button {
+                            showStudioAnalogPanel = true
+                        } label: {
+                            Label("Studio Analog Controls…", systemImage: "slider.horizontal.3")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    } else if track.instrumentSlot?.pluginID != nil {
                         Button {
                             viewModel.openTrackInstrumentUI(track.id)
                         } label: {
@@ -2485,6 +2500,10 @@ struct TrackInspectorSection: View {
             InstrumentBrowserSheet(viewModel: viewModel,
                                    trackID: track.id,
                                    isPresented: $showGarritanBrowser)
+        }
+        .sheet(isPresented: $showStudioAnalogPanel) {
+            StudioAnalogPanelView(viewModel: viewModel, trackID: track.id)
+                .frame(minWidth: 900, minHeight: 600)
         }
     }
     

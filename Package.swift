@@ -10,6 +10,7 @@ let package = Package(
     ],
     products: [
         .library(name: "DAWCore", targets: ["DAWCore"]),
+        .library(name: "StudioAnalogDSP", targets: ["StudioAnalogDSP"]),
         .library(name: "DAWUI", targets: ["DAWUI"]),
         .library(name: "VST3Bridge", targets: ["VST3Bridge"]),
         .executable(name: "DAWApp", targets: ["DAWApp"]),
@@ -19,6 +20,15 @@ let package = Package(
         .package(url: "https://github.com/supabase/supabase-swift", from: "2.0.0")
     ],
     targets: [
+        // MARK: - Original, standalone C++17 modular virtual-analog engine
+        .target(
+            name: "StudioAnalogDSP",
+            path: "StudioAnalogDSP",
+            sources: ["src/StudioAnalogDSP.cpp"],
+            publicHeadersPath: "include",
+            cxxSettings: [.unsafeFlags(["-std=c++17"])]
+        ),
+
         // MARK: - Real-time callback primitives (C11 atomics)
         .target(
             name: "DAWRealtime",
@@ -32,6 +42,7 @@ let package = Package(
             name: "DAWCore",
             dependencies: [
                 "DAWRealtime",
+                "StudioAnalogDSP",
                 .product(name: "Supabase", package: "supabase-swift")
             ],
             path: "DAWCore/Sources/DAWCore",
@@ -93,6 +104,11 @@ let package = Package(
         ),
 
         // MARK: - Tests
+        .testTarget(
+            name: "StudioAnalogDSPTests",
+            dependencies: ["StudioAnalogDSP"],
+            path: "Tests/StudioAnalogDSPTests"
+        ),
         .testTarget(
             name: "DAWCoreTests",
             dependencies: ["DAWCore", "DAWRealtime"],

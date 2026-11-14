@@ -97,6 +97,9 @@ public final class PlaybackEngine: ObservableObject {
     // MainActor registries used by UI and AU loading.
     private var midiQueueTrackInstruments: [TrackID: TrackInstrument] = [:]
     private var midiQueueRackInstruments: [UUID: TrackInstrument] = [:]
+    // Native synth track scores, compiled before Play and executed directly
+    // in each AVAudioSourceNode render callback.
+    private var nativeSequencedTracks: Set<TrackID> = []
     
     // Timer for processing V-Rack MIDI events in hybrid mode
     // (When Core Audio backend is active, AVAudioEngine's timing tap may not fire)
@@ -232,7 +235,14 @@ public final class PlaybackEngine: ObservableObject {
         
         // Skip if already set up
         if trackInstruments[track.id] != nil { return }
-        
+
+        // Reopen saved native synthesizers through the same track mixer and
+        // stage acoustics as external instruments (no AU host required).
+        if track.studioAnalogEnabled == true && coreAudioBackend == nil {
+            try loadStudioAnalog(for: track.id, patch: track.studioAnalogPatch)
+            return
+        }
+
         // Core Audio backend path
         if let backend = coreAudioBackend {
             try backend.createTrack(id: track.id)
@@ -264,6 +274,50 @@ public final class PlaybackEngine: ObservableObject {
         print("[PlaybackEngine] Setup fallback sampler for track: \(track.name)")
     }
     
+    /// Install the original Studio Analog source as an instrument track input.
+    /// Construct the renderer before stopping the engine; never modify its
+    /// source or DSP graph from within the real-time callback.
+    public func loadStudioAnalog(for trackID: TrackID, patch: StudioAnalogPatch? = nil) throws {
+        guard coreAudioBackend == nil else {
+            throw StudioAnalogError.unsupportedAudioBackend
+        }
+        guard let trackNode = audioEngine.trackNode(for: trackID) else {
+            throw PlaybackError.trackNotFound(trackID)
+        }
+        let synth = try StudioAnalogInstrument(sampleRate: audioEngine.sampleRate)
+        if let patch {
+            synth.apply(patch)
+            // Corrupt/incompatible saved cables must not prevent the project
+            // from opening. Keep the native factory graph as a fallback.
+            if patch.connections != nil {
+                do { try synth.setRouting(patch.activeConnections) }
+                catch { print("[Studio Analog] Saved graph rejected: \(error)") }
+            }
+        }
+        let engine = audioEngine.engine
+        let wasRunning = engine.isRunning
+        if wasRunning { engine.stop() }
+        defer {
+            if wasRunning && !engine.isRunning {
+                do { try engine.start() }
+                catch { print("[Studio Analog] Failed to restore engine after graph change: \(error)") }
+            }
+        }
+
+        // Keep existing ARIA and sampler paths untouched until a user
+        // explicitly selects Studio Analog for this track.
+        removeInstrument(for: trackID)
+        engine.attach(synth.audioNode)
+        engine.connect(synth.audioNode, to: trackNode.inputMixer, format: synth.format)
+        let loaded = TrackInstrument.studioAnalog(synth)
+        trackInstruments[trackID] = loaded
+        midiProcessingQueue.sync {
+            midiQueueTrackInstruments[trackID] = loaded
+        }
+        if wasRunning { try engine.start() }
+        print("[Studio Analog] Native synthesizer connected to track \(trackID.rawValue)")
+    }
+
     // Mixer nodes used for sample rate conversion when loading AU instruments
     private var instrumentMixers: [TrackID: AVAudioMixerNode] = [:]
     
@@ -1042,6 +1096,14 @@ public final class PlaybackEngine: ObservableObject {
         print("[PlaybackEngine] Loaded instruments: \(debugInstrumentList())")
         print("[PlaybackEngine] ========================================")
         
+        // Begin precompiled native scores on the next synth render buffer.
+        for trackID in nativeSequencedTracks {
+            if let instrument = trackInstruments[trackID],
+               case .studioAnalog(let synth) = instrument {
+                synth.beginSequence()
+            }
+        }
+
         // Start all scheduled audio player nodes
         startAllAudioPlayers()
         
@@ -1274,14 +1336,16 @@ public final class PlaybackEngine: ObservableObject {
             ))
             
         case .controlChange(let controller, let value):
-            instrument.sendController(controller, value: value, channel: channel)
+            instrument.sendController(controller, value: value, channel: channel,
+                                      sampleOffset: sampleOffset)
             
         case .programChange(let program):
             instrument.sendProgramChange(program, channel: channel)
             
         case .pitchBend(let value):
             let unsignedValue = UInt16(bitPattern: Int16(value + 8192))
-            instrument.sendPitchBend(unsignedValue, channel: channel)
+            instrument.sendPitchBend(unsignedValue, channel: channel,
+                                     sampleOffset: sampleOffset)
             
         default:
             break
@@ -1412,6 +1476,13 @@ public final class PlaybackEngine: ObservableObject {
     
     public func stopPlayback() {
         isPlaying = false
+        for trackID in nativeSequencedTracks {
+            if let instrument = trackInstruments[trackID],
+               case .studioAnalog(let synth) = instrument {
+                synth.stopSequence()
+            }
+        }
+        nativeSequencedTracks.removeAll()
         // Barrier: drain any queued buffer processing and prevent callbacks
         // enqueued after stop from releasing or retriggering notes.
         midiProcessingQueue.sync {
@@ -1462,6 +1533,16 @@ public final class PlaybackEngine: ObservableObject {
     
     public func pausePlayback() {
         isPlaying = false
+        // An armed source-node sequence must not keep playing during Pause.
+        // On resume a new schedule will be built from transport's seek beat.
+        for trackID in nativeSequencedTracks {
+            if let instrument = trackInstruments[trackID],
+               case .studioAnalog(let synth) = instrument {
+                synth.stopSequence()
+                synth.allNotesOff()
+            }
+        }
+        nativeSequencedTracks.removeAll()
         midiProcessingQueue.sync {
             midiQueuePlaybackActive = false
         }
@@ -1730,10 +1811,99 @@ public final class PlaybackEngine: ObservableObject {
             }
         }
         
-        // Publish the complete sorted schedule atomically to the worker.
+        // Precompile complete Studio Analog scores off the render thread.
+        // ARIA and other AU instruments remain on the unchanged MIDI worker.
+        // If native preparation fails, retain those events for fallback.
+        nativeSequencedTracks.removeAll()
+        let sampleRate = audioEngine.sampleRate
+        let bpm = project.tempo.bpm
+        func frame(for beat: Double) -> UInt64? {
+            let relative = (beat - playbackStartBeat) * (60.0 / bpm) * sampleRate
+            guard relative.isFinite && relative >= 0 &&
+                  relative < Double(UInt64.max) / 4 else { return nil }
+            return UInt64(relative.rounded())
+        }
+        if bpm > 0 && sampleRate > 0 {
+            for (trackID, instrument) in trackInstruments {
+                guard case .studioAnalog(let synth) = instrument else { continue }
+                var timeline: [StudioAnalogTimedEvent] = []
+                var invalid = false
+                for scheduled in localScheduledMIDIEvents where scheduled.trackID == trackID {
+                    if case .rackInstrument = scheduled.midiOutput { continue }
+                    guard let start = frame(for: scheduled.absoluteBeat) else {
+                        if scheduled.absoluteBeat >= playbackStartBeat { invalid = true }
+                        continue
+                    }
+                    let channel = scheduled.event.channel & 0x0F
+                    switch scheduled.event.type {
+                    case .note(let note):
+                        if note.velocity == 0 {
+                            timeline.append(StudioAnalogTimedEvent(sampleFrame: start,
+                                status: 0x80 | channel, data1: note.pitch, data2: 0))
+                        } else {
+                            timeline.append(StudioAnalogTimedEvent(sampleFrame: start,
+                                status: 0x90 | channel, data1: note.pitch, data2: note.velocity))
+                            guard let end = frame(for: scheduled.absoluteBeat + note.duration) else {
+                                invalid = true
+                                continue
+                            }
+                            timeline.append(StudioAnalogTimedEvent(
+                                sampleFrame: max(start + 1, end),
+                                status: 0x80 | channel, data1: note.pitch, data2: 0))
+                        }
+                    case .controlChange(let cc, let value):
+                        if cc == 1 || cc == 64 || cc == 120 || cc == 123 {
+                            timeline.append(StudioAnalogTimedEvent(sampleFrame: start,
+                                status: 0xB0 | channel, data1: cc, data2: value))
+                        }
+                    case .pitchBend(let value):
+                        let bend = UInt16(clamping: Int(value) + 8192)
+                        timeline.append(StudioAnalogTimedEvent(sampleFrame: start,
+                            status: 0xE0 | channel, data1: UInt8(bend & 0x7F),
+                            data2: UInt8((bend >> 7) & 0x7F)))
+                    default: break
+                    }
+                }
+                guard !invalid else {
+                    print("[Studio Analog] Skipping native MIDI timeline for \(trackID.rawValue): invalid positions")
+                    continue
+                }
+
+                // Stable order at one sample: note-offs before subsequent
+                // note-ons, other event types retaining clip insertion order.
+                let ordered = timeline.enumerated().sorted { lhs, rhs in
+                    if lhs.element.sampleFrame != rhs.element.sampleFrame {
+                        return lhs.element.sampleFrame < rhs.element.sampleFrame
+                    }
+                    func isNoteOff(_ event: StudioAnalogTimedEvent) -> Bool {
+                        let type = event.status & 0xF0
+                        return type == 0x80 || (type == 0x90 && event.data2 == 0)
+                    }
+                    if isNoteOff(lhs.element) != isNoteOff(rhs.element) {
+                        return isNoteOff(lhs.element)
+                    }
+                    return lhs.offset < rhs.offset
+                }.map { $0.element }
+                do {
+                    try synth.loadSequence(ordered)
+                    nativeSequencedTracks.insert(trackID)
+                } catch {
+                    print("[Studio Analog] Native MIDI for \(trackID.rawValue) unavailable: \(error); retaining legacy worker schedule")
+                }
+            }
+        }
         localScheduledMIDIEvents.sort { $0.absoluteBeat < $1.absoluteBeat }
+        let prepared = nativeSequencedTracks
+        let workerEvents = localScheduledMIDIEvents.filter { event in
+            guard prepared.contains(event.trackID) else { return true }
+            if case .rackInstrument = event.midiOutput { return true }
+            return false
+        }
         midiProcessingQueue.sync {
-            scheduledMIDIEvents = localScheduledMIDIEvents
+            scheduledMIDIEvents = workerEvents
+        }
+        if !prepared.isEmpty {
+            print("[Studio Analog] Pre-scheduled render-local MIDI for \(prepared.count) tracks")
         }
     }
     
@@ -2043,6 +2213,19 @@ public final class PlaybackEngine: ObservableObject {
                 instrument?.stopNote(note.pitch, channel: note.channel)
             }
             activeNotes.removeAll()
+            // Normal Note Off can be held by a sustain pedal. Stopping the
+            // transport always silences native synthesizers and clears their
+            // held note/pedal state without changing ARIA or sampler paths.
+            for instrument in midiQueueTrackInstruments.values {
+                if case .studioAnalog(let synth) = instrument {
+                    synth.allNotesOff()
+                }
+            }
+            for instrument in midiQueueRackInstruments.values {
+                if case .studioAnalog(let synth) = instrument {
+                    synth.allNotesOff()
+                }
+            }
         }
     }
     
@@ -2293,12 +2476,14 @@ public enum PlaybackError: Error, LocalizedError {
 public enum TrackInstrument {
     case auInstrument(AVAudioUnit, pluginID: UUID)
     case sampler(AVAudioUnitSampler)
+    case studioAnalog(StudioAnalogInstrument)
     
     /// The underlying audio unit node
     public var audioNode: AVAudioNode {
         switch self {
         case .auInstrument(let au, _): return au
         case .sampler(let sampler): return sampler
+        case .studioAnalog(let synth): return synth.audioNode
         }
     }
     
@@ -2331,6 +2516,10 @@ public enum TrackInstrument {
             }
         case .sampler(let sampler):
             sampler.startNote(note, withVelocity: velocity, onChannel: channel)
+        case .studioAnalog(let synth):
+            let offset: UInt32 = sampleOffset >= 0 && sampleOffset <= 65_535
+                ? UInt32(sampleOffset) : 0
+            synth.noteOn(note, velocity: velocity, channel: channel, frameOffset: offset)
         }
     }
     
@@ -2361,11 +2550,16 @@ public enum TrackInstrument {
             }
         case .sampler(let sampler):
             sampler.stopNote(note, onChannel: channel)
+        case .studioAnalog(let synth):
+            let offset: UInt32 = sampleOffset >= 0 && sampleOffset <= 65_535
+                ? UInt32(sampleOffset) : 0
+            synth.noteOff(note, channel: channel, frameOffset: offset)
         }
     }
     
     /// Send a control change
-    public func sendController(_ controller: UInt8, value: UInt8, channel: UInt8) {
+    public func sendController(_ controller: UInt8, value: UInt8, channel: UInt8,
+                               sampleOffset: AUEventSampleTime = AUEventSampleTimeImmediate) {
         switch self {
         case .auInstrument(let au, _):
             let status = UInt32(0xB0 | (channel & 0x0F))
@@ -2380,6 +2574,11 @@ public enum TrackInstrument {
             }
         case .sampler(let sampler):
             sampler.sendController(controller, withValue: value, onChannel: channel)
+        case .studioAnalog(let synth):
+            let offset: UInt32 = sampleOffset >= 0 && sampleOffset <= 65_535
+                ? UInt32(sampleOffset) : 0
+            synth.controller(controller, value: value, channel: channel,
+                             frameOffset: offset)
         }
     }
     
@@ -2399,11 +2598,14 @@ public enum TrackInstrument {
             }
         case .sampler(let sampler):
             sampler.sendProgramChange(program, onChannel: channel)
+        case .studioAnalog:
+            break // Native patches will use the Studio preset browser.
         }
     }
 
     /// Send pitch bend
-    public func sendPitchBend(_ value: UInt16, channel: UInt8) {
+    public func sendPitchBend(_ value: UInt16, channel: UInt8,
+                              sampleOffset: AUEventSampleTime = AUEventSampleTimeImmediate) {
         switch self {
         case .auInstrument(let au, _):
             let lsb = UInt8(value & 0x7F)
@@ -2420,6 +2622,10 @@ public enum TrackInstrument {
             }
         case .sampler(let sampler):
             sampler.sendPitchBend(value, onChannel: channel)
+        case .studioAnalog(let synth):
+            let offset: UInt32 = sampleOffset >= 0 && sampleOffset <= 65_535
+                ? UInt32(sampleOffset) : 0
+            synth.pitchBend(value, channel: channel, frameOffset: offset)
         }
     }
 }

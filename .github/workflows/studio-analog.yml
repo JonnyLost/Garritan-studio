@@ -1,0 +1,46 @@
+name: Studio Analog DSP checks
+
+on:
+  push:
+    branches:
+      - feature/studio-analog
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Run exactly once per Studio Analog branch push; draft PR #2 is updated
+# by the same commits. Cancel obsolete runs on the branch.
+concurrency:
+  group: studio-analog-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  standalone-dsp:
+    name: Original DSP / AddressSanitizer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run standalone DSP smoke test
+        run: |
+          clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I StudioAnalogDSP/include \
+            StudioAnalogDSP/src/StudioAnalogDSP.cpp \
+            Tests/StudioAnalogDSPStandalone/main.cpp \
+            -o /tmp/studio-analog-smoke
+          ASAN_OPTIONS=detect_leaks=1 /tmp/studio-analog-smoke
+
+  swift-package:
+    name: macOS Swift package and regression tests
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve packages
+        run: swift package resolve
+      - name: Build all targets
+        run: swift build
+      - name: Test original synth and existing DAWCore
+        run: swift test --parallel
+      - name: Optimized app build
+        run: swift build -c release --product DAWApp

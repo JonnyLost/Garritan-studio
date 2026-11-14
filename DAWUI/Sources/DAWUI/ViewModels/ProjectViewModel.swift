@@ -478,6 +478,115 @@ public final class ProjectViewModel: ObservableObject {
         }
     }
     
+    /// Select the original built-in analog synth for a track, preserving the
+    /// ARIA plug-in host's independent ownership of its previous instance.
+    public func loadStudioAnalog(for trackID: TrackID) throws {
+        guard var track = project.track(withID: trackID),
+              track.type == .midi || track.type == .instrument else {
+            throw PlaybackError.trackNotFound(trackID)
+        }
+        let previousPluginID: UUID?
+        if let instrument = playbackEngine.instrument(for: trackID),
+           case .auInstrument(_, let id) = instrument {
+            previousPluginID = id
+        } else {
+            previousPluginID = nil
+        }
+        // Only persist native selection after a successful audio graph load.
+        try playbackEngine.loadStudioAnalog(for: trackID, patch: track.studioAnalogPatch)
+        if let previousPluginID { pluginHost.unloadPlugin(id: previousPluginID) }
+        track.instrumentSlot = nil
+        track.garritanProgramID = nil
+        track.studioAnalogEnabled = true
+        updateTrack(track, description: "Load Studio Analog")
+    }
+
+    /// Read a parameter from project state, or the native engine default.
+    public func studioAnalogValue(_ parameter: StudioAnalogParameter, for trackID: TrackID) -> Float {
+        project.track(withID: trackID)?.studioAnalogPatch?.value(for: parameter)
+            ?? parameter.defaultValue
+    }
+
+    /// Apply live control changes without placing hundreds of undo entries
+    /// into the track history during each knob/slider gesture. The updated
+    /// patch is stored in the normal project and saved with the track.
+    public func setStudioAnalogParameter(_ parameter: StudioAnalogParameter,
+                                         value: Float, for trackID: TrackID) {
+        guard parameter.valid(value),
+              let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioAnalogEnabled == true else { return }
+        if let instrument = playbackEngine.instrument(for: trackID),
+           case .studioAnalog(let synth) = instrument {
+            guard synth.setParameter(parameter.rawValue, value: value) else { return }
+        }
+        var patch = project.tracks[index].studioAnalogPatch ?? StudioAnalogPatch()
+        patch.set(value, for: parameter)
+        project.tracks[index].studioAnalogPatch = patch
+        project.tracks[index].studioAnalogPresetID = nil
+    }
+
+    /// Replace the analog modular patch atomically at an audio buffer boundary.
+    /// No project change is recorded if the native graph rejects the routing.
+    public func setStudioAnalogConnections(_ connections: [StudioAnalogConnection],
+                                           for trackID: TrackID) throws {
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioAnalogEnabled == true,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioAnalog(let synth) = instrument else {
+            throw StudioAnalogError.invalidConfiguration
+        }
+        try synth.setRouting(connections)
+        var patch = project.tracks[index].studioAnalogPatch ?? StudioAnalogPatch()
+        patch.connections = connections
+        patch.version = max(2, patch.version)
+        project.tracks[index].studioAnalogPatch = patch
+        project.tracks[index].studioAnalogPresetID = nil
+    }
+
+    /// Restore original engine defaults, including the per-track patch data.
+    public func resetStudioAnalogPatch(for trackID: TrackID) throws {
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioAnalogEnabled == true,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioAnalog(let synth) = instrument else {
+            throw StudioAnalogError.invalidConfiguration
+        }
+        let resetPatch = StudioAnalogPatch()
+        try synth.setRouting(StudioAnalogConnection.factory)
+        synth.apply(resetPatch)
+        project.tracks[index].studioAnalogPatch = resetPatch
+        project.tracks[index].studioAnalogPresetID = nil
+    }
+
+    /// Apply a factory or user preset to the actual native synthesizer.
+    /// Validate and publish the entire routing first; if the graph is invalid
+    /// or busy, leave the parameters and project patch completely unchanged.
+    /// All disk access occurs in the browser, never on the render callback.
+    public func applyStudioAnalogPreset(_ preset: StudioAnalogPreset,
+                                         for trackID: TrackID) throws {
+        try preset.validate()
+        guard let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioAnalogEnabled == true,
+              let instrument = playbackEngine.instrument(for: trackID),
+              case .studioAnalog(let synth) = instrument else {
+            throw StudioAnalogError.invalidConfiguration
+        }
+        try synth.setRouting(preset.patch.activeConnections)
+        _ = synth.allNotesOff() // Release held voices and old controller state.
+        synth.apply(preset.patch)
+        project.tracks[index].studioAnalogPatch = preset.patch
+        project.tracks[index].studioAnalogPresetID = preset.id
+    }
+
+    /// Mark the current patch with its new user bank identity after a
+    /// successful on-disk save; never mutate the actual audio parameters.
+    public func markStudioAnalogPresetSaved(id: String, for trackID: TrackID) {
+        guard UUID(uuidString: id) != nil,
+              let index = project.tracks.firstIndex(where: { $0.id == trackID }),
+              project.tracks[index].studioAnalogEnabled == true else { return }
+        project.tracks[index].studioAnalogPresetID = id
+    }
+
     /// Remove the track's audio unit and its corresponding host registry entry.
     /// Use this for both track deletion and "Remove Instrument" in the header.
     public func unloadTrackInstrument(for trackID: TrackID) {

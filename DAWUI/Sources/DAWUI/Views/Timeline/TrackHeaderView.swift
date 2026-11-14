@@ -337,6 +337,7 @@ struct InstrumentSlotButton: View {
     let track: Track
     @ObservedObject var viewModel: ProjectViewModel
     @Binding var showBrowser: Bool
+    @State private var showStudioAnalogPanel = false
     
     var body: some View {
         Button(action: {
@@ -346,7 +347,11 @@ struct InstrumentSlotButton: View {
                 Image(systemName: "pianokeys")
                     .font(.system(size: 9))
                 
-                if let pluginID = track.instrumentSlot?.pluginID {
+                if track.studioAnalogEnabled == true {
+                    Text("Studio Analog")
+                        .font(.system(size: 10, weight: .semibold))
+                        .lineLimit(1)
+                } else if let pluginID = track.instrumentSlot?.pluginID {
                     Text(pluginID.name)
                         .font(.system(size: 10))
                         .lineLimit(1)
@@ -358,12 +363,17 @@ struct InstrumentSlotButton: View {
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(track.instrumentSlot?.pluginID != nil ? Color.purple.opacity(0.3) : Color.gray.opacity(0.2))
+            .background((track.instrumentSlot?.pluginID != nil || track.studioAnalogEnabled == true) ? Color.purple.opacity(0.3) : Color.gray.opacity(0.2))
             .cornerRadius(4)
         }
         .buttonStyle(.plain)
         .contextMenu {
-            if track.instrumentSlot?.pluginID != nil {
+            if track.studioAnalogEnabled == true {
+                Button("Browse / Change Instrument...") { showBrowser = true }
+                Button("Open Studio Analog Controls...") { showStudioAnalogPanel = true }
+                Divider()
+                Button("Remove Studio Analog", role: .destructive) { removeInstrument() }
+            } else if track.instrumentSlot?.pluginID != nil {
                 Button("Browse / Change Instrument...") { showBrowser = true }
                 Button("Open Instrument Controls...") { openInstrumentUI() }
                 Divider()
@@ -371,6 +381,10 @@ struct InstrumentSlotButton: View {
             } else {
                 Button("Load Instrument...") { showBrowser = true }
             }
+        }
+        .sheet(isPresented: $showStudioAnalogPanel) {
+            StudioAnalogPanelView(viewModel: viewModel, trackID: track.id)
+                .frame(minWidth: 900, minHeight: 600)
         }
     }
     
@@ -387,6 +401,7 @@ struct InstrumentSlotButton: View {
     private func removeInstrument() {
         var updatedTrack = track
         updatedTrack.instrumentSlot = nil
+        updatedTrack.studioAnalogEnabled = false
         viewModel.updateTrack(updatedTrack, description: "Remove Instrument")
         viewModel.unloadTrackInstrument(for: track.id)
     }
@@ -553,6 +568,27 @@ struct InstrumentBrowserSheet: View {
                 .padding(.horizontal, 16)
             }
 
+            Divider()
+            HStack(spacing: 12) {
+                Image(systemName: "waveform.path")
+                    .font(.title3)
+                    .foregroundColor(.orange)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Studio Analog").font(.subheadline.weight(.semibold))
+                    Text("Built-in modular virtual-analog synth · no plug-in required")
+                        .font(.caption).foregroundColor(.secondary)
+                }
+                Spacer()
+                Button {
+                    loadNativeStudioAnalog()
+                } label: {
+                    Label("Load Studio Analog", systemImage: "waveform")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isLoading)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
             Divider()
             HStack(spacing: 8) {
                 Button {
@@ -951,6 +987,17 @@ struct InstrumentBrowserSheet: View {
         print(message)  // Also print for good measure
     }
     
+    /// Native instrument selection bypasses third-party AU discovery and hosting.
+    private func loadNativeStudioAnalog() {
+        loadError = nil
+        do {
+            try viewModel.loadStudioAnalog(for: trackID)
+            isPresented = false
+        } catch {
+            loadError = error.localizedDescription
+        }
+    }
+
     private func loadInstrument(_ description: PluginDescription) {
         isLoading = true
         loadError = nil
@@ -1003,6 +1050,7 @@ struct InstrumentBrowserSheet: View {
                     }
 
                     track.instrumentSlot = PluginSlot(pluginID: description.identifier, isEnabled: true)
+                    track.studioAnalogEnabled = false
                     await MainActor.run {
                         viewModel.updateTrack(track, description: "Load Instrument")
                     }
