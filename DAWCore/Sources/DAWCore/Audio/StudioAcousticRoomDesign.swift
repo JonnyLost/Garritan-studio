@@ -189,11 +189,9 @@ public struct StudioAcousticRoomDesign: Codable, Equatable, Sendable {
         // Studio's FDN is intentionally limited to 0.2...15 s. The UI shows
         // the unbounded formula result; only the synthesizer clamps the target.
         let target = rt.map { Float(max(0.2, min(15, $0))) }
-        // Short, spectrally uneven rooms expose cross-band feedback leakage.
-        // Opt into the bounded, precomputed feedback fit only here; every
-        // other custom room retains its previously calibrated native sound.
-        let requiresShortRoomCalibration =
-            rt[2] < 0.70 && rt[4] < 0.55 && rt[0] > 2 * rt[2]
+        // The experimental six-band feedback fitter failed multi-band
+        // acoustic validation for a small treated room. Never enable it
+        // automatically for user-facing native room designs.
         return StudioRoomAcousticProfile(
             id: Self.profileID,
             name: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -201,7 +199,7 @@ public struct StudioAcousticRoomDesign: Codable, Equatable, Sendable {
             bassRT60: target[1], midRT60: target[2], trebleRT60: target[4],
             earlyReflections: taps,
             sixBandRT60: target,
-            shortRoomFeedbackCalibration: requiresShortRoomCalibration,
+            shortRoomFeedbackCalibration: false,
             lateDelayScale: volumeScale,
             earlyReflectionHighCutHz: reflectionHighCutHz
         )
