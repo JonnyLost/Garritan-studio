@@ -173,7 +173,7 @@ public final class OfflineBounce {
             )
             
             // Render audio clips
-            audioClipRenderer.render(
+            audioClipRenderer.renderOffline(
                 into: &bufferList,
                 currentSample: currentSample,
                 frameCount: framesToRender

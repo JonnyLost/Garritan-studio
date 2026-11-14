@@ -198,6 +198,8 @@ public final class CoreAudioBackend: AudioBackend {
     
     public func stop() {
         guard let unit = outputUnit, _isRunning else { return }
+        _isPlaying = false
+        audioClipRenderer.pauseStreaming()
         
         AudioOutputUnitStop(unit)
         _isRunning = false
@@ -291,6 +293,11 @@ public final class CoreAudioBackend: AudioBackend {
         endSample: Int64,
         volume: Float
     ) throws {
+        guard !_isPlaying else {
+            throw AudioBackendError.configurationError(
+                "Stop experimental Core Audio playback before editing audio clips"
+            )
+        }
         try audioClipRenderer.scheduleClip(
             url: url,
             trackID: trackID,
@@ -302,13 +309,28 @@ public final class CoreAudioBackend: AudioBackend {
     }
     
     public func clearAudioClips() {
+        // Keep the callback from referencing retired PCM page storage.
+        // Stopping the output unit drains in-flight render callbacks.
+        let wasRunning = _isRunning
+        _isPlaying = false
+        if wasRunning, let outputUnit {
+            AudioOutputUnitStop(outputUnit)
+        }
         audioClipRenderer.clearClips()
+        if wasRunning, let outputUnit {
+            let status = AudioOutputUnitStart(outputUnit)
+            if status != noErr { _isRunning = false }
+        }
     }
     
     // MARK: - Playback Control
     
     
     public func play(from samplePosition: Int64) {
+        _isPlaying = false
+        // Prefill on the control thread; no ExtAudioFileRead can run in
+        // CoreAudioBackend.render after this point.
+        audioClipRenderer.preparePlayback(at: samplePosition)
         _playbackStartSample = samplePosition
         _currentSamplePosition = samplePosition
         _isPlaying = true
@@ -323,12 +345,14 @@ public final class CoreAudioBackend: AudioBackend {
     
     public func pause() {
         _isPlaying = false
+        audioClipRenderer.pauseStreaming()
         print("[CoreAudioBackend] Paused at sample \(_currentSamplePosition)")
     }
     
     public func stopPlayback() {
         _isPlaying = false
-        
+        audioClipRenderer.pauseStreaming()
+
         // Stop all notes
         renderGraph.allNotesOff()
         
@@ -336,8 +360,12 @@ public final class CoreAudioBackend: AudioBackend {
     }
     
     public func seek(to samplePosition: Int64) {
+        let resume = _isPlaying
+        _isPlaying = false
+        audioClipRenderer.preparePlayback(at: samplePosition)
         _currentSamplePosition = samplePosition
         _playbackStartSample = samplePosition
+        _isPlaying = resume
     }
     
     // MARK: - Metronome
@@ -374,6 +402,11 @@ public final class CoreAudioBackend: AudioBackend {
         outputURL: URL,
         progress: ((Double) -> Void)?
     ) async throws {
+        guard !_isPlaying else {
+            throw AudioBackendError.configurationError(
+                "Stop realtime playback before offline bounce"
+            )
+        }
         try await offlineBounce.bounce(
             from: startSample,
             to: endSample,
