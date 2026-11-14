@@ -11,7 +11,9 @@ final class NativeMicrophoneCaptureMatrixTests: XCTestCase {
         let length = sourceAudio[0].count
         let inputs = sourceAudio.map { audio -> UnsafeMutablePointer<Float> in
             let ptr = UnsafeMutablePointer<Float>.allocate(capacity: length)
-            ptr.initialize(from: audio, count: length)
+            audio.withUnsafeBufferPointer { buffer in
+                ptr.initialize(from: buffer.baseAddress!, count: length)
+            }
             return ptr
         }
         let outputPointers = (0..<matrix.microphoneCount).map { _ -> UnsafeMutablePointer<Float> in
