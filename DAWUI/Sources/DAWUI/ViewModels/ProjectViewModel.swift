@@ -343,9 +343,38 @@ public final class ProjectViewModel: ObservableObject {
         }
     }
     
+    // MARK: - Studio Export
+
+    /// A render pass supplies a filtered *copy* of the project. The session,
+    /// undo history, saved mute/solo, and open plug-ins are never rewritten.
+    @Published public private(set) var isStudioExporting = false
+    private var studioExportPlaybackProject: Project?
+
+    public func beginStudioExport() {
+        isStudioExporting = true
+    }
+
+    public func prepareStudioExportPass(_ isolated: Project) {
+        studioExportPlaybackProject = isolated
+        playbackEngine.prepareForPlayback(project: isolated)
+    }
+
+    public func endStudioExportPass() {
+        studioExportPlaybackProject = nil
+    }
+
+    public func endStudioExport() {
+        studioExportPlaybackProject = nil
+        isStudioExporting = false
+    }
+
     // MARK: - Playback Preparation
     
     public func prepareForPlayback() {
+        // The export coordinator precompiled its isolated project before
+        // the transport starts. Re-preparing the whole live project here
+        // would silently leak unselected MIDI and audio into stem files.
+        if studioExportPlaybackProject != nil { return }
         playbackEngine.prepareForPlayback(project: project)
     }
     
