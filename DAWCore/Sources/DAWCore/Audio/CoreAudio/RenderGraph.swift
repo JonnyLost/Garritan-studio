@@ -1,6 +1,7 @@
 import Foundation
 import AudioToolbox
 import AVFoundation
+import DAWRealtime
 
 // MARK: - Render Graph
 
@@ -30,26 +31,62 @@ public final class RenderGraph {
     // MARK: - Properties
     
     private var tracks: [TrackID: TrackNode] = [:]
-    /// Immutable route membership prepared by the control thread while
-    /// output callbacks are drained. Per-track parameters remain mutable
-    /// only by the single active render consumer.
-    private struct RenderSnapshot {
+    /// Stable membership object. A published instance is never changed;
+    /// TrackNode still contains mutable render-owned parameters and AUs.
+    private final class RenderSnapshot {
         let generation: UInt64
         let routes: [TrackNode]
+        init(generation: UInt64, routes: [TrackNode]) {
+            self.generation = generation
+            self.routes = routes
+        }
     }
-    private var renderSnapshot = RenderSnapshot(generation: 0, routes: [])
+
+    /// The C11 exchange owns the current opaque snapshot pointer. The
+    /// control side keeps replaced objects until every reader is quiescent.
+    /// ARC releases MUST NEVER run on the audio callback.
+    private let routeExchange: OpaquePointer
+    private var latestSnapshot: RenderSnapshot
+    private var retiredSnapshots: [UnsafeMutableRawPointer] = []
 
     private func publishRenderSnapshot() {
         let routes = tracks.values.sorted {
             $0.id.rawValue.uuidString < $1.id.rawValue.uuidString
         }
-        renderSnapshot = RenderSnapshot(
-            generation: renderSnapshot.generation &+ 1, routes: routes
+        let next = RenderSnapshot(
+            generation: latestSnapshot.generation &+ 1, routes: routes
         )
+        let owned = Unmanaged.passRetained(next).toOpaque()
+        guard let old = daw_route_exchange_publish(routeExchange, owned) else {
+            Unmanaged<RenderSnapshot>.fromOpaque(owned).release()
+            preconditionFailure("Render route exchange lost its active snapshot")
+        }
+        latestSnapshot = next
+        retiredSnapshots.append(old)
+        retireQuiescentSnapshots()
     }
 
-    var renderSnapshotGeneration: UInt64 { renderSnapshot.generation }
-    var renderSnapshotTrackIDs: [TrackID] { renderSnapshot.routes.map(\.id) }
+    /// Only on the serialized control domain. Releasing a route snapshot may
+    /// release AVAudioUnit references, so never call from the callback.
+    private func retireQuiescentSnapshots() {
+        guard daw_route_exchange_is_quiescent(routeExchange) else { return }
+        for raw in retiredSnapshots {
+            Unmanaged<RenderSnapshot>.fromOpaque(raw).release()
+        }
+        retiredSnapshots.removeAll(keepingCapacity: true)
+    }
+
+    private func withRenderSnapshot<T>(_ body: (RenderSnapshot) -> T) -> T {
+        guard let raw = daw_route_exchange_begin_read(routeExchange) else {
+            preconditionFailure("No render snapshot published")
+        }
+        defer { daw_route_exchange_end_read(routeExchange) }
+        let snapshot = Unmanaged<RenderSnapshot>.fromOpaque(raw).takeUnretainedValue()
+        return body(snapshot)
+    }
+
+    var renderSnapshotGeneration: UInt64 { latestSnapshot.generation }
+    var renderSnapshotTrackIDs: [TrackID] { latestSnapshot.routes.map(\\.id) }
 
     private var masterVolume: Float = 1.0
     private let sampleRate: Double
@@ -61,11 +98,30 @@ public final class RenderGraph {
     // MARK: - Initialization
     
     init(sampleRate: Double, bufferSize: Int) {
+        let empty = RenderSnapshot(generation: 0, routes: [])
+        let owned = Unmanaged.passRetained(empty).toOpaque()
+        guard let exchange = daw_route_exchange_create(owned) else {
+            Unmanaged<RenderSnapshot>.fromOpaque(owned).release()
+            preconditionFailure("Unable to allocate native render route exchange")
+        }
+        self.routeExchange = exchange
+        self.latestSnapshot = empty
         self.sampleRate = sampleRate
         self.bufferSize = bufferSize
     }
     
     deinit {
+        // The backend must first drain hardware output and offline bounce.
+        precondition(daw_route_exchange_is_quiescent(routeExchange),
+                     "RenderGraph destroyed while an audio render is active")
+        guard let active = daw_route_exchange_take_current_quiescent(routeExchange) else {
+            preconditionFailure("RenderGraph destroyed without its active snapshot")
+        }
+        Unmanaged<RenderSnapshot>.fromOpaque(active).release()
+        for raw in retiredSnapshots {
+            Unmanaged<RenderSnapshot>.fromOpaque(raw).release()
+        }
+        daw_route_exchange_destroy(routeExchange)
         // Clean up allocated buffers
         for track in tracks.values {
             track.renderBufferLeft?.deallocate()
@@ -411,7 +467,8 @@ public final class RenderGraph {
         
         guard let outL = outputLeft, let outR = outputRight else { return }
         
-        for track in renderSnapshot.routes {
+        withRenderSnapshot { snapshot in
+        for track in snapshot.routes {
             // Skip muted tracks (or non-soloed tracks when solo is active)
             if track.isMuted { continue }
             if hasSoloedTracks && !track.isSolo { continue }
@@ -490,6 +547,7 @@ public final class RenderGraph {
                 outL[i] += bufferL[i] * leftGain
                 outR[i] += bufferR[i] * rightGain
             }
+        }
         }
     }
 }
