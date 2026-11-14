@@ -173,8 +173,12 @@ enum StudioMIDIExpressionEditing {
                 return true
             }
             let absolute = event.beatPosition + clipStartBeat
-            return !(absolute >= Double(bounds.lowerBound) * division - tolerance &&
-                     absolute <= Double(bounds.upperBound) * division + tolerance)
+            let lowerBeat = max(clipStartBeat,
+                                Double(bounds.lowerBound) * division)
+            let upperBeat = max(clipStartBeat,
+                                Double(bounds.upperBound) * division)
+            return !(absolute >= lowerBeat - tolerance &&
+                     absolute <= upperBeat + tolerance)
         }
         for (key, value) in sampled.sorted(by: { $0.key < $1.key }) {
             let absolute = max(clipStartBeat, Double(key) * division)
