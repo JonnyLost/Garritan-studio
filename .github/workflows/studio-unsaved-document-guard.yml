@@ -1,0 +1,21 @@
+name: Verify Unsaved Document Guard
+
+on:
+  push:
+    branches:
+      - fix/studio-unsaved-document-guard-2026-11-14
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift package resolve
+      - run: swift build
+      - run: swift test --parallel
+      - run: swift build -c release --product DAWApp
