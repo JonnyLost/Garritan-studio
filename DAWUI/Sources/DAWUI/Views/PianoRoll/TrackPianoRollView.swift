@@ -535,6 +535,20 @@ public struct TrackPianoRollView: View {
             
             Divider().frame(height: 20)
             
+            HStack(spacing: 4) {
+                Button("Split") { splitSelectedAtPlayhead() }
+                    .disabled(selectedNoteIDs.isEmpty)
+                    .help("Split selected notes at playhead")
+                Button("Glue") { glueSelectedNotes() }
+                    .disabled(selectedNoteIDs.count < 2)
+                    .help("Join compatible adjacent notes in the same MIDI region")
+                Button("Mute") { toggleSelectedNoteMute() }
+                    .disabled(selectedNoteIDs.isEmpty)
+                    .help("Toggle mute on selected notes")
+            }
+            .font(.caption)
+            .buttonStyle(.bordered)
+
             Button("Quantize") { showQuantizeDialog = true }
                 .font(.caption)
                 .buttonStyle(.bordered)
@@ -1304,6 +1318,7 @@ public struct TrackPianoRollView: View {
             if StudioMIDINoteEditing.hasPitchOrTimingChanges(
                 before: midi.events, after: edited) {
                 midi.events = edited
+                midi.articulations?.removeAll { ids.contains($0.noteID) }
                 track.clips[index].content = .midi(midi)
                 changed = true
             }
@@ -1410,6 +1425,72 @@ public struct TrackPianoRollView: View {
         let note = MIDIEvent.note(at: beat, pitch: UInt8(pitch), velocity: velocity,
                                   duration: max(0.0625, duration))
         insertNotes([note], at: beat, description: "Add MIDI Note")
+    }
+
+    private func splitSelectedAtPlayhead() {
+        guard !selectedNoteIDs.isEmpty, var track = currentTrack else { return }
+        let tempo = viewModel.transportState.tempo.bpm
+        let beat = viewModel.transportState.playheadBeats
+        var addedIDs: Set<UUID> = []
+        for index in track.clips.indices {
+            guard case .midi(var midi) = track.clips[index].content else { continue }
+            let clipStart = track.clips[index].timeRange.start.beats(atTempo: tempo)
+            let result = StudioMIDINoteEditing.splitting(
+                midi.events, selectedIDs: selectedNoteIDs, at: beat - clipStart)
+            guard !result.idMapping.isEmpty else { continue }
+            let originalArticulations =
+                StudioArticulationAssignmentEditing.byNoteID(in: midi)
+            midi.events = result.events
+            StudioArticulationAssignmentEditing.transfer(
+                from: originalArticulations, idMapping: result.idMapping,
+                into: &midi)
+            track.clips[index].content = .midi(midi)
+            addedIDs.formUnion(result.idMapping.values)
+        }
+        guard !addedIDs.isEmpty else { return }
+        viewModel.updateTrack(track, description: "Split MIDI Notes")
+        selectedNoteIDs.formUnion(addedIDs)
+    }
+
+    private func glueSelectedNotes() {
+        guard selectedNoteIDs.count > 1, var track = currentTrack else { return }
+        var removedIDs: Set<UUID> = []
+        for index in track.clips.indices {
+            guard case .midi(var midi) = track.clips[index].content else { continue }
+            let result = StudioMIDINoteEditing.gluing(
+                midi.events, selectedIDs: selectedNoteIDs,
+                articulations: StudioArticulationAssignmentEditing.byNoteID(in: midi))
+            guard !result.removedIDs.isEmpty else { continue }
+            midi.events = result.events
+            midi.articulations?.removeAll {
+                result.removedIDs.contains($0.noteID)
+            }
+            track.clips[index].content = .midi(midi)
+            removedIDs.formUnion(result.removedIDs)
+        }
+        guard !removedIDs.isEmpty else { return }
+        viewModel.updateTrack(track, description: "Glue MIDI Notes")
+        selectedNoteIDs.subtract(removedIDs)
+    }
+
+    private func toggleSelectedNoteMute() {
+        guard !selectedNoteIDs.isEmpty, var track = currentTrack else { return }
+        var didChange = false
+        for index in track.clips.indices {
+            guard case .midi(var midi) = track.clips[index].content else { continue }
+            let edited = StudioMIDINoteEditing.togglingMute(
+                midi.events, selectedIDs: selectedNoteIDs)
+            guard zip(midi.events, edited).contains(where: { before, after in
+                guard case .note(let old) = before.type,
+                      case .note(let new) = after.type else { return false }
+                return old.isMuted != new.isMuted
+            }) else { continue }
+            midi.events = edited
+            track.clips[index].content = .midi(midi)
+            didChange = true
+        }
+        guard didChange else { return }
+        viewModel.updateTrack(track, description: "Toggle MIDI Note Mute")
     }
 
     private func deleteNoteIDs(_ ids: Set<UUID>, description: String) {
@@ -1756,53 +1837,46 @@ public struct TrackPianoRollView: View {
     // MARK: - Quantize & Offset
     
     private func quantizeSelectedNotes(to grid: QuantizeGrid) {
-        guard var track = currentTrack else { return }
-        guard !selectedNoteIDs.isEmpty else { return }
-        
-        let gridDivision = grid.division
-        guard gridDivision > 0 else { return }
-        
-        for clipIndex in 0..<track.clips.count {
-            if case .midi(var midiData) = track.clips[clipIndex].content {
-                let clipStartBeat = track.clips[clipIndex].timeRange.start.beats(atTempo: viewModel.transportState.tempo.bpm)
-                
-                for i in 0..<midiData.events.count {
-                    if selectedNoteIDs.contains(midiData.events[i].id) {
-                        let absoluteBeat = clipStartBeat + midiData.events[i].beatPosition
-                        let quantizedAbsolute = round(absoluteBeat / gridDivision) * gridDivision
-                        midiData.events[i].beatPosition = quantizedAbsolute - clipStartBeat
-                    }
-                }
-                
-                track.clips[clipIndex].content = .midi(midiData)
-            }
-        }
-        
-        viewModel.updateTrack(track, description: "Quantize")
-        showQuantizeDialog = false
-    }
-    
-    private func applyOffset(milliseconds: Double) {
-        guard var track = currentTrack else { return }
-        guard !selectedNoteIDs.isEmpty else { return }
-
+        guard var track = currentTrack, !selectedNoteIDs.isEmpty else { return }
         let tempo = viewModel.transportState.tempo.bpm
-        let beatOffset = (milliseconds / 1000.0) * (tempo / 60.0)
-
-        for clipIndex in 0..<track.clips.count {
-            if case .midi(var midiData) = track.clips[clipIndex].content {
-                for i in 0..<midiData.events.count {
-                    if selectedNoteIDs.contains(midiData.events[i].id) {
-                        midiData.events[i].beatPosition = max(0, midiData.events[i].beatPosition + beatOffset)
-                    }
-                }
-                track.clips[clipIndex].content = .midi(midiData)
-            }
+        var changed = false
+        for index in track.clips.indices {
+            guard case .midi(var midi) = track.clips[index].content else { continue }
+            let clipStart = track.clips[index].timeRange.start.beats(atTempo: tempo)
+            let edited = StudioMIDINoteEditing.quantizing(
+                midi.events, selectedIDs: selectedNoteIDs,
+                division: grid.division, clipStartBeat: clipStart)
+            guard StudioMIDINoteEditing.hasPitchOrTimingChanges(
+                before: midi.events, after: edited) else { continue }
+            midi.events = edited
+            track.clips[index].content = .midi(midi)
+            changed = true
         }
-
-        viewModel.updateTrack(track, description: "Offset Notes")
+        showQuantizeDialog = false
+        guard changed else { return }
+        viewModel.updateTrack(track, description: "Quantize MIDI Notes")
     }
-    
+
+    private func applyOffset(milliseconds: Double) {
+        guard milliseconds.isFinite, var track = currentTrack,
+              !selectedNoteIDs.isEmpty else { return }
+        let tempo = viewModel.transportState.tempo.bpm
+        let beatOffset = milliseconds / 1000 * tempo / 60
+        var changed = false
+        for index in track.clips.indices {
+            guard case .midi(var midi) = track.clips[index].content else { continue }
+            let edited = StudioMIDINoteEditing.nudging(
+                midi.events, selectedIDs: selectedNoteIDs, beatDelta: beatOffset)
+            guard StudioMIDINoteEditing.hasPitchOrTimingChanges(
+                before: midi.events, after: edited) else { continue }
+            midi.events = edited
+            track.clips[index].content = .midi(midi)
+            changed = true
+        }
+        guard changed else { return }
+        viewModel.updateTrack(track, description: "Offset MIDI Notes")
+    }
+
     // MARK: - Zoom Functions
     
     private func zoomHorizontal(zoomIn: Bool) {
@@ -1882,6 +1956,7 @@ struct TrackNoteView: View {
         }
         .frame(width: width, height: noteHeight - 2)
         .offset(x: x, y: y + 1)
+        .opacity(noteData.isMuted == true ? 0.32 : 1)
         .onContinuousHover { phase in
             switch phase {
             case .active(let location):
