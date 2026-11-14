@@ -716,16 +716,10 @@ public struct TrackPianoRollView: View {
             let beatsPerBar = StudioMusicalGrid.beatsPerBar(timeSignature)
             let totalBeats = Int(totalWidth / pixelsPerBeat) + 1
             
-            for beat in 0...totalBeats {
-                let x = Double(beat) * pixelsPerBeat
-                let line = Path { path in
-                    path.move(to: CGPoint(x: x, y: 0))
-                    path.addLine(to: CGPoint(x: x, y: size.height))
-                }
-                context.stroke(line, with: .color(Color.gray.opacity(0.3)), lineWidth: 0.5)
-            }
+            let offsets = StudioMusicalGrid.interiorQuarterBeats(timeSignature)
             for bar in 0...Int(ceil(Double(totalBeats) / beatsPerBar)) {
-                let x = Double(bar) * beatsPerBar * pixelsPerBeat
+                let barBeat = Double(bar) * beatsPerBar
+                let x = barBeat * pixelsPerBeat
                 let line = Path { path in
                     path.move(to: CGPoint(x: x, y: 0))
                     path.addLine(to: CGPoint(x: x, y: size.height))
@@ -735,8 +729,17 @@ public struct TrackPianoRollView: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.primary)
                 context.draw(text, at: CGPoint(x: x + 8, y: size.height / 2))
+                for offset in offsets {
+                    let beatX = (barBeat + offset) * pixelsPerBeat
+                    let beatLine = Path { path in
+                        path.move(to: CGPoint(x: beatX, y: 0))
+                        path.addLine(to: CGPoint(x: beatX, y: size.height))
+                    }
+                    context.stroke(beatLine, with: .color(Color.gray.opacity(0.3)),
+                                   lineWidth: 0.5)
+                }
             }
-            
+
             // Playhead
             let playheadPath = Path { path in
                 path.move(to: CGPoint(x: playheadX, y: 0))
@@ -798,24 +801,29 @@ public struct TrackPianoRollView: View {
                 context.stroke(linePath, with: .color(palette.separator.opacity(pitch % 12 == 0 ? 0.65 : 0.25)), lineWidth: pitch % 12 == 0 ? 1 : 0.5)
             }
             
-            // Draw quarter-note beats and true measure boundaries independently.
-            for beat in 0...totalBeats {
-                let x = Double(beat) * pixelsPerBeat
-                let line = Path { path in
-                    path.move(to: CGPoint(x: x, y: 0))
-                    path.addLine(to: CGPoint(x: x, y: size.height))
-                }
-                context.stroke(line, with: .color(palette.separator.opacity(0.35)), lineWidth: 0.5)
-            }
+            // Ruler and note grid must share the same fractional bar starts,
+            // including 6/8 and 7/8, not global integer quarter-note lines.
+            let offsets = StudioMusicalGrid.interiorQuarterBeats(timeSignature)
             for bar in 0...Int(ceil(Double(totalBeats) / beatsPerBar)) {
-                let x = Double(bar) * beatsPerBar * pixelsPerBeat
-                let line = Path { path in
-                    path.move(to: CGPoint(x: x, y: 0))
-                    path.addLine(to: CGPoint(x: x, y: size.height))
+                let base = Double(bar) * beatsPerBar
+                let barX = base * pixelsPerBeat
+                let barLine = Path { path in
+                    path.move(to: CGPoint(x: barX, y: 0))
+                    path.addLine(to: CGPoint(x: barX, y: size.height))
                 }
-                context.stroke(line, with: .color(palette.separator.opacity(0.9)), lineWidth: 1)
+                context.stroke(barLine, with: .color(palette.separator.opacity(0.9)),
+                               lineWidth: 1)
+                for offset in offsets {
+                    let x = (base + offset) * pixelsPerBeat
+                    let line = Path { path in
+                        path.move(to: CGPoint(x: x, y: 0))
+                        path.addLine(to: CGPoint(x: x, y: size.height))
+                    }
+                    context.stroke(line, with: .color(palette.separator.opacity(0.35)),
+                                   lineWidth: 0.5)
+                }
             }
-            
+
             // Draw existing notes (with drag offset for selected notes being dragged)
             for event in noteEvents where !eraserPendingIDs.contains(event.id) {
                 if case .note(let noteData) = event.type {
