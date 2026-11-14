@@ -558,3 +558,53 @@ void daw_route_exchange_leave_render(DAWRenderRouteExchange *exchange) {
     if (!exchange) return;
     atomic_store_explicit(&exchange->rendering, false, memory_order_release);
 }
+
+// Atomic progress is read by the control thread and advanced only by the
+// admitted real-time renderer. Saturation prevents overflow after completion.
+struct DAWAudioTransitionProgress {
+    uint32_t totalFrames;
+    _Atomic(uint32_t) completedFrames;
+};
+
+DAWAudioTransitionProgress *daw_transition_create(uint32_t totalFrames) {
+    if (totalFrames == 0) return NULL;
+    DAWAudioTransitionProgress *progress = malloc(sizeof(*progress));
+    if (!progress) return NULL;
+    progress->totalFrames = totalFrames;
+    atomic_init(&progress->completedFrames, 0);
+    return progress;
+}
+
+void daw_transition_destroy(DAWAudioTransitionProgress *progress) {
+    free(progress);
+}
+
+uint32_t daw_transition_advance(DAWAudioTransitionProgress *progress, uint32_t frames) {
+    if (!progress) return 0;
+    uint32_t old = atomic_load_explicit(&progress->completedFrames, memory_order_relaxed);
+    while (old < progress->totalFrames) {
+        const uint32_t remaining = progress->totalFrames - old;
+        const uint32_t step = frames < remaining ? frames : remaining;
+        uint32_t target = old + step;
+        if (atomic_compare_exchange_weak_explicit(
+                &progress->completedFrames, &old, target,
+                memory_order_release, memory_order_relaxed)) {
+            return old;
+        }
+    }
+    return progress->totalFrames;
+}
+
+uint32_t daw_transition_completed(const DAWAudioTransitionProgress *progress) {
+    return progress ? atomic_load_explicit(&progress->completedFrames, memory_order_acquire) : 0;
+}
+
+uint32_t daw_transition_total(const DAWAudioTransitionProgress *progress) {
+    return progress ? progress->totalFrames : 0;
+}
+
+void daw_transition_force_complete(DAWAudioTransitionProgress *progress) {
+    if (!progress) return;
+    atomic_store_explicit(&progress->completedFrames, progress->totalFrames,
+                          memory_order_release);
+}
