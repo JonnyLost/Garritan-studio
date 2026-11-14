@@ -366,7 +366,7 @@ public final class CoreAudioBackend: AudioBackend {
             // Every published route now retains its exact AU/effect/buffer
             // owners. Deleting a loaded track is as safe as deleting an empty
             // one: older render frames finish with the retired snapshot.
-            if renderGraph.pendingRouteRetirementCount >= 48 {
+            if renderGraph.pendingRouteRetirementCount >= 8 {
                 withDrainedOutput { renderGraph.removeTrack(id: id) }
             } else {
                 renderGraph.removeTrack(id: id)
@@ -422,7 +422,7 @@ public final class CoreAudioBackend: AudioBackend {
             }
             // Bound retired snapshots on portable Macs. Only in this rare
             // backlog case do we drain the output to reclaim resources.
-            if renderGraph.pendingRouteRetirementCount >= 48 {
+            if renderGraph.pendingRouteRetirementCount >= 8 {
                 try withDrainedOutputResult {
                     renderGraph.reclaimRetiredRoutesWhileQuiescent()
                 }
@@ -451,7 +451,7 @@ public final class CoreAudioBackend: AudioBackend {
             try renderGraph.validateEffectReplacement(
                 for: trackID, slot: slot, requestID: requestID
             )
-            if renderGraph.pendingRouteRetirementCount >= 48 {
+            if renderGraph.pendingRouteRetirementCount >= 8 {
                 try withDrainedOutputResult {
                     renderGraph.reclaimRetiredRoutesWhileQuiescent()
                 }
@@ -465,7 +465,7 @@ public final class CoreAudioBackend: AudioBackend {
     public func unloadPlugin(for trackID: TrackID, slot: Int) {
         controlGate.perform {
             guard !controlGate.isBounceActive else { return }
-            if renderGraph.pendingRouteRetirementCount >= 48 {
+            if renderGraph.pendingRouteRetirementCount >= 8 {
                 withDrainedOutput { renderGraph.unloadPlugin(for: trackID, slot: slot) }
             } else {
                 renderGraph.unloadPlugin(for: trackID, slot: slot)
