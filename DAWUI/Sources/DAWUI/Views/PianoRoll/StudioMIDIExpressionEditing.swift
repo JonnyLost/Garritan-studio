@@ -78,9 +78,14 @@ enum StudioMIDIExpressionEditing {
         guard clipStartBeat.isFinite, clipStartBeat >= 0,
               division.isFinite, division > 0, channel < 16 else { return events }
         let end = clipEndBeat.flatMap { $0.isFinite && $0 > clipStartBeat ? $0 : nil }
-        let valid = points.filter { $0.beat.isFinite && $0.value.isFinite &&
-            $0.beat >= clipStartBeat && $0.beat < 1_000_000 &&
-            (end == nil || $0.beat < end!) }
+        let valid = points.filter { point in
+            guard point.beat.isFinite && point.value.isFinite,
+                  point.beat >= clipStartBeat, point.beat < 1_000_000 else {
+                return false
+            }
+            if let end { return point.beat < end }
+            return true
+        }
         guard !valid.isEmpty else { return events }
 
         // The grid index bounds keep accidental offscreen mouse gestures
