@@ -39,6 +39,9 @@ public final class CoreAudioBackend: AudioBackend {
     private var _sampleRate: Double = 44100
     private var _bufferSize: UInt32 = 512
     private var _masterVolume: Float = 1.0
+    // Render-thread-owned gain; only modified when consuming commands.
+    private var renderedMasterVolume: Float = 1.0
+    private let graphCommands = StudioGraphParameterMailbox(capacity: 1024)
     private var _tempo: Double = 120.0
     
     // MARK: - AudioBackend Protocol Properties
@@ -225,6 +228,7 @@ public final class CoreAudioBackend: AudioBackend {
                 return
             }
         }
+        applyPendingGraphCommands()
         body()
         if restart, let outputUnit {
             let result = AudioOutputUnitStart(outputUnit)
@@ -254,7 +258,59 @@ public final class CoreAudioBackend: AudioBackend {
                 }
             }
         }
+        applyPendingGraphCommands()
         return try await operation()
+    }
+
+    // MARK: - Render-owned parameter commands
+
+    /// Apply only at callback boundaries, or from a control thread AFTER
+    /// hardware callbacks have drained. Does not alter graph topology.
+    private func applyPendingGraphCommands() {
+        graphCommands.consume(maximum: 128) { command in
+            switch command {
+            case let .trackVolume(id, value):
+                renderGraph.setTrackVolume(value, for: id)
+            case let .trackPan(id, value):
+                renderGraph.setTrackPan(value, for: id)
+            case let .trackMute(id, muted):
+                renderGraph.setTrackMute(muted, for: id)
+            case let .masterVolume(value):
+                renderedMasterVolume = value
+                renderGraph.setMasterVolume(value)
+            }
+        }
+    }
+
+    /// The producer is the serialized backend control thread.
+    /// A full queue uses the existing drained-output path on that thread;
+    /// commands are never silently discarded.
+    private func submitGraphCommand(_ command: StudioGraphParameterCommand) {
+        if !_isRunning {
+            applyPendingGraphCommands()
+            applyGraphCommandImmediately(command)
+            return
+        }
+        if !graphCommands.submit(command) {
+            withDrainedOutput {
+                applyGraphCommandImmediately(command)
+            }
+        }
+    }
+
+    /// Only valid when the output callback is stopped.
+    private func applyGraphCommandImmediately(_ command: StudioGraphParameterCommand) {
+        switch command {
+        case let .trackVolume(id, value):
+            renderGraph.setTrackVolume(value, for: id)
+        case let .trackPan(id, value):
+            renderGraph.setTrackPan(value, for: id)
+        case let .trackMute(id, muted):
+            renderGraph.setTrackMute(muted, for: id)
+        case let .masterVolume(value):
+            renderedMasterVolume = value
+            renderGraph.setMasterVolume(value)
+        }
     }
 
     // MARK: - Track Management
@@ -268,15 +324,15 @@ public final class CoreAudioBackend: AudioBackend {
     }
     
     public func setTrackVolume(_ volume: Float, for trackID: TrackID) {
-        withDrainedOutput { renderGraph.setTrackVolume(volume, for: trackID) }
+        submitGraphCommand(.trackVolume(trackID, volume))
     }
     
     public func setTrackPan(_ pan: Float, for trackID: TrackID) {
-        withDrainedOutput { renderGraph.setTrackPan(pan, for: trackID) }
+        submitGraphCommand(.trackPan(trackID, pan))
     }
     
     public func setTrackMute(_ muted: Bool, for trackID: TrackID) {
-        withDrainedOutput { renderGraph.setTrackMute(muted, for: trackID) }
+        submitGraphCommand(.trackMute(trackID, muted))
     }
     
     // MARK: - Plugin Hosting
@@ -496,10 +552,8 @@ public final class CoreAudioBackend: AudioBackend {
     }
     
     public func setMasterVolume(_ volume: Float) {
-        withDrainedOutput {
-            _masterVolume = volume
-            renderGraph.setMasterVolume(volume)
-        }
+        _masterVolume = volume
+        submitGraphCommand(.masterVolume(volume))
     }
     
     // MARK: - Render Callback (Called from Audio Thread)
@@ -518,6 +572,9 @@ public final class CoreAudioBackend: AudioBackend {
         // Clear output buffer
         clearBuffer(bufferList, frameCount: frameCount)
         
+        // Parameter changes remain responsive while transport is stopped.
+        applyPendingGraphCommands()
+
         guard isPlaying else {
             // Output silence when not playing
             return noErr
@@ -559,7 +616,7 @@ public final class CoreAudioBackend: AudioBackend {
         )
         
         // 5. Apply master volume
-        applyMasterVolume(bufferList, volume: _masterVolume, frameCount: frameCount)
+        applyMasterVolume(bufferList, volume: renderedMasterVolume, frameCount: frameCount)
         
         // 6. Update position
         daw_render_transport_set_position(transport, endSample)
