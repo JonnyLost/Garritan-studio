@@ -1489,13 +1489,19 @@ public struct TrackPianoRollView: View {
             for index in copied.clips.indices {
                 guard case .midi(var source) = copied.clips[index].content,
                       case .midi(let moved) = draft.clips[index].content else { continue }
+                var mapping: [UUID: UUID] = [:]
+                let sourceArticulations =
+                    StudioArticulationAssignmentEditing.byNoteID(in: source)
                 for event in moved.events where selectedNoteIDs.contains(event.id) {
                     guard case .note = event.type else { continue }
                     var duplicate = event
                     duplicate.id = UUID()
                     source.events.append(duplicate)
                     newIDs.insert(duplicate.id)
+                    mapping[event.id] = duplicate.id
                 }
+                StudioArticulationAssignmentEditing.transfer(
+                    from: sourceArticulations, idMapping: mapping, into: &source)
                 copied.clips[index].content = .midi(source)
             }
             guard !newIDs.isEmpty else { return }
