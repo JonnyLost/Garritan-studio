@@ -162,6 +162,8 @@ public enum AutomationParameter: Codable, Sendable, Hashable {
     case mute
     case send(index: Int)
     case plugin(slotIndex: Int, parameterID: String)
+    /// A stable native Studio Synth layer and continuously variable target.
+    case studioSynth(layerID: UUID, destination: StudioSynthModDestination)
     
     public var name: String {
         switch self {
@@ -170,6 +172,7 @@ public enum AutomationParameter: Codable, Sendable, Hashable {
         case .mute: return "Mute"
         case .send(let index): return "Send \(index + 1)"
         case .plugin(_, let paramID): return paramID
+        case .studioSynth(_, let destination): return destination.name
         }
     }
     
@@ -179,7 +182,9 @@ public enum AutomationParameter: Codable, Sendable, Hashable {
         case .pan: return 0.5        // Center (normalized)
         case .mute: return 0.0       // Not muted
         case .send: return 0.0       // No send
-        case .plugin: return 0.5     // Middle (plugin-dependent)
+        case .plugin: return 0.5
+        case .studioSynth(_, let destination):
+            return Float(destination.position(for: destination.defaultValue))     // Middle (plugin-dependent)
         }
     }
     
@@ -210,6 +215,8 @@ public enum AutomationParameter: Codable, Sendable, Hashable {
             
         case .plugin:
             return String(format: "%.2f", value)
+        case .studioSynth(_, let destination):
+            return String(format: "%.2f", destination.value(at: Double(value)))
         }
     }
 }
