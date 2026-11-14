@@ -352,6 +352,7 @@ public final class ProjectViewModel: ObservableObject {
             playbackEngine.startPlayback()
             audioEngine.startPlayback(
                 from: transportState.playbackStartSamplePosition)
+            transportState.finishLoopWrap()
         default:
             break
         }
