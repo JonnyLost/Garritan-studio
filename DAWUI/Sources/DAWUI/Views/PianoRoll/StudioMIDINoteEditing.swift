@@ -70,7 +70,9 @@ enum StudioMIDINoteEditing {
             : StudioMusicalGrid.snap(
                 earliestAbsolute + beatDelta, division: division, bypass: bypassSnap
               )
-        let appliedDelta = intendedAnchor - earliestAbsolute
+        // Clip-local positions must remain non-negative even when the region
+        // itself begins well after bar 1.
+        let appliedDelta = max(clipStartBeat, intendedAnchor) - earliestAbsolute
         let pitches = notes.compactMap { event -> Int? in
             guard case .note(let data) = event.type else { return nil }
             return Int(data.pitch)
