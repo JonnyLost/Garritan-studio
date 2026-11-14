@@ -35,9 +35,8 @@ public enum StudioMIDISessionPlanner {
     /// never retriggered, including notes whose duration crosses the seek.
     public static func events(for track: Track, tempo: Double, from startBeat: Double,
                               until endBeat: Double? = nil) -> [StudioMIDISessionEvent] {
-        guard tempo.isFinite, tempo > 0, startBeat.isFinite, startBeat >= 0 else {
-            return []
-        }
+        guard !track.isMuted, tempo.isFinite, tempo > 0,
+              startBeat.isFinite, startBeat >= 0 else { return [] }
         let upper = endBeat.flatMap { $0.isFinite && $0 > startBeat ? $0 : nil }
         let timeline = track.clips.enumerated().flatMap { clipOrder, clip -> [(item: StudioMIDISessionEvent, priority: Int, index: Int, clipOrder: Int, key: StateKey?)] in
             guard !clip.isMuted, case .midi(let midi) = clip.content else { return [] }
@@ -49,12 +48,23 @@ public enum StudioMIDISessionPlanner {
             let originalIDs = Set(midi.events.map(\.id))
             return StudioArticulationRenderer.events(for: midi, map: track.articulationMap)
                 .enumerated().compactMap { index, event in
-                    let beat = clipStart + event.beatPosition
-                    guard beat.isFinite, beat >= clipStart, beat < clipEnd,
-                          beat >= 0, track.acceptsMIDIChannel(event.channel) else {
+                    let generated = !originalIDs.contains(event.id)
+                    var beat = clipStart + event.beatPosition
+                    guard beat.isFinite, beat >= clipStart, beat >= 0,
+                          track.acceptsMIDIChannel(event.channel) else {
                         return nil
                     }
-                    let generated = !originalIDs.contains(event.id)
+                    if beat >= clipEnd {
+                        // A held controller must release even when its note
+                        // reaches the region boundary. Only ephemeral CC-zero
+                        // release events may be clamped; never extend or
+                        // retrigger musical notes outside their MIDI region.
+                        guard generated,
+                              case .controlChange(_, 0) = event.type else {
+                            return nil
+                        }
+                        beat = max(clipStart, clipEnd - 0.000001)
+                    }
                     let state: StateKey?
                     let priority: Int
                     switch event.type {
@@ -113,10 +123,11 @@ public enum StudioMIDISessionPlanner {
                                           absoluteBeat: startBeat, event: event,
                                           restoresState: true)
         }
-        let future = timeline.lazy
-            .map(\.item)
-            .filter { $0.absoluteBeat >= startBeat &&
-                      (upper == nil || $0.absoluteBeat < upper!) }
+        let future = timeline.lazy.map(\.item).filter { item in
+            guard item.absoluteBeat >= startBeat else { return false }
+            if let upper { return item.absoluteBeat < upper }
+            return true
+        }
         return restored + Array(future)
     }
 }
