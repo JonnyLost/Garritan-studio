@@ -250,6 +250,7 @@ public struct MainWindowView: View {
             }
         }
         .handleKeyboardShortcuts(viewModel: viewModel)
+        .modifier(StudioExportSheetModifier(viewModel: viewModel))
         .overlay(alignment: .center) {
             if !viewModel.isEngineReady {
                 loadingOverlay
