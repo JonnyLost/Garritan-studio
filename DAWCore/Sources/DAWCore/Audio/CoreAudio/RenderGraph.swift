@@ -75,10 +75,12 @@ public final class RenderGraph {
         let generation: UInt64
         let routes: [TrackNode]
         let byID: [TrackID: TrackNode]
+        let hasSoloedTracks: Bool
         init(generation: UInt64, routes: [TrackNode]) {
             self.generation = generation
             self.routes = routes
             self.byID = Dictionary(uniqueKeysWithValues: routes.map { ($0.id, $0) })
+            self.hasSoloedTracks = routes.contains { $0.isSolo }
         }
     }
 
@@ -141,9 +143,6 @@ public final class RenderGraph {
     private let sampleRate: Double
     private var bufferSize: Int
     
-    // Track which tracks have solo enabled
-    private var hasSoloedTracks: Bool = false
-    
     // MARK: - Initialization
     
     init(sampleRate: Double, bufferSize: Int) {
@@ -204,7 +203,6 @@ public final class RenderGraph {
     func removeTrack(id: TrackID) {
         guard tracks.removeValue(forKey: id) != nil else { return }
         publishRenderSnapshot()
-        updateSoloState()
         print("[RenderGraph] Removed track \\(id.rawValue)")
     }
 
@@ -227,13 +225,12 @@ public final class RenderGraph {
         withRenderSnapshot { $0.byID[trackID]?.isMuted = muted }
     }
     
+    /// Solo mutation still requires a drained callback until route-control
+    /// parameters have an independent atomic state per graph generation.
     func setTrackSolo(_ solo: Bool, for trackID: TrackID) {
-        tracks[trackID]?.isSolo = solo
-        updateSoloState()
-    }
-    
-    private func updateSoloState() {
-        hasSoloedTracks = tracks.values.contains { $0.isSolo }
+        guard let track = tracks[trackID] else { return }
+        track.isSolo = solo
+        publishRenderSnapshot()
     }
     
     // MARK: - Plugin Loading
@@ -486,7 +483,7 @@ public final class RenderGraph {
         for track in snapshot.routes {
             // Skip muted tracks (or non-soloed tracks when solo is active)
             if track.isMuted { continue }
-            if hasSoloedTracks && !track.isSolo { continue }
+            if snapshot.hasSoloedTracks && !track.isSolo { continue }
             
             // Need either renderBlock (AUv3) or instrumentUnit (legacy)
             let bufferL = track.scratch.left
