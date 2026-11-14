@@ -42,28 +42,66 @@ public final class RenderGraph {
         deinit { AudioComponentInstanceDispose(unit) }
     }
 
-    final class TrackNode {
-        let id: TrackID
-        /// The AUv3 wrapper is the owner of its underlying AudioUnit.
-        var instrumentOwner: AVAudioUnit?
-        var instrumentUnit: AudioUnit?
-        var auAudioUnit: AUAudioUnit?
-        var renderBlock: AURenderBlock?
-        var effects: [EffectLifetime?] = []
-        var volume: Float = 1.0
-        var pan: Float = 0.0
-        var isMuted: Bool = false
-        var isSolo: Bool = false
-        var scratch: TrackScratchBuffers
+    /// Immutable processing bundle for a particular published route generation.
+    /// The AVAudioUnit wrapper owns the underlying instrument AudioUnit; raw
+    /// effects use EffectLifetime and buffers use TrackScratchBuffers. Old
+    /// bundles remain retained by retired render snapshots until readers exit.
+    final class ProcessingResources {
+        let instrumentOwner: AVAudioUnit?
+        let instrumentUnit: AudioUnit?
+        let auAudioUnit: AUAudioUnit?
+        let renderBlock: AURenderBlock?
+        let effects: [EffectLifetime?]
+        let scratch: TrackScratchBuffers
 
-        init(id: TrackID, bufferSize: Int) {
-            self.id = id
-            self.scratch = TrackScratchBuffers(frameCapacity: bufferSize)
+        init(instrumentOwner: AVAudioUnit? = nil,
+             instrumentUnit: AudioUnit? = nil,
+             auAudioUnit: AUAudioUnit? = nil,
+             renderBlock: AURenderBlock? = nil,
+             effects: [EffectLifetime?] = [],
+             scratch: TrackScratchBuffers) {
+            self.instrumentOwner = instrumentOwner
+            self.instrumentUnit = instrumentUnit
+            self.auAudioUnit = auAudioUnit
+            self.renderBlock = renderBlock
+            self.effects = effects
+            self.scratch = scratch
         }
 
         var isEmpty: Bool {
             instrumentUnit == nil && effects.allSatisfy { $0 == nil }
         }
+    }
+
+    /// Shared gain/pan/mute controls are written solely by the render callback
+    /// while output runs (or by control after output has drained).
+    final class TrackControls {
+        var volume: Float = 1.0
+        var pan: Float = 0.0
+        var isMuted: Bool = false
+        var isSolo: Bool = false
+    }
+
+    final class TrackNode {
+        let id: TrackID
+        let controls = TrackControls()
+        var processing: ProcessingResources
+
+        init(id: TrackID, bufferSize: Int) {
+            self.id = id
+            self.processing = ProcessingResources(
+                scratch: TrackScratchBuffers(frameCapacity: bufferSize)
+            )
+        }
+        var isEmpty: Bool { processing.isEmpty }
+    }
+
+    /// Every published route captures its processing bundle by strong
+    /// reference, independent of later control-side track reconfiguration.
+    private struct RenderRoute {
+        let id: TrackID
+        let controls: TrackControls
+        let processing: ProcessingResources
     }
 
     // MARK: - Properties
@@ -73,14 +111,14 @@ public final class RenderGraph {
     /// TrackNode still contains mutable render-owned parameters and AUs.
     private final class RenderSnapshot {
         let generation: UInt64
-        let routes: [TrackNode]
-        let byID: [TrackID: TrackNode]
+        let routes: [RenderRoute]
+        let byID: [TrackID: RenderRoute]
         let hasSoloedTracks: Bool
-        init(generation: UInt64, routes: [TrackNode]) {
+        init(generation: UInt64, routes: [RenderRoute]) {
             self.generation = generation
             self.routes = routes
             self.byID = Dictionary(uniqueKeysWithValues: routes.map { ($0.id, $0) })
-            self.hasSoloedTracks = routes.contains { $0.isSolo }
+            self.hasSoloedTracks = routes.contains { $0.controls.isSolo }
         }
     }
 
@@ -94,6 +132,8 @@ public final class RenderGraph {
     private func publishRenderSnapshot() {
         let routes = tracks.values.sorted {
             $0.id.rawValue.uuidString < $1.id.rawValue.uuidString
+        }.map {
+            RenderRoute(id: $0.id, controls: $0.controls, processing: $0.processing)
         }
         let next = RenderSnapshot(
             generation: latestSnapshot.generation &+ 1, routes: routes
@@ -181,8 +221,17 @@ public final class RenderGraph {
         guard size > 0 else { return }
         bufferSize = size
         for track in tracks.values {
-            track.scratch = TrackScratchBuffers(frameCapacity: size)
+            let old = track.processing
+            track.processing = ProcessingResources(
+                instrumentOwner: old.instrumentOwner,
+                instrumentUnit: old.instrumentUnit,
+                auAudioUnit: old.auAudioUnit,
+                renderBlock: old.renderBlock,
+                effects: old.effects,
+                scratch: TrackScratchBuffers(frameCapacity: size)
+            )
         }
+        publishRenderSnapshot()
     }
 
     func setMasterVolume(_ volume: Float) {
@@ -214,22 +263,22 @@ public final class RenderGraph {
     }
 
     func setTrackVolume(_ volume: Float, for trackID: TrackID) {
-        withRenderSnapshot { $0.byID[trackID]?.volume = volume }
+        withRenderSnapshot { $0.byID[trackID]?.controls.volume = volume }
     }
     
     func setTrackPan(_ pan: Float, for trackID: TrackID) {
-        withRenderSnapshot { $0.byID[trackID]?.pan = pan }
+        withRenderSnapshot { $0.byID[trackID]?.controls.pan = pan }
     }
     
     func setTrackMute(_ muted: Bool, for trackID: TrackID) {
-        withRenderSnapshot { $0.byID[trackID]?.isMuted = muted }
+        withRenderSnapshot { $0.byID[trackID]?.controls.isMuted = muted }
     }
     
     /// Solo mutation still requires a drained callback until route-control
     /// parameters have an independent atomic state per graph generation.
     func setTrackSolo(_ solo: Bool, for trackID: TrackID) {
         guard let track = tracks[trackID] else { return }
-        track.isSolo = solo
+        track.controls.isSolo = solo
         publishRenderSnapshot()
     }
     
