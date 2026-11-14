@@ -7,12 +7,22 @@ public struct StudioArticulationMap: Codable, Sendable, Equatable {
     public var id: UUID
     public var name: String
     public var articulations: [StudioArticulationDefinition]
+    /// The exact Garritan program from which a factory map was built.
+    /// Optional for old projects and independent user-created maps.
+    public var factoryProgramID: String?
+    /// Only untouched factory maps may be automatically replaced when a new
+    /// Garritan program loads. Editing a map clears this flag.
+    public var isFactoryDefault: Bool?
 
     public init(id: UUID = UUID(), name: String = "Custom Articulations",
-                articulations: [StudioArticulationDefinition] = []) {
+                articulations: [StudioArticulationDefinition] = [],
+                factoryProgramID: String? = nil,
+                isFactoryDefault: Bool? = nil) {
         self.id = id
         self.name = name
         self.articulations = articulations
+        self.factoryProgramID = factoryProgramID
+        self.isFactoryDefault = isFactoryDefault
     }
 
     public func definition(for key: String) -> StudioArticulationDefinition? {
