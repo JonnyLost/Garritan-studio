@@ -5,6 +5,7 @@ on:
     branches:
       - integration/studio-synth-sampler-bridge
       - feature/studio-track-workflow
+      - feature/studio-export-engine
   workflow_dispatch:
 
 permissions:
