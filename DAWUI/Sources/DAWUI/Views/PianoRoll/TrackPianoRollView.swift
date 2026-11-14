@@ -47,6 +47,9 @@ public struct TrackPianoRollView: View {
 
     // Editing state
     @State private var draggedNoteID: UUID? = nil
+    // Keep preview changes local until release, so Undo captures real originals.
+    @State private var previewTrack: Track? = nil
+    @State private var dragHasMaterialChange = false
     @State private var dragMode: NoteDragMode = .none
     @State private var dragStartBeat: Double = 0
     @State private var dragStartPitch: Int = 0
@@ -117,7 +120,7 @@ public struct TrackPianoRollView: View {
     
     /// All note events from all clips on this track (with absolute beat positions)
     private var noteEvents: [MIDIEvent] {
-        guard let track = currentTrack else { return [] }
+        guard let track = previewTrack ?? currentTrack else { return [] }
         
         var allNotes: [MIDIEvent] = []
         for clip in track.clips {
@@ -138,7 +141,7 @@ public struct TrackPianoRollView: View {
     
     /// All CC events from all clips on this track
     private var ccEvents: [MIDIEvent] {
-        guard let track = currentTrack else { return [] }
+        guard let track = previewTrack ?? currentTrack else { return [] }
         
         var allCC: [MIDIEvent] = []
         for clip in track.clips {
@@ -299,6 +302,16 @@ public struct TrackPianoRollView: View {
         .focused($isViewFocused)
         .focusEffectDisabled()
         .onKeyPress { keyPress in
+            if keyPress.modifiers.contains(.command) {
+                switch keyPress.characters.lowercased() {
+                case "a": selectAllNotes(); return .handled
+                case "c": copySelectedNotes(); return .handled
+                case "x": copySelectedNotes(); deleteSelectedNotes(); return .handled
+                case "v": pasteNotes(); return .handled
+                case "d": duplicateSelectedNotes(); return .handled
+                default: break
+                }
+            }
             // CMD + Arrow keys for zoom
             if keyPress.modifiers.contains(.command) {
                 switch keyPress.key {
@@ -337,9 +350,6 @@ public struct TrackPianoRollView: View {
             case "p": currentTool = .pencil; return .handled
             case "e": currentTool = .eraser; return .handled
             case "v": currentTool = .velocity; return .handled
-            case "s": currentTool = .split; return .handled
-            case "g": currentTool = .glue; return .handled
-            case "m": currentTool = .mute; return .handled
             case "q":
                 if !selectedNoteIDs.isEmpty { showQuantizeDialog = true }
                 return .handled
@@ -381,7 +391,7 @@ public struct TrackPianoRollView: View {
             
             Divider().frame(height: 20)
             
-            ForEach(MIDIEditorTool.allCases, id: \.self) { tool in
+            ForEach([MIDIEditorTool.select, .pencil, .eraser, .velocity], id: \.self) { tool in
                 Button(action: { currentTool = tool }) {
                     Image(systemName: tool.icon)
                         .foregroundColor(currentTool == tool ? palette.accent : palette.primaryText)
@@ -421,6 +431,25 @@ public struct TrackPianoRollView: View {
                 .buttonStyle(.bordered)
                 .disabled(selectedNoteIDs.isEmpty)
             
+            HStack(spacing: 5) {
+                Button(action: selectAllNotes) {
+                    Image(systemName: "checkmark.square")
+                }.help("Select All Notes (⌘A)")
+                Button(action: copySelectedNotes) {
+                    Image(systemName: "doc.on.doc")
+                }.disabled(selectedNoteIDs.isEmpty).help("Copy Notes (⌘C)")
+                Button(action: pasteNotes) {
+                    Image(systemName: "doc.on.clipboard")
+                }.disabled(copiedNotes.isEmpty).help("Paste Notes (⌘V)")
+                Button(action: duplicateSelectedNotes) {
+                    Image(systemName: "plus.square.on.square")
+                }.disabled(selectedNoteIDs.isEmpty).help("Duplicate Notes (⌘D)")
+                Button(action: deleteSelectedNotes) {
+                    Image(systemName: "trash")
+                }.disabled(selectedNoteIDs.isEmpty).help("Delete Notes")
+            }
+            .buttonStyle(.plain)
+
             Spacer()
             
             // Zoom controls
@@ -599,19 +628,11 @@ public struct TrackPianoRollView: View {
             // Draw existing notes (with drag offset for selected notes being dragged)
             for event in noteEvents {
                 if case .note(let noteData) = event.type {
-                    var noteX = event.beatPosition * pixelsPerBeat
-                    var notePitch = Int(noteData.pitch)
+                    let noteX = event.beatPosition * pixelsPerBeat
+                    let notePitch = Int(noteData.pitch)
                     let isSelected = selectedNoteIDs.contains(event.id)
-                    let isDragging = draggedNoteID != nil && isSelected && dragStartPositions[event.id] != nil
                     
-                    // Apply drag offset for selected notes during drag
-                    if isDragging, let startPos = dragStartPositions[event.id] {
-                        // Show at dragged position
-                        let newBeat = max(0, startPos.beat + currentDragBeatDelta)
-                        let newPitch = max(0, min(127, startPos.pitch + currentDragPitchDelta))
-                        noteX = newBeat * pixelsPerBeat
-                        notePitch = newPitch
-                    }
+                    // Positions and lengths already come from previewTrack.
                     
                     let noteY = Double(pitchOffset - notePitch) * Double(noteHeight)
                     let noteWidth = max(4, noteData.duration * pixelsPerBeat)
@@ -816,130 +837,99 @@ public struct TrackPianoRollView: View {
     private var noteEditingGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
-                let beat = value.location.x / pixelsPerBeat
-                let pitch = pitchFromY(value.location.y)
-
+                let beat = max(0, value.location.x / pixelsPerBeat)
+                let pitch = max(0, min(127, pitchFromY(value.location.y)))
                 switch currentTool {
                 case .pencil:
                     if pencilPreviewStart == nil {
                         pencilPreviewStart = snapBeat(beat)
                         pencilPreviewPitch = pitch
-                        pencilPreviewDuration = snapMode.division(for: viewModel.transportState.timeSignature) > 0 ? snapMode.division(for: viewModel.transportState.timeSignature) : 0.25
+                        pencilPreviewDuration = snapMode.division(for: viewModel.transportState.timeSignature) > 0
+                            ? snapMode.division(for: viewModel.transportState.timeSignature) : 0.25
                         viewModel.playNotePreview(pitch: UInt8(pitch))
                     } else if let start = pencilPreviewStart {
-                        pencilPreviewDuration = max(snapMode.division(for: viewModel.transportState.timeSignature) > 0 ? snapMode.division(for: viewModel.transportState.timeSignature) : 0.25, snapBeat(beat) - start)
+                        let grid = snapMode.division(for: viewModel.transportState.timeSignature)
+                        pencilPreviewDuration = max(grid > 0 ? grid : 0.25, snapBeat(beat) - start)
                     }
 
                 case .select:
-                    // Check if we're starting a drag on an existing note
+                    isViewFocused = true
                     if draggedNoteID == nil && !isMarqueeSelecting {
-                        if let clickedNote = noteAt(x: value.startLocation.x, y: value.startLocation.y) {
-                            // Clicked on a note - select it and start dragging
-                            // Also grab keyboard focus for delete key
-                            isViewFocused = true
-                            if !selectedNoteIDs.contains(clickedNote.id) {
-                                if !NSEvent.modifierFlags.contains(.shift) {
-                                    selectedNoteIDs = [clickedNote.id]
+                        if let clicked = noteAt(x: value.startLocation.x,
+                                                y: value.startLocation.y) {
+                            if NSEvent.modifierFlags.contains(.shift) {
+                                // Shift-click selection does not start a move.
+                                if !selectedNoteIDs.contains(clicked.id) {
+                                    selectedNoteIDs.insert(clicked.id)
                                 } else {
-                                    selectedNoteIDs.insert(clickedNote.id)
+                                    selectedNoteIDs.remove(clicked.id)
+                                }
+                                return
+                            }
+                            if !selectedNoteIDs.contains(clicked.id) {
+                                selectedNoteIDs = [clicked.id]
+                            }
+                            var mode: NoteDragMode = .move
+                            if case .note(let note) = clicked.type {
+                                let startX = clicked.beatPosition * pixelsPerBeat
+                                let endX = (clicked.beatPosition + note.duration) * pixelsPerBeat
+                                let grab = min(7.0, max(2.0, (endX - startX) / 3))
+                                if value.startLocation.x <= startX + grab {
+                                    mode = .resizeStart
+                                } else if value.startLocation.x >= endX - grab {
+                                    mode = .resizeEnd
                                 }
                             }
-                            draggedNoteID = clickedNote.id
-                            dragStartBeat = beat
-                            dragStartPitch = pitch
-                            
-                            // Store initial positions of all selected notes
-                            dragStartPositions.removeAll()
-                            for event in noteEvents {
-                                if selectedNoteIDs.contains(event.id) {
-                                    if case .note(let data) = event.type {
-                                        dragStartPositions[event.id] = (
-                                            beat: event.beatPosition,
-                                            pitch: Int(data.pitch),
-                                            duration: data.duration
-                                        )
-                                    }
-                                }
-                            }
+                            startNoteDrag(clicked, mode: mode)
                         } else {
-                            // Clicked on empty space - start marquee selection
-                            // Also grab keyboard focus
-                            isViewFocused = true
                             isMarqueeSelecting = true
                             selectionRect = CGRect(origin: value.startLocation, size: .zero)
                         }
                     }
-                    
-                    // Handle ongoing drag
                     if draggedNoteID != nil {
-                        let beatDelta = beat - dragStartBeat
-                        let pitchDelta = pitch - dragStartPitch
-                        
-                        // Update drag delta for visual feedback
-                        currentDragBeatDelta = beatDelta
-                        currentDragPitchDelta = pitchDelta
-                        
-                        // Audition pitch change
-                        if pitch != lastAuditionedPitch {
-                            viewModel.playNotePreview(pitch: UInt8(max(0, min(127, pitch))))
-                            lastAuditionedPitch = pitch
-                        }
+                        handleNoteDrag(value.translation)
                     } else if isMarqueeSelecting {
-                        let origin = CGPoint(
-                            x: min(value.startLocation.x, value.location.x),
-                            y: min(value.startLocation.y, value.location.y)
-                        )
-                        let size = CGSize(
-                            width: abs(value.location.x - value.startLocation.x),
-                            height: abs(value.location.y - value.startLocation.y)
-                        )
-                        selectionRect = CGRect(origin: origin, size: size)
+                        let origin = CGPoint(x: min(value.startLocation.x, value.location.x),
+                                             y: min(value.startLocation.y, value.location.y))
+                        selectionRect = CGRect(origin: origin,
+                            size: CGSize(width: abs(value.location.x - value.startLocation.x),
+                                         height: abs(value.location.y - value.startLocation.y)))
                     }
 
                 case .eraser:
                     eraseNoteAt(beat: beat, pitch: pitch)
-
                 default:
                     break
                 }
             }
             .onEnded { value in
-                let beat = value.location.x / pixelsPerBeat
-                let pitch = pitchFromY(value.location.y)
-
+                let beat = max(0, value.location.x / pixelsPerBeat)
+                let pitch = max(0, min(127, pitchFromY(value.location.y)))
                 switch currentTool {
                 case .pencil:
-                    if let start = pencilPreviewStart, let notePitch = pencilPreviewPitch {
-                        createNote(at: start, pitch: notePitch, duration: pencilPreviewDuration)
+                    if let start = pencilPreviewStart, let selectedPitch = pencilPreviewPitch {
+                        createNote(at: start, pitch: selectedPitch, duration: pencilPreviewDuration)
+                        viewModel.stopNotePreview(pitch: UInt8(selectedPitch))
                     }
                     pencilPreviewStart = nil
                     pencilPreviewPitch = nil
                     pencilPreviewDuration = 0
-
                 case .select:
                     if draggedNoteID != nil {
-                        // Finish dragging - commit the move
-                        commitNotesMove(beatDelta: currentDragBeatDelta, pitchDelta: currentDragPitchDelta)
-                        draggedNoteID = nil
-                        dragStartPositions.removeAll()
-                        lastAuditionedPitch = nil
-                        currentDragBeatDelta = 0
-                        currentDragPitchDelta = 0
+                        endNoteDrag()
                     } else if isMarqueeSelecting, let rect = selectionRect {
                         selectNotesInRect(rect)
                     }
                     isMarqueeSelecting = false
                     selectionRect = nil
-
                 case .eraser:
                     eraseNoteAt(beat: beat, pitch: pitch)
-                    
                 default:
                     break
                 }
             }
     }
-    
+
     // MARK: - Piano Keyboard
     
     private var pianoKeyboard: some View {
@@ -1068,48 +1058,6 @@ public struct TrackPianoRollView: View {
     // MARK: - Note Operations
     
     /// Move selected notes visually during drag (doesn't commit to model yet)
-    private func moveSelectedNotes(beatDelta: Double, pitchDelta: Int) {
-        // This is handled by recalculating positions in the Canvas draw
-        // The actual positions are computed from dragStartPositions + deltas
-    }
-    
-    /// Commit the note move to the data model
-    private func commitNotesMove(beatDelta: Double, pitchDelta: Int) {
-        guard var track = currentTrack else { return }
-        guard !dragStartPositions.isEmpty else { return }
-        
-        let snappedBeatDelta = snapBeat(beatDelta) - snapBeat(0) // Apply snap to delta
-        
-        for clipIndex in 0..<track.clips.count {
-            if case .midi(var midiData) = track.clips[clipIndex].content {
-                let clipStartBeat = track.clips[clipIndex].timeRange.start.beats(atTempo: viewModel.transportState.tempo.bpm)
-                var modified = false
-                
-                for i in 0..<midiData.events.count {
-                    let eventID = midiData.events[i].id
-                    if let startPos = dragStartPositions[eventID] {
-                        if case .note(var noteData) = midiData.events[i].type {
-                            // Calculate new position
-                            let newBeat = max(0, startPos.beat + snappedBeatDelta)
-                            let newPitch = max(0, min(127, startPos.pitch + pitchDelta))
-                            
-                            midiData.events[i].beatPosition = newBeat - clipStartBeat
-                            noteData.pitch = UInt8(newPitch)
-                            midiData.events[i].type = .note(noteData)
-                            modified = true
-                        }
-                    }
-                }
-                
-                if modified {
-                    track.clips[clipIndex].content = .midi(midiData)
-                }
-            }
-        }
-        
-        viewModel.updateTrack(track, description: "Move Notes")
-    }
-
     private func createNote(at beat: Double, pitch: Int, duration: Double, velocity: UInt8 = 100) {
         guard var track = currentTrack else { return }
         
