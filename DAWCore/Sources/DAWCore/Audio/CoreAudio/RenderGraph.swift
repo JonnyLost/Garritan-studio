@@ -565,8 +565,11 @@ public final class RenderGraph {
             unit = nil
             au = nil
             block = nil
-        } else if slot < effects.count {
+        } else if (0..<64).contains(slot) {
+            // An unloaded-but-still-preparing effect must not appear later
+            // merely because the old chain did not yet have that slot.
             track.pendingEffectRequests[slot] = nil
+            guard slot < effects.count, effects[slot] != nil else { return }
             effects[slot] = nil
         } else {
             return
