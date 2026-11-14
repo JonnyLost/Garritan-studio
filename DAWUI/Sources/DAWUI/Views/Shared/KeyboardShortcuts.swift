@@ -310,7 +310,16 @@ public final class GlobalKeyMonitor {
         
         // Check for modifier keys
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        
+
+        // Let the focused piano-roll editor own note clipboard and selection
+        // shortcuts. Otherwise the application-level monitor edits regions
+        // under the editor instead of editing the selected MIDI notes.
+        if modifiers.contains(.command),
+           [0, 8, 9, 7, 2].contains(Int(event.keyCode)),
+           MainActor.assumeIsolated({ viewModel.showPianoRoll }) {
+            return false
+        }
+
         // Handle bar jump mode input
         if isBarJumpMode {
             return handleBarJumpInput(event, viewModel: viewModel)
