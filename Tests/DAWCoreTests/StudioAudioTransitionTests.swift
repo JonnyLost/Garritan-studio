@@ -136,4 +136,76 @@ final class StudioAudioTransitionTests: XCTestCase {
             XCTAssertEqual(outR[i], 0)
         }
     }
+    /// This exercises Apple's actual native effect renderer with a nonzero
+    /// signal, not just our standalone input copy routine. No output device
+    /// or external third-party plug-in is needed on the macOS CI runner.
+    func testAppleEffectReceivesUpstreamPCM() throws {
+        struct StereoBufferList {
+            var mNumberBuffers: UInt32 = 2
+            var left = AudioBuffer()
+            var right = AudioBuffer()
+        }
+        var description = AudioComponentDescription(
+            componentType: kAudioUnitType_Effect,
+            componentSubType: kAudioUnitSubType_NBandEQ,
+            componentManufacturer: kAudioUnitManufacturer_Apple,
+            componentFlags: 0,
+            componentFlagsMask: 0
+        )
+        guard AudioComponentFindNext(nil, &description) != nil else {
+            throw XCTSkip("Apple NBandEQ Audio Unit not installed on this runner")
+        }
+        let graph = RenderGraph(sampleRate: 44_100, bufferSize: 512)
+        let prepared = try graph.prepareEffect(description)
+        let effect = try XCTUnwrap(prepared.unit)
+        let frameCount = 512
+        let dryL = UnsafeMutablePointer<Float>.allocate(capacity: frameCount)
+        let dryR = UnsafeMutablePointer<Float>.allocate(capacity: frameCount)
+        let outputL = UnsafeMutablePointer<Float>.allocate(capacity: frameCount)
+        let outputR = UnsafeMutablePointer<Float>.allocate(capacity: frameCount)
+        defer {
+            dryL.deallocate(); dryR.deallocate()
+            outputL.deallocate(); outputR.deallocate()
+        }
+        dryL.initialize(repeating: 0, count: frameCount)
+        dryR.initialize(repeating: 0, count: frameCount)
+        outputL.initialize(repeating: 0, count: frameCount)
+        outputR.initialize(repeating: 0, count: frameCount)
+
+        var energy: Float = 0
+        for chunk in 0..<4 {
+            for i in 0..<frameCount {
+                let value = Float(sin(Double(chunk * frameCount + i) * 0.1)) * 0.2
+                dryL[i] = value
+                dryR[i] = value
+                outputL[i] = 0
+                outputR[i] = 0
+            }
+            let startSample = Float64(chunk * frameCount)
+            prepared.input.setSource(
+                left: UnsafePointer(dryL), right: UnsafePointer(dryR),
+                sampleTime: startSample, frames: UInt32(frameCount)
+            )
+            var stamp = AudioTimeStamp()
+            stamp.mFlags = .sampleTimeValid
+            stamp.mSampleTime = startSample
+            var flags = AudioUnitRenderActionFlags()
+            var buffers = StereoBufferList()
+            buffers.left = AudioBuffer(
+                mNumberChannels: 1, mDataByteSize: 2048, mData: outputL
+            )
+            buffers.right = AudioBuffer(
+                mNumberChannels: 1, mDataByteSize: 2048, mData: outputR
+            )
+            let status: OSStatus = withUnsafeMutablePointer(to: &buffers) { ptr in
+                ptr.withMemoryRebound(to: AudioBufferList.self, capacity: 1) { abl in
+                    AudioUnitRender(effect, &flags, &stamp, 0, UInt32(frameCount), abl)
+                }
+            }
+            XCTAssertEqual(status, noErr, "Real Apple effect input render failed")
+            for i in 0..<frameCount { energy += abs(outputL[i]) + abs(outputR[i]) }
+        }
+        XCTAssertGreaterThan(energy, 1, "Apple effect did not receive or output input PCM")
+    }
+
 }
