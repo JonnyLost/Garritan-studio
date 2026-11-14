@@ -324,4 +324,60 @@ final class StudioRenderGraphSnapshotTests: XCTestCase {
         ))
     }
 
+    func testEffectReplacementTicketsAreIndependentPerSlot() throws {
+        let graph = RenderGraph(sampleRate: 48_000, bufferSize: 256)
+        let track = TrackID()
+        graph.createTrack(id: track)
+
+        let firstSlot0 = try graph.beginEffectReplacement(for: track, slot: 0)
+        let firstSlot1 = try graph.beginEffectReplacement(for: track, slot: 1)
+        let newerSlot0 = try graph.beginEffectReplacement(for: track, slot: 0)
+        XCTAssertThrowsError(try graph.validateEffectReplacement(
+            for: track, slot: 0, requestID: firstSlot0
+        ))
+        XCTAssertNoThrow(try graph.validateEffectReplacement(
+            for: track, slot: 0, requestID: newerSlot0
+        ))
+        XCTAssertNoThrow(try graph.validateEffectReplacement(
+            for: track, slot: 1, requestID: firstSlot1
+        ))
+
+        // Clearing slot 0 while its AU is still being prepared cancels the
+        // request even though the slot has no installed effect yet.
+        graph.unloadPlugin(for: track, slot: 0)
+        XCTAssertThrowsError(try graph.validateEffectReplacement(
+            for: track, slot: 0, requestID: newerSlot0
+        ))
+        XCTAssertNoThrow(try graph.validateEffectReplacement(
+            for: track, slot: 1, requestID: firstSlot1
+        ))
+    }
+
+    func testRecreatingTrackRejectsOldEffectPreparation() throws {
+        let graph = RenderGraph(sampleRate: 44_100, bufferSize: 512)
+        let id = TrackID()
+        graph.createTrack(id: id)
+        let old = try graph.beginEffectReplacement(for: id, slot: 2)
+        graph.removeTrack(id: id)
+        graph.createTrack(id: id)
+        let fresh = try graph.beginEffectReplacement(for: id, slot: 2)
+        XCTAssertNotEqual(old, fresh)
+        XCTAssertThrowsError(try graph.validateEffectReplacement(
+            for: id, slot: 2, requestID: old
+        ))
+        XCTAssertNoThrow(try graph.validateEffectReplacement(
+            for: id, slot: 2, requestID: fresh
+        ))
+    }
+
+    func testRejectsInvalidEffectSlotWithoutChangingGraph() {
+        let graph = RenderGraph(sampleRate: 48_000, bufferSize: 256)
+        let id = TrackID()
+        graph.createTrack(id: id)
+        let generation = graph.renderSnapshotGeneration
+        XCTAssertThrowsError(try graph.beginEffectReplacement(for: id, slot: -1))
+        XCTAssertThrowsError(try graph.beginEffectReplacement(for: id, slot: 64))
+        XCTAssertEqual(graph.renderSnapshotGeneration, generation)
+    }
+
 }
