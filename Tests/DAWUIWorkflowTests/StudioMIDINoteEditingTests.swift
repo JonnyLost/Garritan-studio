@@ -195,4 +195,111 @@ final class StudioMIDINoteEditingTests: XCTestCase {
             XCTAssertEqual(Int(second.pitch) - Int(first.pitch), 7)
         } else { XCTFail("Expected notes") }
     }
+    func testSplitAtPlayheadPreservesIDPitchAndTotalDuration() {
+        let note = MIDIEvent.note(at: 1, pitch: 60, velocity: 87, duration: 3)
+        let cc = MIDIEvent.controlChange(at: 2, controller: 11, value: 93)
+        let result = StudioMIDINoteEditing.splitting(
+            [note, cc], selectedIDs: [note.id], at: 2.25)
+        XCTAssertEqual(result.events.count, 3)
+        XCTAssertEqual(result.events[0].id, note.id)
+        XCTAssertEqual(result.events[1].id, result.idMapping[note.id])
+        XCTAssertNotEqual(result.events[1].id, note.id)
+        XCTAssertEqual(result.events[0].beatPosition, 1)
+        XCTAssertEqual(result.events[1].beatPosition, 2.25)
+        XCTAssertEqual(result.events[2].id, cc.id)
+        if case .note(let left) = result.events[0].type,
+           case .note(let right) = result.events[1].type {
+            XCTAssertEqual(left.duration, 1.25, accuracy: 0.000001)
+            XCTAssertEqual(right.duration, 1.75, accuracy: 0.000001)
+            XCTAssertEqual(left.pitch, right.pitch)
+            XCTAssertEqual(left.velocity, right.velocity)
+            XCTAssertEqual(left.duration + right.duration, 3, accuracy: 0.000001)
+        } else { XCTFail("Split lost one of its note halves") }
+    }
+
+    func testSplitIsNoOpAtNoteEdgesAndOnNonSelectedNotes() {
+        let a = MIDIEvent.note(at: 0.5, pitch: 65, duration: 2)
+        let b = MIDIEvent.note(at: 0.5, pitch: 67, duration: 2)
+        for beat in [0.5, 2.5, 5] {
+            let result = StudioMIDINoteEditing.splitting(
+                [a, b], selectedIDs: [a.id], at: beat)
+            XCTAssertTrue(result.idMapping.isEmpty)
+            XCTAssertEqual(result.events.map(\.id), [a.id, b.id])
+        }
+        let result = StudioMIDINoteEditing.splitting(
+            [a, b], selectedIDs: [a.id], at: 1)
+        XCTAssertEqual(result.events.count, 3)
+        XCTAssertEqual(result.events[2].id, b.id)
+    }
+
+    func testGlueCompatibleNotesKeepsFirstIdentityAndControllers() {
+        let a = MIDIEvent.note(at: 0, pitch: 60, velocity: 92, duration: 1)
+        let b = MIDIEvent.note(at: 1, pitch: 60, velocity: 92, duration: 0.5)
+        let c = MIDIEvent.note(at: 1.5, pitch: 60, velocity: 92, duration: 1)
+        let cc = MIDIEvent.controlChange(at: 0.25, controller: 1, value: 70)
+        let result = StudioMIDINoteEditing.gluing(
+            [a, cc, b, c], selectedIDs: [a.id, b.id, c.id],
+            articulations: [a.id: "legato", b.id: "legato", c.id: "legato"])
+        XCTAssertEqual(result.events.map(\.id), [a.id, cc.id])
+        XCTAssertEqual(result.removedIDs, [b.id, c.id])
+        if case .note(let merged) = result.events[0].type {
+            XCTAssertEqual(merged.duration, 2.5, accuracy: 0.000001)
+        } else { XCTFail("Glue failed") }
+    }
+
+    func testGlueRefusesGapsDifferentVelocityChannelsOrArticulations() {
+        let first = MIDIEvent.note(at: 0, pitch: 60, velocity: 100, duration: 1)
+        let separated = MIDIEvent.note(at: 1.1, pitch: 60, velocity: 100)
+        let differentVelocity = MIDIEvent.note(at: 1, pitch: 60, velocity: 80)
+        let differentChannel = MIDIEvent.note(at: 1, pitch: 60, channel: 2)
+        let matching = MIDIEvent.note(at: 1, pitch: 60)
+        for bad in [separated, differentVelocity, differentChannel] {
+            let merged = StudioMIDINoteEditing.gluing(
+                [first, bad], selectedIDs: [first.id, bad.id])
+            XCTAssertTrue(merged.removedIDs.isEmpty)
+        }
+        let mismatch = StudioMIDINoteEditing.gluing(
+            [first, matching], selectedIDs: [first.id, matching.id],
+            articulations: [first.id: "arco", matching.id: "pizz"])
+        XCTAssertTrue(mismatch.removedIDs.isEmpty)
+    }
+
+    func testMuteTogglesIndividuallyAndKeepsControllers() {
+        let a = MIDIEvent.note(at: 0, pitch: 60)
+        let b = MIDIEvent.note(at: 1, pitch: 64)
+        let cc = MIDIEvent.controlChange(at: 0, controller: 11, value: 80)
+        let muted = StudioMIDINoteEditing.togglingMute(
+            [a, b, cc], selectedIDs: [a.id, cc.id])
+        if case .note(let data) = muted[0].type {
+            XCTAssertEqual(data.isMuted, true)
+        } else { XCTFail("Note disappeared") }
+        XCTAssertEqual(muted[1].id, b.id)
+        XCTAssertEqual(muted[2].id, cc.id)
+        let unmuted = StudioMIDINoteEditing.togglingMute(
+            muted, selectedIDs: [a.id])
+        if case .note(let data) = unmuted[0].type {
+            XCTAssertEqual(data.isMuted, false)
+        } else { XCTFail("Note disappeared after unmute") }
+    }
+
+    func testQuantizeUsesAbsoluteGridAndClampsRegionLocalStart() {
+        let note = MIDIEvent.note(at: 0.1, pitch: 72)
+        let cc = MIDIEvent.controlChange(at: 0.1, controller: 1, value: 87)
+        // Source region starts at 2.125 quarter-note beats. Quantizing
+        // absolute 2.225 to 2.0 would be before the source region.
+        let changed = StudioMIDINoteEditing.quantizing(
+            [note, cc], selectedIDs: [note.id, cc.id],
+            division: 0.5, clipStartBeat: 2.125)
+        XCTAssertEqual(changed[0].beatPosition, 0)
+        XCTAssertEqual(changed[1].beatPosition, cc.beatPosition)
+        XCTAssertEqual(note.beatPosition, 0.1)
+        let other = MIDIEvent.note(at: 0.375, pitch: 67)
+        let snapped = StudioMIDINoteEditing.quantizing(
+            [other], selectedIDs: [other.id],
+            division: 0.25, clipStartBeat: 0.125)
+        XCTAssertEqual(snapped[0].beatPosition, 0.375)
+        XCTAssertFalse(StudioMIDINoteEditing.hasPitchOrTimingChanges(
+            before: [other], after: snapped))
+    }
+
 }
