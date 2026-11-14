@@ -344,10 +344,9 @@ public final class CoreAudioBackend: AudioBackend {
     // MARK: - Track Management
     
     public func createTrack(id: TrackID) throws {
-        // Adding an empty route publishes a new immutable membership list.
-        // The active render callback still holds its old snapshot until its
-        // read epoch ends, so this one topology operation needs no output
-        // stop/restart. Removal and AU changes still require hardware drain.
+        // Route generations retain independent processing resources. Track
+        // creation, removal, and AU installation can normally publish without
+        // stopping hardware; only exceptional retirement pressure drains.
         try controlGate.perform {
             try controlGate.ensureMutationAvailable()
             // Cap retained route versions to keep MacBook memory usage bounded.
