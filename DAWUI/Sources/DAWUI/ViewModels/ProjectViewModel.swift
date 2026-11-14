@@ -756,8 +756,16 @@ public final class ProjectViewModel: ObservableObject {
             $0.parameter == parameter
         }) else { return false }
         var updated = track
-        let initial = Float(destination.position(
-            for: destination.defaultValue))
+        let currentValue: Float
+        if let instrument = playbackEngine.instrument(for: trackID),
+           case .studioSynth(let synth) = instrument {
+            currentValue = synth.effectiveParameter(
+                id: layerID, destination: destination) ??
+                destination.defaultValue
+        } else {
+            currentValue = destination.defaultValue
+        }
+        let initial = Float(destination.position(for: currentValue))
         let startBeat = max(0, transportState.playheadBeats)
         var lane = AutomationLane(parameter: parameter, isVisible: true)
         lane.setPoint(at: startBeat, value: initial)
