@@ -290,11 +290,14 @@ class AppState: ObservableObject {
     }
     
     func openProject(at url: URL) async {
+        guard mayReplaceCurrentDocument() else { return }
         do {
             // Decode and validate the next project BEFORE tearing down the
             // current session. A missing/corrupt file must not silence the
             // existing instruments or stop its autosave.
             let loadedProject = try await fileManager.load(from: url)
+            // The current project may have changed while disk I/O was pending.
+            guard mayReplaceCurrentDocument() else { return }
 
             autosaveManager.stopAutosave()
             NotificationCenter.default.post(name: .clearAllPlugins, object: nil)
@@ -509,8 +512,29 @@ class AppState: ObservableObject {
         }
     }
 
+    /// Until the unified revision-aware save coordinator is integrated,
+    /// never replace an edited document without an acknowledged save.
+    /// A save request is asynchronous, so replacing immediately after clicking
+    /// Save could silently lose newly edited MIDI or Audio Unit preset data.
+    private func mayReplaceCurrentDocument() -> Bool {
+        guard !hasUnsavedChanges else {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Save Your Current Project First"
+            alert.informativeText = """
+                Studio will keep your current project open to protect your
+                unsaved composing work. Save the project and wait until
+                its Edited indicator disappears, then try again.
+                """
+            alert.addButton(withTitle: "Keep Editing")
+            alert.runModal()
+            return false
+        }
+        return true
+    }
+
     func newProject() {
-        // TODO: Prompt to save if needed
+        guard mayReplaceCurrentDocument() else { return }
         autosaveManager.stopAutosave()
         
         // Clear all existing plugins first
