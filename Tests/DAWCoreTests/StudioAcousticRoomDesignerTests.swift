@@ -3,12 +3,13 @@ import XCTest
 @testable import DAWCore
 
 final class StudioAcousticRoomDesignerTests: XCTestCase {
-    func testOnlyStronglyDampedShortRoomsEnableFeedbackCorrection() {
+    func testExperimentalFeedbackFitIsNeverAutomaticallyEnabled() {
         let scenarios = StudioAcousticCalibrationScenario.contrastingRooms
-        XCTAssertEqual(scenarios[0].design.makeProfile().shortRoomFeedbackCalibration, true)
-        XCTAssertEqual(scenarios[1].design.makeProfile().shortRoomFeedbackCalibration, false)
-        XCTAssertEqual(scenarios[2].design.makeProfile().shortRoomFeedbackCalibration, false)
-        XCTAssertEqual(StudioAcousticRoomDesign().makeProfile().shortRoomFeedbackCalibration, false)
+        XCTAssertTrue(scenarios.allSatisfy {
+            $0.design.makeProfile().shortRoomFeedbackCalibration != true
+        })
+        XCTAssertEqual(StudioAcousticRoomDesign().makeProfile().shortRoomFeedbackCalibration,
+                       false)
         XCTAssertTrue(StudioRoomAcousticProfile.starterProfiles.allSatisfy {
             $0.shortRoomFeedbackCalibration == nil
         })
@@ -41,6 +42,7 @@ final class StudioAcousticRoomDesignerTests: XCTestCase {
 
     func testShortRoomFeedbackFitChangesRealNativeOutputWithoutNonfiniteSamples() {
         var tuned = StudioAcousticCalibrationScenario.contrastingRooms[0].design.makeProfile()
+        tuned.shortRoomFeedbackCalibration = true  // Explicit offline experiment ONLY
         var baseline = tuned
         baseline.shortRoomFeedbackCalibration = false
         func render(_ room: StudioRoomAcousticProfile) -> [Float] {
