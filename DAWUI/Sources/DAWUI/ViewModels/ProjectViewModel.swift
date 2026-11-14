@@ -57,6 +57,7 @@ public final class ProjectViewModel: ObservableObject {
     // Playback state
     @Published public private(set) var isEngineReady: Bool = false
     @Published public private(set) var acousticRoomSelectionError: String?
+    @Published public private(set) var microphoneAuditionError: String?
     
     // MARK: - Subsystems
     
@@ -617,10 +618,43 @@ public final class ProjectViewModel: ObservableObject {
         project.dawState.virtualMicrophoneSettings = safe
     }
 
-    /// Movable microphones are presently a persistent geometry editor.
-    /// They do not alter playback until the native mic/spill routing matrix
-    /// has passed its own engine stability and isolation milestone.
+    /// Explicit, alternate monitoring mode. The normal track/hall path
+    /// remains the fallback; no saved project auto-activates mic audition.
+    public func setMicrophoneAuditionEnabled(_ enabled: Bool) {
+        guard isEngineReady, !transportState.isPlaying,
+              !transportState.isRecording, !isRecording else {
+            microphoneAuditionError = "Stop playback and recording to change microphone monitoring."
+            return
+        }
+        do {
+            try audioEngine.setMicrophoneAuditionEnabled(
+                enabled, tracks: project.tracks,
+                microphones: project.dawState.virtualMicrophones ?? [],
+                room: project.dawState.acousticRoomDesign ?? StudioAcousticRoomDesign()
+            )
+            microphoneAuditionError = nil
+        } catch {
+            microphoneAuditionError = error.localizedDescription
+        }
+    }
+
+    private func refreshAuditionMicrophones() {
+        audioEngine.refreshMicrophoneRouting(
+            tracks: project.tracks,
+            microphones: project.dawState.virtualMicrophones ?? [],
+            room: project.dawState.acousticRoomDesign ?? StudioAcousticRoomDesign()
+        )
+    }
+
+    /// Add/remove operations change graph cardinality. They intentionally
+    /// require mic audition to be disabled first, while live position and
+    /// mixer edits can continue without rebuilding AVAudioEngine.
+
     public func addVirtualMicrophoneArray(_ preset: StudioMicrophoneArrayPreset) {
+        guard !audioEngine.isMicrophoneAuditionActive else {
+            microphoneAuditionError = "Turn off mic audition before adding microphones."
+            return
+        }
         let room = project.dawState.acousticRoomDesign ?? StudioAcousticRoomDesign()
         var microphones = project.dawState.virtualMicrophones ?? []
         guard microphones.count + preset.microphoneCount <= 32 else { return }
@@ -644,6 +678,7 @@ public final class ProjectViewModel: ObservableObject {
         let room = project.dawState.acousticRoomDesign ?? StudioAcousticRoomDesign()
         microphones[index] = microphone.clamped(to: room)
         project.dawState.virtualMicrophones = microphones
+        refreshAuditionMicrophones()
     }
 
     public func setVirtualMicrophonePosition(id: UUID, position: StudioRoomPosition3D) {
@@ -655,6 +690,10 @@ public final class ProjectViewModel: ObservableObject {
     }
 
     public func removeVirtualMicrophone(id: UUID) {
+        guard !audioEngine.isMicrophoneAuditionActive else {
+            microphoneAuditionError = "Turn off mic audition before removing microphones."
+            return
+        }
         guard var microphones = project.dawState.virtualMicrophones else { return }
         microphones.removeAll { $0.id == id }
         project.dawState.virtualMicrophones = microphones
@@ -685,6 +724,7 @@ public final class ProjectViewModel: ObservableObject {
                 }
             }
             project.dawState.acousticRoomProfileID = StudioAcousticRoomDesign.profileID
+            refreshAuditionMicrophones()
         } catch {
             acousticRoomSelectionError =
                 "Could not apply custom room: \(error.localizedDescription)"
