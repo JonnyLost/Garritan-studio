@@ -725,16 +725,11 @@ public final class CoreAudioBackend: AudioBackend {
         // The Core Audio render callback must never print or allocate
         // diagnostic strings. The MIDI scheduler returns an event count for
         // non-render diagnostics, not console logging on this thread.
-        _ = midiScheduler.processEvents(
+        renderGraph.renderWithScheduledMIDI(
+            scheduler: midiScheduler,
             startSample: startSample,
             endSample: endSample,
-            renderGraph: renderGraph
-        )
-        
-        // 2. Render all tracks through the graph
-        renderGraph.render(
             frameCount: frameCount,
-            currentSample: startSample,
             outputBuffer: bufferList
         )
         
