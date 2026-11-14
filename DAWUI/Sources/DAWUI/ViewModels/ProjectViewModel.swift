@@ -1697,74 +1697,104 @@ public final class ProjectViewModel: ObservableObject {
 
     // MARK: - Clipboard Operations
     
-    private var clipboardClips: [Clip] = []
+    /// Keep the source lane for each region so multi-track selections
+    /// cannot lose clips or be pasted into an incompatible track type.
+    private struct ClipboardRegion {
+        let clip: Clip
+        let sourceTrackID: TrackID
+        let sourceTrackIndex: Int
+    }
+
+    private var clipboardClips: [ClipboardRegion] = []
     private var clipboardSourceTrackID: TrackID?
-    
-    /// Copy selected clips to clipboard
+
+    /// Copy all selected regions, including selections spanning tracks.
     public func copySelectedClips() {
-        guard let trackID = selectedTrackID,
-              let track = project.track(withID: trackID) else { return }
-        
-        clipboardClips = track.clips.filter { selectedClipIDs.contains($0.id) }
-        clipboardSourceTrackID = trackID
-        
+        clipboardClips = project.tracks.enumerated().flatMap { (index, track) -> [ClipboardRegion] in
+            track.clips.filter { selectedClipIDs.contains($0.id) }.map {
+                ClipboardRegion(clip: $0, sourceTrackID: track.id, sourceTrackIndex: index)
+            }
+        }
+        clipboardSourceTrackID = clipboardClips.first?.sourceTrackID
+
         if !clipboardClips.isEmpty {
             print("[Edit] Copied \(clipboardClips.count) clip(s) to clipboard")
         }
     }
-    
-    /// Cut selected clips (copy + delete)
+
+    /// Cut precisely the regions captured in the clipboard, as one undo step.
     public func cutSelectedClips() {
         copySelectedClips()
-        deleteSelectedClips()
+        guard !clipboardClips.isEmpty else { return }
+        undoManager.beginGrouping(name: "Cut Regions")
+        defer { undoManager.endGrouping() }
+        for entry in clipboardClips {
+            deleteClip(id: entry.clip.id, from: entry.sourceTrackID)
+        }
         print("[Edit] Cut \(clipboardClips.count) clip(s)")
     }
-    
-    /// Paste clips from clipboard at playhead position
+
+    /// Paste at the playhead, preserving the source tracks' relative lane positions.
+    /// Reject the entire paste if a destination lane is absent or incompatible.
     public func pasteClips() {
-        guard !clipboardClips.isEmpty else { return }
-        
-        // Determine target track - use selected track or original source track
-        let targetTrackID = selectedTrackID ?? clipboardSourceTrackID
-        guard let trackID = targetTrackID,
-              let trackIndex = project.tracks.firstIndex(where: { $0.id == trackID }) else { return }
-        
-        let playheadBeat = transportState.playheadBeats
-        
-        // Find the earliest clip in clipboard to calculate offset
-        let earliestBeat = clipboardClips.map { 
-            $0.timeRange.start.beats(atTempo: transportState.tempo.bpm) 
+        guard !clipboardClips.isEmpty,
+              let targetTrackID = selectedTrackID ?? clipboardSourceTrackID,
+              let targetIndex = project.tracks.firstIndex(where: { $0.id == targetTrackID }) else { return }
+
+        let anchorIndex = clipboardClips.map(\.sourceTrackIndex).min() ?? 0
+        var destinationTrackIDs: [TrackID] = []
+        for entry in clipboardClips {
+            let destinationIndex = targetIndex + entry.sourceTrackIndex - anchorIndex
+            guard project.tracks.indices.contains(destinationIndex) else {
+                print("[Edit] Paste cancelled: target track is unavailable")
+                return
+            }
+            let destination = project.tracks[destinationIndex]
+            let compatible: Bool
+            switch entry.clip.content {
+            case .midi:
+                compatible = destination.type == .midi || destination.type == .instrument
+            case .audio:
+                compatible = destination.type == .audio
+            case .empty:
+                compatible = true
+            }
+            guard compatible else {
+                print("[Edit] Paste cancelled: destination track type is incompatible")
+                return
+            }
+            destinationTrackIDs.append(destination.id)
+        }
+
+        let playheadBeat = max(0, transportState.playheadBeats)
+        let earliestBeat = clipboardClips.map {
+            $0.clip.timeRange.start.beats(atTempo: transportState.tempo.bpm)
         }.min() ?? 0
-        
+
         var newClipIDs: [ClipID] = []
         undoManager.beginGrouping(name: "Paste Regions")
         defer { undoManager.endGrouping() }
 
-        for clip in clipboardClips {
-            let clipBeat = clip.timeRange.start.beats(atTempo: transportState.tempo.bpm)
-            let offsetFromEarliest = clipBeat - earliestBeat
-            let newBeat = playheadBeat + offsetFromEarliest
-            
-            let duration = clip.timeRange.duration
-            let newStart = TimePosition(beats: newBeat, tempo: transportState.tempo.bpm, sampleRate: transportState.sampleRate)
-            let newEnd = TimePosition(
-                samples: newStart.samples + duration.samples,
-                sampleRate: transportState.sampleRate
-            )
-            
+        for (index, entry) in clipboardClips.enumerated() {
+            let clip = entry.clip
+            let offset = clip.timeRange.start.beats(atTempo: transportState.tempo.bpm) - earliestBeat
+            let start = TimePosition(beats: playheadBeat + offset,
+                                     tempo: transportState.tempo.bpm,
+                                     sampleRate: transportState.sampleRate)
             var newClip = clip
             newClip.id = ClipID()
-            newClip.timeRange = TimeRange(start: newStart, end: newEnd)
-            
-            undoManager.registerAction(AddClipAction(trackID: trackID, clip: newClip),
-                                       project: &project)
+            newClip.timeRange = TimeRange(start: start, duration: clip.timeRange.duration)
+            undoManager.registerAction(
+                AddClipAction(trackID: destinationTrackIDs[index], clip: newClip),
+                project: &project
+            )
             newClipIDs.append(newClip.id)
         }
-        
+
         selectedClipIDs = Set(newClipIDs)
-        print("[Edit] Pasted \(clipboardClips.count) clip(s) at beat \(playheadBeat)")
+        print("[Edit] Pasted \(newClipIDs.count) clip(s) at beat \(playheadBeat)")
     }
-    
+
     /// Duplicate selected clips in place (offset by 1 beat)
     public func duplicateSelectedClips() {
         guard let trackID = selectedTrackID,
