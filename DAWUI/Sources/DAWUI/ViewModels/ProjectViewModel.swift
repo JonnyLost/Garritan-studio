@@ -340,6 +340,18 @@ public final class ProjectViewModel: ObservableObject {
             }
         case .pause:
             playbackEngine.stopPlayback()
+        case .loopWrapped:
+            // Rebuild the session from the rebased loop beat. Releasing old
+            // voices before preparing the next lap prevents stuck keyswitch
+            // notes and note-offs from the previous pass reaching new voices.
+            // This is a control-thread transition, never render-thread work.
+            guard transportState.isPlaying, !isStudioExporting else { break }
+            audioEngine.stopPlayback()
+            playbackEngine.stopPlayback()
+            prepareForPlayback()
+            playbackEngine.startPlayback()
+            audioEngine.startPlayback(
+                from: transportState.playbackStartSamplePosition)
         default:
             break
         }
