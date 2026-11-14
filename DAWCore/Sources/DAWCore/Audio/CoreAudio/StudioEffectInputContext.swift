@@ -62,15 +62,16 @@ final class StudioEffectInputContext {
         // pointers (mData = nil), or supply writable storage. Support BOTH
         // conventions. The borrowed pointers remain valid through the
         // synchronous AudioUnitRender call, not beyond this callback.
-        let sources = [left.advanced(by: Int(offset)),
-                       right.advanced(by: Int(offset))]
         for channel in 0..<2 {
+            let source = channel == 0
+                ? left.advanced(by: Int(offset))
+                : right.advanced(by: Int(offset))
             if let destination = buffers[channel].mData,
                buffers[channel].mDataByteSize >= UInt32(byteCount) {
-                memmove(destination, sources[channel], byteCount)
+                memmove(destination, source, byteCount)
             } else {
                 buffers[channel].mData = UnsafeMutableRawPointer(
-                    mutating: UnsafeRawPointer(sources[channel])
+                    mutating: UnsafeRawPointer(source)
                 )
             }
             buffers[channel].mDataByteSize = UInt32(byteCount)
