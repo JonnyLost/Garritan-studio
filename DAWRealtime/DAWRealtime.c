@@ -486,3 +486,57 @@ uint64_t daw_pcm_page_cache_underrun_frames(const DAWPCMPageCache *cache) {
     return cache ? atomic_load_explicit(&cache->underrunFrames,
                                         memory_order_acquire) : 0;
 }
+
+
+// MARK: - Atomic render route publication and deferred reclamation
+// seq_cst orders reader admission before pointer observation and retirement
+// checks after publication. A reader that saw the previous snapshot must
+// remain counted until it has fully finished using the pointer.
+struct DAWRenderRouteExchange {
+    _Atomic(void *) current;
+    _Atomic(uint32_t) readers;
+};
+
+DAWRenderRouteExchange *daw_route_exchange_create(void *initialSnapshot) {
+    if (!initialSnapshot) return NULL;
+    DAWRenderRouteExchange *exchange = calloc(1, sizeof(*exchange));
+    if (!exchange) return NULL;
+    atomic_init(&exchange->current, initialSnapshot);
+    atomic_init(&exchange->readers, 0);
+    return exchange;
+}
+
+void daw_route_exchange_destroy(DAWRenderRouteExchange *exchange) {
+    // The caller MUST have drained every reader before destruction.
+    free(exchange);
+}
+
+void *daw_route_exchange_begin_read(DAWRenderRouteExchange *exchange) {
+    if (!exchange) return NULL;
+    atomic_fetch_add_explicit(&exchange->readers, 1, memory_order_seq_cst);
+    return atomic_load_explicit(&exchange->current, memory_order_seq_cst);
+}
+
+void daw_route_exchange_end_read(DAWRenderRouteExchange *exchange) {
+    if (!exchange) return;
+    atomic_fetch_sub_explicit(&exchange->readers, 1, memory_order_seq_cst);
+}
+
+void *daw_route_exchange_publish(DAWRenderRouteExchange *exchange, void *newSnapshot) {
+    if (!exchange || !newSnapshot) return NULL;
+    return atomic_exchange_explicit(&exchange->current, newSnapshot,
+                                    memory_order_seq_cst);
+}
+
+bool daw_route_exchange_is_quiescent(const DAWRenderRouteExchange *exchange) {
+    return exchange && atomic_load_explicit(&exchange->readers,
+                                           memory_order_seq_cst) == 0;
+}
+
+void *daw_route_exchange_take_current_quiescent(DAWRenderRouteExchange *exchange) {
+    if (!exchange || !daw_route_exchange_is_quiescent(exchange)) return NULL;
+    // Only use this during final shutdown with no new reader admission.
+    return atomic_exchange_explicit(&exchange->current, NULL,
+                                    memory_order_seq_cst);
+}
+
