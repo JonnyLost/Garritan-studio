@@ -218,6 +218,7 @@ public final class CoreAudioBackend: AudioBackend {
         guard status == noErr else { return }
         daw_render_transport_set_playing(transport, false)
         drainGraphCommandsWhileQuiescent()
+        renderGraph.reapInstrumentTransitions(force: true)
         audioClipRenderer.pauseStreaming()
         _isRunning = false
         
@@ -410,7 +411,7 @@ public final class CoreAudioBackend: AudioBackend {
         // Publish the prepared, independently-owned AU at an atomic snapshot
         // boundary. Existing callbacks complete on the old AU; the next
         // callback uses the new route and MIDI destination.
-        return try controlGate.perform { () throws -> AudioUnit in
+        let (unit, fading) = try controlGate.perform { () throws -> (AudioUnit, Bool) in
             try controlGate.ensureMutationAvailable()
             try renderGraph.validateInstrumentReplacement(
                 for: trackID, requestID: requestID
@@ -427,9 +428,35 @@ public final class CoreAudioBackend: AudioBackend {
                     renderGraph.reclaimRetiredRoutesWhileQuiescent()
                 }
             }
-            return try renderGraph.installInstrument(
-                prepared, for: trackID, expectedRequestID: requestID
+            let fading = _isRunning && isPlaying
+            let unit = try renderGraph.installInstrument(
+                prepared, for: trackID, expectedRequestID: requestID,
+                enableCrossfade: fading
             )
+            return (unit, fading)
+        }
+        if fading { scheduleInstrumentTransitionCleanup() }
+        return unit
+    }
+
+    /// A one-shot, low-priority control cleanup task. The callback merely
+    /// advances C11-atomic fade progress and never releases an AudioUnit.
+    /// We retry briefly if a patch is muted/paused; after the deadline, old
+    /// owners are retired even if no musical frames have been produced.
+    private func scheduleInstrumentTransitionCleanup(attempt: Int = 0) {
+        DispatchQueue.global(qos: .utility).asyncAfter(
+            deadline: .now() + .milliseconds(100)
+        ) { [weak self] in
+            guard let self else { return }
+            let pending = self.controlGate.perform { () -> Bool in
+                guard !self.controlGate.isBounceActive else { return true }
+                return self.renderGraph.reapInstrumentTransitions(
+                    force: !self.isPlaying || attempt >= 10
+                )
+            }
+            if pending && attempt < 11 {
+                self.scheduleInstrumentTransitionCleanup(attempt: attempt + 1)
+            }
         }
     }
 
@@ -563,6 +590,7 @@ public final class CoreAudioBackend: AudioBackend {
         withDrainedOutput {
             daw_render_transport_set_playing(transport, false)
             audioClipRenderer.pauseStreaming()
+            renderGraph.reapInstrumentTransitions(force: true)
         }
     }
 
@@ -571,6 +599,7 @@ public final class CoreAudioBackend: AudioBackend {
             daw_render_transport_set_playing(transport, false)
             audioClipRenderer.pauseStreaming()
             renderGraph.allNotesOff()
+            renderGraph.reapInstrumentTransitions(force: true)
         }
     }
 
