@@ -16,10 +16,10 @@ final class StudioGarritanArticulationFactoryTests: XCTestCase {
         return nil
     }
 
-    func testStandardViolins1PatchMapsDocumentedKeyswitches() {
-        let id = standard("Violins 1 KS")
+    func testStandardUniqueSoloViolin1PatchMapsDocumentedKeyswitches() {
+        let id = standard("Violin 1 KS")
         guard let map = ready(StudioGarritanArticulationFactory.resolve(programID: id)) else { return }
-        XCTAssertEqual(map.articulations.count, 12)
+        XCTAssertEqual(map.articulations.count, 9)
         XCTAssertEqual(map.factoryProgramID, id)
         XCTAssertEqual(map.isFactoryDefault, true)
 
@@ -29,9 +29,8 @@ final class StudioGarritanArticulationFactoryTests: XCTestCase {
         // The GPO5 manual defines C4 = MIDI 60.
         XCTAssertEqual(pitch("sustain"), 36)       // C2
         XCTAssertEqual(pitch("pizzicato"), 41)     // F2
-        XCTAssertEqual(pitch("staccato"), 46)      // A#2
-        XCTAssertEqual(pitch("spiccato"), 45)      // A2
-        XCTAssertEqual(pitch("sul-tasto"), 47)     // B2
+        XCTAssertEqual(pitch("spiccato"), 43)      // G2
+        XCTAssertEqual(pitch("staccato"), 44)      // G#2
     }
 
     func testStandardCello1UsesItsOwnLowerOctave() {
@@ -65,7 +64,8 @@ final class StudioGarritanArticulationFactoryTests: XCTestCase {
     }
 
     func testDuplicateGPO5NamesRequireManualConfirmation() {
-        for name in ["Violas KS", "Cellos KS", "Basses KS"] {
+        for name in ["Violins 1 KS", "Violins 2 KS",
+                     "Violas KS", "Cellos KS", "Basses KS"] {
             let result = StudioGarritanArticulationFactory.resolve(
                 programID: standard(name))
             if case .needsReview = result { } else {
@@ -96,7 +96,7 @@ final class StudioGarritanArticulationFactoryTests: XCTestCase {
 
     func testFactoryDoesNotOverwriteUserMapIdentity() throws {
         var map = try XCTUnwrap(ready(
-            StudioGarritanArticulationFactory.resolve(programID: standard("Violins 1 KS"))))
+            StudioGarritanArticulationFactory.resolve(programID: standard("Violin 1 KS"))))
         map.articulations[0].actions[0].number = 33
         map.isFactoryDefault = false
         let roundTrip = try JSONDecoder().decode(
