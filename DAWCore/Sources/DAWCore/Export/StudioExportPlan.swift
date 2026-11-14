@@ -98,8 +98,11 @@ public enum StudioExportPlan {
            track.studioFMEnabled == true ||
            track.studioAnalogEnabled == true { return "Synth" }
         let path = (track.garritanProgramID ?? track.name).lowercased()
+        if path.contains("percussion") || path.contains("timpani") ||
+           path.contains("drum") { return "Percussion" }
         if path.contains("string") || path.contains("violin") ||
-           path.contains("viola") || path.contains("cello") || path.contains("bass") {
+           path.contains("viola") || path.contains("cello") ||
+           path.contains("double bass") || path.contains("contrabass") {
             return "Strings"
         }
         if path.contains("brass") || path.contains("trumpet") ||
@@ -109,8 +112,6 @@ public enum StudioExportPlan {
         if path.contains("woodwind") || path.contains("flute") ||
            path.contains("clarinet") || path.contains("oboe") ||
            path.contains("bassoon") || path.contains("sax") { return "Woodwinds" }
-        if path.contains("percussion") || path.contains("timpani") ||
-           path.contains("drum") { return "Percussion" }
         if path.contains("choir") || path.contains("vocal") { return "Choir" }
         if path.contains("piano") || path.contains("keyboard") ||
            path.contains("harp") { return "Keys" }
@@ -155,8 +156,13 @@ public enum StudioExportPlan {
 
         switch settings.mode {
         case .stereoMix, .monoMix:
+            // Full mix must reproduce the user's audible solo/mute choices.
+            let soloExists = project.tracks.contains { $0.isSolo }
+            let audible = project.tracks.filter {
+                !$0.isMuted && (!soloExists || $0.isSolo)
+            }
             return [try makePass(name: project.name + (settings.mode == .monoMix ? " Mono" : " Mix"),
-                                 ids: project.tracks.map(\.id),
+                                 ids: audible.map(\.id),
                                  channels: settings.mode == .monoMix ? 1 : 2)]
         case .individualTracks:
             let ids = settings.selectedTrackIDs.isEmpty ?
