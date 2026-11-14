@@ -60,13 +60,25 @@ public final class NativeRoomReverbProcessor {
             let all = profiles.enumerated().map { index, profile in
                 let delayFrames = profileDelays[index]
                 let octave = profile.sixBandRT60
+                let sixBandGains: [Float]?
+                if let octave, octave.count == 6 {
+                    if profile.shortRoomFeedbackCalibration == true {
+                        sixBandGains = NativeShortRoomFeedbackCalibrator.gains(
+                            targetRT60: octave, delayFrames: delayFrames,
+                            sampleRate: sampleRate
+                        )
+                    } else {
+                        sixBandGains = octave.map { gain($0, delayFrames: delayFrames) }
+                    }
+                } else {
+                    sixBandGains = nil
+                }
                 return DecayGains(
                     delayFrames: delayFrames,
                     bass: gain(profile.bassRT60, delayFrames: delayFrames),
                     mid: gain(profile.midRT60, delayFrames: delayFrames),
                     treble: gain(profile.trebleRT60, delayFrames: delayFrames),
-                    octaveGains: octave?.count == 6
-                        ? octave!.map { gain($0, delayFrames: delayFrames) } : nil
+                    octaveGains: sixBandGains
                 )
             }
             presetGains = all
