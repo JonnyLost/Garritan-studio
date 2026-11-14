@@ -509,6 +509,18 @@ public actor ProjectFileManager {
         return migratedProject
     }
     
+    // MARK: - Standard MIDI File Import
+
+    /// Read a MIDI file into a completely new project. The caller decides
+    /// whether to replace the active document; import never edits it in place.
+    public func importMIDI(from url: URL) async throws -> Project {
+        let data = try Data(contentsOf: url)
+        let suggestedName = url.deletingPathExtension().lastPathComponent
+        return try StandardMIDIFileImporter.decode(
+            data, name: suggestedName.isEmpty ? "Imported MIDI" : suggestedName
+        )
+    }
+
     // MARK: - Export
     
     /// Export project to a standard format
