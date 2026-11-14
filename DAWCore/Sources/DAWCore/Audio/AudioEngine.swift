@@ -13,6 +13,7 @@ public enum AudioEngineError: Error, LocalizedError {
     case nodeNotFound(TrackID)
     case invalidPluginSlot(Int)
     case fileLoadFailed(URL, Error)
+    case microphoneRoutingUnavailable(String)
     
     public var errorDescription: String? {
         switch self {
@@ -32,6 +33,8 @@ public enum AudioEngineError: Error, LocalizedError {
             return "Invalid insert effect slot: \(index)"
         case .fileLoadFailed(let url, let error):
             return "Failed to load audio file at \(url): \(error.localizedDescription)"
+        case .microphoneRoutingUnavailable(let reason):
+            return "Microphone audition unavailable: \(reason)"
         }
     }
 }
@@ -622,6 +625,219 @@ public final class AudioEngine: ObservableObject {
             AVAudioConnectionPoint(node: node.concertHallSend, bus: 0),
             AVAudioConnectionPoint(node: send, bus: 0)
         ], fromBus: 0, format: format)
+    }
+
+    // MARK: - Original Virtual Microphone Capture Graph
+
+    /// Alternate monitoring mode, NEVER a parallel loud copy of the original
+    /// orchestra. Explicit opt-in and limited to 4 channels x 16 sources for
+    /// this first direct/spill capture graph. Graph changes happen stopped.
+    /// A later single multichannel matrix can remove this AU-per-pair limit.
+    public func setMicrophoneAuditionEnabled(
+        _ enabled: Bool, tracks: [Track],
+        microphones: [StudioVirtualMicrophone],
+        room: StudioAcousticRoomDesign
+    ) throws {
+        if enabled == isMicrophoneAuditionActive {
+            if enabled {
+                refreshMicrophoneRouting(tracks: tracks, microphones: microphones,
+                                         room: room)
+            }
+            return
+        }
+        let sources = tracks.filter {
+            ($0.type == .midi || $0.type == .instrument || $0.type == .audio) &&
+                trackNodes[$0.id] != nil
+        }
+        if enabled {
+            guard !microphones.isEmpty else {
+                throw AudioEngineError.microphoneRoutingUnavailable(
+                    "Add a microphone in Rooms → Microphones first.")
+            }
+            guard !sources.isEmpty else {
+                throw AudioEngineError.microphoneRoutingUnavailable(
+                    "No instrument or audio tracks have an active source node.")
+            }
+            guard sources.count <= Self.maximumAuditionSources else {
+                throw AudioEngineError.microphoneRoutingUnavailable(
+                    "This first preview supports up to 16 instrument/audio tracks; the ordinary mix is unchanged.")
+            }
+        }
+
+        let running = engine.isRunning
+        if running { engine.stop() }
+        let format = AVAudioFormat(
+            standardFormatWithSampleRate: sampleRate, channels: 2
+        )!
+        do {
+            if enabled {
+                NativeMicrophoneSpillAudioUnit.registerIfNeeded()
+                routedMicrophones = Array(microphones.prefix(
+                    Self.maximumAuditionMicrophones))
+                microphoneRoom = room
+                for microphone in routedMicrophones {
+                    let bus = AVAudioMixerNode()
+                    engine.attach(bus)
+                    engine.connect(bus, to: microphoneMasterMixer, format: format)
+                    microphoneChannelMixers[microphone.id] = bus
+                }
+                for source in sources {
+                    attachMicrophoneCaptures(for: source, format: format)
+                    updateMicrophoneCapture(for: source)
+                }
+                applyMicrophoneChannelMix()
+                isMicrophoneAuditionActive = true
+            } else {
+                dismantleMicrophoneCaptures(format: format)
+                isMicrophoneAuditionActive = false
+            }
+            for node in trackNodes.values {
+                node.setMicrophoneAuditionActive(enabled)
+            }
+            microphoneMasterMixer.outputVolume = enabled ? 1 : 0
+            concertHallReturnMixer.outputVolume = enabled ? 0 : concertHallOverallReverb
+            if running { try engine.start() }
+            isRunning = engine.isRunning
+        } catch {
+            // Preserve the original dry + hall path whenever setup fails.
+            engine.stop()
+            dismantleMicrophoneCaptures(format: format)
+            isMicrophoneAuditionActive = false
+            microphoneMasterMixer.outputVolume = 0
+            concertHallReturnMixer.outputVolume = concertHallOverallReverb
+            for node in trackNodes.values {
+                node.setMicrophoneAuditionActive(false)
+            }
+            if running { try? engine.start() }
+            isRunning = engine.isRunning
+            throw AudioEngineError.failedToStart(underlying: error)
+        }
+    }
+
+    /// Only parameter writes: safe while the engine runs, no topology changes.
+    /// Array insertions/removals are deliberately handled with audition OFF.
+    public func refreshMicrophoneRouting(
+        tracks: [Track], microphones: [StudioVirtualMicrophone],
+        room: StudioAcousticRoomDesign
+    ) {
+        guard isMicrophoneAuditionActive else { return }
+        microphoneRoom = room
+        routedMicrophones = routedMicrophones.compactMap { existing in
+            microphones.first(where: { $0.id == existing.id })
+        }
+        applyMicrophoneChannelMix()
+        for track in tracks { updateMicrophoneCapture(for: track) }
+    }
+
+    private func applyMicrophoneChannelMix() {
+        let anySolo = routedMicrophones.contains { $0.mixer.isSolo }
+        for mic in routedMicrophones {
+            guard let bus = microphoneChannelMixers[mic.id] else { continue }
+            let mixer = mic.mixer
+            bus.outputVolume = mixer.isMuted || (anySolo && !mixer.isSolo)
+                ? 0 : mixer.safeLevel
+            bus.pan = mixer.safePan
+        }
+    }
+
+    /// Uses the existing PRE-PAN gain node, after inserts but before any
+    /// legacy stereo positioning. A source is sent to EVERY active mic bus.
+    private func attachMicrophoneCaptures(for track: Track,
+                                          format: AVAudioFormat) {
+        guard let source = trackNodes[track.id] else { return }
+        for mic in routedMicrophones {
+            guard let bus = microphoneChannelMixers[mic.id] else { continue }
+            let capture = AVAudioUnitEffect(
+                audioComponentDescription: NativeMicrophoneSpillAudioUnit.componentDescription
+            )
+            engine.attach(capture)
+            engine.connect(capture, to: bus, format: format)
+            microphoneRoutes.append(MicrophoneRoute(
+                sourceID: track.id, microphoneID: mic.id, capture: capture
+            ))
+        }
+        connectMicrophoneSourceFanout(for: source, format: format)
+    }
+
+    /// Explicitly preserve the original panner input while adding one
+    /// independent pre-pan capture for each mic. Reused after insert edits.
+    private func connectMicrophoneSourceFanout(for node: TrackAudioNode,
+                                               format: AVAudioFormat) {
+        let original: AVAudioNode = node.stereoPositionNode ?? node.pannerNode
+        var destinations = [AVAudioConnectionPoint(node: original, bus: 0)]
+        for route in microphoneRoutes where route.sourceID == node.trackID {
+            destinations.append(AVAudioConnectionPoint(node: route.capture, bus: 0))
+        }
+        engine.connect(node.gainNode, to: destinations,
+                       fromBus: 0, format: format)
+    }
+
+    private func updateMicrophoneCapture(for track: Track) {
+        guard isMicrophoneAuditionActive || !microphoneRoutes.isEmpty,
+              let sourceNode = trackNodes[track.id] else { return }
+        let sourcePosition = StudioMicrophoneGeometry.approximateTrackPosition(
+            pan: track.pan, zone: track.stageReverbZone ?? 2,
+            room: microphoneRoom
+        )
+        for route in microphoneRoutes where route.sourceID == track.id {
+            guard let mic = routedMicrophones.first(where: {
+                $0.id == route.microphoneID
+            }) else { continue }
+            let capture = StudioMicrophoneGeometry.capture(
+                source: sourcePosition, microphone: mic
+            )
+            // -12 dB source headroom to reduce clipping with multiple sections.
+            // Track fader, mute and solo still apply independently to every mic.
+            let gain = Float(capture.estimatedDirectAmplitude) *
+                sourceNode.microphoneSourceGain * 0.25
+            let cutoff = max(1_800, min(17_000,
+                17_000 - 75 * capture.distanceMeters))
+            let alpha = Float(1 - exp(-2 * Double.pi * cutoff / sampleRate))
+            let tree = route.capture.auAudioUnit.parameterTree
+            tree?.parameter(
+                withAddress: NativeMicrophoneSpillAudioUnit.signedGainAddress
+            )?.value = gain.isFinite ? min(2, max(-2, gain)) : 0
+            tree?.parameter(
+                withAddress: NativeMicrophoneSpillAudioUnit.delayMillisecondsAddress
+            )?.value = Float(min(
+                Double(NativeMicrophoneSpillProcessor.maximumDelayMilliseconds),
+                capture.propagationDelayMilliseconds
+            ))
+            tree?.parameter(
+                withAddress: NativeMicrophoneSpillAudioUnit.lowPassAlphaAddress
+            )?.value = alpha.isFinite ? max(0.00001, min(1, alpha)) : 1
+        }
+    }
+
+    private func removeMicrophoneCaptures(for sourceID: TrackID) {
+        for route in microphoneRoutes where route.sourceID == sourceID {
+            engine.disconnectNodeOutput(route.capture)
+            engine.disconnectNodeInput(route.capture)
+            engine.detach(route.capture)
+        }
+        microphoneRoutes.removeAll { $0.sourceID == sourceID }
+    }
+
+    /// Stop engine before calling. Original gain->panner graph is restored
+    /// exactly, with no output from the audition return.
+    private func dismantleMicrophoneCaptures(format: AVAudioFormat) {
+        for route in microphoneRoutes {
+            engine.disconnectNodeOutput(route.capture)
+            engine.disconnectNodeInput(route.capture)
+            engine.detach(route.capture)
+        }
+        microphoneRoutes.removeAll()
+        for node in trackNodes.values {
+            let original: AVAudioNode = node.stereoPositionNode ?? node.pannerNode
+            engine.connect(node.gainNode, to: original, format: format)
+        }
+        for bus in microphoneChannelMixers.values {
+            engine.disconnectNodeOutput(bus)
+            engine.disconnectNodeInput(bus)
+            engine.detach(bus)
+        }
+        microphoneChannelMixers.removeAll()
+        routedMicrophones.removeAll()
     }
 
     /// Get track node for external access
