@@ -589,6 +589,7 @@ public final class CoreAudioBackend: AudioBackend {
     public func play(from samplePosition: Int64) {
         withDrainedOutput {
             daw_render_transport_set_playing(transport, false)
+            renderGraph.reapInstrumentTransitions(force: true)
             audioClipRenderer.preparePlayback(at: samplePosition)
             playbackStartSample = samplePosition
             daw_render_transport_set_position(transport, samplePosition)
@@ -617,6 +618,7 @@ public final class CoreAudioBackend: AudioBackend {
         withDrainedOutput {
             let resume = isPlaying
             daw_render_transport_set_playing(transport, false)
+            renderGraph.reapInstrumentTransitions(force: true)
             audioClipRenderer.preparePlayback(at: samplePosition)
             playbackStartSample = samplePosition
             daw_render_transport_set_position(transport, samplePosition)
@@ -705,6 +707,7 @@ public final class CoreAudioBackend: AudioBackend {
         defer {
             controlGate.perform {
                 controlGate.endBounceLease()
+                renderGraph.reapInstrumentTransitions(force: true)
                 if shouldRestartOutput, let outputUnit {
                     let status = AudioOutputUnitStart(outputUnit)
                     if status != noErr {
@@ -750,6 +753,10 @@ public final class CoreAudioBackend: AudioBackend {
             }
         }
         
+        // A buffer-size change invalidates the outgoing fade's old scratch.
+        // The callback has already drained, so retire it before resizing.
+        renderGraph.reapInstrumentTransitions(force: true)
+
         var bufferFrameSize = size
         let status = AudioUnitSetProperty(
             unit,
