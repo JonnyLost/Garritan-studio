@@ -28,6 +28,80 @@ static uint32_t nextPowerOfTwo(uint32_t requested) {
     return n;
 }
 
+
+// MARK: - MIDI SPSC cursor
+// Swift stores the actual event payload; the C11 release/acquire edges
+// establish slot ownership without Swift data races on head/tail counters.
+struct DAWSPSCCursor {
+    uint32_t capacity;
+    uint32_t mask;
+    _Atomic(uint64_t) head;
+    _Atomic(uint64_t) tail;
+};
+
+DAWSPSCCursor *daw_spsc_cursor_create(uint32_t requestedCapacity) {
+    uint32_t capacity = nextPowerOfTwo(requestedCapacity);
+    if (!capacity) return NULL;
+    DAWSPSCCursor *cursor = calloc(1, sizeof(*cursor));
+    if (!cursor) return NULL;
+    cursor->capacity = capacity;
+    cursor->mask = capacity - 1u;
+    atomic_init(&cursor->head, 0);
+    atomic_init(&cursor->tail, 0);
+    return cursor;
+}
+
+void daw_spsc_cursor_destroy(DAWSPSCCursor *cursor) { free(cursor); }
+
+uint32_t daw_spsc_write_index(const DAWSPSCCursor *cursor) {
+    if (!cursor) return UINT32_MAX;
+    uint64_t head = atomic_load_explicit(&cursor->head, memory_order_relaxed);
+    uint64_t tail = atomic_load_explicit(&cursor->tail, memory_order_acquire);
+    // Preserve one free slot so a full queue is unambiguous.
+    if (head - tail >= cursor->capacity - 1u) return UINT32_MAX;
+    return (uint32_t)head & cursor->mask;
+}
+
+void daw_spsc_commit_write(DAWSPSCCursor *cursor) {
+    if (!cursor) return;
+    uint64_t head = atomic_load_explicit(&cursor->head, memory_order_relaxed);
+    atomic_store_explicit(&cursor->head, head + 1, memory_order_release);
+}
+
+uint32_t daw_spsc_read_index(const DAWSPSCCursor *cursor) {
+    if (!cursor) return UINT32_MAX;
+    uint64_t tail = atomic_load_explicit(&cursor->tail, memory_order_relaxed);
+    uint64_t head = atomic_load_explicit(&cursor->head, memory_order_acquire);
+    if (head == tail) return UINT32_MAX;
+    return (uint32_t)tail & cursor->mask;
+}
+
+void daw_spsc_commit_read(DAWSPSCCursor *cursor) {
+    if (!cursor) return;
+    uint64_t tail = atomic_load_explicit(&cursor->tail, memory_order_relaxed);
+    atomic_store_explicit(&cursor->tail, tail + 1, memory_order_release);
+}
+
+uint32_t daw_spsc_count(const DAWSPSCCursor *cursor) {
+    if (!cursor) return 0;
+    uint64_t head = atomic_load_explicit(&cursor->head, memory_order_acquire);
+    uint64_t tail = atomic_load_explicit(&cursor->tail, memory_order_acquire);
+    uint64_t count = head >= tail ? head - tail : 0;
+    return count > cursor->capacity - 1u ? cursor->capacity - 1u : (uint32_t)count;
+}
+
+void daw_spsc_clear_quiescent(DAWSPSCCursor *cursor) {
+    if (!cursor) return;
+    uint64_t head = atomic_load_explicit(&cursor->head, memory_order_acquire);
+    atomic_store_explicit(&cursor->tail, head, memory_order_release);
+}
+
+void daw_spsc_reset_quiescent(DAWSPSCCursor *cursor) {
+    if (!cursor) return;
+    atomic_store_explicit(&cursor->tail, 0, memory_order_relaxed);
+    atomic_store_explicit(&cursor->head, 0, memory_order_release);
+}
+
 static void updatePeak(struct DAWAudioPeakMeter *meter, float value) {
     if (!meter || !isfinite(value)) return;
     value = fabsf(value);
