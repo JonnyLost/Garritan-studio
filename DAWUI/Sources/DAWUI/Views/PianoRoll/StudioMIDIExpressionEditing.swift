@@ -91,7 +91,13 @@ enum StudioMIDIExpressionEditing {
         // The grid index bounds keep accidental offscreen mouse gestures
         // from allocating an unbounded MIDI-event collection.
         func index(_ beat: Double) -> Int {
-            Int(min(4_000_000, max(0, (beat / division).rounded())))
+            // A region can begin halfway between project-grid lines.
+            // A click exactly on its start must stay at the start rather
+            // than skipping ahead to the next grid line.
+            let grid = abs(beat - clipStartBeat) < 0.0000001
+                ? floor(clipStartBeat / division)
+                : (beat / division).rounded()
+            return Int(min(4_000_000, max(0, grid)))
         }
         var sampled: [Int: Double] = [:]
         let sampleCap = 4096
