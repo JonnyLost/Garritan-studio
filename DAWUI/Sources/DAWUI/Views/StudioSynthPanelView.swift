@@ -11,6 +11,9 @@ public struct StudioSynthPanelView: View {
     @State private var selectedLayerID: UUID?
     @State private var selectedAdditiveHarmonic = 0
     @State private var panelError: String?
+    @State private var userPresets: [StudioSynthUserPresetLibrary.Preset] = []
+    @State private var showSavePreset = false
+    @State private var presetName = ""
     @State private var showSampleCapture = false
     @State private var sampleCaptureName = ""
     @State private var sampleCaptureExpanded = false
@@ -54,6 +57,25 @@ public struct StudioSynthPanelView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
+                Menu {
+                    Button("Save Current Sound…") {
+                        presetName = viewModel.project.track(withID: trackID)?.name
+                            ?? "My Studio Synth"
+                        showSavePreset = true
+                    }
+                    Divider()
+                    if userPresets.isEmpty {
+                        Text("No saved sounds")
+                    } else {
+                        ForEach(userPresets) { preset in
+                            Button(preset.name) { replace(with: preset.patch) }
+                        }
+                    }
+                    Divider()
+                    Button("Refresh Saved Sounds") { refreshUserPresets() }
+                } label: {
+                    Label("My Sounds", systemImage: "square.and.arrow.down")
+                }
                 Button {
                     sampleCaptureName = viewModel.project.track(withID: trackID)?.name
                         ?? "Studio Synth Capture"
@@ -311,6 +333,37 @@ public struct StudioSynthPanelView: View {
         .sheet(isPresented: $showSampleCapture) {
             synthSampleCaptureSheet
         }
+        .sheet(isPresented: $showSavePreset) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("SAVE STUDIO SYNTH SOUND").font(.headline)
+                TextField("Sound name", text: $presetName)
+                    .textFieldStyle(.roundedBorder)
+                Text("Saves all layers, modulation and MIDI assignments as a reusable Studio Synth preset.")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Spacer()
+                    Button("Cancel") { showSavePreset = false }
+                    Button("Save") {
+                        do {
+                            _ = try StudioSynthUserPresetLibrary.save(
+                                name: presetName, patch: patch)
+                            refreshUserPresets()
+                            panelError = nil
+                            showSavePreset = false
+                        } catch {
+                            panelError = error.localizedDescription
+                            showSavePreset = false
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(presetName.trimmingCharacters(
+                        in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .padding(24)
+            .frame(width: 460)
+        }
+        .onAppear { refreshUserPresets() }
         .onDisappear {
             viewModel.cancelStudioSynthMIDILearn(for: trackID)
         }
@@ -495,6 +548,14 @@ public struct StudioSynthPanelView: View {
                 .background(Color.primary.opacity(0.04),
                             in: RoundedRectangle(cornerRadius: 7))
             }
+        }
+    }
+
+    private func refreshUserPresets() {
+        do {
+            userPresets = try StudioSynthUserPresetLibrary.list()
+        } catch {
+            panelError = error.localizedDescription
         }
     }
 
