@@ -248,7 +248,7 @@ enum StudioMIDINoteEditing {
                       other.pitch == data.pitch,
                       other.velocity == data.velocity,
                       other.releaseVelocity == data.releaseVelocity,
-                      other.isMuted == data.isMuted,
+                      (other.isMuted == true) == (data.isMuted == true),
                       articulations[candidate.id] == articulations[event.id] else {
                     return false
                 }
