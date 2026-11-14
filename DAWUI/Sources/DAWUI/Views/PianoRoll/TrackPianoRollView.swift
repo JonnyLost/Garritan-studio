@@ -1058,47 +1058,97 @@ public struct TrackPianoRollView: View {
     // MARK: - Note Operations
     
     /// Move selected notes visually during drag (doesn't commit to model yet)
-    private func createNote(at beat: Double, pitch: Int, duration: Double, velocity: UInt8 = 100) {
-        guard var track = currentTrack else { return }
-        
-        // Get or create the master clip
-        if let clipIndex = track.clips.firstIndex(where: { $0.content.isMIDI }) {
-            // Add to existing clip
-            if case .midi(var midiData) = track.clips[clipIndex].content {
-                let clipStartBeat = track.clips[clipIndex].timeRange.start.beats(atTempo: viewModel.transportState.tempo.bpm)
-                let relativeBeat = beat - clipStartBeat
-                
-                let noteData = NoteData(pitch: UInt8(pitch), velocity: velocity, duration: duration)
-                let noteEvent = MIDIEvent(beatPosition: max(0, relativeBeat), type: .note(noteData), channel: 0)
-                midiData.events.append(noteEvent)
-                
-                track.clips[clipIndex].content = .midi(midiData)
-                viewModel.updateTrack(track, description: "Add Note")
-            }
-        } else {
-            // Create a new master clip starting at beat 0
-            let tempo = viewModel.transportState.tempo.bpm
-            let clipDuration = max(beat + duration + 4, 16.0) // At least 4 bars
-            
-            var midiData = MIDIClipData()
-            let noteData = NoteData(pitch: UInt8(pitch), velocity: velocity, duration: duration)
-            let noteEvent = MIDIEvent(beatPosition: beat, type: .note(noteData), channel: 0)
-            midiData.events.append(noteEvent)
-            
-            let newClip = Clip(
-                name: "MIDI",
-                timeRange: TimeRange(
-                    start: TimePosition(beats: 0, tempo: tempo),
-                    duration: TimePosition(beats: clipDuration, tempo: tempo)
-                ),
-                content: .midi(midiData)
-            )
-            
-            track.clips.append(newClip)
-            viewModel.updateTrack(track, description: "Create MIDI")
-        }
+    private func selectAllNotes() {
+        selectedNoteIDs = Set(noteEvents.map(\.id))
     }
-    
+
+    private func copySelectedNotes() {
+        copiedNotes = StudioMIDINoteEditing.selectedNotes(in: noteEvents,
+                                                           ids: selectedNoteIDs)
+    }
+
+    /// Paste notes at the playhead, retaining their channel, velocity and
+    /// relative spacing. Create a region if no MIDI region covers the playhead.
+    private func pasteNotes() {
+        guard !copiedNotes.isEmpty else { return }
+        insertNotes(copiedNotes, at: max(0, viewModel.transportState.playheadBeats),
+                    description: "Paste MIDI Notes")
+    }
+
+    private func duplicateSelectedNotes() {
+        let source = StudioMIDINoteEditing.selectedNotes(in: noteEvents,
+                                                         ids: selectedNoteIDs)
+        guard !source.isEmpty else { return }
+        let end = source.compactMap { event -> Double? in
+            guard case .note(let data) = event.type else { return nil }
+            return event.beatPosition + data.duration
+        }.max() ?? 0
+        insertNotes(source, at: max(0, end), description: "Duplicate MIDI Notes")
+    }
+
+    private func insertNotes(_ source: [MIDIEvent], at anchor: Double,
+                             description: String) {
+        guard var track = currentTrack, anchor.isFinite, anchor >= 0 else { return }
+        var positioned: [MIDIEvent] = []
+        let insertedIDs = StudioMIDINoteEditing.paste(source, into: &positioned, at: anchor)
+        guard !insertedIDs.isEmpty else { return }
+
+        let tempo = viewModel.transportState.tempo.bpm
+        let sampleRate = viewModel.project.sampleRate
+        let destinationIndex = track.clips.firstIndex { clip in
+            guard clip.content.isMIDI else { return false }
+            let start = clip.timeRange.start.beats(atTempo: tempo)
+            let end = clip.timeRange.end.beats(atTempo: tempo)
+            return anchor >= start && anchor <= end
+        }
+        if let index = destinationIndex,
+           case .midi(var midi) = track.clips[index].content {
+            let start = track.clips[index].timeRange.start.beats(atTempo: tempo)
+            for var note in positioned {
+                note.beatPosition -= start
+                midi.events.append(note)
+            }
+            let oldLength = track.clips[index].timeRange.duration.beats(atTempo: tempo)
+            let neededLength = midi.events.compactMap { event -> Double? in
+                guard insertedIDs.contains(event.id),
+                      case .note(let data) = event.type else { return nil }
+                return event.beatPosition + data.duration
+            }.max() ?? 0
+            if neededLength > oldLength {
+                track.clips[index].timeRange = TimeRange(
+                    start: track.clips[index].timeRange.start,
+                    duration: TimePosition(beats: neededLength, tempo: tempo,
+                                           sampleRate: sampleRate))
+            }
+            track.clips[index].content = .midi(midi)
+        } else {
+            let required = positioned.compactMap { event -> Double? in
+                guard case .note(let data) = event.type else { return nil }
+                return event.beatPosition + data.duration - anchor
+            }.max() ?? 1
+            let bar = StudioMusicalGrid.beatsPerBar(viewModel.transportState.timeSignature)
+            let length = max(bar, ceil((required + 0.001) / bar) * bar)
+            let start = TimePosition(beats: anchor, tempo: tempo, sampleRate: sampleRate)
+            let duration = TimePosition(beats: length, tempo: tempo, sampleRate: sampleRate)
+            for index in positioned.indices {
+                positioned[index].beatPosition -= anchor
+            }
+            let region = Clip(name: "MIDI", timeRange: TimeRange(start: start,
+                              duration: duration), content: .midi(MIDIClipData(events: positioned)))
+            track.clips.append(region)
+        }
+
+        viewModel.updateTrack(track, description: description)
+        selectedNoteIDs = insertedIDs
+    }
+
+    private func createNote(at beat: Double, pitch: Int, duration: Double, velocity: UInt8 = 100) {
+        guard pitch >= 0, pitch <= 127, beat.isFinite, beat >= 0 else { return }
+        let note = MIDIEvent.note(at: beat, pitch: UInt8(pitch), velocity: velocity,
+                                  duration: max(0.0625, duration))
+        insertNotes([note], at: beat, description: "Add MIDI Note")
+    }
+
     private func eraseNoteAt(beat: Double, pitch: Int) {
         guard var track = currentTrack else { return }
         var modified = false
