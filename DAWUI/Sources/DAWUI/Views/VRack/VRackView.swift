@@ -470,6 +470,20 @@ public struct VRackView: View {
                         updated.name = instrument.name
                     }
                     updated.garritanProgramID = instrument.id
+                    // Install factory switches only for an exact GPO5 Standard
+                    // KS patch. Never synthesize Instant Orchestra keyswitches,
+                    // infer Notation offsets, or overwrite user-edited maps.
+                    if updated.articulationMap == nil ||
+                        updated.articulationMap?.isFactoryDefault == true {
+                        if case .ready(let factory) =
+                            StudioGarritanArticulationFactory.resolve(programID: instrument.id) {
+                            updated.articulationMap = factory
+                        } else if oldProgram != instrument.id {
+                            // An obsolete factory map must not emit keyswitches
+                            // into a newly selected patch that does not use them.
+                            updated.articulationMap = nil
+                        }
+                    }
                     updated.instrumentSlot?.stateData = try PropertyListSerialization.data(
                         fromPropertyList: unit.auAudioUnit.fullState ?? [:],
                         format: .binary, options: 0)
