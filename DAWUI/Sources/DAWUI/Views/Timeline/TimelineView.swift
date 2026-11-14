@@ -12,6 +12,7 @@ struct TimelineGridView: View {
         Canvas { context, size in
             let pixelsPerBeat = viewModel.pixelsPerBeat
             let timeSignature = viewModel.transportState.timeSignature
+            let barLength = StudioMusicalGrid.beatsPerBar(timeSignature)
             let totalBeats = Int(size.width / pixelsPerBeat) + 1
             
             // Horizontal track divider lines
@@ -24,21 +25,23 @@ struct TimelineGridView: View {
                 context.stroke(linePath, with: .color(Color.gray.opacity(0.3)), lineWidth: 1)
             }
             
-            // Vertical beat lines
+            // Beat and bar lines are separate: 7/8 bars can fall between
+            // integer quarter-note beats.
             for beat in 0..<totalBeats {
                 let x = CGFloat(beat) * pixelsPerBeat
-                let isBar = beat % timeSignature.beatsPerBar == 0
-                
-                let linePath = Path { path in
+                let line = Path { path in
                     path.move(to: CGPoint(x: x, y: 0))
                     path.addLine(to: CGPoint(x: x, y: size.height))
                 }
-                
-                context.stroke(
-                    linePath,
-                    with: .color(isBar ? Color.gray.opacity(0.4) : Color.gray.opacity(0.15)),
-                    lineWidth: isBar ? 1 : 0.5
-                )
+                context.stroke(line, with: .color(Color.gray.opacity(0.15)), lineWidth: 0.5)
+            }
+            for bar in 0...Int(ceil(Double(totalBeats) / barLength)) {
+                let x = CGFloat(Double(bar) * barLength) * pixelsPerBeat
+                let line = Path { path in
+                    path.move(to: CGPoint(x: x, y: 0))
+                    path.addLine(to: CGPoint(x: x, y: size.height))
+                }
+                context.stroke(line, with: .color(Color.gray.opacity(0.4)), lineWidth: 1)
             }
         }
         .frame(height: CGFloat(trackCount) * trackHeight)
@@ -188,10 +191,12 @@ struct ClipView: View {
                             .onEnded { value in
                                 let tempo = viewModel.transportState.tempo.bpm
                                 let start = clip.timeRange.start.beats(atTempo: tempo)
-                                var newStart = start + Double(value.translation.width / viewModel.pixelsPerBeat)
-                                if !NSEvent.modifierFlags.contains(.command) {
-                                    newStart = round(newStart)
-                                }
+                                let newStart = StudioMusicalGrid.snap(
+                                    start + Double(value.translation.width / viewModel.pixelsPerBeat),
+                                    mode: viewModel.arrangementSnapMode,
+                                    timeSignature: viewModel.transportState.timeSignature,
+                                    bypass: NSEvent.modifierFlags.contains(.command)
+                                )
                                 viewModel.trimMIDIClipLeft(clip.id, on: track.id, toBeat: newStart)
                             }
                     )
@@ -217,10 +222,12 @@ struct ClipView: View {
                             .onEnded { value in
                                 let tempo = viewModel.transportState.tempo.bpm
                                 let start = clip.timeRange.start.beats(atTempo: tempo)
-                                var end = start + Double(max(12, clipWidth + value.translation.width) / viewModel.pixelsPerBeat)
-                                if !NSEvent.modifierFlags.contains(.command) {
-                                    end = round(end)
-                                }
+                                let end = StudioMusicalGrid.snap(
+                                    start + Double(max(12, clipWidth + value.translation.width) / viewModel.pixelsPerBeat),
+                                    mode: viewModel.arrangementSnapMode,
+                                    timeSignature: viewModel.transportState.timeSignature,
+                                    bypass: NSEvent.modifierFlags.contains(.command)
+                                )
                                 trimPreviewWidth = nil
                                 viewModel.trimMIDIClipRight(clip.id, on: track.id, toBeat: end)
                             }
@@ -242,7 +249,11 @@ struct ClipView: View {
         .simultaneousGesture(
             TapGesture(count: 1)
                 .onEnded {
-                    viewModel.selectClip(clip.id)
+                    if NSEvent.modifierFlags.contains(.shift) {
+                        viewModel.toggleClipSelection(clip.id)
+                    } else {
+                        viewModel.selectClip(clip.id)
+                    }
                 }
         )
         .offset(dragOffset)
@@ -288,15 +299,12 @@ struct ClipView: View {
                 let currentBeat = clip.timeRange.start.beats(atTempo: viewModel.transportState.tempo.bpm)
                 var newBeat = currentBeat + dragBeats
                 
-                // Snap to grid unless Cmd is held
-                let snapToGrid = !NSEvent.modifierFlags.contains(.command)
-                if snapToGrid {
-                    let snapResolution = 1.0  // 1 beat grid
-                    newBeat = round(newBeat / snapResolution) * snapResolution
-                }
-                
-                // Clamp to valid range
-                newBeat = max(0, newBeat)
+                newBeat = StudioMusicalGrid.snap(
+                    newBeat,
+                    mode: viewModel.arrangementSnapMode,
+                    timeSignature: viewModel.transportState.timeSignature,
+                    bypass: NSEvent.modifierFlags.contains(.command)
+                )
                 
                 // Reset visual state first
                 isDragging = false
