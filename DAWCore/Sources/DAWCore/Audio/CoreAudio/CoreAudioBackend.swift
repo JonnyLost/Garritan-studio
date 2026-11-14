@@ -42,6 +42,8 @@ public final class CoreAudioBackend: AudioBackend {
     // Render-thread-owned gain; only modified when consuming commands.
     private var renderedMasterVolume: Float = 1.0
     private let graphCommands = StudioGraphParameterMailbox(capacity: 1024)
+    /// Control-only; the audio callback must NEVER enter this gate.
+    private let controlGate = StudioGraphControlGate()
     private var _tempo: Double = 120.0
     
     // MARK: - AudioBackend Protocol Properties
@@ -194,6 +196,7 @@ public final class CoreAudioBackend: AudioBackend {
     // MARK: - Lifecycle
     
     public func start() throws {
+        return try controlGate.perform {
         guard let unit = outputUnit, !_isRunning else { return }
         
         let status = AudioOutputUnitStart(unit)
@@ -203,9 +206,11 @@ public final class CoreAudioBackend: AudioBackend {
         
         _isRunning = true
         print("[CoreAudioBackend] Started")
-    }
+    
+        }}
     
     public func stop() {
+        controlGate.perform {
         guard let unit = outputUnit, _isRunning else { return }
         let status = AudioOutputUnitStop(unit)
         guard status == noErr else { return }
@@ -215,13 +220,15 @@ public final class CoreAudioBackend: AudioBackend {
         _isRunning = false
         
         print("[CoreAudioBackend] Stopped")
-    }
+    
+        }}
     
     /// Stop the hardware output and drain its in-flight callback before a
     /// control operation mutates transport, MIDI or clip-renderer state.
     /// This is intentionally control-thread-only and may block.
     /// Callers must serialize all experimental backend control operations.
     private func withDrainedOutput(_ body: () -> Void) {
+        controlGate.perform {
         let restart = _isRunning
         if restart, let outputUnit {
             let stopStatus = AudioOutputUnitStop(outputUnit)
@@ -239,12 +246,14 @@ public final class CoreAudioBackend: AudioBackend {
                 daw_render_transport_set_playing(transport, false)
             }
         }
-    }
+    
+        }}
 
     /// Install already prepared graph resources while callbacks are drained.
     /// Unlike the old async helper, this never suspends with output stopped.
     /// The caller must serialize all experimental backend control operations.
     private func withDrainedOutputResult<T>(_ operation: () throws -> T) throws -> T {
+        return try controlGate.perform {
         let restart = _isRunning
         if restart, let outputUnit {
             let status = AudioOutputUnitStop(outputUnit)
@@ -263,7 +272,8 @@ public final class CoreAudioBackend: AudioBackend {
         }
         drainGraphCommandsWhileQuiescent()
         return try operation()
-    }
+    
+        }}
 
     // MARK: - Render-owned parameter commands
 
@@ -297,6 +307,7 @@ public final class CoreAudioBackend: AudioBackend {
     /// A full queue uses the existing drained-output path on that thread;
     /// commands are never silently discarded.
     private func submitGraphCommand(_ command: StudioGraphParameterCommand) {
+        controlGate.perform {
         if !_isRunning {
             drainGraphCommandsWhileQuiescent()
             applyGraphCommandImmediately(command)
@@ -307,7 +318,8 @@ public final class CoreAudioBackend: AudioBackend {
                 applyGraphCommandImmediately(command)
             }
         }
-    }
+    
+        }}
 
     /// Only valid when the output callback is stopped.
     private func applyGraphCommandImmediately(_ command: StudioGraphParameterCommand) {
@@ -377,19 +389,24 @@ public final class CoreAudioBackend: AudioBackend {
     }
     
     public func getInstrumentAudioUnit(for trackID: TrackID) -> AudioUnit? {
+        controlGate.perform {
         return renderGraph.getInstrumentUnit(for: trackID)
-    }
+    
+        }}
     
     // MARK: - MIDI
     
     private var scheduledEventCount = 0
     
     public func scheduleMIDIEvent(_ event: ScheduledMIDIEvent) {
+        controlGate.perform {
         midiScheduler.schedule(event)
         scheduledEventCount += 1
-    }
+    
+        }}
     
     public func sendImmediateMIDI(status: UInt8, data1: UInt8, data2: UInt8, to trackID: TrackID) {
+        controlGate.perform {
         guard let unit = renderGraph.getInstrumentUnit(for: trackID) else {
             #if DEBUG
             print("[Preview MIDI] CoreAudio routing FAILED: no instrument unit for track=\(trackID.rawValue) status=\(status) pitch=\(data1)")
@@ -402,7 +419,8 @@ public final class CoreAudioBackend: AudioBackend {
             print("[Preview MIDI] CoreAudio delivery FAILED: OSStatus=\(result) track=\(trackID.rawValue) status=\(status) pitch=\(data1)")
         }
         #endif
-    }
+    
+        }}
     
     public func clearScheduledMIDIEvents() {
         withDrainedOutput { midiScheduler.clear() }
@@ -418,12 +436,14 @@ public final class CoreAudioBackend: AudioBackend {
         endSample: Int64,
         volume: Float
     ) throws {
+        return try controlGate.perform {
         guard !isPlaying else {
             throw AudioBackendError.configurationError(
                 "Stop experimental Core Audio playback before editing audio clips"
             )
         }
-        try audioClipRenderer.scheduleClip(
+        try withDrainedOutputResult {
+            try audioClipRenderer.scheduleClip(
             url: url,
             trackID: trackID,
             startSample: startSample,
@@ -431,7 +451,8 @@ public final class CoreAudioBackend: AudioBackend {
             endSample: endSample,
             volume: volume
         )
-    }
+    
+        }}
     
     public func clearAudioClips() {
         withDrainedOutput {
@@ -482,12 +503,16 @@ public final class CoreAudioBackend: AudioBackend {
     // MARK: - Metronome
     
     public func setMetronomeEnabled(_ enabled: Bool) {
+        controlGate.perform {
         metronomeRenderer.isEnabled = enabled
-    }
+    
+        }}
     
     public func setMetronomeVolume(_ volume: Float) {
+        controlGate.perform {
         metronomeRenderer.volume = volume
-    }
+    
+        }}
     
     public func scheduleMetronomeClicks(
         from startBeat: Double,
@@ -495,6 +520,7 @@ public final class CoreAudioBackend: AudioBackend {
         tempo: Double,
         timeSignature: TimeSignature
     ) {
+        controlGate.perform {
         _tempo = tempo
         metronomeRenderer.scheduleClicks(
             from: startBeat,
@@ -503,7 +529,8 @@ public final class CoreAudioBackend: AudioBackend {
             sampleRate: _sampleRate,
             timeSignature: timeSignature
         )
-    }
+    
+        }}
     
     // MARK: - Offline Bounce
     
@@ -530,6 +557,7 @@ public final class CoreAudioBackend: AudioBackend {
     // MARK: - Configuration
     
     public func setBufferSize(_ size: UInt32) throws {
+        return try controlGate.perform {
         guard let unit = outputUnit else { return }
         let restart = _isRunning
         if restart {
@@ -565,12 +593,15 @@ public final class CoreAudioBackend: AudioBackend {
         } else {
             throw AudioBackendError.configurationError("Could not set buffer size: \(status)")
         }
-    }
+    
+        }}
     
     public func setMasterVolume(_ volume: Float) {
+        controlGate.perform {
         _masterVolume = volume
         submitGraphCommand(.masterVolume(volume))
-    }
+    
+        }}
     
     // MARK: - Render Callback (Called from Audio Thread)
     
