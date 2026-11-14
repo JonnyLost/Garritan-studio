@@ -62,8 +62,10 @@ jobs:
           # never modify the normal native room chosen in Studio.
           normal = scenarios["small-treated"]
           candidate = scenarios["small-treated-experimental-fit"]
-          assert all(b["uncalibratedT20Seconds"] is None for b in normal["bands"])
-          assert any(b["uncalibratedT20Seconds"] is not None
+          # Swift's JSONEncoder omits nil Optional fields rather than
+          # emitting explicit nulls. Missing means "not applicable".
+          assert all(b.get("uncalibratedT20Seconds") is None for b in normal["bands"])
+          assert any(b.get("uncalibratedT20Seconds") is not None
                      for b in candidate["bands"])
           summary = ["## Six-band acoustic calibration suite", "",
                      "Synthetic Studio DSP only; same rendered impulse, old versus new octave filters.",
