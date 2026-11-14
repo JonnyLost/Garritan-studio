@@ -1,7 +1,7 @@
 import Foundation
 
 /// Shared-history virtual microphone DSP. This is the preallocated rendering
-/// core for a future consolidated Audio Unit, not yet installed in AVAudioEngine.
+/// core for an experimental per-source Audio Unit with four output busses.
 ///
 /// A source's mono history is stored ONCE, irrespective of microphone count.
 /// Each (source, capsule) pair retains its own gain, fractional propagation
@@ -97,6 +97,20 @@ public final class NativeMicrophoneCaptureMatrix {
     @discardableResult
     public func render(sources: [Source], outputs: [UnsafeMutablePointer<Float>],
                        frameCount: Int) -> Bool {
+        sources.withUnsafeBufferPointer { inputPointers in
+            outputs.withUnsafeBufferPointer { outputPointers in
+                render(sources: inputPointers, outputs: outputPointers,
+                       frameCount: frameCount)
+            }
+        }
+    }
+
+    /// Pre-borrowed pointers keep the AU render callback allocation free.
+    /// Source/output pointer storage is provided by the caller.
+    @discardableResult
+    public func render(sources: UnsafeBufferPointer<Source>,
+                       outputs: UnsafeBufferPointer<UnsafeMutablePointer<Float>>,
+                       frameCount: Int) -> Bool {
         guard sources.count == sourceCount,
               outputs.count == microphoneCount,
               frameCount >= 0 else { return false }
@@ -142,6 +156,18 @@ public final class NativeMicrophoneCaptureMatrix {
             if writePosition == capacity { writePosition = 0 }
         }
         return true
+    }
+
+    /// Reset on transport/graph discontinuity; called outside render.
+    public func reset() {
+        for i in 0..<(capacity * sourceCount) { history[i] = 0 }
+        writePosition = 0
+        for i in paths.indices {
+            paths[i].filtered = 0
+            paths[i].gain = paths[i].targetGain
+            paths[i].delay = paths[i].targetDelay
+            paths[i].alpha = paths[i].targetAlpha
+        }
     }
 
     /// The shared mono history occupies sourceCount * capacity samples,
