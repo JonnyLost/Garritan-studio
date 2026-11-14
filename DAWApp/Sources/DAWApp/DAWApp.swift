@@ -404,50 +404,46 @@ class AppState: ObservableObject {
         choice.alertStyle = .informational
         choice.messageText = "Export Standard MIDI File"
         choice.informativeText = """
-            Musical MIDI exports the notes and authored MIDI controllers without baking articulation triggers.
+            Musical MIDI exports notes and authored controllers without baking articulation triggers.
 
             Rendered Performance MIDI adds the configured keyswitches, controller and program changes for the loaded instrument. Other instruments may interpret these commands differently.
             """
         choice.addButton(withTitle: "Musical MIDI")
         choice.addButton(withTitle: "Rendered Performance MIDI")
         choice.addButton(withTitle: "Cancel")
-        choice.begin { [weak self] response in
-            Task { @MainActor in
-                guard let self else { return }
-                let format: ExportFormat
-                switch response {
-                case .alertFirstButtonReturn:
-                    format = .midi
-                case .alertSecondButtonReturn:
-                    format = .midiPerformance
-                default:
-                    return
-                }
 
-                let panel = NSSavePanel()
-                panel.allowedContentTypes = [UTType(filenameExtension: "mid") ?? .data]
-                panel.nameFieldStringValue = self.currentProject.name + ".mid"
-                panel.begin { [weak self] result in
-                    Task { @MainActor in
-                        guard let self, result == .OK,
-                              let url = panel.url else { return }
-                        // Snapshot the model at confirmation; exporting must
-                        // not change the project's dirty/save state.
-                        let project = self.currentProject
-                        do {
-                            try await self.fileManager.export(
-                                project: project, to: url, format: format
-                            )
-                            print("[AppState] Exported MIDI to: \(url.path)")
-                        } catch {
-                            let alert = NSAlert()
-                            alert.alertStyle = .warning
-                            alert.messageText = "MIDI Export Failed"
-                            alert.informativeText = error.localizedDescription
-                            alert.addButton(withTitle: "OK")
-                            alert.begin(completionHandler: nil)
-                        }
-                    }
+        // NSAlert supports runModal and beginSheetModal(for:); it does not
+        // expose the NSSavePanel-style begin(completionHandler:) method.
+        let format: ExportFormat
+        switch choice.runModal() {
+        case .alertFirstButtonReturn:
+            format = .midi
+        case .alertSecondButtonReturn:
+            format = .midiPerformance
+        default:
+            return
+        }
+
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [UTType(filenameExtension: "mid") ?? .data]
+        panel.nameFieldStringValue = currentProject.name + ".mid"
+        panel.begin { [weak self] response in
+            Task { @MainActor in
+                guard let self, response == .OK, let url = panel.url else { return }
+                // Snapshot at confirmation and preserve unsaved-project state.
+                let project = self.currentProject
+                do {
+                    try await self.fileManager.export(
+                        project: project, to: url, format: format
+                    )
+                    print("[AppState] Exported MIDI to: \(url.path)")
+                } catch {
+                    let alert = NSAlert()
+                    alert.alertStyle = .warning
+                    alert.messageText = "MIDI Export Failed"
+                    alert.informativeText = error.localizedDescription
+                    alert.addButton(withTitle: "OK")
+                    alert.runModal()
                 }
             }
         }
