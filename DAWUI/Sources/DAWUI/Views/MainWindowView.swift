@@ -1958,9 +1958,36 @@ struct TrackLaneView: View {
     
     var body: some View {
         ZStack(alignment: .leading) {
-            // Grid
+            // Double-clicking empty timeline space creates a one-bar MIDI
+            // region at the snapped pointer position. Region surfaces above
+            // the grid keep their own double-click-to-edit behavior.
             TrackGridView(viewModel: viewModel, height: height)
-            
+                .contentShape(Rectangle())
+                .gesture(
+                    SpatialTapGesture(count: 2).onEnded { value in
+                        guard isMIDITrack else { return }
+                        let tempo = viewModel.transportState.tempo.bpm
+                        let beat = StudioMusicalGrid.snap(
+                            Double(value.location.x) / viewModel.pixelsPerBeat,
+                            mode: viewModel.arrangementSnapMode,
+                            timeSignature: viewModel.transportState.timeSignature,
+                            bypass: NSEvent.modifierFlags.contains(.command)
+                        )
+                        let isInsideExistingRegion = track.clips.contains { clip in
+                            let start = clip.timeRange.start.beats(atTempo: tempo)
+                            let end = clip.timeRange.end.beats(atTempo: tempo)
+                            return beat >= start && beat < end
+                        }
+                        guard !isInsideExistingRegion else { return }
+                        let position = TimePosition(beats: beat, tempo: tempo,
+                                                     sampleRate: viewModel.project.sampleRate)
+                        viewModel.createMIDIClip(on: track.id, at: position,
+                            duration: StudioMusicalGrid.beatsPerBar(
+                                viewModel.transportState.timeSignature))
+                        viewModel.selectAndArmTrack(track.id)
+                    }
+                )
+
             // Clips
             ForEach(track.clips) { clip in
                 let width = clipWidth(for: clip)
