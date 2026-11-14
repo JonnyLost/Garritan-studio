@@ -100,6 +100,17 @@ uint32_t daw_spsc_count(const DAWSPSCCursor *cursor);
 void daw_spsc_clear_quiescent(DAWSPSCCursor *cursor);
 void daw_spsc_reset_quiescent(DAWSPSCCursor *cursor);
 
+
+// Experimental Core Audio transport snapshot. All mutations which also touch
+// render-graph/MIDI/clip objects require a drained output callback first.
+typedef struct DAWRenderTransport DAWRenderTransport;
+DAWRenderTransport *daw_render_transport_create(void);
+void daw_render_transport_destroy(DAWRenderTransport *state);
+bool daw_render_transport_is_playing(const DAWRenderTransport *state);
+void daw_render_transport_set_playing(DAWRenderTransport *state, bool playing);
+int64_t daw_render_transport_position(const DAWRenderTransport *state);
+void daw_render_transport_set_position(DAWRenderTransport *state, int64_t frame);
+
 #ifdef __cplusplus
 }
 #endif
