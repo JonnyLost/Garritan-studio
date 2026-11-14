@@ -71,9 +71,29 @@ struct ArticulationsWorkspaceView: View {
     }
 
     private var suggestedPatch: GPOKeyswitchCatalog.Patch? {
-        guard let catalog, !suggestedName.isEmpty else { return nil }
-        let needle = normalized(suggestedName.replacingOccurrences(of: ".sfz", with: "", options: .caseInsensitive))
-        // Match only unambiguous, exact patch names; never guess an articulation map.
+        guard !suggestedName.isEmpty else { return nil }
+        // An identically named Section Strings patch may have a completely
+        // different table from KS Groups or Choir. The verified factory,
+        // keyed by the REAL ARIA bank path, is the only playable source.
+        if let programID = viewModel.selectedTrack?.garritanProgramID,
+           case .ready(let map) =
+            StudioGarritanArticulationFactory.resolve(programID: programID) {
+            let switches = map.articulations.compactMap { definition -> GPOKeyswitchCatalog.Assignment? in
+                guard let action = definition.actions.first(where: {
+                    $0.kind == .keyswitch && (0...127).contains($0.number)
+                }) else { return nil }
+                return GPOKeyswitchCatalog.Assignment(
+                    note: NoteData(pitch: UInt8(action.number)).noteName,
+                    articulation: definition.name)
+            }
+            return switches.isEmpty ? nil :
+                GPOKeyswitchCatalog.Patch(patch: suggestedName, keyswitches: switches)
+        }
+        guard let catalog else { return nil }
+        let needle = normalized(suggestedName.replacingOccurrences(
+            of: ".sfz", with: "", options: .caseInsensitive))
+        // Unverified programs can still browse the reference catalog, but
+        // may NOT trigger MIDI by name matching alone.
         let matches = catalog.patches.filter { normalized($0.patch) == needle }
         return matches.count == 1 ? matches.first : nil
     }
@@ -88,6 +108,11 @@ struct ArticulationsWorkspaceView: View {
     private var activePatch: GPOKeyswitchCatalog.Patch? {
         guard let catalog else { return nil }
         if let selectedPatchName {
+            // Explicit selection of the loaded patch must show its
+            // context-correct factory table, not the flattened JSON entry.
+            if suggestedPatch?.patch == selectedPatchName {
+                return suggestedPatch
+            }
             return catalog.patches.first { $0.patch == selectedPatchName }
         }
         return suggestedPatch
