@@ -169,7 +169,7 @@ public final class MIDISequencer: ObservableObject {
             guard let transport = transportState, transport.isLoopEnabled else {
                 return nil
             }
-            return transport.loopEnd.beats(atTempo: tempo.bpm)
+            return transport.loopEnd.beats(atTempo: tempo)
         }()
         for trackID in scheduledTracks.keys.sorted(
             by: { $0.rawValue.uuidString < $1.rawValue.uuidString }) {
