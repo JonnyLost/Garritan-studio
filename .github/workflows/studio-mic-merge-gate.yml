@@ -45,6 +45,26 @@ jobs:
             echo "Already integrated in candidate."
             exit 0
           fi
+          # GitHub Apps without workflows permission cannot push changes
+          # to .github/workflows. The verified *application source* may be
+          # published as a single-parent commit while leaving existing CI
+          # workflows untouched. Original feature branches still retain them.
+          git merge --quit
+          while IFS= read -r changed; do
+            [[ -n "$changed" ]] || continue
+            if git cat-file -e "HEAD:$changed" 2>/dev/null; then
+              git restore --source=HEAD --staged --worktree -- "$changed"
+            else
+              git rm -f --ignore-unmatch -- "$changed"
+            fi
+          done < <(git diff --cached --name-only -- .github/workflows/)
+          if [[ -n "$(git diff --cached --name-only -- .github/workflows/)" ]]; then
+            echo "Workflow changes remain; refusing unauthorized push." >&2
+            exit 1
+          fi
           git diff --cached --check
-          git commit -m "Integrate virtual microphone and Rooms acoustics alongside Ostinato"
+          grep -q 'OstinatoWorkspaceView(viewModel: viewModel)' DAWUI/Sources/DAWUI/Views/MainWindowView.swift
+          grep -q 'StudioRoomAcousticsWorkspaceView(viewModel: viewModel)' DAWUI/Sources/DAWUI/Views/MainWindowView.swift
+          grep -q 'ensureMicrophoneMasterReturnConnected(format: format)' DAWCore/Sources/DAWCore/Audio/AudioEngine.swift
+          git commit -m "Integrate verified Rooms and virtual microphone routing with Ostinato"
           git push origin HEAD:refs/heads/integration/studio-mic-merge-candidate-2026-11-14
