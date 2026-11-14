@@ -1080,7 +1080,13 @@ public final class AudioEngine: ObservableObject {
                 ))
             }
         }
-        engine.connect(source, to: destinations, fromBus: 0, format: format)
+        if destinations.count == 1 {
+            // AVAudioEngine's connection-point fanout API requires two or
+            // more destinations. Normal rack monitoring has only one.
+            engine.connect(source, to: vRackDirectMonitorMixer, format: format)
+        } else {
+            engine.connect(source, to: destinations, fromBus: 0, format: format)
+        }
     }
 
     private func updateVRackMicrophoneCapture() {
