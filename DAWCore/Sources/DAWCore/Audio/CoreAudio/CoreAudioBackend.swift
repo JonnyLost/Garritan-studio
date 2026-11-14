@@ -2,6 +2,7 @@ import Foundation
 import AudioToolbox
 import CoreAudio
 import AVFoundation
+import DAWRealtime
 
 // MARK: - Core Audio Backend
 
@@ -32,9 +33,9 @@ public final class CoreAudioBackend: AudioBackend {
     // MARK: - State (Atomic for thread safety)
     
     private var _isRunning: Bool = false
-    private var _isPlaying: Bool = false
-    private var _currentSamplePosition: Int64 = 0
-    private var _playbackStartSample: Int64 = 0
+    /// Owned by this backend for its lifetime; callback reads atomically.
+    private let transport: OpaquePointer
+    private var playbackStartSample: Int64 = 0
     private var _sampleRate: Double = 44100
     private var _bufferSize: UInt32 = 512
     private var _masterVolume: Float = 1.0
@@ -45,13 +46,17 @@ public final class CoreAudioBackend: AudioBackend {
     public var isRunning: Bool { _isRunning }
     public var sampleRate: Double { _sampleRate }
     public var bufferSize: UInt32 { _bufferSize }
-    public var currentSamplePosition: Int64 { _currentSamplePosition }
-    public var isPlaying: Bool { _isPlaying }
+    public var currentSamplePosition: Int64 { daw_render_transport_position(transport) }
+    public var isPlaying: Bool { daw_render_transport_is_playing(transport) }
     public var masterVolume: Float { _masterVolume }
     
     // MARK: - Initialization
     
     public init() {
+        guard let state = daw_render_transport_create() else {
+            preconditionFailure("Unable to allocate native render transport")
+        }
+        transport = state
         print("[CoreAudioBackend] Initializing...")
         
         // Get sample rate from system
@@ -75,6 +80,7 @@ public final class CoreAudioBackend: AudioBackend {
             AudioOutputUnitStop(unit)
             AudioComponentInstanceDispose(unit)
         }
+        daw_render_transport_destroy(transport)
     }
     
     // MARK: - Output Unit Setup
@@ -198,16 +204,33 @@ public final class CoreAudioBackend: AudioBackend {
     
     public func stop() {
         guard let unit = outputUnit, _isRunning else { return }
-        _isPlaying = false
-        audioClipRenderer.pauseStreaming()
-        
         AudioOutputUnitStop(unit)
+        daw_render_transport_set_playing(transport, false)
+        audioClipRenderer.pauseStreaming()
         _isRunning = false
-        _isPlaying = false
         
         print("[CoreAudioBackend] Stopped")
     }
     
+    /// Stop the hardware output and drain its in-flight callback before a
+    /// control operation mutates transport, MIDI or clip-renderer state.
+    /// This is intentionally control-thread-only and may block.
+    /// Callers must serialize all experimental backend control operations.
+    private func withDrainedOutput(_ body: () -> Void) {
+        let restart = _isRunning
+        if restart, let outputUnit {
+            AudioOutputUnitStop(outputUnit)
+        }
+        body()
+        if restart, let outputUnit {
+            let result = AudioOutputUnitStart(outputUnit)
+            if result != noErr {
+                _isRunning = false
+                daw_render_transport_set_playing(transport, false)
+            }
+        }
+    }
+
     // MARK: - Track Management
     
     public func createTrack(id: TrackID) throws {
@@ -280,7 +303,7 @@ public final class CoreAudioBackend: AudioBackend {
     }
     
     public func clearScheduledMIDIEvents() {
-        midiScheduler.clear()
+        withDrainedOutput { midiScheduler.clear() }
     }
     
     // MARK: - Audio Clips
@@ -293,7 +316,7 @@ public final class CoreAudioBackend: AudioBackend {
         endSample: Int64,
         volume: Float
     ) throws {
-        guard !_isPlaying else {
+        guard !isPlaying else {
             throw AudioBackendError.configurationError(
                 "Stop experimental Core Audio playback before editing audio clips"
             )
@@ -309,65 +332,51 @@ public final class CoreAudioBackend: AudioBackend {
     }
     
     public func clearAudioClips() {
-        // Keep the callback from referencing retired PCM page storage.
-        // Stopping the output unit drains in-flight render callbacks.
-        let wasRunning = _isRunning
-        _isPlaying = false
-        if wasRunning, let outputUnit {
-            AudioOutputUnitStop(outputUnit)
-        }
-        audioClipRenderer.clearClips()
-        if wasRunning, let outputUnit {
-            let status = AudioOutputUnitStart(outputUnit)
-            if status != noErr { _isRunning = false }
+        withDrainedOutput {
+            daw_render_transport_set_playing(transport, false)
+            audioClipRenderer.clearClips()
         }
     }
-    
+
     // MARK: - Playback Control
     
     
     public func play(from samplePosition: Int64) {
-        _isPlaying = false
-        // Prefill on the control thread; no ExtAudioFileRead can run in
-        // CoreAudioBackend.render after this point.
-        audioClipRenderer.preparePlayback(at: samplePosition)
-        _playbackStartSample = samplePosition
-        _currentSamplePosition = samplePosition
-        _isPlaying = true
-        
-        print("[CoreAudioBackend] ========================================")
-        print("[CoreAudioBackend] Playing from sample \(samplePosition)")
-        print("[CoreAudioBackend] Scheduled events: \(scheduledEventCount)")
-        print("[CoreAudioBackend] MIDI scheduler event count: \(midiScheduler.eventCount)")
-        print("[CoreAudioBackend] Is running: \(_isRunning)")
-        print("[CoreAudioBackend] ========================================")
+        withDrainedOutput {
+            daw_render_transport_set_playing(transport, false)
+            audioClipRenderer.preparePlayback(at: samplePosition)
+            playbackStartSample = samplePosition
+            daw_render_transport_set_position(transport, samplePosition)
+            daw_render_transport_set_playing(transport, true)
+        }
     }
-    
-    public func pause() {
-        _isPlaying = false
-        audioClipRenderer.pauseStreaming()
-        print("[CoreAudioBackend] Paused at sample \(_currentSamplePosition)")
-    }
-    
-    public func stopPlayback() {
-        _isPlaying = false
-        audioClipRenderer.pauseStreaming()
 
-        // Stop all notes
-        renderGraph.allNotesOff()
-        
-        print("[CoreAudioBackend] Stopped playback")
+    public func pause() {
+        withDrainedOutput {
+            daw_render_transport_set_playing(transport, false)
+            audioClipRenderer.pauseStreaming()
+        }
     }
-    
+
+    public func stopPlayback() {
+        withDrainedOutput {
+            daw_render_transport_set_playing(transport, false)
+            audioClipRenderer.pauseStreaming()
+            renderGraph.allNotesOff()
+        }
+    }
+
     public func seek(to samplePosition: Int64) {
-        let resume = _isPlaying
-        _isPlaying = false
-        audioClipRenderer.preparePlayback(at: samplePosition)
-        _currentSamplePosition = samplePosition
-        _playbackStartSample = samplePosition
-        _isPlaying = resume
+        withDrainedOutput {
+            let resume = isPlaying
+            daw_render_transport_set_playing(transport, false)
+            audioClipRenderer.preparePlayback(at: samplePosition)
+            playbackStartSample = samplePosition
+            daw_render_transport_set_position(transport, samplePosition)
+            daw_render_transport_set_playing(transport, resume)
+        }
     }
-    
+
     // MARK: - Metronome
     
     public func setMetronomeEnabled(_ enabled: Bool) {
@@ -461,12 +470,12 @@ public final class CoreAudioBackend: AudioBackend {
         // Clear output buffer
         clearBuffer(bufferList, frameCount: frameCount)
         
-        guard _isPlaying else {
+        guard isPlaying else {
             // Output silence when not playing
             return noErr
         }
         
-        let startSample = _currentSamplePosition
+        let startSample = daw_render_transport_position(transport)
         let endSample = StudioMIDIClockMath.bufferEnd(
             startSample: startSample, frameCount: frameCount
         )
@@ -505,7 +514,7 @@ public final class CoreAudioBackend: AudioBackend {
         applyMasterVolume(bufferList, volume: _masterVolume, frameCount: frameCount)
         
         // 6. Update position
-        _currentSamplePosition = endSample
+        daw_render_transport_set_position(transport, endSample)
         
         return noErr
     }
