@@ -239,4 +239,47 @@ final class StudioMIDISessionPlannerTests: XCTestCase {
             StudioMIDITransportOrder.priority(
                 status: 0x90, data2: 100))
     }
+    func testTrimmedRegionShortensMusicalNoteWithoutMutatingOriginal() {
+        let original = note(0.5, 60, duration: 8)
+        let track = trackWithClip(start: 4, length: 2, events: [original])
+        let compiled = StudioMIDISessionPlanner.events(
+            for: track, tempo: 120, from: 4)
+        XCTAssertEqual(compiled.count, 1)
+        XCTAssertEqual(compiled[0].absoluteBeat, 4.5, accuracy: 0.00001)
+        XCTAssertEqual(compiled[0].event.id, original.id)
+        if case .note(let scheduled) = compiled[0].event.type {
+            XCTAssertEqual(scheduled.duration, 1.5, accuracy: 0.00001)
+        } else { XCTFail("Expected a note") }
+        if case .midi(let source) = track.clips[0].content,
+           case .note(let saved) = source.events[0].type {
+            XCTAssertEqual(saved.duration, 8, accuracy: 0.00001)
+        } else { XCTFail("Expected untouched source note") }
+    }
+
+    func testHeldKeyswitchAndMusicalNoteBothStopAtTrimmedClipEnd() {
+        let original = note(0.5, 64, duration: 6)
+        let map = StudioArticulationMap(articulations: [
+            StudioArticulationDefinition(id: "bow", name: "Bow",
+                actions: [StudioArticulationAction(
+                    kind: .keyswitch, number: 24, channel: 0,
+                    holdForNote: true)])
+        ])
+        let track = trackWithClip(start: 8, length: 2,
+            events: [original],
+            assignments: [.init(noteID: original.id, articulationID: "bow")],
+            map: map)
+        let compiled = StudioMIDISessionPlanner.events(
+            for: track, tempo: 120, from: 8)
+        let notes = compiled.compactMap { item -> (UInt8, Double)? in
+            if case .note(let data) = item.event.type {
+                return (data.pitch, item.absoluteBeat + data.duration)
+            }
+            return nil
+        }
+        XCTAssertEqual(notes.count, 2)
+        XCTAssertEqual(notes.first { $0.0 == 64 }?.1 ?? -1, 10, accuracy: 0.00001)
+        XCTAssertEqual(notes.first { $0.0 == 24 }?.1 ?? -1, 10, accuracy: 0.00001)
+        XCTAssertTrue(compiled.allSatisfy { $0.absoluteBeat < 10 })
+    }
+
 }
