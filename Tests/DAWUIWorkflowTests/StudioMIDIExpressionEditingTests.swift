@@ -103,6 +103,41 @@ final class StudioMIDIExpressionEditingTests: XCTestCase {
         } else { XCTFail("Expected CC68") }
     }
 
+    func testInstantOrchestraExpressionModeIsDiscreteAndBlendsAreContinuous() {
+        let gm = StudioMIDIExpressionEditing.makeEvent(
+            at: 1, lane: .expressionMode, normalized: 0.1)!
+        let gpo = StudioMIDIExpressionEditing.makeEvent(
+            at: 2, lane: .expressionMode, normalized: 0.9)!
+        let blend = StudioMIDIExpressionEditing.makeEvent(
+            at: 3, lane: .blend1, normalized: 0.25)!
+        if case .controlChange(let cc, let value) = gm.type {
+            XCTAssertEqual(cc, 104)
+            XCTAssertEqual(value, 0)
+        } else { XCTFail("Expected CC104 GM mode") }
+        if case .controlChange(let cc, let value) = gpo.type {
+            XCTAssertEqual(cc, 104)
+            XCTAssertEqual(value, 127)
+        } else { XCTFail("Expected CC104 GPO mode") }
+        if case .controlChange(let cc, let value) = blend.type {
+            XCTAssertEqual(cc, 30)
+            XCTAssertEqual(value, 32)
+        } else { XCTFail("Expected CC30 continuous texture blend") }
+    }
+
+    func testGPOAutoLegatoControllerIsDiscrete() {
+        let off = StudioMIDIExpressionEditing.makeEvent(
+            at: 0, lane: .autoLegato, normalized: 0)!
+        let on = StudioMIDIExpressionEditing.makeEvent(
+            at: 1, lane: .autoLegato, normalized: 1)!
+        if case .controlChange(let c0, let v0) = off.type,
+           case .controlChange(let c1, let v1) = on.type {
+            XCTAssertEqual(c0, 102)
+            XCTAssertEqual(v0, 0)
+            XCTAssertEqual(c1, 102)
+            XCTAssertEqual(v1, 127)
+        } else { XCTFail("Expected CC102 auto-legato switches") }
+    }
+
     func testDrawingPreservesAnotherChannelAndControllers() {
         let a = MIDIEvent.controlChange(at: 1, controller: 1, value: 10, channel: 1)
         let b = MIDIEvent.controlChange(at: 1, controller: 11, value: 20, channel: 0)
