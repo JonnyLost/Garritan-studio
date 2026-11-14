@@ -207,7 +207,8 @@ public final class CoreAudioBackend: AudioBackend {
     
     public func stop() {
         guard let unit = outputUnit, _isRunning else { return }
-        AudioOutputUnitStop(unit)
+        let status = AudioOutputUnitStop(unit)
+        guard status == noErr else { return }
         daw_render_transport_set_playing(transport, false)
         drainGraphCommandsWhileQuiescent()
         audioClipRenderer.pauseStreaming()
