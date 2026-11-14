@@ -18,10 +18,10 @@ fi
 if git merge --no-commit --no-ff "$source_sha" >/tmp/studio-export-merge.log 2>&1; then
   echo "Export engine merged without content conflicts."
 else
-  mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
-  if [[ "${#conflicts[@]}" -ne 1 || "${conflicts[0]}" != "$conflict_path" ]]; then
+  conflicts="$(git diff --name-only --diff-filter=U)"
+  if [[ "$conflicts" != "$conflict_path" ]]; then
     echo "Unexpected conflict set; refusing to complete the integration:" >&2
-    printf '%s\n' "${conflicts[@]}" >&2
+    printf '%s\n' "$conflicts" >&2
     cat /tmp/studio-export-merge.log >&2
     exit 1
   fi
