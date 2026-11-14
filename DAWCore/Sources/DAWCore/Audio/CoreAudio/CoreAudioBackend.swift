@@ -219,7 +219,11 @@ public final class CoreAudioBackend: AudioBackend {
     private func withDrainedOutput(_ body: () -> Void) {
         let restart = _isRunning
         if restart, let outputUnit {
-            AudioOutputUnitStop(outputUnit)
+            let stopStatus = AudioOutputUnitStop(outputUnit)
+            guard stopStatus == noErr else {
+                // Never mutate callback-owned objects if output drain fails.
+                return
+            }
         }
         body()
         if restart, let outputUnit {
