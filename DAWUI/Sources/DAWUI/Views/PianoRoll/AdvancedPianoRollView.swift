@@ -1183,7 +1183,8 @@ public struct AdvancedPianoRollView: View {
         case .move:
             edited = StudioMIDINoteEditing.moving(
                 original.events, selectedIDs: selectedNoteIDs, beatDelta: beatDelta,
-                pitchDelta: pitchDelta, division: division, bypassSnap: bypass)
+                pitchDelta: pitchDelta, division: division, bypassSnap: bypass,
+                clipStartBeat: clipStartBeat)
             let previewPitch = max(0, min(127, dragStartPitch + pitchDelta))
             if previewPitch != lastAuditionedPitch {
                 if let previous = lastAuditionedPitch {
