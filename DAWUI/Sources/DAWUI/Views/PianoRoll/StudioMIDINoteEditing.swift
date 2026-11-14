@@ -132,6 +132,23 @@ enum StudioMIDINoteEditing {
         }
     }
 
+    /// Prevent empty undo entries when a nudge reaches the start of a
+    /// region or the top/bottom of the MIDI pitch range.
+    static func hasPitchOrTimingChanges(before: [MIDIEvent],
+                                        after: [MIDIEvent]) -> Bool {
+        guard before.count == after.count else { return true }
+        for index in before.indices {
+            let old = before[index]
+            let new = after[index]
+            guard old.id == new.id else { return true }
+            if old.beatPosition != new.beatPosition { return true }
+            if case .note(let oldNote) = old.type,
+               case .note(let newNote) = new.type,
+               oldNote.pitch != newNote.pitch { return true }
+        }
+        return false
+    }
+
     /// Keep the opposite edge fixed and never produce zero/negative length notes.
     static func resizing(_ events: [MIDIEvent], noteID: UUID, edge: ResizeEdge,
                          beatDelta: Double, division: Double, bypassSnap: Bool = false,
