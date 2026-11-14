@@ -455,9 +455,25 @@ public final class AudioEngine: ObservableObject {
                         node.setMicrophoneAuditionActive(false)
                     }
                 } else {
-                    attachMicrophoneCaptures(for: track, format: format)
-                    updateMicrophoneCapture(for: track)
-                    trackNode.setMicrophoneAuditionActive(true)
+                    do {
+                        try attachMicrophoneCaptures(for: track, format: format)
+                        updateMicrophoneCapture(for: track)
+                        ensureMicrophoneMasterReturnConnected(format: format)
+                        trackNode.setMicrophoneAuditionActive(true)
+                    } catch {
+                        // A new track must not leave an incomplete or muted
+                        // audition graph. Restore every track's original dry
+                        // path and the rack monitor before surfacing the error.
+                        dismantleMicrophoneCaptures(format: format)
+                        isMicrophoneAuditionActive = false
+                        microphoneMasterMixer.outputVolume = 0
+                        vRackDirectMonitorMixer.outputVolume = 1
+                        concertHallReturnMixer.outputVolume = concertHallOverallReverb
+                        for node in trackNodes.values {
+                            node.setMicrophoneAuditionActive(false)
+                        }
+                        throw error
+                    }
                 }
             }
         }
