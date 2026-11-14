@@ -60,7 +60,7 @@ final class StudioMIDINoteEditingTests: XCTestCase {
     func testResizeEndSnapsAbsoluteEndInsteadOfDuration() {
         let note = MIDIEvent.note(at: 0.375, pitch: 60, duration: 0.5)
         let result = StudioMIDINoteEditing.resizing([note], noteID: note.id,
-                      edge: .end, beatDelta: 0, division: 0.25)
+                      edge: .end, beatDelta: 0.01, division: 0.25)
         if case .note(let data) = result[0].type {
             XCTAssertEqual(data.duration, 0.625, accuracy: 0.000001)
         } else { XCTFail("Expected note") }
@@ -73,6 +73,28 @@ final class StudioMIDINoteEditingTests: XCTestCase {
                                                            ids: [note.id, cc.id])
         XCTAssertEqual(kept.count, 1)
         XCTAssertEqual(kept[0].id, cc.id)
+    }
+
+    func testClickOnlyDoesNotQuantizeAnUnsnappedNote() {
+        let note = MIDIEvent.note(at: 0.375, pitch: 60, duration: 0.5)
+        let moved = StudioMIDINoteEditing.moving([note], selectedIDs: [note.id],
+                    beatDelta: 0, pitchDelta: 0, division: 0.25)
+        XCTAssertEqual(moved[0].beatPosition, 0.375)
+        let resized = StudioMIDINoteEditing.resizing([note], noteID: note.id,
+                       edge: .end, beatDelta: 0, division: 0.25)
+        if case .note(let data) = resized[0].type {
+            XCTAssertEqual(data.duration, 0.5)
+        } else { XCTFail("Expected note") }
+    }
+
+    func testVerticalOnlyMoveKeepsOriginalTiming() {
+        let note = MIDIEvent.note(at: 0.375, pitch: 60)
+        let moved = StudioMIDINoteEditing.moving([note], selectedIDs: [note.id],
+                    beatDelta: 0, pitchDelta: 2, division: 0.25)
+        XCTAssertEqual(moved[0].beatPosition, 0.375)
+        if case .note(let data) = moved[0].type {
+            XCTAssertEqual(data.pitch, 62)
+        } else { XCTFail("Expected note") }
     }
 
     func testPitchTranspositionKeepsChordIntervalsWhenApproachingMIDIClamp() {
