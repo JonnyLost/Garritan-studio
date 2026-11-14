@@ -733,6 +733,14 @@ public final class RenderGraph {
         data2: UInt8, sampleOffset: UInt32, in snapshot: RenderSnapshot
     ) {
         guard let processing = snapshot.byID[trackID]?.processing else { return }
+        sendMIDI(to: processing, status: status,
+                 data1: data1, data2: data2, sampleOffset: sampleOffset)
+    }
+
+    private func sendMIDI(
+        to processing: ProcessingResources, status: UInt8,
+        data1: UInt8, data2: UInt8, sampleOffset: UInt32
+    ) {
         if let au = processing.auAudioUnit,
            let schedule = au.scheduleMIDIEventBlock {
             var midi: (UInt8, UInt8, UInt8) = (status, data1, data2)
@@ -744,6 +752,15 @@ public final class RenderGraph {
         } else if let unit = processing.instrumentUnit {
             _ = MusicDeviceMIDIEvent(unit, UInt32(status),
                                      UInt32(data1), UInt32(data2), sampleOffset)
+        }
+    }
+
+    /// The outgoing AU receives All Notes Off before its short fade.
+    /// Only the new AU receives newly scheduled MIDI events.
+    private func releaseOutgoingNotes(_ outgoing: ProcessingResources) {
+        for channel: UInt8 in 0..<16 {
+            sendMIDI(to: outgoing, status: 0xB0 | channel,
+                     data1: 123, data2: 0, sampleOffset: 0)
         }
     }
 
@@ -895,9 +912,66 @@ public final class RenderGraph {
             // diagnostics can be collected asynchronously outside this path.
             if renderStatus != noErr {
                 renderErrorCount += 1
-                continue
+                memset(bufferL, 0, Int(frameCount) * MemoryLayout<Float>.size)
+                memset(bufferR, 0, Int(frameCount) * MemoryLayout<Float>.size)
+                // A failing new AU can still fade smoothly from the old AU.
+                if track.processing.transition == nil { continue }
             }
-            
+
+            // For the short transition, render the outgoing instrument into
+            // its OWN scratch, then blend the two dry signals BEFORE feeding
+            // their single shared serial effect chain.
+            if let transition = track.processing.transition,
+               !transition.isComplete {
+                let outgoing = transition.outgoing
+                let oldScratch = outgoing.scratch
+                if oldScratch.frameCapacity >= Int(frameCount),
+                   outgoing.instrumentUnit != nil {
+                    let starting = transition.advance(frames: frameCount)
+                    if starting < transition.totalFrames {
+                        if starting == 0 { releaseOutgoingNotes(outgoing) }
+                        let bytes = Int(frameCount) * MemoryLayout<Float>.size
+                        memset(oldScratch.left, 0, bytes)
+                        memset(oldScratch.right, 0, bytes)
+                        var oldList = StereoBufferList()
+                        oldList.mBuffers0 = AudioBuffer(
+                            mNumberChannels: 1, mDataByteSize: frameCount * 4,
+                            mData: oldScratch.left
+                        )
+                        oldList.mBuffers1 = AudioBuffer(
+                            mNumberChannels: 1, mDataByteSize: frameCount * 4,
+                            mData: oldScratch.right
+                        )
+                        var oldFlags = AudioUnitRenderActionFlags()
+                        var oldTime = timeStamp
+                        let oldStatus: OSStatus = withUnsafeMutablePointer(to: &oldList) { pointer in
+                            pointer.withMemoryRebound(to: AudioBufferList.self, capacity: 1) { abl in
+                                if let block = outgoing.renderBlock {
+                                    return block(&oldFlags, &oldTime, frameCount, 0, abl, nil)
+                                } else if let unit = outgoing.instrumentUnit {
+                                    return AudioUnitRender(unit, &oldFlags, &oldTime, 0, frameCount, abl)
+                                }
+                                return noErr
+                            }
+                        }
+                        if oldStatus != noErr {
+                            memset(oldScratch.left, 0, bytes)
+                            memset(oldScratch.right, 0, bytes)
+                            renderErrorCount += 1
+                        }
+                        StudioInstrumentCrossfade.blend(
+                            oldLeft: UnsafePointer(oldScratch.left),
+                            oldRight: UnsafePointer(oldScratch.right),
+                            newLeft: bufferL, newRight: bufferR,
+                            frames: Int(frameCount),
+                            startFrame: starting, totalFrames: transition.totalFrames
+                        )
+                    }
+                } else {
+                    transition.forceComplete()
+                }
+            }
+
             // Process a real serial chain: each effect's input callback
             // reads the previous stage from its own nonaliased scratch, and
             // AudioUnitRender writes the next stage into bufferL/bufferR.
