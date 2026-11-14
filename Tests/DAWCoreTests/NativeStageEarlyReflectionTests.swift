@@ -181,6 +181,34 @@ final class StudioVirtualMicrophoneTests: XCTestCase {
 }
 
 final class NativeRoomImpulseAnalyzerTests: XCTestCase {
+    func testNarrowerOctaveAnalysisRejectsDistantLowFrequencyLeakage() {
+        let sampleRate = 48_000.0
+        let count = Int(sampleRate)
+        let unwanted = (0..<count).map { index -> Double in
+            sin(2 * Double.pi * 125 * Double(index) / sampleRate)
+        }
+        let legacy = NativeRoomImpulseAnalyzer.octaveApproximate(
+            unwanted, sampleRate: sampleRate, centerHz: 1_000,
+            filter: .legacyWideBand)
+        let improved = NativeRoomImpulseAnalyzer.octaveApproximate(
+            unwanted, sampleRate: sampleRate, centerHz: 1_000,
+            filter: .cascadedButterworth)
+        // Ignore filter startup transient: compare steady-state squared energy.
+        func energy(_ x: [Double]) -> Double {
+            x.dropFirst(24_000).reduce(0) { $0 + $1 * $1 }
+        }
+        XCTAssertLessThan(energy(improved), energy(legacy) * 0.3)
+        XCTAssertTrue(improved.allSatisfy(\.isFinite))
+
+        let wanted = (0..<count).map { index -> Double in
+            sin(2 * Double.pi * 1_000 * Double(index) / sampleRate)
+        }
+        let filteredWanted = NativeRoomImpulseAnalyzer.octaveApproximate(
+            wanted, sampleRate: sampleRate, centerHz: 1_000,
+            filter: .cascadedButterworth)
+        XCTAssertGreaterThan(energy(filteredWanted), energy(wanted) * 0.4)
+    }
+
     func testKnownExponentialDecayT20IsApproximatelyCorrect() {
         let sampleRate = 24_000.0
         let n = Int(sampleRate * 3.5)
