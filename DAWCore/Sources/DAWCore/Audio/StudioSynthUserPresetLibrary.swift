@@ -98,10 +98,50 @@ public enum StudioSynthUserPresetLibrary {
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
+    public static func fileURL(for preset: Preset,
+                               in folder: URL = directory()) -> URL {
+        folder.appendingPathComponent(preset.id.uuidString)
+            .appendingPathExtension("studiosynth")
+    }
+
+    /// Changes the display name without changing the preset's stable file ID.
+    /// A successful save is atomic, so interrupted writes do not corrupt it.
+    public static func rename(_ preset: Preset, to newName: String,
+                              in folder: URL = directory()) throws -> Preset {
+        let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.count <= 80 else {
+            throw PresetError.invalidName
+        }
+        let url = fileURL(for: preset, in: folder)
+        var updated = try load(from: url)
+        guard updated.id == preset.id else { throw PresetError.invalidFormat }
+        guard !(try list(in: folder)).contains(where: {
+            $0.id != preset.id &&
+                $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
+        }) else { throw PresetError.duplicateName }
+        updated.name = name
+        let data = try JSONEncoder().encode(Envelope(
+            format: "garritan.studio.synth.preset",
+            version: 1, preset: updated))
+        try data.write(to: url, options: .atomic)
+        return updated
+    }
+
+    /// Import a user-supplied .studiosynth patch. Assign a fresh UUID to
+    /// avoid overwriting a different existing preset with the same file ID.
+    /// Granular source WAVs are intentionally NOT bundled in this format.
+    public static func importPreset(from file: URL,
+                                    into folder: URL = directory()) throws -> Preset {
+        guard file.pathExtension.lowercased() == "studiosynth" else {
+            throw PresetError.invalidFormat
+        }
+        let imported = try load(from: file)
+        return try save(name: imported.name, patch: imported.patch, in: folder)
+    }
+
     public static func delete(_ preset: Preset,
                               in folder: URL = directory()) throws {
-        let url = folder.appendingPathComponent(
-            preset.id.uuidString).appendingPathExtension("studiosynth")
+        let url = fileURL(for: preset, in: folder)
         try FileManager.default.removeItem(at: url)
     }
 }
