@@ -175,6 +175,9 @@ public final class ProjectViewModel: ObservableObject {
     }
     
     private func handleLiveMIDIEvent(_ event: IncomingMIDIEvent) {
+        // Live keyboard/CC activity must not alter a stem's voices while a
+        // deterministic project snapshot is being recorded.
+        guard !isStudioExporting else { return }
         // Capture only a physical/virtual CoreMIDI CC from the normal input
         // stream. A learned assignment does not depend on the track being
         // record-armed, but normal MIDI playthrough still follows arm state.
@@ -324,7 +327,7 @@ public final class ProjectViewModel: ObservableObject {
     private func handleTransportEvent(_ event: TransportEvent) {
         switch event {
         case .record:
-            startRecording()
+            if !isStudioExporting { startRecording() }
         case .stopRecording:
             stopRecording()
         case .play:
@@ -343,9 +346,38 @@ public final class ProjectViewModel: ObservableObject {
         }
     }
     
+    // MARK: - Studio Export
+
+    /// A render pass supplies a filtered *copy* of the project. The session,
+    /// undo history, saved mute/solo, and open plug-ins are never rewritten.
+    @Published public private(set) var isStudioExporting = false
+    private var studioExportPlaybackProject: Project?
+
+    public func beginStudioExport() {
+        isStudioExporting = true
+    }
+
+    public func prepareStudioExportPass(_ isolated: Project) {
+        studioExportPlaybackProject = isolated
+        playbackEngine.prepareForPlayback(project: isolated)
+    }
+
+    public func endStudioExportPass() {
+        studioExportPlaybackProject = nil
+    }
+
+    public func endStudioExport() {
+        studioExportPlaybackProject = nil
+        isStudioExporting = false
+    }
+
     // MARK: - Playback Preparation
     
     public func prepareForPlayback() {
+        // The export coordinator precompiled its isolated project before
+        // the transport starts. Re-preparing the whole live project here
+        // would silently leak unselected MIDI and audio into stem files.
+        if studioExportPlaybackProject != nil { return }
         playbackEngine.prepareForPlayback(project: project)
     }
     

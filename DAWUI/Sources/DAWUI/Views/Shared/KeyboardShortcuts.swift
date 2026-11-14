@@ -12,6 +12,7 @@ public extension Notification.Name {
     static let toggleLoop = Notification.Name("toggleLoop")
     static let toggleMetronome = Notification.Name("toggleMetronome")
     static let newStudioTrack = Notification.Name("newStudioTrack")
+    static let showStudioExport = Notification.Name("showStudioExport")
     static let newAudioTrack = Notification.Name("newAudioTrack")
     static let newMIDITrack = Notification.Name("newMIDITrack")
     static let deleteSelectedTrack = Notification.Name("deleteSelectedTrack")

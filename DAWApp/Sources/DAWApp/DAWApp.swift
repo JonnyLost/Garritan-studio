@@ -90,6 +90,12 @@ struct DAWApp: App {
                     appState.saveProjectAs()
                 }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
+                
+                Divider()
+                Button("Export Audio & Stems…") {
+                    NotificationCenter.default.post(name: .showStudioExport, object: nil)
+                }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
             }
             
             // Edit commands
