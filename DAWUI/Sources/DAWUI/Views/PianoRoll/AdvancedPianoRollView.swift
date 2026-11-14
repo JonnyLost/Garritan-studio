@@ -1566,7 +1566,8 @@ struct VelocityBar: View {
     let onVelocityCommit: () -> Void
 
     @State private var isDragging = false
-    
+    @State private var startVelocity: UInt8? = nil
+
     var body: some View {
         let x = CGFloat(beat) * pixelsPerBeat
         let barHeight = CGFloat(velocity) / 127 * height
@@ -1578,13 +1579,18 @@ struct VelocityBar: View {
             .gesture(
                 DragGesture()
                     .onChanged { value in
-                        isDragging = true
-                        let newHeight = height - value.location.y
-                        let newVelocity = UInt8(max(1, min(127, Int(newHeight / height * 127))))
+                        if !isDragging {
+                            isDragging = true
+                            startVelocity = velocity
+                        }
+                        let start = Int(startVelocity ?? velocity)
+                        let change = Int((-value.translation.height / max(height, 1) * 127).rounded())
+                        let newVelocity = UInt8(max(1, min(127, start + change)))
                         onVelocityChange(newVelocity)
                     }
                     .onEnded { _ in
                         isDragging = false
+                        startVelocity = nil
                         onVelocityCommit()
                     }
             )
