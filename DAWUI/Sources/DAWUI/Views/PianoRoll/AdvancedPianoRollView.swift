@@ -185,6 +185,7 @@ public struct AdvancedPianoRollView: View {
     
     // Copied notes for paste
     @State private var copiedNotes: [MIDIEvent] = []
+    @State private var copiedArticulations: [UUID: String] = [:]
     
     // Playhead position (updated in real-time)
     @State private var currentPlayheadBeat: Double = 0
@@ -1096,15 +1097,22 @@ public struct AdvancedPianoRollView: View {
     private func copySelected() {
         copiedNotes = StudioMIDINoteEditing.selectedNotes(in: noteEvents,
                                                            ids: selectedNoteIDs)
+        let selectedIDs = Set(copiedNotes.map(\.id))
+        copiedArticulations = articulationAssignments.filter {
+            selectedIDs.contains($0.key)
+        }
     }
 
     private func paste() {
         guard !copiedNotes.isEmpty,
               var clip = currentClip, case .midi(var midiData) = clip.content else { return }
         let insertion = max(0, viewModel.transportState.playheadBeats - clipStartBeat)
-        let newIDs = StudioMIDINoteEditing.paste(copiedNotes, into: &midiData.events,
-                                                at: insertion)
+        let mapping = StudioMIDINoteEditing.pasteWithIDMapping(
+            copiedNotes, into: &midiData.events, at: insertion)
+        let newIDs = Set(mapping.values)
         guard !newIDs.isEmpty else { return }
+        StudioArticulationAssignmentEditing.transfer(
+            from: copiedArticulations, idMapping: mapping, into: &midiData)
         clip.content = .midi(midiData)
         updateClip(extendingClip(clip, toInclude: newIDs),
                    description: "Paste MIDI Notes")
@@ -1114,9 +1122,18 @@ public struct AdvancedPianoRollView: View {
     private func duplicateSelected() {
         guard !selectedNoteIDs.isEmpty,
               var clip = currentClip, case .midi(var midiData) = clip.content else { return }
-        let ids = StudioMIDINoteEditing.duplicateSelected(in: &midiData.events,
-                                                          ids: selectedNoteIDs)
+        let source = StudioMIDINoteEditing.selectedNotes(
+            in: midiData.events, ids: selectedNoteIDs)
+        let end = source.compactMap { event -> Double? in
+            guard case .note(let note) = event.type else { return nil }
+            return event.beatPosition + note.duration
+        }.max() ?? 0
+        let mapping = StudioMIDINoteEditing.pasteWithIDMapping(
+            source, into: &midiData.events, at: max(0, end))
+        let ids = Set(mapping.values)
         guard !ids.isEmpty else { return }
+        StudioArticulationAssignmentEditing.transfer(
+            from: articulationAssignments, idMapping: mapping, into: &midiData)
         clip.content = .midi(midiData)
         updateClip(extendingClip(clip, toInclude: ids),
                    description: "Duplicate MIDI Notes")
