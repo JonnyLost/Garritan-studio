@@ -142,3 +142,32 @@ and phase/latency alignment; source-directivity and frequency-dependent
 air loss; V-Rack routing parity; mic-bus meters; optional mic/stem
 exports; and one consolidated MacBook test. Milestone 3 shared-field
 routing is committed but **not yet Mac-build or listening verified**.
+
+## Follow-on: manual microphone timing alignment (November 14, 2026)
+
+Mic Mixer channels now have a persistent, optional **Align** control with
+0.1 ms editing steps from -20 to +20 ms and a **Zero** reset. The trim is
+added to the modeled source-to-capsule propagation delay for *every* source
+received by that capsule, bounded by the existing 0–450 ms AU range.
+A negative trim can shorten travel delay only down to zero: it cannot
+predict future signal or implement true negative-time latency compensation.
+Zero is the backward-compatible default for existing projects, and
+non-finite/out-of-range stored values are safely normalized.
+
+The existing AU delay renderer interpolates fractional sample positions
+and retains signed rear-lobe polarity; regression tests cover its
+fractional-delay behavior and saved/legacy alignment values.
+This is **manual temporal calibration**, not automatic cross-correlation,
+full-band phase matching, mic-array time-of-arrival calibration, or
+latency compensation for the shared hall return. Comb filtering may still
+occur between microphone channels, particularly when capturing the same
+source with differing delays. Microphone gain/polarity also depend on
+source geometry and the chosen pattern, and no real microphone IR is used.
+
+**Performance and routing still open:** the live prototype remains
+16 sources × 4 microphone channels (up to 64 source/mic capture AUs).
+No increase to this limit is warranted before a single preallocated
+matrix renderer is implemented, benchmarked, and tested. V-Rack inputs
+remain outside this proof-of-concept path. New code is not counted as
+macOS-build verified until the matching GitHub workflow succeeds; device
+listening and orchestral load tests are still a consolidated Mac milestone.
