@@ -207,6 +207,7 @@ public struct StudioSynthPanelView: View {
                         .font(.caption).foregroundStyle(.secondary)
 
                     layerOverview
+                    synthAutomationEditor
 
                     StudioSynthModulationView(viewModel: viewModel, trackID: trackID)
                     StudioSynthMIDILearnView(viewModel: viewModel, trackID: trackID)
@@ -474,6 +475,56 @@ public struct StudioSynthPanelView: View {
                 await MainActor.run {
                     self.sampleCaptureError = error.localizedDescription
                     self.samplingInProgress = false
+                }
+            }
+        }
+    }
+
+    private var synthAutomationEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let selectedLayer,
+               let track = viewModel.project.track(withID: trackID) {
+                let lanes = track.automationLanes.filter { lane in
+                    if case .studioSynth(let id, _) = lane.parameter {
+                        return id == selectedLayer.id
+                    }
+                    return false
+                }
+                if !lanes.isEmpty {
+                    HStack {
+                        Text("TRACK AUTOMATION")
+                            .font(.caption.weight(.semibold))
+                        Spacer()
+                        Text("Add or edit points at the playhead")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(lanes) { lane in
+                        HStack(spacing: 10) {
+                            Text(lane.parameter.name)
+                                .font(.caption)
+                                .frame(width: 170, alignment: .leading)
+                            Slider(value: Binding<Double>(
+                                get: {
+                                    let beat = max(0, viewModel.transportState.playheadBeats)
+                                    let latest = viewModel.project
+                                        .track(withID: trackID)?
+                                        .automationLanes.first(where: { $0.id == lane.id })
+                                    return Double(latest?.value(atBeat: beat) ?? 0.5)
+                                },
+                                set: { value in
+                                    let beat = max(0, viewModel.transportState.playheadBeats)
+                                    _ = viewModel.setStudioSynthAutomationPoint(
+                                        for: trackID, laneID: lane.id,
+                                        normalized: Float(value), atBeat: beat)
+                                }), in: 0...1)
+                            Text(lane.parameter.format(
+                                value: lane.value(atBeat:
+                                    max(0, viewModel.transportState.playheadBeats))))
+                                .font(.caption.monospacedDigit())
+                                .frame(width: 58, alignment: .trailing)
+                        }
+                    }
                 }
             }
         }
