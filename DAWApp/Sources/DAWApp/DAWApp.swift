@@ -93,6 +93,10 @@ struct DAWApp: App {
 
                 Divider()
 
+                Button("Import MIDI as New Project...") {
+                    appState.importMIDI()
+                }
+
                 Button("Export MIDI...") {
                     appState.exportMIDI()
                 }
@@ -396,6 +400,56 @@ class AppState: ObservableObject {
         }
     }
     
+    /// A foreign SMF becomes a new, unsaved Studio project. Never overwrite
+    /// an unsaved composing session or destructively append unreviewed tracks.
+    func importMIDI() {
+        guard !hasUnsavedChanges else {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Save Your Current Project First"
+            alert.informativeText = """
+                Import MIDI opens a new Studio project. Save your current changes before importing so nothing is lost.
+                """
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            return
+        }
+
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [
+            UTType(filenameExtension: "mid") ?? .data,
+            UTType(filenameExtension: "midi") ?? .data
+        ]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.begin { [weak self] response in
+            Task { @MainActor in
+                guard let self, response == .OK, let url = panel.url else { return }
+                do {
+                    // Full parsing and validation happen before we stop the
+                    // old audio session or replace the active document.
+                    let imported = try await self.fileManager.importMIDI(from: url)
+                    guard !self.hasUnsavedChanges else { return }
+                    self.autosaveManager.stopAutosave()
+                    NotificationCenter.default.post(
+                        name: .clearAllPlugins, object: nil)
+                    self.currentProject = imported
+                    self.currentProjectURL = nil
+                    self.projectID = UUID()
+                    self.markUnsavedChanges()
+                    print("[AppState] Imported MIDI as a new project: \(url.path)")
+                } catch {
+                    let alert = NSAlert()
+                    alert.alertStyle = .warning
+                    alert.messageText = "MIDI Import Failed"
+                    alert.informativeText = error.localizedDescription
+                    alert.addButton(withTitle: "OK")
+                    alert.runModal()
+                }
+            }
+        }
+    }
+
     /// Choose whether portable MIDI should contain only the composed music
     /// or instrument-specific performance commands. Keep musical-only as the
     /// safest default for sending MIDI to a different synth or DAW.
