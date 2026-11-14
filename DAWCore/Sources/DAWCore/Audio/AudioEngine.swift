@@ -338,9 +338,23 @@ public final class AudioEngine: ObservableObject {
         trackNodes[track.id] = trackNode
         if isMicrophoneAuditionActive,
            (track.type == .midi || track.type == .instrument || track.type == .audio) {
-            attachMicrophoneCaptures(for: track, format: format)
-            updateMicrophoneCapture(for: track)
-            trackNode.setMicrophoneAuditionActive(true)
+            let sourceCount = Set(microphoneRoutes.map(\.sourceID)).count
+            if sourceCount >= Self.maximumAuditionSources {
+                // A newly created track must NEVER become inaudible just
+                // because the bounded mic graph has reached its source cap.
+                // Restore the original mix instead of creating a silent track.
+                dismantleMicrophoneCaptures(format: format)
+                isMicrophoneAuditionActive = false
+                microphoneMasterMixer.outputVolume = 0
+                concertHallReturnMixer.outputVolume = concertHallOverallReverb
+                for node in trackNodes.values {
+                    node.setMicrophoneAuditionActive(false)
+                }
+            } else {
+                attachMicrophoneCaptures(for: track, format: format)
+                updateMicrophoneCapture(for: track)
+                trackNode.setMicrophoneAuditionActive(true)
+            }
         }
         print("[Track Audio] Installing meter")
         installTrackMeter(for: trackNode)
