@@ -764,7 +764,8 @@ public final class AudioEngine: ObservableObject {
     
     /// Install a tap on the main mixer to track sample position and trigger MIDI events
     private func installTimingTap() {
-        guard !timingTapInstalled else { return }
+        // Mixdown temporarily owns this bus and already performs MIDI timing.
+        guard !timingTapInstalled, exportCapture == nil else { return }
         
         let format = masterMixer.outputFormat(forBus: 0)
         guard format.sampleRate > 0 else {
