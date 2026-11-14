@@ -55,12 +55,22 @@ final class VRackMicrophoneRoutingTests: XCTestCase {
             // Completely mute microphone channels and the shared hall.
             // Any non-silent signal in audition would therefore be a
             // leakage of the V-Rack's original dry monitor path.
-            var mic = StudioVirtualMicrophone()
+            let room = StudioAcousticRoomDesign()
+            let center = StudioMicrophoneGeometry.approximateTrackPosition(
+                pan: 0, zone: 2, room: room
+            )
+            var mic = StudioVirtualMicrophone(
+                position: StudioRoomPosition3D(
+                    xMeters: center.xMeters,
+                    yMeters: max(0, center.yMeters - 1),
+                    zMeters: center.zMeters
+                ),
+                pattern: .omnidirectional
+            )
             mic.mixerSettings = StudioMicrophoneChannelSettings(level: 0)
             studio.setMicrophoneRoomWetLevel(0)
             try studio.setMicrophoneAuditionEnabled(
-                true, tracks: [], microphones: [mic],
-                room: StudioAcousticRoomDesign()
+                true, tracks: [], microphones: [mic], room: room
             )
             XCTAssertTrue(studio.isMicrophoneAuditionActive)
 
@@ -74,6 +84,16 @@ final class VRackMicrophoneRoutingTests: XCTestCase {
             let mutedPeak = try renderPeak(engine)
             XCTAssertLessThan(mutedPeak, 0.0001,
                 "Audition must not double a direct V-Rack signal")
+
+            // Unmute only the synthetic microphone channel, without
+            // reopening the original V-Rack direct-monitor path.
+            mic.mixerSettings = StudioMicrophoneChannelSettings(level: 1)
+            studio.refreshMicrophoneRouting(
+                tracks: [], microphones: [mic], room: room
+            )
+            let audibleMicPeak = try renderPeak(engine)
+            XCTAssertGreaterThan(audibleMicPeak, 0.01,
+                "The V-Rack aggregate must actually reach the microphone channel")
             engine.stop()
             player.stop()
 
