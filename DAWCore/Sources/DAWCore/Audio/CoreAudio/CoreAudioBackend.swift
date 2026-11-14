@@ -362,7 +362,16 @@ public final class CoreAudioBackend: AudioBackend {
     }
     
     public func removeTrack(id: TrackID) {
-        withDrainedOutput { renderGraph.removeTrack(id: id) }
+        controlGate.perform {
+            guard !controlGate.isBounceActive else { return }
+            // Only a track without an instrument or effects can retire
+            // live; its scratch remains owned by any older render snapshot.
+            if renderGraph.canRemoveEmptyTrackLive(id: id) {
+                renderGraph.removeTrack(id: id)
+            } else {
+                withDrainedOutput { renderGraph.removeTrack(id: id) }
+            }
+        }
     }
     
     public func setTrackVolume(_ volume: Float, for trackID: TrackID) {
