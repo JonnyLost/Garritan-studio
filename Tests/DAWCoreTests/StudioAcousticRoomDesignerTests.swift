@@ -3,6 +3,69 @@ import XCTest
 @testable import DAWCore
 
 final class StudioAcousticRoomDesignerTests: XCTestCase {
+    func testOnlyStronglyDampedShortRoomsEnableFeedbackCorrection() {
+        let scenarios = StudioAcousticCalibrationScenario.contrastingRooms
+        XCTAssertEqual(scenarios[0].design.makeProfile().shortRoomFeedbackCalibration, true)
+        XCTAssertEqual(scenarios[1].design.makeProfile().shortRoomFeedbackCalibration, false)
+        XCTAssertEqual(scenarios[2].design.makeProfile().shortRoomFeedbackCalibration, false)
+        XCTAssertEqual(StudioAcousticRoomDesign().makeProfile().shortRoomFeedbackCalibration, false)
+        XCTAssertTrue(StudioRoomAcousticProfile.starterProfiles.allSatisfy {
+            $0.shortRoomFeedbackCalibration == nil
+        })
+    }
+
+    func testOfflineShortRoomFeedbackFitIsBoundedAndImprovesSpectralTargets() {
+        let room = StudioAcousticCalibrationScenario.contrastingRooms[0].design.makeProfile()
+        let targets = room.sixBandRT60!
+        let sampleRate = 48_000.0
+        let delayFrames = 1_425
+        let original = targets.map {
+            Float(pow(10.0, -3 * Double(delayFrames) /
+                     (sampleRate * Double($0))))
+        }
+        let corrected = NativeShortRoomFeedbackCalibrator.gains(
+            targetRT60: targets, delayFrames: delayFrames, sampleRate: sampleRate
+        )
+        let desired = original.map(Double.init)
+        func error(_ gains: [Float]) -> Double {
+            let response = NativeShortRoomFeedbackCalibrator.responseMagnitudes(
+                gains: gains, sampleRate: sampleRate)
+            return zip(response, desired).reduce(0.0) { partial, pair in
+                partial + pow(pair.0 - pair.1, 2)
+            }
+        }
+        XCTAssertEqual(corrected.count, 6)
+        XCTAssertTrue(corrected.allSatisfy { $0.isFinite && $0 > 0 && $0 < 1 })
+        XCTAssertLessThan(error(corrected), error(original))
+    }
+
+    func testShortRoomFeedbackFitChangesRealNativeOutputWithoutNonfiniteSamples() {
+        var tuned = StudioAcousticCalibrationScenario.contrastingRooms[0].design.makeProfile()
+        var baseline = tuned
+        baseline.shortRoomFeedbackCalibration = false
+        func render(_ room: StudioRoomAcousticProfile) -> [Float] {
+            let processor = NativeRoomReverbProcessor(sampleRate: 24_000,
+                profiles: [room], includeEarlyReflections: false)
+            var l = [Float](repeating: 0, count: 24_000)
+            var r = l
+            l[0] = 1
+            r[0] = 1
+            l.withUnsafeMutableBufferPointer { lp in
+                r.withUnsafeMutableBufferPointer { rp in
+                    processor.process(left: lp.baseAddress!, right: rp.baseAddress!,
+                                      frameCount: lp.count)
+                }
+            }
+            return l
+        }
+        let original = render(baseline)
+        let corrected = render(tuned)
+        XCTAssertNotEqual(original, corrected)
+        XCTAssertTrue(corrected.allSatisfy(\.isFinite))
+        tuned.shortRoomFeedbackCalibration = true
+        XCTAssertEqual(tuned.shortRoomFeedbackCalibration, true)
+    }
+
     func testCalibrationSuiteCoversDistinctRoomTypesAndVolumes() {
         let suite = StudioAcousticCalibrationScenario.contrastingRooms
         XCTAssertEqual(suite.count, 3)
