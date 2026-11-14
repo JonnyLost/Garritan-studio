@@ -1,4 +1,5 @@
 import Foundation
+import DAWRealtime
 
 // MARK: - Ring Buffer
 
@@ -21,23 +22,20 @@ public final class RingBuffer<T> {
     private let capacity: Int
     
     /// Bitmask for efficient modulo (capacity - 1)
-    private let mask: Int
-    
-    /// Write position (only written by producer/main thread)
-    /// Using UnsafeMutablePointer for atomic-like behavior
-    private var head: Int = 0
-    
-    /// Read position (only written by consumer/audio thread)
-    private var tail: Int = 0
+    private let cursor: OpaquePointer
     
     // MARK: - Initialization
     
     /// Create a ring buffer with the specified minimum capacity
     /// Actual capacity will be rounded up to the next power of 2
     public init(capacity: Int) {
-        let actualCapacity = Self.nextPowerOf2(max(capacity, 2))
+        let clamped = max(2, min(capacity, 1 << 29))
+        let actualCapacity = Self.nextPowerOf2(clamped)
         self.capacity = actualCapacity
-        self.mask = actualCapacity - 1
+        guard let cursor = daw_spsc_cursor_create(UInt32(actualCapacity)) else {
+            preconditionFailure("Unable to allocate atomic SPSC cursor")
+        }
+        self.cursor = cursor
         
         // Allocate and initialize buffer
         self.buffer = UnsafeMutablePointer<T?>.allocate(capacity: actualCapacity)
@@ -48,6 +46,7 @@ public final class RingBuffer<T> {
         // Clean up
         buffer.deinitialize(count: capacity)
         buffer.deallocate()
+        daw_spsc_cursor_destroy(cursor)
     }
     
     // MARK: - Producer Methods (Main Thread)
@@ -58,127 +57,61 @@ public final class RingBuffer<T> {
     /// - Note: Only call from producer (main) thread
     @discardableResult
     public func push(_ element: T) -> Bool {
-        let currentHead = head
-        let nextHead = (currentHead + 1) & mask
-        
-        // Check if buffer is full
-        // We leave one slot empty to distinguish full from empty
-        if nextHead == tail {
-            return false
-        }
-        
-        // Write element
-        buffer[currentHead] = element
-        
-        // Memory barrier to ensure write is visible before head update
-        OSMemoryBarrier()
-        
-        // Update head
-        head = nextHead
-        
+        let slot = daw_spsc_write_index(cursor)
+        guard slot != UInt32.max else { return false }
+        buffer[Int(slot)] = element
+        daw_spsc_commit_write(cursor)
         return true
     }
-    
-    /// Push multiple elements to the buffer
-    /// - Parameter elements: The elements to push
-    /// - Returns: Number of elements successfully pushed
-    /// - Note: Only call from producer (main) thread
+
     @discardableResult
     public func push(contentsOf elements: [T]) -> Int {
         var pushed = 0
         for element in elements {
-            if push(element) {
-                pushed += 1
-            } else {
-                break
-            }
+            guard push(element) else { break }
+            pushed += 1
         }
         return pushed
     }
-    
-    // MARK: - Consumer Methods (Audio Thread)
-    
-    /// Peek at the next element without removing it
-    /// - Returns: The next element, or nil if buffer is empty
-    /// - Note: Only call from consumer (audio) thread
+
+    /// Consumer-only; the acquired index guarantees the producer published
+    /// the fully written event before the audio thread reads it.
     public func peek() -> T? {
-        // Memory barrier to ensure we see latest writes
-        OSMemoryBarrier()
-        
-        if head == tail {
-            return nil
-        }
-        
-        return buffer[tail]
+        let slot = daw_spsc_read_index(cursor)
+        guard slot != UInt32.max else { return nil }
+        return buffer[Int(slot)]
     }
-    
-    /// Pop the next element from the buffer
-    /// - Note: Only call from consumer (audio) thread
+
+    /// Consumer-only. Do not overwrite a slot until ownership is released.
     public func pop() {
-        guard head != tail else { return }
-        
-        // Clear the slot (helps with debugging, not strictly necessary)
-        buffer[tail] = nil
-        
-        // Update tail
-        tail = (tail + 1) & mask
+        let slot = daw_spsc_read_index(cursor)
+        guard slot != UInt32.max else { return }
+        buffer[Int(slot)] = nil
+        daw_spsc_commit_read(cursor)
     }
-    
-    /// Pop and return the next element
-    /// - Returns: The next element, or nil if buffer is empty
-    /// - Note: Only call from consumer (audio) thread
+
     public func popAndReturn() -> T? {
         guard let element = peek() else { return nil }
         pop()
         return element
     }
-    
-    // MARK: - Query Methods (Thread-Safe)
-    
-    /// Check if buffer is empty
-    /// - Note: Safe to call from any thread, but result may be stale
-    public var isEmpty: Bool {
-        OSMemoryBarrier()
-        return head == tail
-    }
-    
-    /// Get approximate count of elements in buffer
-    /// - Note: Safe to call from any thread, but result may be stale
-    public var count: Int {
-        OSMemoryBarrier()
-        let h = head
-        let t = tail
-        if h >= t {
-            return h - t
-        } else {
-            return capacity - t + h
-        }
-    }
-    
-    /// Get available space in buffer
-    public var availableSpace: Int {
-        capacity - 1 - count
-    }
-    
-    // MARK: - Reset (Main Thread Only)
-    
-    /// Clear all elements from the buffer
-    /// - Warning: Only call when audio thread is not accessing the buffer
+
+    public var isEmpty: Bool { daw_spsc_count(cursor) == 0 }
+    public var count: Int { Int(daw_spsc_count(cursor)) }
+    public var availableSpace: Int { capacity - 1 - count }
+
+    /// Requires the producer and render consumer both to be stopped.
     public func clear() {
-        // Set tail to head (effectively empties the buffer)
-        tail = head
+        // Do not release slots from a third thread while the callback reads.
+        daw_spsc_clear_quiescent(cursor)
     }
-    
-    /// Reset the buffer completely
-    /// - Warning: Only call when audio thread is not accessing the buffer
+
+    /// Requires the producer and render consumer both to be stopped.
     public func reset() {
-        head = 0
-        tail = 0
-        for i in 0..<capacity {
-            buffer[i] = nil
-        }
+        daw_spsc_reset_quiescent(cursor)
+        for i in 0..<capacity { buffer[i] = nil }
     }
-    
+
     // MARK: - Helpers
     
     private static func nextPowerOf2(_ n: Int) -> Int {
