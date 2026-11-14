@@ -397,6 +397,42 @@ public struct TrackPianoRollView: View {
                 }
             }
             
+            if keyPress.key == .escape {
+                selectedNoteIDs.removeAll()
+                return .handled
+            }
+
+            // Arrow keys edit notes, not the track ruler. Shift+arrows step
+            // a bar horizontally or an octave vertically. Command+arrows
+            // continue to operate the existing horizontal/vertical zoom.
+            if !selectedNoteIDs.isEmpty &&
+               !keyPress.modifiers.contains(.command) &&
+               !keyPress.modifiers.contains(.control) &&
+               !keyPress.modifiers.contains(.option) {
+                let larger = keyPress.modifiers.contains(.shift)
+                let division = snapMode.division(
+                    for: viewModel.transportState.timeSignature)
+                let step = division > 0 ? division : 0.125
+                let horizontal = larger
+                    ? StudioMusicalGrid.beatsPerBar(viewModel.transportState.timeSignature)
+                    : step
+                switch keyPress.key {
+                case .leftArrow:
+                    nudgeSelectedNotes(beats: -horizontal)
+                    return .handled
+                case .rightArrow:
+                    nudgeSelectedNotes(beats: horizontal)
+                    return .handled
+                case .upArrow:
+                    nudgeSelectedNotes(semitones: larger ? 12 : 1)
+                    return .handled
+                case .downArrow:
+                    nudgeSelectedNotes(semitones: larger ? -12 : -1)
+                    return .handled
+                default:
+                    break
+                }
+            }
             // Tool shortcuts (without modifiers)
             switch keyPress.characters.lowercased() {
             case "a": currentTool = .select; return .handled
@@ -1234,6 +1270,45 @@ public struct TrackPianoRollView: View {
     /// Move selected notes visually during drag (doesn't commit to model yet)
     private func selectAllNotes() {
         selectedNoteIDs = Set(noteEvents.map(\.id))
+    }
+
+    /// Apply an identical safe interval to every selected note, even
+    /// when the selection crosses multiple MIDI regions on one track.
+    private func nudgeSelectedNotes(beats: Double = 0, semitones: Int = 0) {
+        guard !selectedNoteIDs.isEmpty, var track = currentTrack else { return }
+        var selected: [MIDIEvent] = []
+        for clip in track.clips {
+            guard case .midi(let midi) = clip.content else { continue }
+            selected += StudioMIDINoteEditing.selectedNotes(
+                in: midi.events, ids: selectedNoteIDs)
+        }
+        guard !selected.isEmpty else { return }
+        let minBeat = selected.map(\.beatPosition).min() ?? 0
+        let safeBeat = max(-minBeat, beats)
+        let pitches = selected.compactMap { event -> Int? in
+            if case .note(let note) = event.type { return Int(note.pitch) }
+            return nil
+        }
+        let safePitch = max(-(pitches.min() ?? 0),
+                            min(127 - (pitches.max() ?? 127), semitones))
+        guard safeBeat != 0 || safePitch != 0 else { return }
+
+        var changed = false
+        for index in track.clips.indices {
+            guard case .midi(var midi) = track.clips[index].content else { continue }
+            let edited = StudioMIDINoteEditing.nudging(
+                midi.events, selectedIDs: selectedNoteIDs,
+                beatDelta: safeBeat, pitchDelta: safePitch)
+            if StudioMIDINoteEditing.hasPitchOrTimingChanges(
+                before: midi.events, after: edited) {
+                midi.events = edited
+                track.clips[index].content = .midi(midi)
+                changed = true
+            }
+        }
+        guard changed else { return }
+        viewModel.updateTrack(extendingEditedRegions(track, noteIDs: selectedNoteIDs),
+                              description: "Nudge MIDI Notes")
     }
 
     private func copySelectedNotes() {
