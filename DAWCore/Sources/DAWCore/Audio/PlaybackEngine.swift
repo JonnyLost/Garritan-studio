@@ -2370,6 +2370,29 @@ public final class PlaybackEngine: ObservableObject {
     /// mutating the list while stop is iterating it.
     private func stopAllNotes() {
         midiProcessingQueue.sync {
+            // ARIA/samplers may continue sustaining released voices while
+            // CC64/CC66 remains down. Track each actually used MIDI channel,
+            // not every channel of every orchestra instance.
+            var trackChannels: [TrackID: Set<UInt8>] = [:]
+            var rackChannels: [UUID: Set<UInt8>] = [:]
+            for scheduled in scheduledMIDIEvents {
+                switch scheduled.midiOutput {
+                case .rackInstrument(let rackID, let channel):
+                    rackChannels[rackID, default: []].insert(
+                        min(16, max(1, channel)) - 1)
+                case .trackInstrument, .none:
+                    trackChannels[scheduled.trackID, default: []].insert(
+                        scheduled.event.channel)
+                }
+            }
+            for note in activeNotes {
+                switch note.midiOutput {
+                case .rackInstrument(let rackID, _):
+                    rackChannels[rackID, default: []].insert(note.channel)
+                case .trackInstrument, .none:
+                    trackChannels[note.trackID, default: []].insert(note.channel)
+                }
+            }
             for note in activeNotes {
                 let instrument: TrackInstrument?
                 switch note.midiOutput {
@@ -2381,6 +2404,25 @@ public final class PlaybackEngine: ObservableObject {
                 instrument?.stopNote(note.pitch, channel: note.channel)
             }
             activeNotes.removeAll()
+            // Clear pedal-held voices in external ARIA/AU samplers as well as
+            // native synths. All-sound-off (CC120) is deliberately avoided:
+            // CC123/64/66 is the gentler channel-specific stop sequence.
+            for (trackID, channels) in trackChannels {
+                guard let instrument = midiQueueTrackInstruments[trackID] else { continue }
+                for channel in channels {
+                    instrument.sendController(64, value: 0, channel: channel)
+                    instrument.sendController(66, value: 0, channel: channel)
+                    instrument.sendController(123, value: 0, channel: channel)
+                }
+            }
+            for (rackID, channels) in rackChannels {
+                guard let instrument = midiQueueRackInstruments[rackID] else { continue }
+                for channel in channels {
+                    instrument.sendController(64, value: 0, channel: channel)
+                    instrument.sendController(66, value: 0, channel: channel)
+                    instrument.sendController(123, value: 0, channel: channel)
+                }
+            }
             // Normal Note Off can be held by a sustain pedal. Stopping the
             // transport always silences native synthesizers and clears their
             // held note/pedal state without changing ARIA or sampler paths.
