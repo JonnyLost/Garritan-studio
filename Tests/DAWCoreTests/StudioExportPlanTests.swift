@@ -96,7 +96,7 @@ final class StudioExportPlanTests: XCTestCase {
             project: p,
             settings: StudioExportSettings(mode: .customStems, stems: stems)
         ))
-        XCTAssertEqual(StudioExportPlan.safeFilename("../Bad/Name"), ".-Bad-Name")
+        XCTAssertEqual(StudioExportPlan.safeFilename("../Bad/Name"), "-Bad-Name")
         XCTAssertFalse(StudioExportPlan.safeFilename(" \n ").isEmpty)
     }
 
