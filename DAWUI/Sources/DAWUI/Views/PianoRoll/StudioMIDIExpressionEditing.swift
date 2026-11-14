@@ -7,6 +7,25 @@ struct StudioMIDIExpressionPoint {
     let value: Double // normalized 0...1; 0.5 is centered pitch bend
 }
 
+/// Editing gestures available in both MIDI piano-roll controller lanes.
+enum StudioExpressionDrawMode: String, CaseIterable, Identifiable {
+    case pencil = "Pencil"
+    case line = "Line"
+    case curve = "Curve"
+    case erase = "Erase"
+
+    var id: String { rawValue }
+
+    var help: String {
+        switch self {
+        case .pencil: return "Freehand controller stroke"
+        case .line: return "Straight ramp between gesture endpoints"
+        case .curve: return "Smooth S-curve between gesture endpoints"
+        case .erase: return "Erase this controller and channel within the dragged range"
+        }
+    }
+}
+
 /// MIDI-expression edits are computed from the original MIDI clip every time.
 /// The UI previews those edits but registers one undo action at gesture end.
 enum StudioMIDIExpressionEditing {
@@ -53,7 +72,8 @@ enum StudioMIDIExpressionEditing {
     /// For Snap Off, the caller should use a small finite subdivision (1/32).
     static func draw(events: [MIDIEvent], lane: CCType,
                      points: [StudioMIDIExpressionPoint], clipStartBeat: Double,
-                     division: Double, channel: UInt8 = 0) -> [MIDIEvent] {
+                     division: Double, channel: UInt8 = 0,
+                     mode: StudioExpressionDrawMode = .pencil) -> [MIDIEvent] {
         guard clipStartBeat.isFinite, clipStartBeat >= 0,
               division.isFinite, division > 0, channel < 16 else { return events }
         let valid = points.filter { $0.beat.isFinite && $0.value.isFinite &&
@@ -68,7 +88,8 @@ enum StudioMIDIExpressionEditing {
         var sampled: [Int: Double] = [:]
         let sampleCap = 4096
         func insertPoint(_ a: StudioMIDIExpressionPoint,
-                         _ b: StudioMIDIExpressionPoint) {
+                         _ b: StudioMIDIExpressionPoint,
+                         shaped: Bool = false) {
             let first = index(a.beat)
             let last = index(b.beat)
             let count = abs(last - first)
@@ -80,20 +101,42 @@ enum StudioMIDIExpressionEditing {
             let strideValue = first <= last ? 1 : -1
             for i in stride(from: first, through: last, by: strideValue) {
                 let t = first == last ? 1.0 : Double(i - first) / Double(last - first)
-                sampled[i] = a.value + (b.value - a.value) * t
+                let shapedT = shaped ? t * t * (3.0 - 2.0 * t) : t
+                sampled[i] = a.value + (b.value - a.value) * shapedT
             }
         }
-        if let first = valid.first {
+        if mode == .line || mode == .curve {
+            if let first = valid.first, let last = valid.last {
+                insertPoint(first, last, shaped: mode == .curve)
+            }
+        } else if let first = valid.first {
             insertPoint(first, first)
-        }
-        if valid.count > 1 {
-            for i in 1..<valid.count {
-                insertPoint(valid[i - 1], valid[i])
+            if valid.count > 1 {
+                for i in 1..<valid.count {
+                    insertPoint(valid[i - 1], valid[i])
+                }
             }
         }
-        guard !sampled.isEmpty else { return events }
-        let bounds = sampled.keys.min()!...sampled.keys.max()!
+        guard let minKey = sampled.keys.min(), let maxKey = sampled.keys.max() else {
+            return events
+        }
+        let bounds = minKey...maxKey
         let tolerance = division * 0.001
+
+        // Eraser changes only the visible controller lane and channel.
+        // A single click clears the nearest grid cell; a drag sweeps all
+        // events in its range. Notes and other MIDI channels are untouched.
+        if mode == .erase {
+            return events.filter { event in
+                guard normalizedValue(of: event, for: lane, channel: channel) != nil else {
+                    return true
+                }
+                let beat = event.beatPosition + clipStartBeat
+                let snappedKey = index(beat)
+                return !(bounds.contains(snappedKey) &&
+                         abs(beat - Double(snappedKey) * division) <= division * 0.5 + tolerance)
+            }
+        }
 
         // Keep event IDs at overwritten grid locations where possible.
         var existing: [Int: UUID] = [:]
