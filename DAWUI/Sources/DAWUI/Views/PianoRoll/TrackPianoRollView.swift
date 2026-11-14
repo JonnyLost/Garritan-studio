@@ -1311,9 +1311,22 @@ public struct TrackPianoRollView: View {
         // Notes in different regions therefore retain their relative timing.
         let starts = dragStartPositions.values.map(\.beat)
         let firstBeat = starts.min() ?? dragStartBeat
-        let newAnchor = StudioMusicalGrid.snap(firstBeat + beatDelta,
-                                                division: division, bypass: bypass)
-        let sharedDelta = newAnchor - firstBeat
+        // A vertical-only drag must not quantize an unsnapped note start.
+        let newAnchor = abs(beatDelta) < 0.000001 ? firstBeat :
+            StudioMusicalGrid.snap(firstBeat + beatDelta,
+                                   division: division, bypass: bypass)
+        // A multi-region selection shares one delta, limited by the earliest
+        // selected note's position relative to its own MIDI region.
+        let earliestLocal = original.clips.compactMap { clip -> Double? in
+            guard case .midi(let midi) = clip.content else { return nil }
+            return midi.events.compactMap { event -> Double? in
+                guard selectedNoteIDs.contains(event.id), case .note = event.type else {
+                    return nil
+                }
+                return event.beatPosition
+            }.min()
+        }.min() ?? 0
+        let sharedDelta = max(newAnchor - firstBeat, -max(0, earliestLocal))
         let pitches = dragStartPositions.values.map(\.pitch)
         let safePitchDelta = max(-(pitches.min() ?? 0),
                                  min(127 - (pitches.max() ?? 127), pitchDelta))
