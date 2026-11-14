@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - feature/pro-midi-sequencer
+  pull_request:
+    branches:
+      - feature/studio-export-engine
   workflow_dispatch:
 
 permissions:
