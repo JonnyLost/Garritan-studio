@@ -235,26 +235,48 @@ public final class CoreAudioBackend: AudioBackend {
         }
     }
 
+    /// Control-thread-only graph edit. The render thread never waits on this.
+    /// The caller must serialize backend control commands, including async loads.
+    private func withDrainedOutputAsync<T>(_ operation: () async throws -> T) async throws -> T {
+        let restart = _isRunning
+        if restart, let outputUnit {
+            let status = AudioOutputUnitStop(outputUnit)
+            guard status == noErr else {
+                throw AudioBackendError.configurationError("Cannot drain Core Audio output: \(status)")
+            }
+        }
+        defer {
+            if restart, let outputUnit {
+                let status = AudioOutputUnitStart(outputUnit)
+                if status != noErr {
+                    _isRunning = false
+                    daw_render_transport_set_playing(transport, false)
+                }
+            }
+        }
+        return try await operation()
+    }
+
     // MARK: - Track Management
     
     public func createTrack(id: TrackID) throws {
-        renderGraph.createTrack(id: id)
+        withDrainedOutput { renderGraph.createTrack(id: id) }
     }
     
     public func removeTrack(id: TrackID) {
-        renderGraph.removeTrack(id: id)
+        withDrainedOutput { renderGraph.removeTrack(id: id) }
     }
     
     public func setTrackVolume(_ volume: Float, for trackID: TrackID) {
-        renderGraph.setTrackVolume(volume, for: trackID)
+        withDrainedOutput { renderGraph.setTrackVolume(volume, for: trackID) }
     }
     
     public func setTrackPan(_ pan: Float, for trackID: TrackID) {
-        renderGraph.setTrackPan(pan, for: trackID)
+        withDrainedOutput { renderGraph.setTrackPan(pan, for: trackID) }
     }
     
     public func setTrackMute(_ muted: Bool, for trackID: TrackID) {
-        renderGraph.setTrackMute(muted, for: trackID)
+        withDrainedOutput { renderGraph.setTrackMute(muted, for: trackID) }
     }
     
     // MARK: - Plugin Hosting
@@ -263,7 +285,9 @@ public final class CoreAudioBackend: AudioBackend {
         _ description: AudioComponentDescription,
         for trackID: TrackID
     ) async throws -> AudioUnit {
-        return try await renderGraph.loadInstrument(description, for: trackID)
+        return try await withDrainedOutputAsync {
+            try await renderGraph.loadInstrument(description, for: trackID)
+        }
     }
     
     public func loadEffect(
@@ -271,11 +295,13 @@ public final class CoreAudioBackend: AudioBackend {
         for trackID: TrackID,
         slot: Int
     ) async throws -> AudioUnit {
-        return try await renderGraph.loadEffect(description, for: trackID, slot: slot)
+        return try await withDrainedOutputAsync {
+            try await renderGraph.loadEffect(description, for: trackID, slot: slot)
+        }
     }
     
     public func unloadPlugin(for trackID: TrackID, slot: Int) {
-        renderGraph.unloadPlugin(for: trackID, slot: slot)
+        withDrainedOutput { renderGraph.unloadPlugin(for: trackID, slot: slot) }
     }
     
     public func getInstrumentAudioUnit(for trackID: TrackID) -> AudioUnit? {
@@ -415,7 +441,7 @@ public final class CoreAudioBackend: AudioBackend {
         outputURL: URL,
         progress: ((Double) -> Void)?
     ) async throws {
-        guard !_isPlaying else {
+        guard !isPlaying else {
             throw AudioBackendError.configurationError(
                 "Stop realtime playback before offline bounce"
             )
@@ -433,6 +459,22 @@ public final class CoreAudioBackend: AudioBackend {
     
     public func setBufferSize(_ size: UInt32) throws {
         guard let unit = outputUnit else { return }
+        let restart = _isRunning
+        if restart {
+            let stopped = AudioOutputUnitStop(unit)
+            guard stopped == noErr else {
+                throw AudioBackendError.configurationError("Cannot drain output for buffer resize: \(stopped)")
+            }
+        }
+        defer {
+            if restart {
+                let started = AudioOutputUnitStart(unit)
+                if started != noErr {
+                    _isRunning = false
+                    daw_render_transport_set_playing(transport, false)
+                }
+            }
+        }
         
         var bufferFrameSize = size
         let status = AudioUnitSetProperty(
@@ -454,8 +496,10 @@ public final class CoreAudioBackend: AudioBackend {
     }
     
     public func setMasterVolume(_ volume: Float) {
-        _masterVolume = volume
-        renderGraph.setMasterVolume(volume)
+        withDrainedOutput {
+            _masterVolume = volume
+            renderGraph.setMasterVolume(volume)
+        }
     }
     
     // MARK: - Render Callback (Called from Audio Thread)
