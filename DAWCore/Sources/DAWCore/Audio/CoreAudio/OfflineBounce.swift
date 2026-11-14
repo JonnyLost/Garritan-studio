@@ -49,7 +49,7 @@ public final class OfflineBounce {
         to endSample: Int64,
         outputURL: URL,
         sampleRate: Double,
-        bufferSize: UInt32 = 4096,
+        bufferSize: UInt32 = 512,
         progress: ((Double) -> Void)?
     ) async throws {
         print("[OfflineBounce] Starting bounce from \(startSample) to \(endSample)")
@@ -100,6 +100,7 @@ public final class OfflineBounce {
         guard status == noErr, let outFile = outputFile else {
             throw AudioBackendError.bounceError("Could not create output file: \(status)")
         }
+        defer { ExtAudioFileDispose(outFile) }
         
         // Set client format
         status = ExtAudioFileSetProperty(
@@ -110,7 +111,6 @@ public final class OfflineBounce {
         )
         
         guard status == noErr else {
-            ExtAudioFileDispose(outFile)
             throw AudioBackendError.bounceError("Could not set client format: \(status)")
         }
         
@@ -186,7 +186,7 @@ public final class OfflineBounce {
                 }
             }
             guard writeStatus == noErr else {
-                throw AudioBackendError.bounceError("Write error: \\(writeStatus)")
+                throw AudioBackendError.bounceError("Write error: \(writeStatus)")
             }
 
             currentSample += Int64(framesToRender)
@@ -203,9 +203,7 @@ public final class OfflineBounce {
             }
         }
         
-        // Close file
-        ExtAudioFileDispose(outFile)
-        
+
         // Final progress update
         progress?(1.0)
         
