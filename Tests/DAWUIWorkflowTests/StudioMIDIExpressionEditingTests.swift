@@ -76,6 +76,33 @@ final class StudioMIDIExpressionEditingTests: XCTestCase {
         XCTAssertEqual(result[0].beatPosition, 0.625)
     }
 
+    func testCCAndPitchBendSurviveProjectSerialization() throws {
+        let expression = StudioMIDIExpressionEditing.makeEvent(
+            at: 1.5, lane: .expression, normalized: 0.75, channel: 3)!
+        let bend = StudioMIDIExpressionEditing.makeEvent(
+            at: 2.5, lane: .pitchBend, normalized: 0.8, channel: 3)!
+        let data = try JSONEncoder().encode([expression, bend])
+        let decoded = try JSONDecoder().decode([MIDIEvent].self, from: data)
+        XCTAssertEqual(decoded.count, 2)
+        XCTAssertEqual(decoded[0].channel, 3)
+        XCTAssertEqual(decoded[1].channel, 3)
+        XCTAssertEqual(decoded[0].beatPosition, 1.5)
+        XCTAssertEqual(decoded[1].beatPosition, 2.5)
+        XCTAssertNotNil(StudioMIDIExpressionEditing.normalizedValue(
+            of: decoded[0], for: .expression, channel: 3))
+        XCTAssertNotNil(StudioMIDIExpressionEditing.normalizedValue(
+            of: decoded[1], for: .pitchBend, channel: 3))
+    }
+
+    func testBinaryArticulationCC68Legato() {
+        let event = StudioMIDIExpressionEditing.makeEvent(
+            at: 3, lane: .legato, normalized: 0.9)
+        if case .controlChange(let controller, let value) = event!.type {
+            XCTAssertEqual(controller, 68)
+            XCTAssertEqual(value, 127)
+        } else { XCTFail("Expected CC68") }
+    }
+
     func testDrawingPreservesAnotherChannelAndControllers() {
         let a = MIDIEvent.controlChange(at: 1, controller: 1, value: 10, channel: 1)
         let b = MIDIEvent.controlChange(at: 1, controller: 11, value: 20, channel: 0)
