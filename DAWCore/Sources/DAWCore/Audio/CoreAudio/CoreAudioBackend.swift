@@ -366,9 +366,20 @@ public final class CoreAudioBackend: AudioBackend {
     ) async throws -> AudioUnit {
         // The new AU is isolated from the active graph until preparation ends.
         // The hardware drain now covers only the synchronous owner swap.
-        let prepared = try await renderGraph.prepareInstrument(description)
+        // Capture configuration under the same control gate used by resize.
+        // A stale prepared AU is rejected instead of installing with the
+        // wrong maximum render slice after a concurrent buffer-size change.
+        let preparedFrames = controlGate.perform { _bufferSize }
+        let prepared = try await renderGraph.prepareInstrument(
+            description, maximumFrames: preparedFrames
+        )
         return try withDrainedOutputResult {
-            try renderGraph.installInstrument(prepared, for: trackID)
+            guard _bufferSize == preparedFrames else {
+                throw AudioBackendError.configurationError(
+                    "Audio buffer size changed during instrument preparation; retry load"
+                )
+            }
+            return try renderGraph.installInstrument(prepared, for: trackID)
         }
     }
     
