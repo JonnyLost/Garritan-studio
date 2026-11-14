@@ -11,23 +11,61 @@ public final class RenderGraph {
     
     // MARK: - Track Node
     
+    /// Owns preallocated per-track scratch. Released by ARC off the render
+    /// callback only after every snapshot borrowing the route has retired.
+    final class TrackScratchBuffers {
+        let left: UnsafeMutablePointer<Float>
+        let right: UnsafeMutablePointer<Float>
+        let frameCapacity: Int
+
+        init(frameCapacity: Int) {
+            self.frameCapacity = frameCapacity
+            left = .allocate(capacity: frameCapacity)
+            right = .allocate(capacity: frameCapacity)
+            left.initialize(repeating: 0, count: frameCapacity)
+            right.initialize(repeating: 0, count: frameCapacity)
+        }
+
+        deinit {
+            left.deinitialize(count: frameCapacity)
+            right.deinitialize(count: frameCapacity)
+            left.deallocate()
+            right.deallocate()
+        }
+    }
+
+    /// Exact single owner of a raw (non-AVAudioUnit-hosted) effect handle.
+    /// Snapshot-held tracks retain this owner until render readers finish.
+    final class EffectLifetime {
+        let unit: AudioUnit
+        init(_ unit: AudioUnit) { self.unit = unit }
+        deinit { AudioComponentInstanceDispose(unit) }
+    }
+
     final class TrackNode {
         let id: TrackID
-        init(id: TrackID) { self.id = id }
+        /// The AUv3 wrapper is the owner of its underlying AudioUnit.
+        var instrumentOwner: AVAudioUnit?
         var instrumentUnit: AudioUnit?
-        var auAudioUnit: AUAudioUnit?  // For AUv3 rendering
-        var renderBlock: AURenderBlock?  // AUv3 render callback
-        var effectUnits: [AudioUnit?] = []
+        var auAudioUnit: AUAudioUnit?
+        var renderBlock: AURenderBlock?
+        var effects: [EffectLifetime?] = []
         var volume: Float = 1.0
         var pan: Float = 0.0
         var isMuted: Bool = false
         var isSolo: Bool = false
-        
-        // Pre-allocated render buffers
-        var renderBufferLeft: UnsafeMutablePointer<Float>?
-        var renderBufferRight: UnsafeMutablePointer<Float>?
+        var scratch: TrackScratchBuffers
+
+        init(id: TrackID, bufferSize: Int) {
+            self.id = id
+            self.scratch = TrackScratchBuffers(frameCapacity: bufferSize)
+        }
+
+        var isEmpty: Bool {
+            instrumentUnit == nil && effects.allSatisfy { $0 == nil }
+        }
     }
-    
+
     // MARK: - Properties
     
     private var tracks: [TrackID: TrackNode] = [:]
@@ -133,32 +171,21 @@ public final class RenderGraph {
             Unmanaged<RenderSnapshot>.fromOpaque(raw).release()
         }
         daw_route_exchange_destroy(routeExchange)
-        // Clean up allocated buffers
-        for track in tracks.values {
-            track.renderBufferLeft?.deallocate()
-            track.renderBufferRight?.deallocate()
-        }
+        // Track scratch/effects/AVAudioUnit owners are released by ARC after
+        // every published snapshot has been reclaimed on this control thread.
     }
     
     // MARK: - Configuration
     
+    /// Only after hardware callbacks and offline bounce are quiescent.
     func setBufferSize(_ size: Int) {
+        guard size > 0 else { return }
         bufferSize = size
-        
-        // Reallocate buffers for all tracks
-        for (id, track) in tracks {
-            track.renderBufferLeft?.deallocate()
-            track.renderBufferRight?.deallocate()
-            
-            var updatedTrack = track
-            updatedTrack.renderBufferLeft = UnsafeMutablePointer<Float>.allocate(capacity: size)
-            updatedTrack.renderBufferRight = UnsafeMutablePointer<Float>.allocate(capacity: size)
-            updatedTrack.renderBufferLeft?.initialize(repeating: 0, count: size)
-            updatedTrack.renderBufferRight?.initialize(repeating: 0, count: size)
-            tracks[id] = updatedTrack
+        for track in tracks.values {
+            track.scratch = TrackScratchBuffers(frameCapacity: size)
         }
     }
-    
+
     func setMasterVolume(_ volume: Float) {
         masterVolume = volume
     }
@@ -167,43 +194,27 @@ public final class RenderGraph {
     
     func createTrack(id: TrackID) {
         guard tracks[id] == nil else { return }
-        
-        var track = TrackNode(id: id)
-        
-        // Allocate render buffers
-        track.renderBufferLeft = UnsafeMutablePointer<Float>.allocate(capacity: bufferSize)
-        track.renderBufferRight = UnsafeMutablePointer<Float>.allocate(capacity: bufferSize)
-        track.renderBufferLeft?.initialize(repeating: 0, count: bufferSize)
-        track.renderBufferRight?.initialize(repeating: 0, count: bufferSize)
-        
-        tracks[id] = track
+        tracks[id] = TrackNode(id: id, bufferSize: bufferSize)
         publishRenderSnapshot()
-        print("[RenderGraph] Created track \(id.rawValue)")
+        print("[RenderGraph] Created track \\(id.rawValue)")
     }
-    
+
+    /// Route contents must remain alive until snapshots retire. The raw AU
+    /// and scratch resources now belong to TrackNode instead of this method.
     func removeTrack(id: TrackID) {
-        guard let track = tracks[id] else { return }
-        
-        // Release AVAudioUnit (which owns the AudioUnit)
-        // Don't call AudioComponentInstanceDispose - AVAudioUnit handles cleanup
-        avAudioUnits.removeValue(forKey: id)
-        
-        // Dispose of effect units
-        for case let unit? in track.effectUnits {
-            AudioComponentInstanceDispose(unit)
-        }
-        
-        // Free buffers
-        track.renderBufferLeft?.deallocate()
-        track.renderBufferRight?.deallocate()
-        
-        tracks.removeValue(forKey: id)
+        guard tracks.removeValue(forKey: id) != nil else { return }
         publishRenderSnapshot()
         updateSoloState()
-        
-        print("[RenderGraph] Removed track \(id.rawValue)")
+        print("[RenderGraph] Removed track \\(id.rawValue)")
     }
-    
+
+    /// Empty tracks can be removed while render snapshots are active:
+    /// no AU process resource is shared by an old and new render callback.
+    /// Nonempty routes still require the backend's hardware drain.
+    func canRemoveEmptyTrackLive(id: TrackID) -> Bool {
+        tracks[id]?.isEmpty ?? false
+    }
+
     func setTrackVolume(_ volume: Float, for trackID: TrackID) {
         withRenderSnapshot { $0.byID[trackID]?.volume = volume }
     }
@@ -224,9 +235,6 @@ public final class RenderGraph {
     private func updateSoloState() {
         hasSoloedTracks = tracks.values.contains { $0.isSolo }
     }
-    
-    // Store AVAudioUnits to keep them alive (AUv3 requires this)
-    private var avAudioUnits: [TrackID: AVAudioUnit] = [:]
     
     // MARK: - Plugin Loading
     
@@ -312,7 +320,7 @@ public final class RenderGraph {
         track.instrumentUnit = prepared.unit
         track.auAudioUnit = prepared.auAudioUnit
         track.renderBlock = prepared.renderBlock
-        avAudioUnits[trackID] = prepared.owner
+        track.instrumentOwner = prepared.owner
         publishRenderSnapshot()
         return prepared.unit
     }
@@ -377,13 +385,10 @@ public final class RenderGraph {
         guard let unit = prepared.takeUnit() else {
             throw AudioBackendError.configurationError("Effect was already installed")
         }
-        while track.effectUnits.count <= slot {
-            track.effectUnits.append(nil)
+        while track.effects.count <= slot {
+            track.effects.append(nil)
         }
-        if let old = track.effectUnits[slot] {
-            AudioComponentInstanceDispose(old)
-        }
-        track.effectUnits[slot] = unit
+        track.effects[slot] = EffectLifetime(unit)
         publishRenderSnapshot()
         return unit
     }
@@ -398,15 +403,12 @@ public final class RenderGraph {
         
         if slot < 0 {
             // Unload instrument - release AVAudioUnit (don't dispose directly)
-            avAudioUnits.removeValue(forKey: trackID)
+            track.instrumentOwner = nil
             track.instrumentUnit = nil
             track.auAudioUnit = nil
             track.renderBlock = nil
-        } else if slot < track.effectUnits.count {
-            if let unit = track.effectUnits[slot] {
-                AudioComponentInstanceDispose(unit)
-            }
-            track.effectUnits[slot] = nil
+        } else if slot < track.effects.count {
+            track.effects[slot] = nil
         }
         
         tracks[trackID] = track
@@ -487,8 +489,9 @@ public final class RenderGraph {
             if hasSoloedTracks && !track.isSolo { continue }
             
             // Need either renderBlock (AUv3) or instrumentUnit (legacy)
-            guard let bufferL = track.renderBufferLeft,
-                  let bufferR = track.renderBufferRight else { continue }
+            let bufferL = track.scratch.left
+            let bufferR = track.scratch.right
+            guard frameCount <= UInt32(track.scratch.frameCapacity) else { continue }
             guard track.renderBlock != nil || track.instrumentUnit != nil else { continue }
             
             // Clear track buffer
@@ -542,12 +545,12 @@ public final class RenderGraph {
             }
             
             // Process through effects
-            for case let effect? in track.effectUnits {
+            for case let effect? in track.effects {
                 var effectTimeStamp = timeStamp
                 var effectFlags = AudioUnitRenderActionFlags()
                 withUnsafeMutablePointer(to: &stereoList) { stereoPtr in
                     stereoPtr.withMemoryRebound(to: AudioBufferList.self, capacity: 1) { ablPtr in
-                        AudioUnitRender(effect, &effectFlags, &effectTimeStamp, 0, frameCount, ablPtr)
+                        AudioUnitRender(effect.unit, &effectFlags, &effectTimeStamp, 0, frameCount, ablPtr)
                     }
                 }
             }
