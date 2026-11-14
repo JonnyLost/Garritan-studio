@@ -80,6 +80,9 @@ public struct Track: Identifiable, Codable, Sendable {
     public var studioSamplerPatch: StudioSamplerPatch?
     /// Selected Garritan catalog entry (library:path), persisted per track.
     public var garritanProgramID: String?
+    /// Embedded per-track articulation map. Nil decodes legacy project files.
+    /// Maps are independent of instrument patches and are not shared by reference.
+    public var articulationMap: StudioArticulationMap?
     
     // MIDI Output Routing (for MIDI tracks)
     // Determines where MIDI is sent: track instrument or V-Rack
@@ -134,6 +137,7 @@ public struct Track: Identifiable, Codable, Sendable {
         self.studioSynthPatch = nil
         self.studioSamplerPatch = nil
         self.garritanProgramID = nil
+        self.articulationMap = nil
         self.midiOutput = nil  // Default: use track instrument
         self.midiOutputChannel = nil  // All channels
         self.instrumentLevelCC7 = nil  // Do not override ARIA's existing level until edited
