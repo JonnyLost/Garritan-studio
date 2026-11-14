@@ -86,6 +86,7 @@ public final class RenderGraph {
         let id: TrackID
         let controls = TrackControls()
         var pendingInstrumentRequestID: UInt64 = 0
+        var pendingEffectRequests: [Int: UInt64] = [:]
         var processing: ProcessingResources
 
         init(id: TrackID, bufferSize: Int) {
@@ -109,6 +110,7 @@ public final class RenderGraph {
     
     private var tracks: [TrackID: TrackNode] = [:]
     private var nextInstrumentRequestID: UInt64 = 0
+    private var nextEffectRequestID: UInt64 = 0
     /// Route membership and processing resources are captured per generation.
     /// TrackControls remain shared, with writes owned by the render domain.
     private final class RenderSnapshot {
@@ -436,6 +438,34 @@ public final class RenderGraph {
         return try installInstrument(prepared, for: trackID, expectedRequestID: request)
     }
 
+    /// Effect request tickets are independent for each slot: loading a new
+    /// effect on slot 1 does not invalidate a pending load on slot 2.
+    func beginEffectReplacement(for trackID: TrackID, slot: Int) throws -> UInt64 {
+        guard (0..<64).contains(slot) else {
+            throw AudioBackendError.configurationError("Effect slot must be between 0 and 63")
+        }
+        guard let track = tracks[trackID] else {
+            throw AudioBackendError.trackNotFound(trackID)
+        }
+        nextEffectRequestID &+= 1
+        if nextEffectRequestID == 0 { nextEffectRequestID = 1 }
+        track.pendingEffectRequests[slot] = nextEffectRequestID
+        return nextEffectRequestID
+    }
+
+    func validateEffectReplacement(
+        for trackID: TrackID, slot: Int, requestID: UInt64
+    ) throws {
+        guard let track = tracks[trackID] else {
+            throw AudioBackendError.trackNotFound(trackID)
+        }
+        guard requestID != 0, track.pendingEffectRequests[slot] == requestID else {
+            throw AudioBackendError.configurationError(
+                "Effect load superseded by a newer selection or unload"
+            )
+        }
+    }
+
     func prepareEffect(_ description: AudioComponentDescription) throws -> PreparedEffect {
         var desc = description
         guard let component = AudioComponentFindNext(nil, &desc) else {
@@ -479,12 +509,18 @@ public final class RenderGraph {
 
     /// Call only after the output callback is fully drained. The prepared
     /// effect owns cleanup automatically if the track was removed meanwhile.
-    func installEffect(_ prepared: PreparedEffect, for trackID: TrackID, slot: Int) throws -> AudioUnit {
+    func installEffect(_ prepared: PreparedEffect, for trackID: TrackID, slot: Int,
+                       expectedRequestID: UInt64? = nil) throws -> AudioUnit {
         guard let track = tracks[trackID] else {
             throw AudioBackendError.trackNotFound(trackID)
         }
         guard (0..<64).contains(slot) else {
             throw AudioBackendError.configurationError("Effect slot must be between 0 and 63")
+        }
+        if let request = expectedRequestID {
+            try validateEffectReplacement(
+                for: trackID, slot: slot, requestID: request
+            )
         }
         guard let unit = prepared.takeUnit() else {
             throw AudioBackendError.configurationError("Effect was already installed")
@@ -502,12 +538,16 @@ public final class RenderGraph {
             scratch: TrackScratchBuffers(frameCapacity: bufferSize)
         )
         publishRenderSnapshot()
+        track.pendingEffectRequests[slot] = nil
         return unit
     }
 
     func loadEffect(_ description: AudioComponentDescription, for trackID: TrackID, slot: Int) async throws -> AudioUnit {
+        let request = try beginEffectReplacement(for: trackID, slot: slot)
         let prepared = try prepareEffect(description)
-        return try installEffect(prepared, for: trackID, slot: slot)
+        return try installEffect(
+            prepared, for: trackID, slot: slot, expectedRequestID: request
+        )
     }
 
     func unloadPlugin(for trackID: TrackID, slot: Int) {
@@ -526,6 +566,7 @@ public final class RenderGraph {
             au = nil
             block = nil
         } else if slot < effects.count {
+            track.pendingEffectRequests[slot] = nil
             effects[slot] = nil
         } else {
             return
