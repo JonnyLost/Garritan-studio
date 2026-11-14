@@ -41,6 +41,9 @@ public struct TrackPianoRollView: View {
     @State private var isMarqueeSelecting: Bool = false
     @State private var didToggleShiftNote = false
     @State private var eraserPendingIDs: Set<UUID> = []
+    @State private var velocityEditID: UUID? = nil
+    @State private var velocityDragStart = 100
+    @State private var velocityHasChanged = false
     
     // Pencil tool preview state
     @State private var pencilPreviewStart: Double? = nil
@@ -753,6 +756,60 @@ public struct TrackPianoRollView: View {
             context.stroke(playheadPath, with: .color(Color.accentColor), lineWidth: 1)
         }
         .background(Color.black.opacity(0.15))
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    previewVelocityEdit(startX: value.startLocation.x, y: value.location.y)
+                }
+                .onEnded { _ in
+                    if velocityHasChanged, let changed = previewTrack {
+                        viewModel.updateTrack(changed, description: "Edit MIDI Velocity")
+                    }
+                    previewTrack = nil
+                    velocityEditID = nil
+                    velocityHasChanged = false
+                }
+        )
+    }
+
+    private func previewVelocityEdit(startX: CGFloat, y: CGFloat) {
+        guard let original = currentTrack else { return }
+        if velocityEditID == nil {
+            guard let nearest = noteEvents.min(by: {
+                abs($0.beatPosition * pixelsPerBeat - Double(startX)) <
+                abs($1.beatPosition * pixelsPerBeat - Double(startX))
+            }), abs(nearest.beatPosition * pixelsPerBeat - Double(startX)) <= 8,
+                  case .note(let data) = nearest.type else { return }
+            velocityEditID = nearest.id
+            velocityDragStart = Int(data.velocity)
+            if !selectedNoteIDs.contains(nearest.id) {
+                selectedNoteIDs = [nearest.id]
+            }
+        }
+        guard let editID = velocityEditID else { return }
+        let fraction = max(0, min(1, Double(velocityLaneHeight - y) /
+                                     Double(max(1, velocityLaneHeight - 4))))
+        let target = max(1, min(127, Int((fraction * 127).rounded())))
+        let delta = target - velocityDragStart
+        var draft = original
+        var modified = false
+        for index in draft.clips.indices {
+            guard case .midi(var midi) = draft.clips[index].content else { continue }
+            for eventIndex in midi.events.indices {
+                guard selectedNoteIDs.contains(midi.events[eventIndex].id),
+                      case .note(var data) = midi.events[eventIndex].type else { continue }
+                // Apply a shared relative shift to preserve chord dynamics.
+                let newValue = UInt8(max(1, min(127, Int(data.velocity) + delta)))
+                if newValue != data.velocity { modified = true }
+                data.velocity = newValue
+                midi.events[eventIndex].type = .note(data)
+            }
+            draft.clips[index].content = .midi(midi)
+        }
+        _ = editID
+        velocityHasChanged = modified
+        previewTrack = draft
     }
     
     // MARK: - CC Canvas
