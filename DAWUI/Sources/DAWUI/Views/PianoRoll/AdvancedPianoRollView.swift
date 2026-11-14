@@ -742,14 +742,19 @@ public struct AdvancedPianoRollView: View {
                     }
                     context.stroke(linePath, with: .color(Color.gray.opacity(0.5)), lineWidth: 1)
 
-                    // Beat subdivisions
-                    for beat in 1..<Int(beatsPerBar) {
-                        let beatX = x + Double(beat) * pixelsPerBeat
-                        let beatPath = Path { path in
-                            path.move(to: CGPoint(x: beatX, y: size.height * 0.6))
-                            path.addLine(to: CGPoint(x: beatX, y: size.height))
+                    // Include the last quarter-beat subdivision in odd /
+                    // compound meters such as 7/8 (bar length 3.5 beats).
+                    if beatsPerBar > 1 {
+                        for quarter in 1...Int(ceil(beatsPerBar))
+                            where Double(quarter) < beatsPerBar {
+                            let beatX = x + Double(quarter) * pixelsPerBeat
+                            let beatPath = Path { path in
+                                path.move(to: CGPoint(x: beatX, y: size.height * 0.6))
+                                path.addLine(to: CGPoint(x: beatX, y: size.height))
+                            }
+                            context.stroke(beatPath, with: .color(Color.gray.opacity(0.3)),
+                                           lineWidth: 0.5)
                         }
-                        context.stroke(beatPath, with: .color(Color.gray.opacity(0.3)), lineWidth: 0.5)
                     }
                 }
             }
@@ -903,6 +908,7 @@ public struct AdvancedPianoRollView: View {
                         onDrag: { delta in handleNoteDrag(delta) },
                         onDragEnd: { endNoteDrag() }
                     )
+                    .allowsHitTesting(currentTool == .select)
                 }
             }
         }
