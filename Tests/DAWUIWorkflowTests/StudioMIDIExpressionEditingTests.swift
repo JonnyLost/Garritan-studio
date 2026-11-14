@@ -91,7 +91,7 @@ final class StudioMIDIExpressionEditingTests: XCTestCase {
 
     func testCurveAndLineRetainOverwrittenEventID() {
         let point = MIDIEvent.controlChange(at: 0.5, controller: 11, value: 30)
-        for mode: StudioExpressionDrawMode in [.line, .curve] {
+        for mode in [StudioExpressionDrawMode.line, .curve] {
             let result = StudioMIDIExpressionEditing.draw(
                 events: [point], lane: .expression,
                 points: [.init(beat: 0, value: 0),
