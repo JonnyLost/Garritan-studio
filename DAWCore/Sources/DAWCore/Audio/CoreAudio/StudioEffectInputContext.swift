@@ -32,12 +32,7 @@ final class StudioEffectInputContext {
         guard buffers.count == 2 else { return kAudio_ParamError }
 
         let byteCount = Int(frames) * MemoryLayout<Float>.size
-        guard let outL = buffers[0].mData,
-              let outR = buffers[1].mData else { return kAudio_ParamError }
-        guard buffers[0].mDataByteSize >= UInt32(byteCount),
-              buffers[1].mDataByteSize >= UInt32(byteCount) else {
-            return kAudio_ParamError
-        }
+        guard byteCount <= Int(UInt32.max) else { return kAudio_ParamError }
 
         var offset: UInt32 = 0
         if timeStamp.pointee.mFlags.contains(.sampleTimeValid) {
@@ -51,16 +46,36 @@ final class StudioEffectInputContext {
 
         guard let left, let right, offset <= availableFrames,
               frames <= availableFrames - offset else {
-            // Unprepared input is silence; invalid slice requests fail closed.
+            // Unprepared input is silence. Never write past a caller-owned
+            // buffer: return an error if the AU provided no valid capacity.
+            guard let outL = buffers[0].mData, let outR = buffers[1].mData,
+                  buffers[0].mDataByteSize >= UInt32(byteCount),
+                  buffers[1].mDataByteSize >= UInt32(byteCount) else {
+                return kAudio_ParamError
+            }
             memset(outL, 0, byteCount)
             memset(outR, 0, byteCount)
             return noErr
         }
 
-        memmove(outL, left.advanced(by: Int(offset)), byteCount)
-        memmove(outR, right.advanced(by: Int(offset)), byteCount)
-        buffers[0].mDataByteSize = UInt32(byteCount)
-        buffers[1].mDataByteSize = UInt32(byteCount)
+        // Audio Units may ask their upstream callback for borrowed input
+        // pointers (mData = nil), or supply writable storage. Support BOTH
+        // conventions. The borrowed pointers remain valid through the
+        // synchronous AudioUnitRender call, not beyond this callback.
+        let sources = [left.advanced(by: Int(offset)),
+                       right.advanced(by: Int(offset))]
+        for channel in 0..<2 {
+            if let destination = buffers[channel].mData,
+               buffers[channel].mDataByteSize >= UInt32(byteCount) {
+                memmove(destination, sources[channel], byteCount)
+            } else {
+                buffers[channel].mData = UnsafeMutableRawPointer(
+                    mutating: UnsafeRawPointer(sources[channel])
+                )
+            }
+            buffers[channel].mDataByteSize = UInt32(byteCount)
+            buffers[channel].mNumberChannels = 1
+        }
         return noErr
     }
 }
