@@ -119,7 +119,7 @@ struct OrchestralStageView: View {
                             viewModel.addVirtualMicrophoneArray(.spot)
                         }
                         .disabled(microphones.count >= 32)
-                        .help("Add a movable microphone object. Does not affect audio yet.")
+                        .help("Add a movable microphone. Use Rooms → Mic Mixer to audition its capture.")
                     }
                     .font(.caption)
                     fittedCurvedStage(
@@ -759,7 +759,7 @@ struct OrchestralStageView: View {
             Text(String(format: "x: %.2f m   y: %.2f m   height: %.2f m",
                         mic.position.xMeters, mic.position.yMeters, mic.position.zMeters))
                 .font(.caption.monospacedDigit())
-            Text("Drag to move across the stage. To edit height, aiming and polar pickup, open Rooms → Microphones. Playback routing is not yet enabled.")
+            Text("Drag to move across the stage. Use Rooms → Microphones for height, aiming and pickup, then Rooms → Mic Mixer to audition direct sound and spill.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
