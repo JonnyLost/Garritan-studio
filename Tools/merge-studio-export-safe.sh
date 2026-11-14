@@ -7,6 +7,8 @@ conflict_path="DAWApp/Sources/DAWApp/DAWApp.swift"
 
 git config user.name "Studio integration bot"
 git config user.email "studio-integration@users.noreply.github.com"
+# Markdown source intentionally uses two spaces for hard line breaks.
+git config core.whitespace "-blank-at-eol"
 git fetch origin "feature/studio-export-engine"
 
 if git merge-base --is-ancestor "$source_sha" HEAD; then
