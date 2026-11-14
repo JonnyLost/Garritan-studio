@@ -39,7 +39,7 @@ public final class NativeMicrophoneMatrixAudioUnit: AUAudioUnit {
         componentFlags: 0,
         componentFlagsMask: 0
     )
-    private static var registered = false
+    @MainActor private static var registered = false
 
     @MainActor
     public static func registerIfNeeded() {
@@ -111,21 +111,27 @@ public final class NativeMicrophoneMatrixAudioUnit: AUAudioUnit {
 
     public override func allocateRenderResources() throws {
         try super.allocateRenderResources()
-        guard inputBus.format.commonFormat == .pcmFormatFloat32,
-              !inputBus.format.isInterleaved,
-              inputBus.format.channelCount == 2,
-              outputArray.count == Self.microphoneCount,
-              outputArray.enumerated().allSatisfy({ _, bus in
-                  bus.format.commonFormat == .pcmFormatFloat32 &&
-                  !bus.format.isInterleaved &&
-                  bus.format.channelCount == 2 &&
-                  bus.format.sampleRate == inputBus.format.sampleRate
-              }),
+        let inputFormat = inputBus.format
+        let inputValid = inputFormat.commonFormat == .pcmFormatFloat32 &&
+            !inputFormat.isInterleaved && inputFormat.channelCount == 2
+        var outputsValid = outputArray.count == Self.microphoneCount
+        if outputsValid {
+            for index in 0..<Self.microphoneCount {
+                let format = outputArray[index].format
+                let valid = format.commonFormat == .pcmFormatFloat32 &&
+                    !format.isInterleaved && format.channelCount == 2 &&
+                    format.sampleRate == inputFormat.sampleRate
+                if !valid {
+                    outputsValid = false
+                    break
+                }
+            }
+        }
+        guard inputValid, outputsValid,
               let processor = NativeMicrophoneCaptureMatrix(
-                  sampleRate: inputBus.format.sampleRate,
-                  sources: 1, microphones: Self.microphoneCount
-              )
-        else {
+                  sampleRate: inputFormat.sampleRate, sources: 1,
+                  microphones: Self.microphoneCount
+              ) else {
             super.deallocateRenderResources()
             throw NSError(domain: NSOSStatusErrorDomain,
                           code: Int(kAudioUnitErr_FormatNotSupported))
