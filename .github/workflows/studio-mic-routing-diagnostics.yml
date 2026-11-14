@@ -1,0 +1,22 @@
+name: Diagnose Stage Microphone Routing
+
+on:
+  push:
+    branches:
+      - fix/studio-virtual-microphone-routing-2026-11-14
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  microphone-regression:
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift package resolve
+      - name: Test native capsule alone and V-Rack fanout
+        run: swift test --filter NativeMicrophoneAuditionGraphDiagnosticsTests
+      - name: Verify the original V-Rack regression
+        run: swift test --filter VRackMicrophoneRoutingTests
