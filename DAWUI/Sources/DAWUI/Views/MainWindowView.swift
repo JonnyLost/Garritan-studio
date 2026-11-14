@@ -20,6 +20,7 @@ public struct MainWindowView: View {
     @State private var showStageWorkspace = false
     @State private var showChannelWorkspace = false
     @State private var showArticulationsWorkspace = false
+    @State private var showOstinatoWorkspace = false
     @State private var showInstrumentWorkspace = false
     @State private var compactLowerWorkspace = false
     @State private var showDockedKeyboard = false
@@ -134,7 +135,7 @@ public struct MainWindowView: View {
                         .background(Color(nsColor: .controlBackgroundColor))
                     }
 
-                    if showInstrumentWorkspace || showChannelWorkspace || showStageWorkspace || showArticulationsWorkspace || viewModel.showMixer || viewModel.showPianoRoll {
+                    if showInstrumentWorkspace || showChannelWorkspace || showStageWorkspace || showArticulationsWorkspace || showOstinatoWorkspace || viewModel.showMixer || viewModel.showPianoRoll {
                         ResizeHandle(height: $pianoRollHeight)
                             .onTapGesture(count: 2) {
                                 if lowerWorkspaceMaximized {
@@ -503,6 +504,7 @@ public struct MainWindowView: View {
         showChannelWorkspace = workspace == "Channel"
         showStageWorkspace = workspace == "Stage"
         showArticulationsWorkspace = workspace == "Articulations"
+        showOstinatoWorkspace = workspace == "Ostinato"
         viewModel.showPianoRoll = workspace == "Piano Roll"
         viewModel.showMixer = workspace == "Mixer"
     }
@@ -522,10 +524,13 @@ public struct MainWindowView: View {
             workspaceButton("Articulations", symbol: "music.note", active: showArticulationsWorkspace) {
                 selectWorkspace("Articulations")
             }
-            workspaceButton("Piano Roll", symbol: "pianokeys", active: viewModel.showPianoRoll && !showInstrumentWorkspace && !showChannelWorkspace && !showStageWorkspace && !showArticulationsWorkspace && !viewModel.showMixer) {
+            workspaceButton("Ostinato", symbol: "square.grid.3x3.fill", active: showOstinatoWorkspace) {
+                selectWorkspace("Ostinato")
+            }
+            workspaceButton("Piano Roll", symbol: "pianokeys", active: viewModel.showPianoRoll && !showInstrumentWorkspace && !showChannelWorkspace && !showStageWorkspace && !showArticulationsWorkspace && !showOstinatoWorkspace && !viewModel.showMixer) {
                 selectWorkspace("Piano Roll")
             }
-            workspaceButton("Mixer", symbol: "slider.vertical.3", active: viewModel.showMixer && !showInstrumentWorkspace && !showChannelWorkspace && !showStageWorkspace && !showArticulationsWorkspace) {
+            workspaceButton("Mixer", symbol: "slider.vertical.3", active: viewModel.showMixer && !showInstrumentWorkspace && !showChannelWorkspace && !showStageWorkspace && !showArticulationsWorkspace && !showOstinatoWorkspace) {
                 selectWorkspace("Mixer")
             }
             Spacer(minLength: 0)
@@ -603,6 +608,8 @@ public struct MainWindowView: View {
             ChannelWorkspaceView(viewModel: viewModel)
         } else if showArticulationsWorkspace {
             ArticulationsWorkspaceView(viewModel: viewModel)
+        } else if showOstinatoWorkspace {
+            OstinatoWorkspaceView(viewModel: viewModel)
         } else if showStageWorkspace {
             VStack(spacing: 0) {
                 StudioWorkspaceHeader(
@@ -728,7 +735,7 @@ public struct MainWindowView: View {
             .help("Toggle Workspace Navigation")
 
             Toggle(isOn: Binding(
-                get: { viewModel.showPianoRoll && !showStageWorkspace && !showChannelWorkspace && !showInstrumentWorkspace },
+                get: { viewModel.showPianoRoll && !showStageWorkspace && !showChannelWorkspace && !showInstrumentWorkspace && !showOstinatoWorkspace },
                 set: { enabled in
                     if enabled { selectWorkspace("Piano Roll") }
                     else { viewModel.showPianoRoll = false }
@@ -739,7 +746,7 @@ public struct MainWindowView: View {
             .help("Toggle MIDI Editor Panel")
             
             Toggle(isOn: Binding(
-                get: { viewModel.showMixer && !showStageWorkspace && !showChannelWorkspace && !showInstrumentWorkspace },
+                get: { viewModel.showMixer && !showStageWorkspace && !showChannelWorkspace && !showInstrumentWorkspace && !showOstinatoWorkspace },
                 set: { enabled in
                     if enabled { selectWorkspace("Mixer") }
                     else { viewModel.showMixer = false }

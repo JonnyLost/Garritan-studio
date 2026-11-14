@@ -531,6 +531,50 @@ public final class ProjectViewModel: ObservableObject {
         reorderTrack(from: sourceIndex, to: destinationIndex)
     }
 
+    // MARK: - Ostinato Patterns
+
+    /// Keep pattern definitions separate from the ordinary MIDI clips they generate.
+    /// These edits are persisted with the project; generated clips use the existing
+    /// track undo action and can be modified freely in the Piano Roll.
+    public func saveOstinatoPattern(_ pattern: OstinatoPattern) {
+        var patterns = project.ostinatoPatterns ?? []
+        if let index = patterns.firstIndex(where: { $0.id == pattern.id }) {
+            patterns[index] = pattern
+        } else {
+            patterns.append(pattern)
+        }
+        project.ostinatoPatterns = patterns
+        project.modifiedAt = Date()
+    }
+
+    public func deleteOstinatoPattern(id: UUID) {
+        project.ostinatoPatterns?.removeAll { $0.id == id }
+        project.modifiedAt = Date()
+    }
+
+    @discardableResult
+    public func applyOstinatoPattern(
+        _ pattern: OstinatoPattern,
+        to trackID: TrackID,
+        atBeat beat: Double
+    ) -> Bool {
+        guard var track = project.track(withID: trackID),
+              track.type == .midi || track.type == .instrument,
+              let clip = OstinatoRenderer.makeClip(
+                  pattern: pattern,
+                  atBeat: beat,
+                  tempo: project.tempo.bpm,
+                  sampleRate: project.sampleRate
+              ) else { return false }
+
+        var generatedClip = clip
+        generatedClip.color = track.color
+        track.clips.append(generatedClip)
+        updateTrack(track, description: "Apply Ostinato Pattern")
+        selectedClipIDs = [generatedClip.id]
+        return true
+    }
+
     // MARK: - Clip Management
     
     /// Create a new MIDI clip on a track

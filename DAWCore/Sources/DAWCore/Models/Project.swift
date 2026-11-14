@@ -25,6 +25,10 @@ public struct Project: Identifiable, Codable, Sendable {
     // V-Rack (multi-timbral instrument hosting)
     public var vRack: VRack
 
+    // Editable patterns remain independent from generated MIDI clips.
+    // Optional to allow older projects to decode without this newer field.
+    public var ostinatoPatterns: [OstinatoPattern]?
+
     // Markers
     public var markers: [Marker]
     
@@ -67,6 +71,7 @@ public struct Project: Identifiable, Codable, Sendable {
             color: .gray
         )
         self.vRack = VRack()
+        self.ostinatoPatterns = []
         self.markers = []
         self.loopRegion = nil
         self.isLoopEnabled = false
