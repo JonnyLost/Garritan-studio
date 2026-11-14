@@ -253,7 +253,7 @@ public final class RenderGraph {
     /// Convenience method for non-running graph usage. The backend calls the
     /// two stages separately to minimize hardware disruption.
     func loadInstrument(_ description: AudioComponentDescription, for trackID: TrackID) async throws -> AudioUnit {
-        let prepared = try await prepareInstrument(description)
+        let prepared = try await prepareInstrument(description, maximumFrames: UInt32(bufferSize))
         return try installInstrument(prepared, for: trackID)
     }
 
