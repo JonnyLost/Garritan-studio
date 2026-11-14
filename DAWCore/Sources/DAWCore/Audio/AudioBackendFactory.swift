@@ -38,13 +38,13 @@ public enum AudioBackendFactory {
     
     /// Get a human-readable name for the current backend
     public static var currentBackendName: String {
-        useCoreAudioBackend ? "Core Audio (Professional)" : "AVAudioEngine (Legacy)"
+        useCoreAudioBackend ? "Core Audio (Experimental)" : "AVAudioEngine (Studio Default)"
     }
     
     /// Get a description of the current backend
     public static var currentBackendDescription: String {
         if useCoreAudioBackend {
-            return "Professional-grade audio engine with sample-accurate timing, direct AudioUnit hosting, and offline bounce support."
+            return "Experimental native Core Audio backend. Not yet validated for real-time disk streaming or full Audio Unit sessions; use the default engine for dependable composing."
         } else {
             return "Standard audio engine using Apple's AVAudioEngine framework. Good for general use."
         }
