@@ -15,7 +15,7 @@ final class NativeMicrophoneAuditionGraphDiagnosticsTests: XCTestCase {
         }
         let engine = AVAudioEngine()
         let format = try XCTUnwrap(
-            AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 2)
+            AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2)
         )
         let player = AVAudioPlayerNode()
         let capture = AVAudioUnitEffect(audioComponentDescription: shared
