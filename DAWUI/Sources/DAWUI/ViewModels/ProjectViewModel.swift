@@ -175,6 +175,9 @@ public final class ProjectViewModel: ObservableObject {
     }
     
     private func handleLiveMIDIEvent(_ event: IncomingMIDIEvent) {
+        // Live keyboard/CC activity must not alter a stem's voices while a
+        // deterministic project snapshot is being recorded.
+        guard !isStudioExporting else { return }
         // Capture only a physical/virtual CoreMIDI CC from the normal input
         // stream. A learned assignment does not depend on the track being
         // record-armed, but normal MIDI playthrough still follows arm state.
@@ -324,7 +327,7 @@ public final class ProjectViewModel: ObservableObject {
     private func handleTransportEvent(_ event: TransportEvent) {
         switch event {
         case .record:
-            startRecording()
+            if !isStudioExporting { startRecording() }
         case .stopRecording:
             stopRecording()
         case .play:
