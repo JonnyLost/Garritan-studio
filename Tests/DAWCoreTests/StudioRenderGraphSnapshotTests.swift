@@ -1,5 +1,6 @@
 import XCTest
 import AudioToolbox
+import AVFoundation
 @testable import DAWCore
 
 /// No audio hardware is needed: topology snapshots are prepared on the
@@ -277,6 +278,50 @@ final class StudioRenderGraphSnapshotTests: XCTestCase {
         }
         XCTAssertTrue(delivered)
         XCTAssertTrue(scheduler.isEmpty)
+    }
+
+    /// Runs only during the consolidated native Mac integration milestone:
+    /// STUDIO_RUN_AU_SWAP_TESTS=1 swift test --filter StudioRenderGraphSnapshotTests
+    /// Verifies two real Apple AU sampler owners can be published successively
+    /// without an audio-output unit or the legacy AVAudioEngine backend.
+    func testRealAppleSamplerHotSwapWhenEnabled() async throws {
+        guard ProcessInfo.processInfo.environment["STUDIO_RUN_AU_SWAP_TESTS"] == "1" else {
+            throw XCTSkip("Enable on a Mac with Apple Audio Units for hardware-free AU hot-swap integration")
+        }
+        var description = AudioComponentDescription(
+            componentType: kAudioUnitType_MusicDevice,
+            componentSubType: kAudioUnitSubType_Sampler,
+            componentManufacturer: kAudioUnitManufacturer_Apple,
+            componentFlags: 0,
+            componentFlagsMask: 0
+        )
+        guard AudioComponentFindNext(nil, &description) != nil else {
+            throw XCTSkip("Apple sampler Audio Unit not installed on this Mac")
+        }
+        let graph = RenderGraph(sampleRate: 44_100, bufferSize: 512)
+        let id = TrackID()
+        graph.createTrack(id: id)
+
+        let firstToken = try graph.beginInstrumentReplacement(for: id)
+        let first = try await graph.prepareInstrument(description, maximumFrames: 512)
+        let firstUnit = try graph.installInstrument(
+            first, for: id, expectedRequestID: firstToken
+        )
+        let firstProcessing = try XCTUnwrap(graph.publishedProcessingIdentity(for: id))
+        let firstGeneration = graph.renderSnapshotGeneration
+
+        let secondToken = try graph.beginInstrumentReplacement(for: id)
+        let second = try await graph.prepareInstrument(description, maximumFrames: 512)
+        let secondUnit = try graph.installInstrument(
+            second, for: id, expectedRequestID: secondToken
+        )
+        XCTAssertNotEqual(firstUnit, secondUnit)
+        XCTAssertEqual(graph.getInstrumentUnit(for: id), secondUnit)
+        XCTAssertNotEqual(graph.publishedProcessingIdentity(for: id), firstProcessing)
+        XCTAssertEqual(graph.renderSnapshotGeneration, firstGeneration + 1)
+        XCTAssertThrowsError(try graph.validateInstrumentReplacement(
+            for: id, requestID: firstToken
+        ))
     }
 
 }
