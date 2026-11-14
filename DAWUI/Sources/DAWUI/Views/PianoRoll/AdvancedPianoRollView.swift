@@ -339,6 +339,47 @@ public struct AdvancedPianoRollView: View {
                 default: return .ignored
                 }
             }
+            // Delete, Escape, and precision MIDI note nudging mirror the
+            // track piano roll. Command is reserved for editing shortcuts.
+            let isDeleteKey = keyPress.key == .delete ||
+                              keyPress.key == .deleteForward ||
+                              keyPress.characters == "\u{7F}" ||
+                              keyPress.characters == "\u{08}"
+            if isDeleteKey, !selectedNoteIDs.isEmpty {
+                deleteSelected()
+                return .handled
+            }
+            if keyPress.key == .escape {
+                selectedNoteIDs.removeAll()
+                return .handled
+            }
+            if !keyPress.modifiers.contains(.command) &&
+               !keyPress.modifiers.contains(.control) &&
+               !keyPress.modifiers.contains(.option) {
+                let larger = keyPress.modifiers.contains(.shift)
+                let beatStep = snapMode.division(
+                    for: viewModel.transportState.timeSignature)
+                let step = beatStep > 0 ? beatStep : 0.125
+                let horizontal = larger
+                    ? StudioMusicalGrid.beatsPerBar(viewModel.transportState.timeSignature)
+                    : step
+                switch keyPress.key {
+                case .leftArrow:
+                    nudgeSelectedNotes(beats: -horizontal)
+                    return selectedNoteIDs.isEmpty ? .ignored : .handled
+                case .rightArrow:
+                    nudgeSelectedNotes(beats: horizontal)
+                    return selectedNoteIDs.isEmpty ? .ignored : .handled
+                case .upArrow:
+                    nudgeSelectedNotes(semitones: larger ? 12 : 1)
+                    return selectedNoteIDs.isEmpty ? .ignored : .handled
+                case .downArrow:
+                    nudgeSelectedNotes(semitones: larger ? -12 : -1)
+                    return selectedNoteIDs.isEmpty ? .ignored : .handled
+                default:
+                    break
+                }
+            }
             // Tool shortcuts (when no modifier keys are held)
             switch keyPress.characters.lowercased() {
             case "a":
@@ -1119,6 +1160,22 @@ public struct AdvancedPianoRollView: View {
         selectedNoteIDs = Set(noteEvents.map { $0.id })
     }
     
+    /// One key press is one undoable change. Existing unsnapped offsets
+    /// and selected-note articulation IDs are retained automatically.
+    private func nudgeSelectedNotes(beats: Double = 0, semitones: Int = 0) {
+        guard !selectedNoteIDs.isEmpty, var clip = currentClip,
+              case .midi(var midi) = clip.content else { return }
+        let edited = StudioMIDINoteEditing.nudging(
+            midi.events, selectedIDs: selectedNoteIDs,
+            beatDelta: beats, pitchDelta: semitones)
+        guard StudioMIDINoteEditing.hasPitchOrTimingChanges(
+            before: midi.events, after: edited) else { return }
+        midi.events = edited
+        clip.content = .midi(midi)
+        updateClip(extendingClip(clip, toInclude: selectedNoteIDs),
+                   description: "Nudge MIDI Notes")
+    }
+
     private func deleteSelected() {
         guard !selectedNoteIDs.isEmpty,
               var clip = currentClip, case .midi(var midiData) = clip.content else { return }
