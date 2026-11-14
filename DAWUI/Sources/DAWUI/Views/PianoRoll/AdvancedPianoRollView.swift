@@ -84,6 +84,9 @@ public enum CCType: Int, CaseIterable, Identifiable {
     case breath = 2
     case foot = 4
     case volume = 7
+    case blend1 = 30
+    case blend2 = 31
+    case blend3 = 32
     case pan = 10
     case expression = 11
     case sustain = 64
@@ -91,6 +94,8 @@ public enum CCType: Int, CaseIterable, Identifiable {
     case sostenuto = 66
     case soft = 67
     case legato = 68
+    case autoLegato = 102
+    case expressionMode = 104
     case resonance = 71
     case release = 72
     case attack = 73
@@ -106,6 +111,9 @@ public enum CCType: Int, CaseIterable, Identifiable {
         case .breath: return "CC2 Breath"
         case .foot: return "CC4 Foot"
         case .volume: return "CC7 Volume"
+        case .blend1: return "CC30 IO Blend 1"
+        case .blend2: return "CC31 IO Blend 2"
+        case .blend3: return "CC32 IO Blend 3"
         case .pan: return "CC10 Pan"
         case .expression: return "CC11 Expression"
         case .sustain: return "CC64 Sustain"
@@ -113,6 +121,8 @@ public enum CCType: Int, CaseIterable, Identifiable {
         case .sostenuto: return "Sostenuto"
         case .soft: return "Soft Pedal"
         case .legato: return "CC68 Legato"
+        case .autoLegato: return "CC102 GPO Auto-Legato"
+        case .expressionMode: return "CC104 IO GM/GPO Mode"
         case .resonance: return "Resonance"
         case .release: return "Release"
         case .attack: return "Attack"
