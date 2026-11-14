@@ -67,12 +67,26 @@ final class VRackMicrophoneRoutingTests: XCTestCase {
                 ),
                 pattern: .omnidirectional
             )
-            mic.mixerSettings = StudioMicrophoneChannelSettings(level: 0)
+            mic.mixerSettings = StudioMicrophoneChannelSettings(level: 1)
             studio.setMicrophoneRoomWetLevel(0)
             try studio.setMicrophoneAuditionEnabled(
                 true, tracks: [], microphones: [mic], room: room
             )
             XCTAssertTrue(studio.isMicrophoneAuditionActive)
+            let rackConnections = engine.outputConnectionPoints(
+                for: rackSum, outputBus: 0
+            )
+            XCTAssertEqual(rackConnections.count, 2,
+                           "Rack sum must feed monitor plus one mic capture")
+            let captureNode = rackConnections.compactMap {
+                $0.node as? AVAudioUnitEffect
+            }.first
+            XCTAssertNotNil(captureNode, "Rack sum must connect to the mic AU")
+            if let captureNode {
+                XCTAssertFalse(engine.outputConnectionPoints(
+                    for: captureNode, outputBus: 0
+                ).isEmpty, "Mic AU must connect to a mic channel")
+            }
 
             // AudioEngine prepares its device graph during initialization.
             // Offline rendering may only be enabled after a full stop.
@@ -84,19 +98,28 @@ final class VRackMicrophoneRoutingTests: XCTestCase {
             let input = try makeInput(format)
             player.scheduleBuffer(input, at: nil, options: [.loops])
             player.play()
+            let initialMicPeak = try renderPeak(engine)
+            XCTAssertGreaterThan(initialMicPeak, 0.01,
+                "The V-Rack microphone must sound on initial graph construction")
+
+            // Mute only the microphone channel; if rack dry monitoring
+            // leaked into audition, a signal would remain.
+            mic.mixerSettings = StudioMicrophoneChannelSettings(level: 0)
+            studio.refreshMicrophoneRouting(
+                tracks: [], microphones: [mic], room: room
+            )
             let mutedPeak = try renderPeak(engine)
             XCTAssertLessThan(mutedPeak, 0.0001,
                 "Audition must not double a direct V-Rack signal")
 
-            // Unmute only the synthetic microphone channel, without
-            // reopening the original V-Rack direct-monitor path.
+            // Restore the channel live without reopening rack direct monitoring.
             mic.mixerSettings = StudioMicrophoneChannelSettings(level: 1)
             studio.refreshMicrophoneRouting(
                 tracks: [], microphones: [mic], room: room
             )
             let audibleMicPeak = try renderPeak(engine)
             XCTAssertGreaterThan(audibleMicPeak, 0.01,
-                "The V-Rack aggregate must actually reach the microphone channel")
+                "The V-Rack microphone must remain audible after unmuting")
             engine.stop()
             player.stop()
 
