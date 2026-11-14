@@ -163,21 +163,16 @@ public final class OfflineBounce {
             memset(leftBuffer, 0, Int(framesToRender) * MemoryLayout<Float>.size)
             memset(rightBuffer, 0, Int(framesToRender) * MemoryLayout<Float>.size)
             
-            // Render MIDI
-            midiScheduler.processEvents(
-                startSample: currentSample,
-                endSample: currentSample + Int64(framesToRender),
-                renderGraph: renderGraph
-            )
-            
             // All borrowed buffer pointers stay inside one synchronous scope.
             // This avoids writing a second AudioBuffer header past Swift's
             // single-buffer AudioBufferList layout.
             let writeStatus: OSStatus = withUnsafeMutablePointer(to: &stereoList) { stereoPointer in
                 stereoPointer.withMemoryRebound(to: AudioBufferList.self, capacity: 1) { bufferList in
-                    renderGraph.render(
+                    renderGraph.renderWithScheduledMIDI(
+                        scheduler: midiScheduler,
+                        startSample: currentSample,
+                        endSample: currentSample + Int64(framesToRender),
                         frameCount: framesToRender,
-                        currentSample: currentSample,
                         outputBuffer: bufferList
                     )
                     audioClipRenderer.renderOffline(
