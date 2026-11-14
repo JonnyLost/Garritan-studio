@@ -1806,97 +1806,73 @@ public final class PlaybackEngine: ObservableObject {
                 print("[PlaybackEngine] Track '\(track.name)' uses track instrument → CORE AUDIO path")
             }
             
+            // Compile one ordered, seek-aware MIDI stream per track. This
+            // restores the last articulation/controller states without ever
+            // replaying musical notes from before the playhead.
+            let midiSession = StudioMIDISessionPlanner.events(
+                for: track, tempo: tempo, from: playbackStartBeat)
+            for entry in midiSession {
+                let event = entry.event
+                if routesToVRack, let info = vRackInfo {
+                    localScheduledMIDIEvents.append(ScheduledEvent(
+                        trackID: track.id,
+                        clipID: entry.clipID,
+                        absoluteBeat: entry.absoluteBeat,
+                        event: event,
+                        midiOutput: .rackInstrument(id: info.rackID, channel: info.channel)
+                    ))
+                } else {
+                    let samplePos = Int64((entry.absoluteBeat / tempo) * 60.0 * sampleRate)
+                    switch event.type {
+                    case .note(let noteData):
+                        coreAudioMIDIEvents.append(.noteOn(
+                            trackID: track.id, samplePosition: samplePos,
+                            note: noteData.pitch, velocity: noteData.velocity,
+                            channel: event.channel))
+                        let durationSamples = max(1, Int64(
+                            (noteData.duration / tempo) * 60.0 * sampleRate))
+                        coreAudioMIDIEvents.append(.noteOff(
+                            trackID: track.id,
+                            samplePosition: samplePos + durationSamples,
+                            note: noteData.pitch, channel: event.channel))
+                    case .controlChange(let cc, let value):
+                        coreAudioMIDIEvents.append(.controlChange(
+                            trackID: track.id, samplePosition: samplePos,
+                            controller: cc, value: value, channel: event.channel))
+                    case .programChange(let program):
+                        coreAudioMIDIEvents.append(ScheduledMIDIEvent(
+                            trackID: track.id, samplePosition: samplePos,
+                            status: 0xC0 | (event.channel & 0x0F),
+                            data1: program, data2: 0, channel: event.channel))
+                    case .pitchBend(let value):
+                        let bend = UInt16(clamping: Int(value) + 8192)
+                        coreAudioMIDIEvents.append(ScheduledMIDIEvent(
+                            trackID: track.id, samplePosition: samplePos,
+                            status: 0xE0 | (event.channel & 0x0F),
+                            data1: UInt8(bend & 0x7F),
+                            data2: UInt8((bend >> 7) & 0x7F),
+                            channel: event.channel))
+                    case .aftertouch(let pressure):
+                        coreAudioMIDIEvents.append(ScheduledMIDIEvent(
+                            trackID: track.id, samplePosition: samplePos,
+                            status: 0xD0 | (event.channel & 0x0F),
+                            data1: pressure, data2: 0, channel: event.channel))
+                    case .polyAftertouch(let note, let pressure):
+                        coreAudioMIDIEvents.append(ScheduledMIDIEvent(
+                            trackID: track.id, samplePosition: samplePos,
+                            status: 0xA0 | (event.channel & 0x0F),
+                            data1: note, data2: pressure, channel: event.channel))
+                    case .sysex:
+                        break
+                    }
+                }
+            }
             for clip in track.clips {
                 guard !clip.isMuted else { continue }
-                
-                switch clip.content {
-                case .midi(let midiData):
-                    let clipStartBeat = clip.timeRange.start.beats(atTempo: tempo)
-                    let clipEndBeat = clip.timeRange.end.beats(atTempo: tempo)
-                    
-                    for event in StudioArticulationRenderer.events(for: midiData, map: track.articulationMap) {
-                        // Use the same channel filter as live MIDI playthrough.
-                        guard track.acceptsMIDIChannel(event.channel) else { continue }
-                        let absoluteBeat = clipStartBeat + event.beatPosition
-                        guard absoluteBeat >= clipStartBeat && absoluteBeat < clipEndBeat else { continue }
-                        
-                        if routesToVRack, let info = vRackInfo {
-                            // V-RACK: Use legacy scheduling (will be processed via AVAudioEngine)
-                            let scheduledEvent = ScheduledEvent(
-                                trackID: track.id,
-                                clipID: clip.id,
-                                absoluteBeat: absoluteBeat,
-                                event: event,
-                                midiOutput: .rackInstrument(id: info.rackID, channel: info.channel)
-                            )
-                            localScheduledMIDIEvents.append(scheduledEvent)
-                        } else {
-                            // CORE AUDIO: Schedule to backend
-                            let samplePos = Int64((absoluteBeat / tempo) * 60.0 * sampleRate)
-                            
-                            switch event.type {
-                            case .note(let noteData):
-                                let noteOn = ScheduledMIDIEvent.noteOn(
-                                    trackID: track.id,
-                                    samplePosition: samplePos,
-                                    note: noteData.pitch,
-                                    velocity: noteData.velocity,
-                                    channel: event.channel
-                                )
-                                coreAudioMIDIEvents.append(noteOn)
-                                
-                                let durationSamples = Int64((noteData.duration / tempo) * 60.0 * sampleRate)
-                                let noteOff = ScheduledMIDIEvent.noteOff(
-                                    trackID: track.id,
-                                    samplePosition: samplePos + durationSamples,
-                                    note: noteData.pitch,
-                                    channel: event.channel
-                                )
-                                coreAudioMIDIEvents.append(noteOff)
-                                
-                            case .controlChange(let cc, let value):
-                                let ccEvent = ScheduledMIDIEvent.controlChange(
-                                    trackID: track.id,
-                                    samplePosition: samplePos,
-                                    controller: cc,
-                                    value: value,
-                                    channel: event.channel
-                                )
-                                coreAudioMIDIEvents.append(ccEvent)
-
-                            case .programChange(let program):
-                                coreAudioMIDIEvents.append(ScheduledMIDIEvent(
-                                    trackID: track.id, samplePosition: samplePos,
-                                    status: 0xC0 | (event.channel & 0x0F),
-                                    data1: program, data2: 0, channel: event.channel
-                                ))
-
-                            case .pitchBend(let value):
-                                let bend = UInt16(clamping: Int(value) + 8192)
-                                coreAudioMIDIEvents.append(ScheduledMIDIEvent(
-                                    trackID: track.id, samplePosition: samplePos,
-                                    status: 0xE0 | (event.channel & 0x0F),
-                                    data1: UInt8(bend & 0x7F),
-                                    data2: UInt8((bend >> 7) & 0x7F),
-                                    channel: event.channel
-                                ))
-                                
-                            default:
-                                break
-                            }
-                        }
-                    }
-                    print("[PlaybackEngine] Collected \(midiData.events.count) MIDI events from '\(clip.name)'")
-                    
-                case .audio(let audioData):
-                    // HYBRID MODE: Audio clips go through AVAudioEngine (same path as V-Rack)
-                    // This ensures audio clips and V-Rack instruments stay in sync
-                    // since they both play through AVAudioEngine's output
-                    prepareAudioClipWithAVAudioPlayer(audioData, clip: clip, track: track, project: project)
-                    print("[PlaybackEngine] Prepared audio clip '\(clip.name)' for HYBRID playback")
-                    
-                case .empty:
-                    break
+                if case .audio(let audioData) = clip.content {
+                    // Audio clip scheduling is unchanged by MIDI state reconstruction.
+                    prepareAudioClipWithAVAudioPlayer(
+                        audioData, clip: clip, track: track, project: project)
                 }
             }
         }
@@ -1904,13 +1880,32 @@ public final class PlaybackEngine: ObservableObject {
         // HYBRID SCHEDULING:
         
         // 1. Sort and schedule Core Audio events
-        coreAudioMIDIEvents.sort { $0.samplePosition < $1.samplePosition }
+        // Stable same-sample order: note-off, controller/program/bend,
+        // then note-on. Within one class retain the compiled MIDI order,
+        // including keyswitches placed before the corresponding notes.
+        coreAudioMIDIEvents = coreAudioMIDIEvents.enumerated().sorted { lhs, rhs in
+            if lhs.element.samplePosition != rhs.element.samplePosition {
+                return lhs.element.samplePosition < rhs.element.samplePosition
+            }
+            let lp = StudioMIDITransportOrder.priority(
+                status: lhs.element.status, data2: lhs.element.data2)
+            let rp = StudioMIDITransportOrder.priority(
+                status: rhs.element.status, data2: rhs.element.data2)
+            return lp == rp ? lhs.offset < rhs.offset : lp < rp
+        }.map(\.element)
         for event in coreAudioMIDIEvents {
             backend.scheduleMIDIEvent(event)
         }
         
         // 2. Sort legacy V-Rack events by beat position
-        localScheduledMIDIEvents.sort { $0.absoluteBeat < $1.absoluteBeat }
+        // Preserves planner order for simultaneous switches and notes.
+        localScheduledMIDIEvents = localScheduledMIDIEvents.enumerated().sorted {
+            lhs, rhs in
+            if lhs.element.absoluteBeat != rhs.element.absoluteBeat {
+                return lhs.element.absoluteBeat < rhs.element.absoluteBeat
+            }
+            return lhs.offset < rhs.offset
+        }.map(\.element)
         
         // 3. Atomically assign to the shared state (thread-safe)
         midiProcessingQueue.sync {
