@@ -392,25 +392,47 @@ public final class CoreAudioBackend: AudioBackend {
         _ description: AudioComponentDescription,
         for trackID: TrackID
     ) async throws -> AudioUnit {
-        // The new AU is isolated from the active graph until preparation ends.
-        // The hardware drain now covers only the synchronous owner swap.
-        // Capture configuration under the same control gate used by resize.
-        // A stale prepared AU is rejected instead of installing with the
-        // wrong maximum render slice after a concurrent buffer-size change.
-        let preparedFrames = controlGate.perform { _bufferSize }
+        // The control gate is held only for short, non-suspending operations.
+        // A new unique ticket prevents out-of-order AU instantiation from
+        // replacing a newer selection or a newly recreated track.
+        let (preparedFrames, requestID) = try controlGate.perform { () throws -> (UInt32, UInt64) in
+            try controlGate.ensureMutationAvailable()
+            let request = try renderGraph.beginInstrumentReplacement(for: trackID)
+            return (_bufferSize, request)
+        }
+
+        // AUv2/AUv3 instantiation, stream configuration and resource
+        // allocation take place while existing hardware playback continues.
         let prepared = try await renderGraph.prepareInstrument(
             description, maximumFrames: preparedFrames
         )
-        return try withDrainedOutputResult {
-            guard _bufferSize == preparedFrames else {
+
+        // Publish the prepared, independently-owned AU at an atomic snapshot
+        // boundary. Existing callbacks complete on the old AU; the next
+        // callback uses the new route and MIDI destination.
+        return try controlGate.perform { () throws -> AudioUnit in
+            try controlGate.ensureMutationAvailable()
+            try renderGraph.validateInstrumentReplacement(
+                for: trackID, requestID: requestID
+            )
+            guard preparedFrames == _bufferSize else {
                 throw AudioBackendError.configurationError(
-                    "Audio buffer size changed during instrument preparation; retry load"
+                    "Hardware buffer size changed while loading instrument; retry"
                 )
             }
-            return try renderGraph.installInstrument(prepared, for: trackID)
+            // Bound retired snapshots on portable Macs. Only in this rare
+            // backlog case do we drain the output to reclaim resources.
+            if renderGraph.pendingRouteRetirementCount >= 48 {
+                try withDrainedOutputResult {
+                    renderGraph.reclaimRetiredRoutesWhileQuiescent()
+                }
+            }
+            return try renderGraph.installInstrument(
+                prepared, for: trackID, expectedRequestID: requestID
+            )
         }
     }
-    
+
     public func loadEffect(
         _ description: AudioComponentDescription,
         for trackID: TrackID,
