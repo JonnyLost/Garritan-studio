@@ -1696,24 +1696,44 @@ public final class PlaybackEngine: ObservableObject {
     
     // MARK: - Event Scheduling
     
+    /// Refresh a track's automation snapshot whenever its points or
+    /// enablement change, even while the transport is running. Never parse
+    /// project JSON or inspect SwiftUI state from an audio callback.
+    public func updateSynthAutomation(for track: Track) {
+        let oldIDs = Set((synthAutomationLanes[track.id] ?? []).map(\.id))
+        var lanes: [AutomationLane] = []
+        if track.studioSynthEnabled == true, let patch = track.studioSynthPatch {
+            lanes = track.automationLanes.filter { lane in
+                guard lane.isEnabled, !lane.points.isEmpty,
+                      case .studioSynth(let id, let destination) =
+                        lane.parameter else { return false }
+                return destination.isContinuouslyModulatable &&
+                    patch.layers.contains {
+                        $0.id == id && $0.enabled &&
+                        $0.engine == destination.engine
+                    }
+            }
+        }
+        if lanes.isEmpty {
+            synthAutomationLanes.removeValue(forKey: track.id)
+        } else {
+            synthAutomationLanes[track.id] = lanes
+        }
+        // If a lane is deleted or disabled mid-play, the transport must
+        // release its temporary DSP override immediately.
+        if !oldIDs.isSubset(of: Set(lanes.map(\.id))),
+           let instrument = trackInstruments[track.id],
+           case .studioSynth(let synth) = instrument {
+            synth.clearAutomation()
+        }
+    }
+
     /// Prepare all clips for playback
     public func prepareForPlayback(project: Project) {
-        synthAutomationLanes = Dictionary(uniqueKeysWithValues:
-            project.tracks.compactMap { track -> (TrackID, [AutomationLane])? in
-                guard track.studioSynthEnabled == true,
-                      let patch = track.studioSynthPatch else { return nil }
-                let lanes = track.automationLanes.filter { lane in
-                    guard lane.isEnabled, !lane.points.isEmpty,
-                          case .studioSynth(let id, let destination) =
-                            lane.parameter else { return false }
-                    return destination.isContinuouslyModulatable &&
-                        patch.layers.contains {
-                            $0.id == id && $0.enabled &&
-                            $0.engine == destination.engine
-                        }
-                }
-                return lanes.isEmpty ? nil : (track.id, lanes)
-            })
+        synthAutomationLanes.removeAll()
+        for track in project.tracks {
+            updateSynthAutomation(for: track)
+        }
         // Core Audio backend path
         if let backend = coreAudioBackend {
             prepareForPlaybackCoreAudio(project: project, backend: backend)
