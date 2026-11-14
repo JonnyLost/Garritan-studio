@@ -55,6 +55,14 @@ final class NativeMicrophoneSpillProcessorTests: XCTestCase {
         XCTAssertEqual(whole, chunks)
     }
 
+    func testFractionalSampleDelayInterpolateWithoutChangingPolarity() {
+        let halfFrame = 0.5 * 1000.0 / rate
+        let samples = impulse(gain: -1, delayMs: Float(halfFrame))
+        XCTAssertEqual(samples[0], -0.5, accuracy: 0.0001)
+        XCTAssertEqual(samples[1], -0.5, accuracy: 0.0001)
+        XCTAssertTrue(samples.dropFirst(2).allSatisfy { abs($0) < 1.0e-6 })
+    }
+
     func testMutedSourceDoesNotLeakIntoMicrophone() {
         let muted = impulse(gain: 0, delayMs: 12)
         XCTAssertTrue(muted.allSatisfy { $0 == 0 })
@@ -126,6 +134,43 @@ final class StudioMicrophoneMixerStateTests: XCTestCase {
         )
         XCTAssertNil(old.mixerSettings)
         XCTAssertEqual(old.mixer.safeLevel, 0.65, accuracy: 0.0001)
+    }
+
+    func testMicrophoneAlignmentPersistsWithoutBreakingLegacyProjects() throws {
+        var microphone = StudioVirtualMicrophone()
+        microphone.mixerSettings = StudioMicrophoneChannelSettings(
+            alignmentMilliseconds: -4.5
+        )
+        let encoded = try JSONEncoder().encode(microphone)
+        let restored = try JSONDecoder().decode(
+            StudioVirtualMicrophone.self, from: encoded
+        )
+        XCTAssertEqual(restored.mixer.safeAlignmentMilliseconds,
+                       -4.5, accuracy: 0.0001)
+
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        var mixer = try XCTUnwrap(object["mixerSettings"] as? [String: Any])
+        mixer.removeValue(forKey: "alignmentMilliseconds")
+        object["mixerSettings"] = mixer
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+        let legacy = try JSONDecoder().decode(
+            StudioVirtualMicrophone.self, from: legacyData
+        )
+        XCTAssertEqual(legacy.mixer.safeAlignmentMilliseconds, 0)
+    }
+
+    func testManualAlignmentIsBoundedAndFinite() {
+        XCTAssertEqual(StudioMicrophoneChannelSettings(
+            alignmentMilliseconds: .nan
+        ).safeAlignmentMilliseconds, 0)
+        XCTAssertEqual(StudioMicrophoneChannelSettings(
+            alignmentMilliseconds: 100
+        ).safeAlignmentMilliseconds, 20)
+        XCTAssertEqual(StudioMicrophoneChannelSettings(
+            alignmentMilliseconds: -100
+        ).safeAlignmentMilliseconds, -20)
     }
 
     func testPanDefaultsReflectRealMicArrays() {
