@@ -95,9 +95,18 @@ struct StudioArticulationMapEditor: View {
                 if case .ready(let factory) = factoryResolution {
                     Button("Load GPO5 Factory") {
                         draft = factory
-                        libraryMessage = "Loaded Standard-set map from the GPO5 owner’s manual. Apply to track to use it."
+                        libraryMessage = "Loaded verified Standard-set keyswitches for this exact GPO5 bank path."
                     }
-                    .help("Replace this draft with the exact verified GPO5 Standard keyswitch mapping")
+                    .help("Replace this draft with the verified GPO5 Standard keyswitch mapping")
+                }
+                if let notation = StudioGarritanArticulationFactory.notationTemplate(
+                    programID: garritanProgramID
+                ) {
+                    Button("Prepare Notation Map…") {
+                        draft = notation
+                        libraryMessage = "Notation articulation names loaded with NO MIDI triggers. Enter the actual keyswitch notes from your Notation ARIA patch before saving; the Standard octaves cannot be assumed."
+                    }
+                    .help("Prepare an unarmed Notation template for manually verified note assignments")
                 }
                 Button("Duplicate Map") {
                     // Keep articulation IDs, but give this instrument its own
