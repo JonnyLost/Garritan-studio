@@ -96,6 +96,8 @@ public final class AudioEngine: ObservableObject {
     
     // Timing tap installed flag
     private var timingTapInstalled = false
+    private var exportCapture: BufferedAudioCapture?
+
     private let realtimeSamplePosition = RealtimeSamplePosition()
     private var timingPositionUITimer: Timer?
     
@@ -660,6 +662,104 @@ public final class AudioEngine: ObservableObject {
         samplePositionSubject.send(position)
     }
     
+    // MARK: - Master Mixdown Capture
+
+    public struct MixdownCaptureResult: Sendable {
+        public let writtenFrames: Int64
+        public let droppedFrames: UInt64
+        public let writeError: String?
+        public var succeeded: Bool { droppedFrames == 0 && writeError == nil }
+    }
+
+    public enum MixdownError: Error, LocalizedError {
+        case busy
+        case unsupportedFormat
+
+        public var errorDescription: String? {
+            switch self {
+            case .busy: return "Stop playback before starting an export."
+            case .unsupportedFormat: return "The master mixer's audio format cannot be exported."
+            }
+        }
+    }
+
+    /// Temporarily replace the normal timing tap with a combined timing AND
+    /// stereo export tap. Two independent taps on mainMixer bus 0 would
+    /// displace the MIDI worker, causing missing instruments or sync drift.
+    /// The callback only pushes frames into the preallocated SPSC ring.
+    public func beginMixdownCapture(to url: URL, bitDepth: Int) throws {
+        guard !isPlaying, exportCapture == nil else { throw MixdownError.busy }
+        let format = masterMixer.outputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount == 2,
+              format.commonFormat == .pcmFormatFloat32,
+              bitDepth == 16 || bitDepth == 24 else {
+            throw MixdownError.unsupportedFormat
+        }
+        let settings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: format.sampleRate,
+            AVNumberOfChannelsKey: 2,
+            AVLinearPCMBitDepthKey: bitDepth,
+            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMIsBigEndianKey: false,
+            AVLinearPCMIsNonInterleaved: false
+        ]
+        let file = try AVAudioFile(
+            forWriting: url, settings: settings,
+            commonFormat: .pcmFormatFloat32, interleaved: false
+        )
+        let capture = try BufferedAudioCapture(file: file, sampleRate: format.sampleRate)
+        removeTimingTap()
+
+        let publishedPosition = realtimeSamplePosition
+        masterMixer.installTap(onBus: 0, bufferSize: bufferSize, format: format) {
+            [weak self] buffer, _ in
+            guard let self, self.isPlaying else { return }
+            let host = mach_absolute_time()
+            let elapsed = self.hostTimeToSamples(
+                from: self.playbackStartHostTime, to: host
+            )
+            let firstSample = self.playbackStartSamplePosition + elapsed
+            self.midiEventCallback?(firstSample, buffer.frameLength, self.currentTempo)
+            publishedPosition.publish(firstSample + Int64(buffer.frameLength))
+            capture.append(buffer)
+        }
+        exportCapture = capture
+    }
+
+    /// Stop the export tap before draining disk I/O, then reinstate normal
+    /// MIDI timing. No saved mix can be considered valid after ring overflow.
+    public func endMixdownCapture() -> MixdownCaptureResult? {
+        guard let capture = exportCapture else { return nil }
+        masterMixer.removeTap(onBus: 0)
+        exportCapture = nil
+        let done = capture.finish()
+        installTimingTap()
+        return MixdownCaptureResult(
+            writtenFrames: done.writtenFrames,
+            droppedFrames: done.droppedFrames,
+            writeError: done.writeError
+        )
+    }
+
+    /// Mute excludes both the dry channel and the pre-master hall send.
+    /// This is deliberately separate from the stored solo/mute flags.
+    public func applyExportIsolation(
+        selected: Set<TrackID>, tracks: [Track]
+    ) {
+        for track in tracks {
+            trackNodes[track.id]?.setMuted(
+                !selected.contains(track.id) || track.isMuted
+            )
+        }
+    }
+
+    /// Flush the shared reverb delay lines between distinct render passes.
+    /// Otherwise a previous stem's tail could appear in the next stem.
+    public func resetExportHallTail() {
+        concertHallReverb.auAudioUnit.reset()
+    }
+
     // MARK: - Timing Tap
     
     /// Install a tap on the main mixer to track sample position and trigger MIDI events
