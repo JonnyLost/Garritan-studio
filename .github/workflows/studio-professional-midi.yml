@@ -1,0 +1,35 @@
+name: Studio Professional MIDI Arrangement
+
+on:
+  push:
+    branches:
+      - feature/pro-midi-sequencer
+  pull_request:
+    branches:
+      - feature/studio-export-engine
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-midi-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  macos-midi-build:
+    name: Build and regression tests
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Report toolchain
+        run: |
+          sw_vers
+          swift --version
+      - name: Resolve dependencies
+        run: swift package resolve
+      - name: Build Studio
+        run: swift build
+      - name: Test Studio (including musical grid and editing)
+        run: swift test --parallel
