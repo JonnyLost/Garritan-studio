@@ -176,6 +176,16 @@ public final class RenderGraph {
         return body(snapshot)
     }
 
+    /// One output render frame at a time. An unexpected overlapping callback
+    /// leaves its already-cleared destination silent rather than invoking a
+    /// shared legacy effect/AU concurrently. This never blocks or spins.
+    private func withRenderFrame(_ body: (RenderSnapshot) -> Void) {
+        guard daw_route_exchange_try_enter_render(routeExchange) else { return }
+        defer { daw_route_exchange_leave_render(routeExchange) }
+        withRenderSnapshot(body)
+    }
+
+
     var renderSnapshotGeneration: UInt64 { latestSnapshot.generation }
     var renderSnapshotTrackIDs: [TrackID] { latestSnapshot.routes.map(\.id) }
     /// Test-only/introspection identity of the immutable resources retained
@@ -504,24 +514,31 @@ public final class RenderGraph {
     
     func sendMIDI(to trackID: TrackID, status: UInt8, data1: UInt8, data2: UInt8, sampleOffset: UInt32) {
         withRenderSnapshot { snapshot in
-        guard let track = snapshot.byID[trackID] else { return }
-
-        // Called by the real-time scheduler: never log or format strings here.
-        if let auAudioUnit = track.processing.auAudioUnit,
-           let scheduleMIDIEventBlock = auAudioUnit.scheduleMIDIEventBlock {
-            let midiData: [UInt8] = [status, data1, data2]
-            midiData.withUnsafeBufferPointer { buffer in
-                scheduleMIDIEventBlock(AUEventSampleTimeImmediate, 0, 3, buffer.baseAddress!)
-            }
-        } else if let unit = track.processing.instrumentUnit {
-            _ = MusicDeviceMIDIEvent(
-                unit, UInt32(status), UInt32(data1), UInt32(data2), sampleOffset
-            )
-        }
+            sendMIDI(to: trackID, status: status, data1: data1,
+                     data2: data2, sampleOffset: sampleOffset, in: snapshot)
         }
     }
 
-        func allNotesOff() {
+    private func sendMIDI(
+        to trackID: TrackID, status: UInt8, data1: UInt8,
+        data2: UInt8, sampleOffset: UInt32, in snapshot: RenderSnapshot
+    ) {
+        guard let processing = snapshot.byID[trackID]?.processing else { return }
+        if let au = processing.auAudioUnit,
+           let schedule = au.scheduleMIDIEventBlock {
+            var midi: (UInt8, UInt8, UInt8) = (status, data1, data2)
+            withUnsafeBytes(of: &midi) { bytes in
+                if let address = bytes.baseAddress?.assumingMemoryBound(to: UInt8.self) {
+                    schedule(AUEventSampleTimeImmediate, 0, 3, address)
+                }
+            }
+        } else if let unit = processing.instrumentUnit {
+            _ = MusicDeviceMIDIEvent(unit, UInt32(status),
+                                     UInt32(data1), UInt32(data2), sampleOffset)
+        }
+    }
+
+    func allNotesOff() {
         for track in tracks.values {
             guard let unit = track.processing.instrumentUnit else { continue }
             
@@ -548,7 +565,44 @@ public final class RenderGraph {
     
     /// Render all tracks and mix to output buffer
     /// Called from the audio thread - MUST be realtime safe
+    /// Existing direct graph rendering remains available to hardware-free
+    /// tests and exclusive offline paths. One callback/graph may render at a
+    /// time, avoiding non-reentrant effects during live AU replacement.
     func render(
+        frameCount: UInt32,
+        currentSample: Int64,
+        outputBuffer: UnsafeMutablePointer<AudioBufferList>
+    ) {
+        withRenderFrame { snapshot in
+            renderRoutes(snapshot: snapshot, frameCount: frameCount,
+                         currentSample: currentSample, outputBuffer: outputBuffer)
+        }
+    }
+
+    /// Pin a single immutable generation for BOTH scheduled MIDI and AU audio
+    /// within the current buffer. The live-published replacement becomes
+    /// visible on the next buffer boundary, never halfway through a buffer.
+    func renderWithScheduledMIDI(
+        scheduler: MIDIScheduler,
+        startSample: Int64,
+        endSample: Int64,
+        frameCount: UInt32,
+        outputBuffer: UnsafeMutablePointer<AudioBufferList>
+    ) {
+        withRenderFrame { snapshot in
+            _ = scheduler.processEvents(startSample: startSample, endSample: endSample) {
+                event, offset in
+                sendMIDI(to: event.trackID, status: event.status,
+                         data1: event.data1, data2: event.data2,
+                         sampleOffset: offset, in: snapshot)
+            }
+            renderRoutes(snapshot: snapshot, frameCount: frameCount,
+                         currentSample: startSample, outputBuffer: outputBuffer)
+        }
+    }
+
+    private func renderRoutes(
+        snapshot: RenderSnapshot,
         frameCount: UInt32,
         currentSample: Int64,
         outputBuffer: UnsafeMutablePointer<AudioBufferList>
@@ -561,7 +615,6 @@ public final class RenderGraph {
         
         guard let outL = outputLeft, let outR = outputRight else { return }
         
-        withRenderSnapshot { snapshot in
         for track in snapshot.routes {
             // Skip muted tracks (or non-soloed tracks when solo is active)
             if track.controls.isMuted { continue }
@@ -642,7 +695,6 @@ public final class RenderGraph {
                 outL[i] += bufferL[i] * leftGain
                 outR[i] += bufferR[i] * rightGain
             }
-        }
-        }
+         }
     }
 }
