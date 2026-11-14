@@ -168,13 +168,17 @@ public final class OfflineBounce {
             // single-buffer AudioBufferList layout.
             let writeStatus: OSStatus = withUnsafeMutablePointer(to: &stereoList) { stereoPointer in
                 stereoPointer.withMemoryRebound(to: AudioBufferList.self, capacity: 1) { bufferList in
-                    renderGraph.renderWithScheduledMIDI(
+                    guard renderGraph.renderWithScheduledMIDI(
                         scheduler: midiScheduler,
                         startSample: currentSample,
                         endSample: currentSample + Int64(framesToRender),
                         frameCount: framesToRender,
                         outputBuffer: bufferList
-                    )
+                    ) else {
+                        // Offline bounce must never emit a valid-looking WAV
+                        // when the graph is unexpectedly occupied.
+                        return OSStatus(-1)
+                    }
                     audioClipRenderer.renderOffline(
                         into: bufferList,
                         currentSample: currentSample,
