@@ -747,13 +747,17 @@ public final class CoreAudioBackend: AudioBackend {
         // The Core Audio render callback must never print or allocate
         // diagnostic strings. The MIDI scheduler returns an event count for
         // non-render diagnostics, not console logging on this thread.
-        renderGraph.renderWithScheduledMIDI(
+        guard renderGraph.renderWithScheduledMIDI(
             scheduler: midiScheduler,
             startSample: startSample,
             endSample: endSample,
             frameCount: frameCount,
             outputBuffer: bufferList
-        )
+        ) else {
+            // A second overlapping callback cannot safely process shared
+            // Audio Units, clips or metronome. Buffer was already cleared.
+            return noErr
+        }
         
         // 3. Render audio clips
         audioClipRenderer.render(
