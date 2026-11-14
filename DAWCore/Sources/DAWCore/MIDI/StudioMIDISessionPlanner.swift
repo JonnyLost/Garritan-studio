@@ -55,19 +55,31 @@ public enum StudioMIDISessionPlanner {
                         return nil
                     }
                     if beat >= clipEnd {
-                        // A held controller must release even when its note
-                        // reaches the region boundary. Only ephemeral CC-zero
-                        // release events may be clamped; never extend or
-                        // retrigger musical notes outside their MIDI region.
+                        // Only ephemeral held-CC releases may be clamped to
+                        // the last instant of a trimmed region.
                         guard generated,
                               case .controlChange(_, 0) = event.type else {
                             return nil
                         }
                         beat = max(clipStart, clipEnd - 0.000001)
                     }
+                    // A MIDI region is an audible boundary: original notes
+                    // and generated keyswitch notes must not sound past it.
+                    // Keep the same event ID and beat for undo/articulations;
+                    // this is an ephemeral session-only duration adjustment.
+                    var scheduledEvent = event
+                    if case .note(var note) = event.type, note.velocity > 0 {
+                        guard note.duration.isFinite, note.duration >= 0 else {
+                            return nil
+                        }
+                        let available = clipEnd - beat
+                        guard available > 0 else { return nil }
+                        note.duration = min(note.duration, available)
+                        scheduledEvent.type = .note(note)
+                    }
                     let state: StateKey?
                     let priority: Int
-                    switch event.type {
+                    switch scheduledEvent.type {
                     case .note(let note):
                         state = generated && note.velocity > 0 ? .keyswitch(event.channel) : nil
                         // Generated keyswitch note-on must precede regular notes.
@@ -91,7 +103,7 @@ public enum StudioMIDISessionPlanner {
                         priority = 1
                     }
                     return (StudioMIDISessionEvent(clipID: clip.id,
-                                                  absoluteBeat: beat, event: event),
+                                                  absoluteBeat: beat, event: scheduledEvent),
                             priority, index, clipOrder, state)
                 }
         }.sorted {
