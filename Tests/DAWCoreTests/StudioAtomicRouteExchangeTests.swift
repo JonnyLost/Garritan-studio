@@ -61,4 +61,26 @@ final class StudioAtomicRouteExchangeTests: XCTestCase {
         XCTAssertEqual(daw_route_exchange_take_current_quiescent(exchange),
                        UnsafeMutableRawPointer(memory))
     }
+    func testRenderFramesCannotOverlapAndRecoverWithoutWaiting() {
+        let memory = UnsafeMutablePointer<UInt8>.allocate(capacity: 1)
+        memory.initialize(to: 7)
+        defer { memory.deinitialize(count: 1); memory.deallocate() }
+        guard let exchange = daw_route_exchange_create(UnsafeMutableRawPointer(memory)) else {
+            XCTFail("Could not create route exchange")
+            return
+        }
+        defer { daw_route_exchange_destroy(exchange) }
+
+        XCTAssertTrue(daw_route_exchange_try_enter_render(exchange))
+        // A simultaneous render callback must produce silence, not re-enter
+        // the same underlying non-reentrant AU or effect chain.
+        XCTAssertFalse(daw_route_exchange_try_enter_render(exchange))
+        daw_route_exchange_leave_render(exchange)
+        XCTAssertTrue(daw_route_exchange_try_enter_render(exchange))
+        daw_route_exchange_leave_render(exchange)
+        XCTAssertTrue(daw_route_exchange_is_quiescent(exchange))
+        XCTAssertEqual(daw_route_exchange_take_current_quiescent(exchange),
+                       UnsafeMutableRawPointer(memory))
+    }
+
 }
