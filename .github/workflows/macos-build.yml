@@ -33,6 +33,11 @@ jobs:
       - name: Resolve package dependencies
         run: swift package resolve
 
+      # Fail quickly on mic-bus graph regressions before the full app build.
+      # The same compiled test products are reused by the full suite below.
+      - name: Verify V-Rack microphone graph
+        run: swift test --filter VRackMicrophoneRoutingTests
+
       - name: Build all targets
         run: swift build
 
