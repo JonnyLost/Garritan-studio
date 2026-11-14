@@ -1814,7 +1814,7 @@ public final class PlaybackEngine: ObservableObject {
                     let clipStartBeat = clip.timeRange.start.beats(atTempo: tempo)
                     let clipEndBeat = clip.timeRange.end.beats(atTempo: tempo)
                     
-                    for event in midiData.events {
+                    for event in StudioArticulationRenderer.events(for: midiData, map: track.articulationMap) {
                         // Use the same channel filter as live MIDI playthrough.
                         guard track.acceptsMIDIChannel(event.channel) else { continue }
                         let absoluteBeat = clipStartBeat + event.beatPosition
@@ -1863,6 +1863,23 @@ public final class PlaybackEngine: ObservableObject {
                                     channel: event.channel
                                 )
                                 coreAudioMIDIEvents.append(ccEvent)
+
+                            case .programChange(let program):
+                                coreAudioMIDIEvents.append(ScheduledMIDIEvent(
+                                    trackID: track.id, samplePosition: samplePos,
+                                    status: 0xC0 | (event.channel & 0x0F),
+                                    data1: program, data2: 0, channel: event.channel
+                                ))
+
+                            case .pitchBend(let value):
+                                let bend = UInt16(clamping: Int(value) + 8192)
+                                coreAudioMIDIEvents.append(ScheduledMIDIEvent(
+                                    trackID: track.id, samplePosition: samplePos,
+                                    status: 0xE0 | (event.channel & 0x0F),
+                                    data1: UInt8(bend & 0x7F),
+                                    data2: UInt8((bend >> 7) & 0x7F),
+                                    channel: event.channel
+                                ))
                                 
                             default:
                                 break
@@ -2190,7 +2207,7 @@ public final class PlaybackEngine: ObservableObject {
         let clipStartBeat = clip.timeRange.start.beats(atTempo: project.tempo.bpm)
         let clipEndBeat = clip.timeRange.end.beats(atTempo: project.tempo.bpm)
 
-        for event in midiData.events {
+        for event in StudioArticulationRenderer.events(for: midiData, map: track.articulationMap) {
             // Match the same filter used by the hybrid backend and live input.
             guard track.acceptsMIDIChannel(event.channel) else { continue }
 
