@@ -187,7 +187,7 @@ public final class RenderGraph {
         }
     }
 
-    func prepareInstrument(_ description: AudioComponentDescription) async throws -> PreparedInstrument {
+    func prepareInstrument(_ description: AudioComponentDescription, maximumFrames: UInt32) async throws -> PreparedInstrument {
         let avAudioUnit = try await withCheckedThrowingContinuation {
             (continuation: CheckedContinuation<AVAudioUnit, Error>) in
             AVAudioUnit.instantiate(with: description, options: []) { avUnit, error in
@@ -220,7 +220,7 @@ public final class RenderGraph {
         guard status == noErr else {
             throw AudioBackendError.pluginLoadFailed("Instrument stream format failed: \(status)")
         }
-        var maxFrames = UInt32(bufferSize)
+        var maxFrames = maximumFrames
         let maxStatus = AudioUnitSetProperty(
             unit, kAudioUnitProperty_MaximumFramesPerSlice, kAudioUnitScope_Global,
             0, &maxFrames, UInt32(MemoryLayout<UInt32>.size)
