@@ -172,7 +172,7 @@ public enum AutomationParameter: Codable, Sendable, Hashable {
         case .mute: return "Mute"
         case .send(let index): return "Send \(index + 1)"
         case .plugin(_, let paramID): return paramID
-        case .studioSynth(_, let destination): return destination.name
+        case .studioSynth(_, let destination): return destination.title
         }
     }
     
