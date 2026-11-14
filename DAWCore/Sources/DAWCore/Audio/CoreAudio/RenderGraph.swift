@@ -289,9 +289,9 @@ public final class RenderGraph {
         print("[RenderGraph] Removed track \\(id.rawValue)")
     }
 
-    /// Empty tracks can be removed while render snapshots are active:
-    /// no AU process resource is shared by an old and new render callback.
-    /// Nonempty routes still require the backend's hardware drain.
+    /// Retained processing bundles now make empty-track inspection optional.
+    /// Loaded-route removal is safe to publish live too, provided the sole
+    /// render callback owns the shared effect chain and no offline export runs.
     func canRemoveEmptyTrackLive(id: TrackID) -> Bool {
         tracks[id]?.isEmpty ?? false
     }
@@ -417,8 +417,8 @@ public final class RenderGraph {
     /// Prepared instruments have separate AU instances and scratch buffers.
     /// Publication is control-thread-only, and no hardware drain is needed
     /// when the render callback pins a single immutable route generation.
-    /// Call only after the output callback is fully drained.
-    /// The old AVAudioUnit remains retained until this synchronous swap.
+    /// Install without draining the output. Previous AVAudioUnit ownership
+    /// remains in retired immutable snapshots until active readers finish.
     func installInstrument(_ prepared: PreparedInstrument, for trackID: TrackID,
                            expectedRequestID: UInt64? = nil) throws -> AudioUnit {
         guard let track = tracks[trackID] else {
@@ -518,8 +518,9 @@ public final class RenderGraph {
         return prepared
     }
 
-    /// Call only after the output callback is fully drained. The prepared
-    /// effect owns cleanup automatically if the track was removed meanwhile.
+    /// Live effect-slot replacement. A prepared raw AU is transferred to
+    /// EffectLifetime on the control thread; old generations retain previous
+    /// effects until reader quiescence. A failed install cleans up the AU.
     func installEffect(_ prepared: PreparedEffect, for trackID: TrackID, slot: Int,
                        expectedRequestID: UInt64? = nil) throws -> AudioUnit {
         guard let track = tracks[trackID] else {
