@@ -171,6 +171,7 @@ public final class StudioSynthInstrument {
     private var activeCCMappings: [StudioSynthMIDIControlMapping] = []
     private var currentModulation: StudioSynthModulationSettings
     private var currentMIDIControls: StudioSynthMIDIControlSettings
+    private var automationActive = false
     private var tempo: Double
 
     public init(sampleRate: Double, patch: StudioSynthPatch,
@@ -213,7 +214,7 @@ public final class StudioSynthInstrument {
 
     private func refreshControlWorker() {
         let needed = currentModulation.hasEnabledRoutes ||
-            currentMIDIControls.hasEnabledMappings
+            currentMIDIControls.hasEnabledMappings || automationActive
         if let worker = controlWorker() {
             worker.update(currentModulation)
             worker.updateMIDIControls(currentMIDIControls)
@@ -288,6 +289,37 @@ public final class StudioSynthInstrument {
         activeCCMappings = controls.mappings.filter(\.enabled)
         workerReferenceLock.unlock()
         return true
+    }
+
+    /// Apply a normalized automation value at control rate, without editing
+    /// the persistent StudioSynthPatch or creating an audio-thread lock.
+    /// Automation overrides a mapped CC while active. Modulation continues
+    /// to add its offset to that temporary automation base.
+    @discardableResult
+    public func setAutomation(layerID: UUID,
+                              destination: StudioSynthModDestination,
+                              normalized: Float) -> Bool {
+        guard destination.engine == runtime.first(where: {
+            $0.id == layerID
+        })?.engine,
+              destination.isContinuouslyModulatable,
+              normalized.isFinite, (0...1).contains(normalized) else {
+            return false
+        }
+        if controlWorker() == nil { createControlWorker() }
+        let accepted = controlWorker()?.setAutomation(
+            layer: layerID, destination: destination,
+            normalized: normalized) ?? false
+        if accepted { automationActive = true }
+        return accepted
+    }
+
+    /// Restore saved and controller baselines on Stop or when lanes are
+    /// disabled, while leaving the currently sounding voices intact.
+    public func clearAutomation() {
+        controlWorker()?.clearAutomation()
+        automationActive = false
+        refreshControlWorker()
     }
 
     /// A live host tempo edit affects both synced LFOs without resetting phase
