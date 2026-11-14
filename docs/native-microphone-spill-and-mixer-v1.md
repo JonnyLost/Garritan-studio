@@ -243,3 +243,38 @@ listening and CPU/underrun stress measurements. Do not declare latency,
 sound quality, multi-bus host compatibility, or 64-source scalability
 validated from DSP unit tests alone. No previously working route is
 made dependent on this experimental backend.
+
+## V-Rack aggregate capture and monitor isolation (November 14, 2026)
+
+The V-Rack's audio graph previously ran separately from instrument-track
+capture: its `vRackSumMixer` fed the master directly, so enabling microphone
+audition could leave an unprocessed rack signal audible simultaneously.
+
+The V-Rack sum now feeds a separate **direct monitor mixer** managed by
+`AudioEngine`. The sum itself remains at unity and continues to support
+V-Rack recording and monitoring taps. In the original mix the direct monitor
+has unity gain; in microphone audition it is muted, while a separate capture
+fan-out from the same V-Rack sum feeds each active virtual microphone bus.
+The implementation supports either of Studio's microphone audition backends:
+legacy per-pair capture or experimental four-output shared-history capture.
+Returning to the original mix restores the V-Rack direct monitor without
+removing its recording/monitoring sum. A replaced/disconnected V-Rack sum or a
+change between no loaded rack instruments and some loaded instruments during
+audition restores the original mix to avoid missing or duplicated rack audio.
+
+**Source-count guard:** the aggregate V-Rack signal counts as **one** source
+when rack instruments are present; it contributes to the existing 16-source
+live limit. This limit is not increased until multi-source performance is
+benchmarked on a MacBook. V-Rack microphone pickup is currently modeled as
+one **centered, middle-stage** acoustic source. Multiple rack instruments,
+even if triggered by separate MIDI channels or tracks, are already summed at
+this point and cannot have independent positions, pickup polarities, or
+microphone spill. Per-rack-instrument stage capture is future work and will
+require routing individual rack converter mixers before the V-Rack sum.
+
+The new `VRackMicrophoneRoutingTests` exercise a macOS manual rendering
+graph for both backends, checking direct-signal isolation, restored monitoring,
+and fail-safe response to changing rack-source availability. These tests must
+pass on the target branch before this is considered build-verified. Manual
+MacBook listening, metering and large-session CPU/memory measurements remain
+outstanding. The original no-audition route is the default.
