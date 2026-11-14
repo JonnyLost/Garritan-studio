@@ -28,6 +28,7 @@ enum StudioGarritanArticulationFactory {
     /// or containing percussion playback-note ranges mixed with KS triggers.
     /// These are shown in the reference browser, not armed automatically.
     private static let manualReviewPatches: Set<String> = [
+        "Violins 1 KS", "Violins 2 KS",
         "Violas KS", "Cellos KS", "Basses KS",
         "Percussion Accessories KS", "Snares KS",
         "Timpani 1 KS", "Timpani 2 KS", "Timpani 3 KS"
