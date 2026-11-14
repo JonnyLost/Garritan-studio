@@ -307,14 +307,11 @@ public final class CoreAudioBackend: AudioBackend {
     
     // MARK: - Playback Control
     
-    private var renderCallCount = 0
-    private var lastLogTime: UInt64 = 0
     
     public func play(from samplePosition: Int64) {
         _playbackStartSample = samplePosition
         _currentSamplePosition = samplePosition
         _isPlaying = true
-        renderCallCount = 0
         
         print("[CoreAudioBackend] ========================================")
         print("[CoreAudioBackend] Playing from sample \(samplePosition)")
@@ -436,28 +433,17 @@ public final class CoreAudioBackend: AudioBackend {
             return noErr
         }
         
-        renderCallCount += 1
-        
         let startSample = _currentSamplePosition
         let endSample = startSample + Int64(frameCount)
-        
-        // Debug logging (throttled to once per second)
-        let now = mach_absolute_time()
-        if now - lastLogTime > 1_000_000_000 {  // ~1 second
-            print("[CoreAudioBackend:Render] Sample range: \(startSample)-\(endSample), Events pending: \(midiScheduler.eventCount)")
-            lastLogTime = now
-        }
-        
-        // 1. Process MIDI events for this buffer
-        let eventsProcessed = midiScheduler.processEvents(
+
+        // The Core Audio render callback must never print or allocate
+        // diagnostic strings. The MIDI scheduler returns an event count for
+        // non-render diagnostics, not console logging on this thread.
+        _ = midiScheduler.processEvents(
             startSample: startSample,
             endSample: endSample,
             renderGraph: renderGraph
         )
-        
-        if eventsProcessed > 0 {
-            print("[CoreAudioBackend:Render] Processed \(eventsProcessed) MIDI events at sample \(startSample)")
-        }
         
         // 2. Render all tracks through the graph
         renderGraph.render(

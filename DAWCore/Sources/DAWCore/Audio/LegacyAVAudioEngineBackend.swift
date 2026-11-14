@@ -48,7 +48,7 @@ public final class LegacyAVAudioEngineBackend: AudioBackend {
     private var scheduledClicks: [(samplePosition: Int64, isAccent: Bool)] = []
     
     /// MIDI processing queue
-    private let midiProcessingQueue = DispatchQueue(label: "com.musio.legacy-midi", qos: .userInteractive)
+    private let midiProcessingQueue = DispatchQueue(label: "studio.midi.legacy", qos: .userInteractive)
     
     /// Timing tap installed
     private var timingTapInstalled = false

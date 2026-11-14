@@ -96,7 +96,7 @@ public final class PlaybackEngine: ObservableObject {
     @Published public private(set) var isPlaying: Bool = false
     
     // High-priority queue for MIDI processing (avoids blocking audio thread)
-    private let midiProcessingQueue = DispatchQueue(label: "com.musio.midi-processing", qos: .userInteractive)
+    private let midiProcessingQueue = DispatchQueue(label: "studio.midi.processing", qos: .userInteractive)
     // These fields are owned exclusively by midiProcessingQueue. The audio
     // tap submits buffer positions but never reads mutable transport state.
     private var midiQueuePlaybackActive = false
@@ -1267,15 +1267,17 @@ public final class PlaybackEngine: ObservableObject {
     /// Convert beats to samples
     private func beatsToSamples(_ beats: Double, tempo: Double, sampleRate: Double? = nil) -> Int64 {
         let sr = sampleRate ?? coreAudioBackend?.sampleRate ?? audioEngine.sampleRate
-        let seconds = (beats / tempo) * 60.0
-        return Int64(seconds * sr)
+        return StudioMIDIClockMath.samples(
+            forBeats: beats, tempoBPM: tempo, sampleRate: sr
+        )
     }
     
     /// Convert samples to beats
     private func samplesToBeats(_ samples: Int64, tempo: Double, sampleRate: Double? = nil) -> Double {
         let sr = sampleRate ?? coreAudioBackend?.sampleRate ?? audioEngine.sampleRate
-        let seconds = Double(samples) / sr
-        return (seconds / 60.0) * tempo
+        return StudioMIDIClockMath.beats(
+            forSamples: samples, tempoBPM: tempo, sampleRate: sr
+        )
     }
     
     /// Process MIDI events for the current audio buffer (called from audio thread)
@@ -1284,7 +1286,9 @@ public final class PlaybackEngine: ObservableObject {
         // Do not inspect MainActor playback state on the render callback.
         // Only submit scalar timing values; the serial MIDI worker owns the
         // session snapshot, event cursor and active-note list.
-        let bufferEndSample = startSample + Int64(frameCount)
+        let bufferEndSample = StudioMIDIClockMath.bufferEnd(
+            startSample: startSample, frameCount: frameCount
+        )
         midiProcessingQueue.async { [weak self] in
             guard let self = self, self.midiQueuePlaybackActive else { return }
             let beatsPerSample = tempo / (60.0 * self.midiQueueSampleRate)
@@ -1808,7 +1812,10 @@ public final class PlaybackEngine: ObservableObject {
                             localScheduledMIDIEvents.append(scheduledEvent)
                         } else {
                             // CORE AUDIO: Schedule to backend
-                            let samplePos = Int64((absoluteBeat / tempo) * 60.0 * sampleRate)
+                            let samplePos = StudioMIDIClockMath.samples(
+                                forBeats: absoluteBeat, tempoBPM: tempo,
+                                sampleRate: sampleRate
+                            )
                             
                             switch event.type {
                             case .note(let noteData):
@@ -1821,7 +1828,10 @@ public final class PlaybackEngine: ObservableObject {
                                 )
                                 coreAudioMIDIEvents.append(noteOn)
                                 
-                                let durationSamples = Int64((noteData.duration / tempo) * 60.0 * sampleRate)
+                                let durationSamples = StudioMIDIClockMath.samples(
+                                    forBeats: noteData.duration, tempoBPM: tempo,
+                                    sampleRate: sampleRate
+                                )
                                 let noteOff = ScheduledMIDIEvent.noteOff(
                                     trackID: track.id,
                                     samplePosition: samplePos + durationSamples,
