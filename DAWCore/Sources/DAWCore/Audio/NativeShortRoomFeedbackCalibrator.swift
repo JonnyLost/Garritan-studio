@@ -112,6 +112,27 @@ enum NativeShortRoomFeedbackCalibrator {
                 }
             }
         }
+        // Conservative stability check between octave centers. A filter
+        // response can exceed its individual nonnegative gains because the
+        // complementary lowpass sections have different phases. Keep the
+        // precomputed loop gain below unity across a dense logarithmic grid,
+        // not only at the six fitting frequencies.
+        var peakMagnitude = 0.0
+        for n in 0..<72 {
+            let frequency = 20 * pow(2, Double(n) / 6)
+            guard frequency < sampleRate * 0.48 else { break }
+            let spectralBasis = responseBasis(frequency: frequency,
+                                               sampleRate: sampleRate)
+            var response = Complex(re: 0, im: 0)
+            for band in 0..<6 {
+                response = response + spectralBasis[band] * fitted[band]
+            }
+            peakMagnitude = max(peakMagnitude, response.magnitude)
+        }
+        if peakMagnitude >= 0.995 {
+            let safetyScale = 0.995 / peakMagnitude
+            fitted = fitted.map { $0 * safetyScale }
+        }
         return fitted.map(Float.init)
     }
 }
