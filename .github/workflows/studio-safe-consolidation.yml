@@ -1,0 +1,88 @@
+name: Studio Nov 14 Safe Consolidation
+
+on:
+  push:
+    branches:
+      - integration/studio-safe-consolidation-2026-11-14
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-safe-consolidation-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  cross-branch-merge-audit:
+    name: Rehearse remaining merges without modifying remote refs
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Inspect true Git merge conflicts, without publishing changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*'
+          original="$(git rev-parse HEAD)"
+          echo '## Consolidation: read-only merge rehearsals' >> "$GITHUB_STEP_SUMMARY"
+          echo '| Feature source | Actual Git merge conflicts |' >> "$GITHUB_STEP_SUMMARY"
+          echo '| --- | --- |' >> "$GITHUB_STEP_SUMMARY"
+          targets=(
+            feature/studio-export-engine
+            integration/studio-complete-mac-test
+            feature/studio-core-project-integrity
+            architecture/studio-independence
+            feature/stage-acoustics-sync
+            feature/ostinato-engine-v1
+            feature/studio-sampler-native
+          )
+          for target in "${targets[@]}"; do
+            ref="refs/remotes/origin/${target}"
+            git show-ref --quiet --verify "$ref"
+            git switch -C __disposable_merge_audit "$original"
+            echo "AUDIT TARGET: $target"
+            if git merge --no-commit --no-ff "$ref" >/tmp/studio-merge-audit.log 2>&1; then
+              echo "CLEAN: $target"
+              echo "| \`$target\` | Clean at inspected commit |" >> "$GITHUB_STEP_SUMMARY"
+            else
+              conflicts="$(git diff --name-only --diff-filter=U)"
+              if [[ -z "$conflicts" ]]; then
+                echo "MERGE ERROR (not normal content conflicts): $target"
+                tail -50 /tmp/studio-merge-audit.log
+                echo "| \`$target\` | Merge error; inspect job log |" >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "CONFLICT: $target"
+                printf '%s\n' "$conflicts"
+                echo "| \`$target\` | Needs reconciliation |" >> "$GITHUB_STEP_SUMMARY"
+                echo '~~~text' >> "$GITHUB_STEP_SUMMARY"
+                printf '%s\n' "$conflicts" >> "$GITHUB_STEP_SUMMARY"
+                echo '~~~' >> "$GITHUB_STEP_SUMMARY"
+              fi
+            fi
+            if [[ -f .git/MERGE_HEAD ]]; then git merge --abort; fi
+            git reset --hard "$original"
+          done
+          echo '**No original development or integration branch was modified.**' >> "$GITHUB_STEP_SUMMARY"
+
+  macos-build-test:
+    name: Build, regression suite and release DAWApp on consolidated head
+    runs-on: macos-15
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - name: Report macOS and Swift
+        run: |
+          sw_vers
+          swift --version
+      - name: Resolve dependencies
+        run: swift package resolve
+      - name: Compile all Studio targets
+        run: swift build
+      - name: Run all automated tests
+        run: swift test --parallel
+      - name: Verify optimized app
+        run: swift build -c release --product DAWApp
