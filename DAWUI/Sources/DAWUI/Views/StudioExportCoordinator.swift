@@ -25,6 +25,7 @@ public final class StudioExportCoordinator: ObservableObject {
         case recordingGap
         case captureUnavailable
         case projectChanged
+        case wavTooLarge
 
         public var errorDescription: String? {
             switch self {
@@ -50,6 +51,8 @@ public final class StudioExportCoordinator: ObservableObject {
                 return "Studio could not finish the audio capture."
             case .projectChanged:
                 return "The project was modified during export. The staged audio was not committed."
+            case .wavTooLarge:
+                return "This render would exceed the standard WAV file size limit. Export a shorter range or use a lower sample rate."
             }
         }
     }
@@ -137,6 +140,12 @@ public final class StudioExportCoordinator: ObservableObject {
         guard rate.isFinite, rate > 0, targetFrames > 0 else {
             throw StudioExportPlan.PlanningError.invalidDuration
         }
+        // This milestone writes RIFF WAV rather than RF64. Do not silently
+        // produce invalid headers when a long 24-bit recording exceeds 4 GiB.
+        let maxStereoDataBytes = Double(targetFrames) * 2 * Double(settings.bitDepth / 8)
+        guard maxStereoDataBytes < Double(UInt32.max) - 65_536 else {
+            throw ExportError.wavTooLarge
+        }
 
         var outputPaths: [URL] = []
         for (index, pass) in passes.enumerated() {
@@ -154,6 +163,7 @@ public final class StudioExportCoordinator: ObservableObject {
             engine.resetExportTrackEffects()
             engine.applyExportIsolation(selected: pass.trackIDs, tracks: snapshot.tracks)
             viewModel.prepareStudioExportPass(isolated)
+            try engine.ensureRunning()
 
             let sourceURL = staging.appendingPathComponent("capture-\(index).wav")
             try engine.beginMixdownCapture(to: sourceURL, bitDepth: settings.bitDepth)
@@ -209,9 +219,11 @@ public final class StudioExportCoordinator: ObservableObject {
         guard viewModel.project.modifiedAt == snapshot.modifiedAt else {
             throw ExportError.projectChanged
         }
+        try Task.checkCancellation()
         var committed: [URL] = []
         do {
             for (index, pass) in passes.enumerated() {
+                try Task.checkCancellation()
                 let finalURL = destinationDirectory.appendingPathComponent(pass.fileName)
                 guard !fileManager.fileExists(atPath: finalURL.path) else {
                     throw ExportError.outputExists(finalURL)
