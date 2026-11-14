@@ -519,13 +519,16 @@ public final class ProjectViewModel: ObservableObject {
     
     /// Create a new MIDI clip on a track
     public func createMIDIClip(on trackID: TrackID, at position: TimePosition, duration: Double) {
-        guard var track = project.track(withID: trackID) else { return }
-        
+        guard var track = project.track(withID: trackID),
+              track.type == .midi || track.type == .instrument,
+              duration.isFinite, duration > 0 else { return }
+
         let clipNumber = track.clips.count + 1
-        let endPosition = TimePosition(
-            samples: position.samples + Int64(duration * project.sampleRate),
-            sampleRate: project.sampleRate
-        )
+        // The API takes beats, not seconds. Region creation must honor tempo.
+        let length = TimePosition(beats: duration, tempo: transportState.tempo.bpm,
+                                  sampleRate: project.sampleRate)
+        let endPosition = TimePosition(samples: position.samples + length.samples,
+                                       sampleRate: project.sampleRate)
         
         let midiData = MIDIClipData(events: [], originalTempo: project.tempo.bpm)
         
