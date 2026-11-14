@@ -8,6 +8,14 @@ struct OrchestralStageView: View {
     @ObservedObject var viewModel: ProjectViewModel
     var expanded: Bool = false
     @State private var dragOrigins: [TrackID: CGPoint] = [:]
+    @State private var microphoneDragOrigins: [UUID: CGPoint] = [:]
+
+    private var microphones: [StudioVirtualMicrophone] {
+        viewModel.project.dawState.virtualMicrophones ?? []
+    }
+    private var roomForMicrophones: StudioAcousticRoomDesign {
+        viewModel.project.dawState.acousticRoomDesign ?? StudioAcousticRoomDesign()
+    }
     private var selectedLayout: StageLayout {
         StageLayout(rawValue: viewModel.project.dawState.stageLayoutID ?? "") ?? .symphony
     }
@@ -47,8 +55,16 @@ struct OrchestralStageView: View {
     private var compactWorkspace: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Orchestral Stage").font(.headline)
-                Text("Drag a marker sideways to pan and between rows to assign a reverb zone.")
+                HStack {
+                    Text("Orchestral Stage").font(.headline)
+                    Spacer()
+                    Button("Add Spot Mic") {
+                        viewModel.addVirtualMicrophoneArray(.spot)
+                    }
+                    .disabled(microphones.count >= 32)
+                    .font(.caption)
+                }
+                Text("Drag instruments to set pan/depth, or microphones to set their 3D floor position.")
                     .font(.caption).foregroundStyle(.secondary)
 
                 GeometryReader { proxy in
@@ -64,8 +80,9 @@ struct OrchestralStageView: View {
                 .font(.system(size: 9)).foregroundStyle(.secondary)
 
                 selectedTrackControls
+                selectedMicrophoneControls
 
-                Text("Stage positions are saved with the project. Choose acoustic rooms in the Rooms workspace.")
+                Text("Instrument and microphone positions are saved with the project. Configure pickup patterns in Rooms → Microphones.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
             .padding(12)
@@ -98,6 +115,11 @@ struct OrchestralStageView: View {
                         Button("Auto Arrange") { autoArrangeTracks() }
                             .disabled(instrumentTracks.isEmpty)
                             .help("Place recognized instruments in the selected seating template")
+                        Button("Add Spot Mic") {
+                            viewModel.addVirtualMicrophoneArray(.spot)
+                        }
+                        .disabled(microphones.count >= 32)
+                        .help("Add a movable microphone object. Does not affect audio yet.")
                     }
                     .font(.caption)
                     fittedCurvedStage(
@@ -120,6 +142,7 @@ struct OrchestralStageView: View {
                   VStack(alignment: .leading, spacing: 14) {
                     StudioSectionHeading("Instrument Position", symbol: "slider.horizontal.3")
                     selectedTrackControls
+                    selectedMicrophoneControls
                     Divider()
                     Text("REVERB ZONES")
                         .font(.system(size: 10, weight: .semibold))
@@ -392,6 +415,9 @@ struct OrchestralStageView: View {
                 curvedMarker(track, width: width)
             }
             conductorPodium(width: width)
+            ForEach(microphones) { microphone in
+                microphoneMarker(microphone, width: width, curved: true)
+            }
         }
         .frame(height: 560 * stageScale(width))
         .clipped()
@@ -564,6 +590,9 @@ struct OrchestralStageView: View {
             ForEach(instrumentTracks) { track in
                 marker(track, width: width)
             }
+            ForEach(microphones) { microphone in
+                microphoneMarker(microphone, width: width, curved: false)
+            }
         }
     }
 
@@ -634,6 +663,107 @@ struct OrchestralStageView: View {
         let rawZone = (proposedY - 35) / 43
         let zone = min(5, max(1, Int(rawZone.rounded()) + 1))
         viewModel.setTrackStagePosition(id: trackID, pan: Float(clamped), zone: zone)
+    }
+
+    /// Both stage canvases show the same persisted mic positions. This is a
+    /// flat projection of 3D position; adjust microphone height in Rooms.
+    private func microphoneCanvasPoint(_ mic: StudioVirtualMicrophone,
+                                       width: CGFloat, curved: Bool) -> CGPoint {
+        let room = roomForMicrophones
+        let xFraction = CGFloat(min(1, max(0,
+            mic.position.xMeters / room.safeWidth + 0.5)))
+        let depthFraction = CGFloat(min(1, max(0,
+            mic.position.yMeters / room.safeLength)))
+        if curved {
+            let scale = stageScale(width)
+            return CGPoint(x: (90 + xFraction * 820) * scale,
+                           y: (475 - depthFraction * 390) * scale)
+        }
+        return CGPoint(x: 18 + xFraction * max(1, width - 36),
+                       y: 215 - depthFraction * 175)
+    }
+
+    private func microphoneMarker(_ mic: StudioVirtualMicrophone,
+                                  width: CGFloat, curved: Bool) -> some View {
+        let position = microphoneCanvasPoint(mic, width: width, curved: curved)
+        let selected = viewModel.selectedVirtualMicrophoneID == mic.id
+        return Circle()
+            .fill(selected ? Color.cyan : Color.teal)
+            .frame(width: curved ? 28 : 23, height: curved ? 28 : 23)
+            .overlay(Circle().stroke(Color.white, lineWidth: selected ? 3 : 1.5))
+            .overlay(
+                Image(systemName: "mic.fill")
+                    .font(.system(size: curved ? 13 : 11, weight: .bold))
+                    .foregroundStyle(.white)
+            )
+            .position(position)
+            .help("\(mic.name): x \(String(format: "%.1f", mic.position.xMeters))m, y \(String(format: "%.1f", mic.position.yMeters))m, height \(String(format: "%.1f", mic.position.zMeters))m")
+            .accessibilityIdentifier("stage-microphone-" + mic.id.uuidString)
+            .onTapGesture { viewModel.selectVirtualMicrophone(mic.id) }
+            .gesture(
+                DragGesture(minimumDistance: 3)
+                    .onChanged { value in
+                        moveMicrophoneMarker(id: mic.id, current: position,
+                                             translation: value.translation,
+                                             width: width, curved: curved)
+                    }
+                    .onEnded { _ in
+                        microphoneDragOrigins.removeValue(forKey: mic.id)
+                    }
+            )
+    }
+
+    private func moveMicrophoneMarker(id: UUID, current: CGPoint,
+                                      translation: CGSize, width: CGFloat,
+                                      curved: Bool) {
+        if microphoneDragOrigins[id] == nil {
+            microphoneDragOrigins[id] = current
+        }
+        guard let start = microphoneDragOrigins[id],
+              let original = microphones.first(where: { $0.id == id }) else { return }
+        let x = start.x + translation.width
+        let y = start.y + translation.height
+        let xFraction: CGFloat
+        let depthFraction: CGFloat
+        if curved {
+            let scale = stageScale(width)
+            xFraction = (x / scale - 90) / 820
+            depthFraction = (475 - y / scale) / 390
+        } else {
+            xFraction = (x - 18) / max(1, width - 36)
+            depthFraction = (215 - y) / 175
+        }
+        let room = roomForMicrophones
+        let safeX = min(1, max(0, xFraction))
+        let safeDepth = min(1, max(0, depthFraction))
+        viewModel.selectVirtualMicrophone(id)
+        viewModel.setVirtualMicrophonePosition(
+            id: id,
+            position: StudioRoomPosition3D(
+                xMeters: (Double(safeX) - 0.5) * room.safeWidth,
+                yMeters: Double(safeDepth) * room.safeLength,
+                zMeters: original.position.zMeters
+            )
+        )
+    }
+
+    @ViewBuilder
+    private var selectedMicrophoneControls: some View {
+        if let selectedID = viewModel.selectedVirtualMicrophoneID,
+           let mic = microphones.first(where: { $0.id == selectedID }) {
+            Divider()
+            StudioSectionHeading("Virtual Microphone", symbol: "mic")
+            Text(mic.name).font(.subheadline.weight(.semibold))
+            Text(mic.pattern.displayName)
+                .font(.caption).foregroundStyle(.secondary)
+            Text(String(format: "x: %.2f m   y: %.2f m   height: %.2f m",
+                        mic.position.xMeters, mic.position.yMeters, mic.position.zMeters))
+                .font(.caption.monospacedDigit())
+            Text("Drag to move across the stage. To edit height, aiming and polar pickup, open Rooms → Microphones. Playback routing is not yet enabled.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     @ViewBuilder
