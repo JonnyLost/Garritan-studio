@@ -3,6 +3,104 @@ import DAWCore
 @testable import DAWUI
 
 final class StudioMIDIExpressionEditingTests: XCTestCase {
+    func testStraightRampUsesEndpointsNotIntermediatePointerJitter() {
+        let points = [
+            StudioMIDIExpressionPoint(beat: 0, value: 0),
+            StudioMIDIExpressionPoint(beat: 0.5, value: 1),
+            StudioMIDIExpressionPoint(beat: 1, value: 0.8)
+        ]
+        let result = StudioMIDIExpressionEditing.draw(
+            events: [], lane: .expression, points: points,
+            clipStartBeat: 0, division: 0.25, mode: .line)
+        let curve = result.sorted { $0.beatPosition < $1.beatPosition }
+        XCTAssertEqual(curve.count, 5)
+        XCTAssertEqual(curve[0].beatPosition, 0)
+        XCTAssertEqual(curve[2].beatPosition, 0.5)
+        XCTAssertEqual(curve[4].beatPosition, 1)
+        if case .controlChange(_, let midpoint) = curve[2].type {
+            XCTAssertEqual(midpoint, 51) // 0.4 of CC 0...127
+        } else { XCTFail("Expected expression ramp") }
+    }
+
+    func testSmoothCurveEasesAtBothEndsAndPreservesBounds() {
+        let points = [
+            StudioMIDIExpressionPoint(beat: 0, value: 0),
+            StudioMIDIExpressionPoint(beat: 2, value: 1)
+        ]
+        let result = StudioMIDIExpressionEditing.draw(
+            events: [], lane: .modulation, points: points,
+            clipStartBeat: 0, division: 0.25, mode: .curve)
+        let sorted = result.sorted { $0.beatPosition < $1.beatPosition }
+        XCTAssertEqual(sorted.count, 9)
+        func value(at i: Int) -> UInt8 {
+            if case .controlChange(_, let value) = sorted[i].type {
+                return value
+            }
+            return 0
+        }
+        XCTAssertEqual(value(at: 0), 0)
+        XCTAssertEqual(value(at: 8), 127)
+        XCTAssertLessThan(value(at: 1), 16) // eased vs linear 16
+        XCTAssertEqual(value(at: 4), 64)
+        XCTAssertGreaterThan(value(at: 7), 111)
+        XCTAssertTrue(sorted.allSatisfy {
+            StudioMIDIExpressionEditing.normalizedValue(
+                of: $0, for: .modulation) != nil
+        })
+    }
+
+    func testEraserOnlyDeletesSelectedControllerAndChannelInSweep() {
+        let cc1a = MIDIEvent.controlChange(at: 1, controller: 1, value: 30)
+        let cc1b = MIDIEvent.controlChange(at: 1.5, controller: 1, value: 90)
+        let cc1outside = MIDIEvent.controlChange(at: 3, controller: 1, value: 60)
+        let otherChannel = MIDIEvent.controlChange(at: 1, controller: 1,
+                                                   value: 70, channel: 1)
+        let otherLane = MIDIEvent.controlChange(at: 1.5, controller: 11, value: 55)
+        let note = MIDIEvent.note(at: 1.5, pitch: 62)
+        let erased = StudioMIDIExpressionEditing.draw(
+            events: [cc1a, cc1b, cc1outside, otherChannel, otherLane, note],
+            lane: .modulation,
+            points: [.init(beat: 1.5, value: 0.1), .init(beat: 1, value: 0.5)],
+            clipStartBeat: 0, division: 0.25,
+            channel: 0, mode: .erase)
+        XCTAssertEqual(erased.count, 4)
+        XCTAssertFalse(erased.contains { $0.id == cc1a.id })
+        XCTAssertFalse(erased.contains { $0.id == cc1b.id })
+        for keep in [cc1outside, otherChannel, otherLane, note] {
+            XCTAssertTrue(erased.contains { $0.id == keep.id })
+        }
+    }
+
+    func testSingleClickEraserHandlesUnsnappedEventInOffsetRegion() {
+        let midi = MIDIEvent.controlChange(at: 0.375, controller: 11, value: 70)
+        let a = StudioMIDIExpressionEditing.draw(
+            events: [midi], lane: .expression,
+            points: [.init(beat: 2.5, value: 0.5)],
+            clipStartBeat: 2.125, division: 0.25, mode: .erase)
+        XCTAssertTrue(a.isEmpty)
+    }
+
+    func testEraserNoMatchingEventMakesNoEdits() {
+        let note = MIDIEvent.note(at: 0.5, pitch: 70)
+        let result = StudioMIDIExpressionEditing.draw(
+            events: [note], lane: .pitchBend,
+            points: [.init(beat: 0.5, value: 0.2)],
+            clipStartBeat: 0, division: 0.25, mode: .erase)
+        XCTAssertEqual(result.map(\.id), [note.id])
+    }
+
+    func testCurveAndLineRetainOverwrittenEventID() {
+        let point = MIDIEvent.controlChange(at: 0.5, controller: 11, value: 30)
+        for mode: StudioExpressionDrawMode in [.line, .curve] {
+            let result = StudioMIDIExpressionEditing.draw(
+                events: [point], lane: .expression,
+                points: [.init(beat: 0, value: 0),
+                         .init(beat: 1, value: 1)],
+                clipStartBeat: 0, division: 0.25, mode: mode)
+            XCTAssertEqual(result.first { $0.beatPosition == 0.5 }?.id, point.id)
+        }
+    }
+
     func testCC1AndCC11AreIndependent() {
         let cc1 = MIDIEvent.controlChange(at: 1, controller: 1, value: 48)
         let cc11 = MIDIEvent.controlChange(at: 1.5, controller: 11, value: 83)
