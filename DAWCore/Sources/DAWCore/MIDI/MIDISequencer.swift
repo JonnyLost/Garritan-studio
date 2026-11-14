@@ -296,8 +296,10 @@ public final class MIDISequencer: ObservableObject {
             sampler.sendProgramChange(program, onChannel: scheduled.event.channel)
             
         case .pitchBend(let value):
-            let normalizedValue = UInt8(((Int(value) + 8192) >> 7) & 0x7F)
-            sampler.sendPitchBend(UInt16(normalizedValue) << 7, onChannel: scheduled.event.channel)
+            // AVAudioUnitSampler expects a full unsigned 14-bit bend.
+            // Quantizing to seven bits loses fine orchestral intonation.
+            let midiBend = UInt16(clamping: Int(value) + 8192)
+            sampler.sendPitchBend(midiBend, onChannel: scheduled.event.channel)
             
         default:
             break
