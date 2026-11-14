@@ -77,8 +77,9 @@ public final class AudioEngine: ObservableObject {
 
     // Mic audition is an alternate, explicitly selected mix. The original dry
     // tracks and hall always remain wired and can be restored immediately.
-    // Only four mics x sixteen source tracks are supported in this first
-    // per-pair Audio Unit graph. A consolidated matrix is a later optimization.
+    // The verified per-pair graph remains the default. An opt-in shared-
+    // history matrix uses one Audio Unit per source with four output busses.
+    // Both retain the 16-source cap until orchestral benchmarks pass.
     public static let maximumAuditionMicrophones = 4
     public static let maximumAuditionSources = 16
     private let microphoneMasterMixer = AVAudioMixerNode()
@@ -87,11 +88,22 @@ public final class AudioEngine: ObservableObject {
         let sourceID: TrackID
         let microphoneID: UUID
         let capture: AVAudioUnitEffect
+        /// Output bus for the shared-history Audio Unit; zero for legacy.
+        let microphoneBus: Int
     }
     private var microphoneRoutes: [MicrophoneRoute] = []
     private var routedMicrophones: [StudioVirtualMicrophone] = []
     private var microphoneRoom = StudioAcousticRoomDesign()
     @Published public private(set) var isMicrophoneAuditionActive = false
+    /// Experimental backend. Opt-in, never restored automatically at launch.
+    /// One shared-history processor per source, not one AU per pair.
+    @Published public private(set) var usesSharedMicrophoneMatrix = false
+
+    /// Topology may only change with audition disabled.
+    public func setSharedMicrophoneMatrixEnabled(_ enabled: Bool) {
+        guard !isMicrophoneAuditionActive else { return }
+        usesSharedMicrophoneMatrix = enabled
+    }
     /// Temporary wet trim for the existing shared hall while auditioning capsules.
     /// This is one room field for the whole orchestra, never one reverb per mic.
     @Published public private(set) var microphoneRoomWetLevel: Float = 0.20
@@ -661,7 +673,8 @@ public final class AudioEngine: ObservableObject {
     /// Alternate monitoring mode, NEVER a parallel loud copy of the original
     /// orchestra. Explicit opt-in and limited to 4 channels x 16 sources for
     /// this first direct/spill capture graph. Graph changes happen stopped.
-    /// A later single multichannel matrix can remove this AU-per-pair limit.
+    /// The experimental backend reduces the AU count to one per source
+    /// while preserving the original 16-source safety cap.
     public func setMicrophoneAuditionEnabled(
         _ enabled: Bool, tracks: [Track],
         microphones: [StudioVirtualMicrophone],
@@ -700,7 +713,11 @@ public final class AudioEngine: ObservableObject {
         )!
         do {
             if enabled {
-                NativeMicrophoneSpillAudioUnit.registerIfNeeded()
+                if usesSharedMicrophoneMatrix {
+                    NativeMicrophoneMatrixAudioUnit.registerIfNeeded()
+                } else {
+                    NativeMicrophoneSpillAudioUnit.registerIfNeeded()
+                }
                 routedMicrophones = Array(microphones.prefix(
                     Self.maximumAuditionMicrophones))
                 microphoneRoom = room
@@ -776,28 +793,61 @@ public final class AudioEngine: ObservableObject {
     private func attachMicrophoneCaptures(for track: Track,
                                           format: AVAudioFormat) {
         guard let source = trackNodes[track.id] else { return }
-        for mic in routedMicrophones {
-            guard let bus = microphoneChannelMixers[mic.id] else { continue }
+        if usesSharedMicrophoneMatrix {
+            // One effect per source, with four independently addressable
+            // capsule output busses. The AU pulls the upstream stream once
+            // per timestamp and shares its single delay history.
             let capture = AVAudioUnitEffect(
-                audioComponentDescription: NativeMicrophoneSpillAudioUnit.componentDescription
+                audioComponentDescription: NativeMicrophoneMatrixAudioUnit.componentDescription
             )
             engine.attach(capture)
-            engine.connect(capture, to: bus, format: format)
-            microphoneRoutes.append(MicrophoneRoute(
-                sourceID: track.id, microphoneID: mic.id, capture: capture
-            ))
+            for (index, mic) in routedMicrophones.enumerated() {
+                guard let bus = microphoneChannelMixers[mic.id] else { continue }
+                engine.connect(
+                    capture, to: bus, fromBus: AVAudioNodeBus(index),
+                    toBus: bus.nextAvailableInputBus, format: format
+                )
+                microphoneRoutes.append(MicrophoneRoute(
+                    sourceID: track.id, microphoneID: mic.id,
+                    capture: capture, microphoneBus: index
+                ))
+            }
+        } else {
+            // Original proven per-pair backend remains available.
+            for mic in routedMicrophones {
+                guard let bus = microphoneChannelMixers[mic.id] else { continue }
+                let capture = AVAudioUnitEffect(
+                    audioComponentDescription: NativeMicrophoneSpillAudioUnit.componentDescription
+                )
+                engine.attach(capture)
+                engine.connect(capture, to: bus, format: format)
+                microphoneRoutes.append(MicrophoneRoute(
+                    sourceID: track.id, microphoneID: mic.id,
+                    capture: capture, microphoneBus: 0
+                ))
+            }
         }
         connectMicrophoneSourceFanout(for: source, format: format)
     }
 
-    /// Explicitly preserve the original panner input while adding one
-    /// independent pre-pan capture for each mic. Reused after insert edits.
+    /// The original pre-pan connection stays intact; a single connection
+    /// into the matrix AU replaces up to four per-microphone fanouts.
     private func connectMicrophoneSourceFanout(for node: TrackAudioNode,
                                                format: AVAudioFormat) {
         let original: AVAudioNode = node.stereoPositionNode ?? node.pannerNode
         var destinations = [AVAudioConnectionPoint(node: original, bus: 0)]
-        for route in microphoneRoutes where route.sourceID == node.trackID {
-            destinations.append(AVAudioConnectionPoint(node: route.capture, bus: 0))
+        if usesSharedMicrophoneMatrix {
+            if let route = microphoneRoutes.first(where: { $0.sourceID == node.trackID }) {
+                destinations.append(AVAudioConnectionPoint(
+                    node: route.capture, bus: 0
+                ))
+            }
+        } else {
+            for route in microphoneRoutes where route.sourceID == node.trackID {
+                destinations.append(AVAudioConnectionPoint(
+                    node: route.capture, bus: 0
+                ))
+            }
         }
         engine.connect(node.gainNode, to: destinations,
                        fromBus: 0, format: format)
@@ -825,24 +875,31 @@ public final class AudioEngine: ObservableObject {
                 17_000 - 75 * capture.distanceMeters))
             let alpha = Float(1 - exp(-2 * Double.pi * cutoff / sampleRate))
             let tree = route.capture.auAudioUnit.parameterTree
-            tree?.parameter(
-                withAddress: NativeMicrophoneSpillAudioUnit.signedGainAddress
-            )?.value = gain.isFinite ? min(2, max(-2, gain)) : 0
-            tree?.parameter(
-                withAddress: NativeMicrophoneSpillAudioUnit.delayMillisecondsAddress
-            )?.value = Float(min(
+            let gainAddress = usesSharedMicrophoneMatrix
+                ? NativeMicrophoneMatrixAudioUnit.gainAddress(route.microphoneBus)
+                : NativeMicrophoneSpillAudioUnit.signedGainAddress
+            let delayAddress = usesSharedMicrophoneMatrix
+                ? NativeMicrophoneMatrixAudioUnit.delayAddress(route.microphoneBus)
+                : NativeMicrophoneSpillAudioUnit.delayMillisecondsAddress
+            let filterAddress = usesSharedMicrophoneMatrix
+                ? NativeMicrophoneMatrixAudioUnit.filterAddress(route.microphoneBus)
+                : NativeMicrophoneSpillAudioUnit.lowPassAlphaAddress
+            tree?.parameter(withAddress: gainAddress)?.value =
+                gain.isFinite ? min(2, max(-2, gain)) : 0
+            tree?.parameter(withAddress: delayAddress)?.value = Float(min(
                 Double(NativeMicrophoneSpillProcessor.maximumDelayMilliseconds),
                 max(0, capture.propagationDelayMilliseconds +
                     Double(mic.mixer.safeAlignmentMilliseconds))
             ))
-            tree?.parameter(
-                withAddress: NativeMicrophoneSpillAudioUnit.lowPassAlphaAddress
-            )?.value = alpha.isFinite ? max(0.00001, min(1, alpha)) : 1
+            tree?.parameter(withAddress: filterAddress)?.value =
+                alpha.isFinite ? max(0.00001, min(1, alpha)) : 1
         }
     }
 
     private func removeMicrophoneCaptures(for sourceID: TrackID) {
+        var detached = Set<ObjectIdentifier>()
         for route in microphoneRoutes where route.sourceID == sourceID {
+            guard detached.insert(ObjectIdentifier(route.capture)).inserted else { continue }
             engine.disconnectNodeOutput(route.capture)
             engine.disconnectNodeInput(route.capture)
             engine.detach(route.capture)
@@ -853,7 +910,9 @@ public final class AudioEngine: ObservableObject {
     /// Stop engine before calling. Original gain->panner graph is restored
     /// exactly, with no output from the audition return.
     private func dismantleMicrophoneCaptures(format: AVAudioFormat) {
+        var detached = Set<ObjectIdentifier>()
         for route in microphoneRoutes {
+            guard detached.insert(ObjectIdentifier(route.capture)).inserted else { continue }
             engine.disconnectNodeOutput(route.capture)
             engine.disconnectNodeInput(route.capture)
             engine.detach(route.capture)
