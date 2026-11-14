@@ -363,10 +363,15 @@ public final class RenderGraph {
         guard let track = tracks[trackID] else {
             throw AudioBackendError.trackNotFound(trackID)
         }
-        track.instrumentUnit = prepared.unit
-        track.auAudioUnit = prepared.auAudioUnit
-        track.renderBlock = prepared.renderBlock
-        track.instrumentOwner = prepared.owner
+        let previous = track.processing
+        track.processing = ProcessingResources(
+            instrumentOwner: prepared.owner,
+            instrumentUnit: prepared.unit,
+            auAudioUnit: prepared.auAudioUnit,
+            renderBlock: prepared.renderBlock,
+            effects: previous.effects,
+            scratch: TrackScratchBuffers(frameCapacity: bufferSize)
+        )
         publishRenderSnapshot()
         return prepared.unit
     }
@@ -431,10 +436,18 @@ public final class RenderGraph {
         guard let unit = prepared.takeUnit() else {
             throw AudioBackendError.configurationError("Effect was already installed")
         }
-        while track.effects.count <= slot {
-            track.effects.append(nil)
-        }
-        track.effects[slot] = EffectLifetime(unit)
+        let previous = track.processing
+        var effects = previous.effects
+        while effects.count <= slot { effects.append(nil) }
+        effects[slot] = EffectLifetime(unit)
+        track.processing = ProcessingResources(
+            instrumentOwner: previous.instrumentOwner,
+            instrumentUnit: previous.instrumentUnit,
+            auAudioUnit: previous.auAudioUnit,
+            renderBlock: previous.renderBlock,
+            effects: effects,
+            scratch: TrackScratchBuffers(frameCapacity: bufferSize)
+        )
         publishRenderSnapshot()
         return unit
     }
@@ -445,22 +458,33 @@ public final class RenderGraph {
     }
 
     func unloadPlugin(for trackID: TrackID, slot: Int) {
-        guard var track = tracks[trackID] else { return }
-        
+        guard let track = tracks[trackID] else { return }
+        let old = track.processing
+        var effects = old.effects
+        var owner = old.instrumentOwner
+        var unit = old.instrumentUnit
+        var au = old.auAudioUnit
+        var block = old.renderBlock
+
         if slot < 0 {
-            // Unload instrument - release AVAudioUnit (don't dispose directly)
-            track.instrumentOwner = nil
-            track.instrumentUnit = nil
-            track.auAudioUnit = nil
-            track.renderBlock = nil
-        } else if slot < track.effects.count {
-            track.effects[slot] = nil
+            owner = nil
+            unit = nil
+            au = nil
+            block = nil
+        } else if slot < effects.count {
+            effects[slot] = nil
+        } else {
+            return
         }
-        
-        tracks[trackID] = track
+        track.processing = ProcessingResources(
+            instrumentOwner: owner, instrumentUnit: unit,
+            auAudioUnit: au, renderBlock: block,
+            effects: effects,
+            scratch: TrackScratchBuffers(frameCapacity: bufferSize)
+        )
         publishRenderSnapshot()
     }
-    
+
     func getInstrumentUnit(for trackID: TrackID) -> AudioUnit? {
         return tracks[trackID]?.instrumentUnit
     }
@@ -474,13 +498,13 @@ public final class RenderGraph {
         guard let track = snapshot.byID[trackID] else { return }
 
         // Called by the real-time scheduler: never log or format strings here.
-        if let auAudioUnit = track.auAudioUnit,
+        if let auAudioUnit = track.processing.auAudioUnit,
            let scheduleMIDIEventBlock = auAudioUnit.scheduleMIDIEventBlock {
             let midiData: [UInt8] = [status, data1, data2]
             midiData.withUnsafeBufferPointer { buffer in
                 scheduleMIDIEventBlock(AUEventSampleTimeImmediate, 0, 3, buffer.baseAddress!)
             }
-        } else if let unit = track.instrumentUnit {
+        } else if let unit = track.processing.instrumentUnit {
             _ = MusicDeviceMIDIEvent(
                 unit, UInt32(status), UInt32(data1), UInt32(data2), sampleOffset
             )
@@ -490,7 +514,7 @@ public final class RenderGraph {
 
         func allNotesOff() {
         for track in tracks.values {
-            guard let unit = track.instrumentUnit else { continue }
+            guard let unit = track.processing.instrumentUnit else { continue }
             
             // Send all notes off on all channels
             for channel: UInt8 in 0..<16 {
@@ -531,14 +555,14 @@ public final class RenderGraph {
         withRenderSnapshot { snapshot in
         for track in snapshot.routes {
             // Skip muted tracks (or non-soloed tracks when solo is active)
-            if track.isMuted { continue }
-            if snapshot.hasSoloedTracks && !track.isSolo { continue }
+            if track.controls.isMuted { continue }
+            if snapshot.hasSoloedTracks && !track.controls.isSolo { continue }
             
             // Need either renderBlock (AUv3) or instrumentUnit (legacy)
-            let bufferL = track.scratch.left
-            let bufferR = track.scratch.right
-            guard frameCount <= UInt32(track.scratch.frameCapacity) else { continue }
-            guard track.renderBlock != nil || track.instrumentUnit != nil else { continue }
+            let bufferL = track.processing.scratch.left
+            let bufferR = track.processing.scratch.right
+            guard frameCount <= UInt32(track.processing.scratch.frameCapacity) else { continue }
+            guard track.processing.renderBlock != nil || track.processing.instrumentUnit != nil else { continue }
             
             // Clear track buffer
             memset(bufferL, 0, Int(frameCount) * MemoryLayout<Float>.size)
@@ -566,14 +590,14 @@ public final class RenderGraph {
             var renderStatus: OSStatus = noErr
             
             // Use AUv3 renderBlock if available, otherwise fall back to AudioUnitRender
-            if let renderBlock = track.renderBlock {
+            if let renderBlock = track.processing.renderBlock {
                 // AUv3 rendering using the render block
                 renderStatus = withUnsafeMutablePointer(to: &stereoList) { stereoPtr in
                     stereoPtr.withMemoryRebound(to: AudioBufferList.self, capacity: 1) { ablPtr in
                         renderBlock(&actionFlags, &timeStamp, frameCount, 0, ablPtr, nil)
                     }
                 }
-            } else if let instrument = track.instrumentUnit {
+            } else if let instrument = track.processing.instrumentUnit {
                 // Legacy AudioUnit rendering
                 renderStatus = withUnsafeMutablePointer(to: &stereoList) { stereoPtr in
                     stereoPtr.withMemoryRebound(to: AudioBufferList.self, capacity: 1) { ablPtr in
@@ -591,7 +615,7 @@ public final class RenderGraph {
             }
             
             // Process through effects
-            for case let effect? in track.effects {
+            for case let effect? in track.processing.effects {
                 var effectTimeStamp = timeStamp
                 var effectFlags = AudioUnitRenderActionFlags()
                 withUnsafeMutablePointer(to: &stereoList) { stereoPtr in
@@ -602,8 +626,8 @@ public final class RenderGraph {
             }
             
             // Apply volume and pan, mix to output
-            let leftGain = track.volume * (1.0 - max(0, track.pan))
-            let rightGain = track.volume * (1.0 + min(0, track.pan))
+            let leftGain = track.controls.volume * (1.0 - max(0, track.controls.pan))
+            let rightGain = track.controls.volume * (1.0 + min(0, track.controls.pan))
             
             for i in 0..<Int(frameCount) {
                 outL[i] += bufferL[i] * leftGain
