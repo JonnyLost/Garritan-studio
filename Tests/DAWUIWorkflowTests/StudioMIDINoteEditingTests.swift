@@ -302,4 +302,33 @@ final class StudioMIDINoteEditingTests: XCTestCase {
             before: [other], after: snapped))
     }
 
+    func testSplitAndGluePreserveSemanticArticulationAssignments() {
+        let original = MIDIEvent.note(at: 0, pitch: 69, duration: 2)
+        var midi = MIDIClipData(events: [original])
+        midi.articulations = [
+            StudioNoteArticulation(noteID: original.id, articulationID: "sustain")
+        ]
+        let split = StudioMIDINoteEditing.splitting(
+            midi.events, selectedIDs: [original.id], at: 1)
+        guard let rightID = split.idMapping[original.id] else {
+            return XCTFail("No split destination ID")
+        }
+        let copied = StudioArticulationAssignmentEditing.byNoteID(in: midi)
+        midi.events = split.events
+        StudioArticulationAssignmentEditing.transfer(
+            from: copied, idMapping: split.idMapping, into: &midi)
+        XCTAssertEqual(StudioArticulationAssignmentEditing.byNoteID(in: midi)[rightID],
+                       "sustain")
+        let merged = StudioMIDINoteEditing.gluing(
+            midi.events, selectedIDs: [original.id, rightID],
+            articulations: StudioArticulationAssignmentEditing.byNoteID(in: midi))
+        XCTAssertEqual(merged.removedIDs, [rightID])
+        midi.events = merged.events
+        midi.articulations?.removeAll { merged.removedIDs.contains($0.noteID) }
+        XCTAssertEqual(midi.events.count, 1)
+        XCTAssertEqual(midi.events[0].id, original.id)
+        XCTAssertEqual(StudioArticulationAssignmentEditing.byNoteID(in: midi),
+                       [original.id: "sustain"])
+    }
+
 }
