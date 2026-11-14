@@ -63,9 +63,9 @@ final class StudioRenderGraphSnapshotTests: XCTestCase {
 
         // An invalid component must fail during preparation, before install.
         let invalid = AudioComponentDescription(
-            componentType: 0,
-            componentSubType: 0,
-            componentManufacturer: 0,
+            componentType: 0xDEADBEEF,
+            componentSubType: 0xDEADBEEF,
+            componentManufacturer: 0xDEADBEEF,
             componentFlags: 0,
             componentFlagsMask: 0
         )
