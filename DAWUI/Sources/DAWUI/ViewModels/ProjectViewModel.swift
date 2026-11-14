@@ -30,6 +30,8 @@ public final class ProjectViewModel: ObservableObject {
     @Published public var activeKeyswitchArticulationID: String?
     @Published public var activeKeyswitchTrackID: TrackID?
     @Published public private(set) var selectedTrackID: TrackID?
+    /// UI selection only; microphone objects are stored in DAWState.
+    @Published public private(set) var selectedVirtualMicrophoneID: UUID?
     @Published public private(set) var selectedClipIDs: Set<ClipID> = []
     @Published public private(set) var isModified: Bool = false
     @Published public private(set) var studioSynthMIDILearnRequest: StudioSynthMIDILearnRequest?
@@ -63,6 +65,8 @@ public final class ProjectViewModel: ObservableObject {
     
     // Playback state
     @Published public private(set) var isEngineReady: Bool = false
+    @Published public private(set) var acousticRoomSelectionError: String?
+    @Published public private(set) var microphoneAuditionError: String?
     
     // MARK: - Subsystems
     
@@ -290,6 +294,27 @@ public final class ProjectViewModel: ObservableObject {
         Task {
             do {
                 print("Starting audio engine...")
+                // Restore the chosen native room before preparing track instruments.
+                // Previous projects default to the original close-microphone balance.
+                audioEngine.setVirtualMicrophone(
+                    project.dawState.virtualMicrophoneSettings ?? StudioVirtualMicrophoneSettings()
+                )
+                // A legacy project with no saved profile keeps the tested Apple hall.
+                if let design = project.dawState.acousticRoomDesign {
+                    try audioEngine.configureDesignedRoom(design)
+                }
+                if let id = project.dawState.acousticRoomProfileID,
+                   StudioRoomAcousticProfile.index(forID: id) != nil {
+                    do {
+                        try audioEngine.setNativeConcertHallReverbEnabled(true)
+                        _ = audioEngine.selectNativeRoomProfile(id: id)
+                    } catch {
+                        acousticRoomSelectionError = error.localizedDescription
+                        print("[Acoustics] Could not restore native room: \(error)")
+                        // Do not prevent legacy sessions from starting.
+                        try? audioEngine.setNativeConcertHallReverbEnabled(false)
+                    }
+                }
                 try audioEngine.start()
                 print("Audio engine started successfully. Running: \(audioEngine.engine.isRunning)")
                 print("Sample rate: \(audioEngine.sampleRate)")
@@ -1490,6 +1515,159 @@ public final class ProjectViewModel: ObservableObject {
 
     public func setConcertHallOverallReverb(_ level: Float) {
         audioEngine.setConcertHallOverallReverb(level)
+    }
+
+    /// Virtual microphone changes use AU parameters and mixer gains, so the
+    /// listener can be moved without rebuilding the AVAudioEngine graph.
+    public func setVirtualMicrophone(_ settings: StudioVirtualMicrophoneSettings) {
+        let safe = StudioVirtualMicrophoneSettings(
+            perspective: settings.perspective, stereoWidth: settings.safeWidth
+        )
+        audioEngine.setVirtualMicrophone(safe)
+        project.dawState.virtualMicrophoneSettings = safe
+    }
+
+    /// Explicit, alternate monitoring mode. The normal track/hall path
+    /// remains the fallback; no saved project auto-activates mic audition.
+    public func setMicrophoneAuditionEnabled(_ enabled: Bool) {
+        guard isEngineReady, !transportState.isPlaying,
+              !transportState.isRecording, !isRecording else {
+            microphoneAuditionError = "Stop playback and recording to change microphone monitoring."
+            return
+        }
+        do {
+            try audioEngine.setMicrophoneAuditionEnabled(
+                enabled, tracks: project.tracks,
+                microphones: project.dawState.virtualMicrophones ?? [],
+                room: project.dawState.acousticRoomDesign ?? StudioAcousticRoomDesign()
+            )
+            microphoneAuditionError = nil
+        } catch {
+            microphoneAuditionError = error.localizedDescription
+        }
+    }
+
+    private func refreshAuditionMicrophones() {
+        audioEngine.refreshMicrophoneRouting(
+            tracks: project.tracks,
+            microphones: project.dawState.virtualMicrophones ?? [],
+            room: project.dawState.acousticRoomDesign ?? StudioAcousticRoomDesign()
+        )
+    }
+
+    /// Add/remove operations change graph cardinality. They intentionally
+    /// require mic audition to be disabled first, while live position and
+    /// mixer edits can continue without rebuilding AVAudioEngine.
+
+    public func addVirtualMicrophoneArray(_ preset: StudioMicrophoneArrayPreset) {
+        guard !audioEngine.isMicrophoneAuditionActive else {
+            microphoneAuditionError = "Turn off mic audition before adding microphones."
+            return
+        }
+        let room = project.dawState.acousticRoomDesign ?? StudioAcousticRoomDesign()
+        var microphones = project.dawState.virtualMicrophones ?? []
+        guard microphones.count + preset.microphoneCount <= 32 else { return }
+        let added = preset.makeMicrophones(in: room)
+        microphones.append(contentsOf: added)
+        project.dawState.virtualMicrophones = microphones
+        selectedVirtualMicrophoneID = added.first?.id
+    }
+
+    public func selectVirtualMicrophone(_ id: UUID?) {
+        guard id == nil || (project.dawState.virtualMicrophones ?? []).contains(where: {
+            $0.id == id
+        }) else { return }
+        selectedVirtualMicrophoneID = id
+    }
+
+    public func updateVirtualMicrophone(_ microphone: StudioVirtualMicrophone) {
+        guard var microphones = project.dawState.virtualMicrophones,
+              let index = microphones.firstIndex(where: { $0.id == microphone.id })
+        else { return }
+        let room = project.dawState.acousticRoomDesign ?? StudioAcousticRoomDesign()
+        microphones[index] = microphone.clamped(to: room)
+        project.dawState.virtualMicrophones = microphones
+        refreshAuditionMicrophones()
+    }
+
+    public func setVirtualMicrophonePosition(id: UUID, position: StudioRoomPosition3D) {
+        guard var microphone = project.dawState.virtualMicrophones?.first(where: {
+            $0.id == id
+        }) else { return }
+        microphone.position = position
+        updateVirtualMicrophone(microphone)
+    }
+
+    public func removeVirtualMicrophone(id: UUID) {
+        guard !audioEngine.isMicrophoneAuditionActive else {
+            microphoneAuditionError = "Turn off mic audition before removing microphones."
+            return
+        }
+        guard var microphones = project.dawState.virtualMicrophones else { return }
+        microphones.removeAll { $0.id == id }
+        project.dawState.virtualMicrophones = microphones
+        if selectedVirtualMicrophoneID == id {
+            selectedVirtualMicrophoneID = microphones.first?.id
+        }
+    }
+
+    /// Apply current room geometry/materials to our native FDN and source
+    /// reflections. The button is disabled during transport activity.
+    /// Save the new design only after the audio engine accepted it.
+    public func applyAcousticRoomDesign(_ design: StudioAcousticRoomDesign) {
+        guard isEngineReady,
+              !transportState.isPlaying, !transportState.isRecording,
+              !isRecording else { return }
+        do {
+            if !audioEngine.usesNativeConcertHallReverb {
+                try audioEngine.setNativeConcertHallReverbEnabled(true)
+            }
+            try audioEngine.configureDesignedRoom(design)
+            guard audioEngine.selectNativeRoomProfile(id: StudioAcousticRoomDesign.profileID)
+            else { return }
+            acousticRoomSelectionError = nil
+            project.dawState.acousticRoomDesign = design
+            if let microphones = project.dawState.virtualMicrophones {
+                project.dawState.virtualMicrophones = microphones.map {
+                    $0.clamped(to: design)
+                }
+            }
+            project.dawState.acousticRoomProfileID = StudioAcousticRoomDesign.profileID
+            refreshAuditionMicrophones()
+        } catch {
+            acousticRoomSelectionError =
+                "Could not apply custom room: \(error.localizedDescription)"
+        }
+    }
+
+    /// Legacy Apple hall or one of the modeled spaces. Project persistence uses
+    /// the stable room ID, not the Audio Unit's numeric parameter index.
+    /// Graph rebuilds only occur when changing between Apple and native engines;
+    /// while playback/recording is running this operation is intentionally blocked.
+    public func selectConcertHallRoom(id: String) {
+        guard isEngineReady,
+              !transportState.isPlaying, !transportState.isRecording,
+              !isRecording else { return }
+        if id == StudioAcousticRoomDesign.profileID {
+            applyAcousticRoomDesign(project.dawState.acousticRoomDesign ?? StudioAcousticRoomDesign())
+            return
+        }
+        let isLegacy = id == "apple-medium-hall"
+        guard isLegacy || StudioRoomAcousticProfile.index(forID: id) != nil else { return }
+        do {
+            if isLegacy {
+                try audioEngine.setNativeConcertHallReverbEnabled(false)
+            } else {
+                if !audioEngine.usesNativeConcertHallReverb {
+                    try audioEngine.setNativeConcertHallReverbEnabled(true)
+                }
+                _ = audioEngine.selectNativeRoomProfile(id: id)
+            }
+            acousticRoomSelectionError = nil
+            project.dawState.acousticRoomProfileID = isLegacy ? nil : id
+        } catch {
+            acousticRoomSelectionError = "Could not change acoustic room: \(error.localizedDescription)"
+        }
     }
 
     public func setTrackStageZone(id: TrackID, zone: Int) {

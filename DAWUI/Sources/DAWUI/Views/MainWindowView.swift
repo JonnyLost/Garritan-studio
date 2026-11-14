@@ -18,6 +18,7 @@ public struct MainWindowView: View {
     @State private var mixerHeight: CGFloat = 280
     @State private var pianoRollHeight: CGFloat = 500
     @State private var showStageWorkspace = false
+    @State private var showRoomAcousticsWorkspace = false
     @State private var showChannelWorkspace = false
     @State private var showArticulationsWorkspace = false
     @State private var showOstinatoWorkspace = false
@@ -135,7 +136,7 @@ public struct MainWindowView: View {
                         .background(Color(nsColor: .controlBackgroundColor))
                     }
 
-                    if showInstrumentWorkspace || showChannelWorkspace || showStageWorkspace || showArticulationsWorkspace || showOstinatoWorkspace || viewModel.showMixer || viewModel.showPianoRoll {
+                    if showInstrumentWorkspace || showChannelWorkspace || showStageWorkspace || showRoomAcousticsWorkspace || showArticulationsWorkspace || showOstinatoWorkspace || viewModel.showMixer || viewModel.showPianoRoll {
                         ResizeHandle(height: $pianoRollHeight)
                             .onTapGesture(count: 2) {
                                 if lowerWorkspaceMaximized {
@@ -504,6 +505,7 @@ public struct MainWindowView: View {
         showInstrumentWorkspace = workspace == "Instruments"
         showChannelWorkspace = workspace == "Channel"
         showStageWorkspace = workspace == "Stage"
+        showRoomAcousticsWorkspace = workspace == "Rooms"
         showArticulationsWorkspace = workspace == "Articulations"
         showOstinatoWorkspace = workspace == "Ostinato"
         viewModel.showPianoRoll = workspace == "Piano Roll"
@@ -522,16 +524,19 @@ public struct MainWindowView: View {
             workspaceButton("Stage", symbol: "circle.hexagongrid", active: showStageWorkspace) {
                 selectWorkspace("Stage")
             }
+            workspaceButton("Rooms", symbol: "waveform.path", active: showRoomAcousticsWorkspace) {
+                selectWorkspace("Rooms")
+            }
             workspaceButton("Articulations", symbol: "music.note", active: showArticulationsWorkspace) {
                 selectWorkspace("Articulations")
             }
             workspaceButton("Ostinato", symbol: "square.grid.3x3.fill", active: showOstinatoWorkspace) {
                 selectWorkspace("Ostinato")
             }
-            workspaceButton("Piano Roll", symbol: "pianokeys", active: viewModel.showPianoRoll && !showInstrumentWorkspace && !showChannelWorkspace && !showStageWorkspace && !showArticulationsWorkspace && !showOstinatoWorkspace && !viewModel.showMixer) {
+            workspaceButton("Piano Roll", symbol: "pianokeys", active: viewModel.showPianoRoll && !showInstrumentWorkspace && !showChannelWorkspace && !showStageWorkspace && !showRoomAcousticsWorkspace && !showArticulationsWorkspace && !showOstinatoWorkspace && !viewModel.showMixer) {
                 selectWorkspace("Piano Roll")
             }
-            workspaceButton("Mixer", symbol: "slider.vertical.3", active: viewModel.showMixer && !showInstrumentWorkspace && !showChannelWorkspace && !showStageWorkspace && !showArticulationsWorkspace && !showOstinatoWorkspace) {
+            workspaceButton("Mixer", symbol: "slider.vertical.3", active: viewModel.showMixer && !showInstrumentWorkspace && !showChannelWorkspace && !showStageWorkspace && !showRoomAcousticsWorkspace && !showArticulationsWorkspace && !showOstinatoWorkspace) {
                 selectWorkspace("Mixer")
             }
             Spacer(minLength: 0)
@@ -564,7 +569,15 @@ public struct MainWindowView: View {
 
     private var compactWorkspaceStrip: some View {
         HStack(spacing: 16) {
-            if let track = viewModel.selectedTrack {
+            if showRoomAcousticsWorkspace {
+                Image(systemName: "waveform.path")
+                Text("Room Acoustics").font(.subheadline.weight(.semibold))
+                Text(viewModel.project.dawState.acousticRoomProfileID ?? "Apple Medium Hall")
+                    .font(.caption).foregroundColor(.secondary)
+                Spacer()
+                Button("Expand to Edit") { compactLowerWorkspace = false }
+                    .buttonStyle(.borderless)
+            } else if let track = viewModel.selectedTrack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(track.name).font(.subheadline.weight(.semibold))
                     Text(track.studioSamplerPatch != nil ? "Studio Sampler" : track.studioFMEnabled == true ? "Studio FM" :
@@ -611,6 +624,25 @@ public struct MainWindowView: View {
             ArticulationsWorkspaceView(viewModel: viewModel)
         } else if showOstinatoWorkspace {
             OstinatoWorkspaceView(viewModel: viewModel)
+        } else if showRoomAcousticsWorkspace {
+            VStack(spacing: 0) {
+                StudioWorkspaceHeader(
+                    "Room Acoustics",
+                    subtitle: "Room library, original six-band designer and orchestral ambience",
+                    symbol: "waveform.path"
+                ) {
+                    Button("Stage") { selectWorkspace("Stage") }
+                        .buttonStyle(.borderless)
+                    Button {
+                        selectWorkspace("Piano Roll")
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Close Room Acoustics workspace")
+                }
+                StudioRoomAcousticsWorkspaceView(viewModel: viewModel)
+            }
         } else if showStageWorkspace {
             VStack(spacing: 0) {
                 StudioWorkspaceHeader(
@@ -736,7 +768,7 @@ public struct MainWindowView: View {
             .help("Toggle Workspace Navigation")
 
             Toggle(isOn: Binding(
-                get: { viewModel.showPianoRoll && !showStageWorkspace && !showChannelWorkspace && !showInstrumentWorkspace && !showOstinatoWorkspace },
+                get: { viewModel.showPianoRoll && !showStageWorkspace && !showRoomAcousticsWorkspace && !showChannelWorkspace && !showInstrumentWorkspace && !showOstinatoWorkspace },
                 set: { enabled in
                     if enabled { selectWorkspace("Piano Roll") }
                     else { viewModel.showPianoRoll = false }
@@ -747,7 +779,7 @@ public struct MainWindowView: View {
             .help("Toggle MIDI Editor Panel")
             
             Toggle(isOn: Binding(
-                get: { viewModel.showMixer && !showStageWorkspace && !showChannelWorkspace && !showInstrumentWorkspace && !showOstinatoWorkspace },
+                get: { viewModel.showMixer && !showStageWorkspace && !showRoomAcousticsWorkspace && !showChannelWorkspace && !showInstrumentWorkspace && !showOstinatoWorkspace },
                 set: { enabled in
                     if enabled { selectWorkspace("Mixer") }
                     else { viewModel.showMixer = false }
