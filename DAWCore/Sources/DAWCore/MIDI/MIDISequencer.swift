@@ -160,7 +160,7 @@ public final class MIDISequencer: ObservableObject {
                 atTempo: transportState?.tempo.bpm ?? 120
             )
             
-            for event in midiData.events {
+            for event in StudioArticulationRenderer.events(for: midiData, map: track.articulationMap) {
                 let absoluteBeat = clipStartBeat + event.beatPosition
                 
                 let scheduled = SequencerMIDIEvent(
