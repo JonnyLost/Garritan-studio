@@ -752,10 +752,18 @@ public final class CoreAudioBackend: AudioBackend {
         bufferList: UnsafeMutablePointer<AudioBufferList>?
     ) -> OSStatus {
         guard let bufferList = bufferList else { return noErr }
-        
+        // The SPSC mailbox, MIDI scheduler, shared effects, disk-streamed
+        // clips and metronome all require a SINGLE callback consumer.
+        // A reentrant callback outputs silence rather than touching them.
+        guard renderGraph.tryBeginOutputRender() else {
+            clearBuffer(bufferList, frameCount: frameCount)
+            return noErr
+        }
+        defer { renderGraph.endOutputRender() }
+
         // Clear output buffer
         clearBuffer(bufferList, frameCount: frameCount)
-        
+
         // Parameter changes remain responsive while transport is stopped.
         applyPendingGraphCommands()
 
@@ -777,7 +785,8 @@ public final class CoreAudioBackend: AudioBackend {
             startSample: startSample,
             endSample: endSample,
             frameCount: frameCount,
-            outputBuffer: bufferList
+            outputBuffer: bufferList,
+            alreadyAdmitted: true
         ) else {
             // A second overlapping callback cannot safely process shared
             // Audio Units, clips or metronome. Buffer was already cleared.
