@@ -434,7 +434,9 @@ public final class CoreAudioBackend: AudioBackend {
         }
         
         let startSample = _currentSamplePosition
-        let endSample = startSample + Int64(frameCount)
+        let endSample = StudioMIDIClockMath.bufferEnd(
+            startSample: startSample, frameCount: frameCount
+        )
 
         // The Core Audio render callback must never print or allocate
         // diagnostic strings. The MIDI scheduler returns an event count for

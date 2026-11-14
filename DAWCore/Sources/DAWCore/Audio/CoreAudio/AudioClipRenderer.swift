@@ -26,13 +26,19 @@ public final class AudioClipRenderer {
     private let sampleRate: Double
     
     /// Read buffer for ExtAudioFile
-    private var readBuffer: UnsafeMutablePointer<Float>?
-    private var readBufferSize: Int = 0
+    // Fixed working storage allocated on backend construction, not in render.
+    // 65,536 stereo frames = 512 KiB; bounded for portable Macs.
+    private static let preparedFrameCapacity = 65_536
+    private let readBuffer: UnsafeMutablePointer<Float>
+    private let readBufferSize: Int
     
     // MARK: - Initialization
     
     init(sampleRate: Double) {
         self.sampleRate = sampleRate
+        self.readBufferSize = Self.preparedFrameCapacity * 2
+        self.readBuffer = UnsafeMutablePointer<Float>.allocate(capacity: readBufferSize)
+        self.readBuffer.initialize(repeating: 0, count: readBufferSize)
     }
     
     deinit {
@@ -40,7 +46,8 @@ public final class AudioClipRenderer {
         for clip in scheduledClips {
             ExtAudioFileDispose(clip.extAudioFile)
         }
-        readBuffer?.deallocate()
+        readBuffer.deinitialize(count: readBufferSize)
+        readBuffer.deallocate()
     }
     
     // MARK: - Clip Management (Main Thread)
@@ -120,7 +127,9 @@ public final class AudioClipRenderer {
     // MARK: - Rendering (Audio Thread)
     
     /// Render audio clips into the output buffer
-    /// Called from audio thread - should be realtime safe (ExtAudioFile is not perfectly RT-safe but acceptable)
+    /// Called on the audio thread. No allocation or console output occurs
+    /// here. ExtAudioFileRead still performs potentially blocking disk I/O;
+    /// move file decoding to a bounded worker in a future backend milestone.
     func render(
         into bufferList: UnsafeMutablePointer<AudioBufferList>,
         currentSample: Int64,
@@ -134,11 +143,14 @@ public final class AudioClipRenderer {
         
         guard let outL = outputLeft, let outR = outputRight else { return }
         
-        let endSample = currentSample + Int64(frameCount)
-        
-        // Ensure read buffer is big enough
-        ensureReadBuffer(size: Int(frameCount) * 2)  // Stereo interleaved
-        guard let readBuf = readBuffer else { return }
+        let endSample = StudioMIDIClockMath.bufferEnd(
+            startSample: currentSample, frameCount: frameCount
+        )
+
+        // An oversize callback is silenced rather than resizing memory on a
+        // realtime thread. Ordinary hardware buffers are far below this cap.
+        guard Int(frameCount) <= Self.preparedFrameCapacity else { return }
+        let readBuf = readBuffer
         
         for i in 0..<scheduledClips.count {
             var clip = scheduledClips[i]
@@ -178,7 +190,7 @@ public final class AudioClipRenderer {
             let status = ExtAudioFileRead(clip.extAudioFile, &framesToReadVar, &readBufferList)
             
             if status != noErr {
-                print("[AudioClipRenderer] Read error: \(status)")
+                // No logging or UI dispatch inside the audio callback.
                 continue
             }
             
@@ -198,11 +210,4 @@ public final class AudioClipRenderer {
         }
     }
     
-    private func ensureReadBuffer(size: Int) {
-        if readBufferSize < size {
-            readBuffer?.deallocate()
-            readBuffer = UnsafeMutablePointer<Float>.allocate(capacity: size)
-            readBufferSize = size
-        }
-    }
 }
