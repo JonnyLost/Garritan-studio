@@ -1,0 +1,56 @@
+name: Studio Safe Export Merge and Gate
+
+on:
+  push:
+    branches:
+      - integration/studio-safe-consolidation-2026-11-14
+  workflow_dispatch:
+
+concurrency:
+  group: studio-safe-export-merge
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify pinned export + modern MIDI on macOS before publishing
+    runs-on: macos-15
+    timeout-minutes: 55
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Safely rehearse export merge against the current staging snapshot
+        run: bash Tools/merge-studio-export-safe.sh
+      - name: Resolve and build all targets
+        run: |
+          swift package resolve
+          swift build
+      - name: Test combined application
+        run: swift test --parallel
+      - name: Build optimized app
+        run: swift build -c release --product DAWApp
+
+  publish:
+    name: Publish verified export merge to staging, never to main
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reapply the exact pinned and conflict-guarded merge
+        run: bash Tools/merge-studio-export-safe.sh
+      - name: Push verified merge using ordinary fast-forward only
+        run: |
+          set -euo pipefail
+          if [[ "${SKIP_COMMIT:-}" == "true" ]]; then
+            echo "Already integrated; nothing to publish."
+            exit 0
+          fi
+          git diff --cached --check
+          git commit -m "Integrate updated audio and stem export without replacing professional MIDI"
+          git push origin HEAD:refs/heads/integration/studio-safe-consolidation-2026-11-14
