@@ -97,6 +97,7 @@ public struct TrackPianoRollView: View {
     
     // Copied notes for paste
     @State private var copiedNotes: [MIDIEvent] = []
+    @State private var copiedArticulations: [UUID: String] = [:]
     
     // Playhead position
     @State private var currentPlayheadBeat: Double = 0
@@ -1213,6 +1214,8 @@ public struct TrackPianoRollView: View {
     private func copySelectedNotes() {
         copiedNotes = StudioMIDINoteEditing.selectedNotes(in: noteEvents,
                                                            ids: selectedNoteIDs)
+        let ids = Set(copiedNotes.map(\.id))
+        copiedArticulations = articulationAssignments.filter { ids.contains($0.key) }
     }
 
     /// Paste notes at the playhead, retaining their channel, velocity and
@@ -1220,7 +1223,8 @@ public struct TrackPianoRollView: View {
     private func pasteNotes() {
         guard !copiedNotes.isEmpty else { return }
         insertNotes(copiedNotes, at: max(0, viewModel.transportState.playheadBeats),
-                    description: "Paste MIDI Notes")
+                    description: "Paste MIDI Notes",
+                    sourceArticulations: copiedArticulations)
     }
 
     private func duplicateSelectedNotes() {
@@ -1231,14 +1235,18 @@ public struct TrackPianoRollView: View {
             guard case .note(let data) = event.type else { return nil }
             return event.beatPosition + data.duration
         }.max() ?? 0
-        insertNotes(source, at: max(0, end), description: "Duplicate MIDI Notes")
+        insertNotes(source, at: max(0, end), description: "Duplicate MIDI Notes",
+                    sourceArticulations: articulationAssignments)
     }
 
     private func insertNotes(_ source: [MIDIEvent], at anchor: Double,
-                             description: String) {
+                             description: String,
+                             sourceArticulations: [UUID: String] = [:]) {
         guard var track = currentTrack, anchor.isFinite, anchor >= 0 else { return }
         var positioned: [MIDIEvent] = []
-        let insertedIDs = StudioMIDINoteEditing.paste(source, into: &positioned, at: anchor)
+        let idMapping = StudioMIDINoteEditing.pasteWithIDMapping(
+            source, into: &positioned, at: anchor)
+        let insertedIDs = Set(idMapping.values)
         guard !insertedIDs.isEmpty else { return }
 
         let tempo = viewModel.transportState.tempo.bpm
@@ -1256,6 +1264,8 @@ public struct TrackPianoRollView: View {
                 note.beatPosition -= start
                 midi.events.append(note)
             }
+            StudioArticulationAssignmentEditing.transfer(
+                from: sourceArticulations, idMapping: idMapping, into: &midi)
             let oldLength = track.clips[index].timeRange.duration.beats(atTempo: tempo)
             let neededLength = midi.events.compactMap { event -> Double? in
                 guard insertedIDs.contains(event.id),
@@ -1281,8 +1291,11 @@ public struct TrackPianoRollView: View {
             for index in positioned.indices {
                 positioned[index].beatPosition -= anchor
             }
+            var midi = MIDIClipData(events: positioned)
+            StudioArticulationAssignmentEditing.transfer(
+                from: sourceArticulations, idMapping: idMapping, into: &midi)
             let region = Clip(name: "MIDI", timeRange: TimeRange(start: start,
-                              duration: duration), content: .midi(MIDIClipData(events: positioned)))
+                              duration: duration), content: .midi(midi))
             track.clips.append(region)
         }
 
