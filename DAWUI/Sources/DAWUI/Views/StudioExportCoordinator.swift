@@ -151,6 +151,7 @@ public final class StudioExportCoordinator: ObservableObject {
             transport.setPlayheadBeats(0)
             playback.resetInstrumentsForExport()
             engine.resetExportHallTail()
+            engine.resetExportTrackEffects()
             engine.applyExportIsolation(selected: pass.trackIDs, tracks: snapshot.tracks)
             viewModel.prepareStudioExportPass(isolated)
 
