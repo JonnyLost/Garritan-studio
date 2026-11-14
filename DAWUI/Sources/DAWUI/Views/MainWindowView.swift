@@ -703,6 +703,14 @@ public struct MainWindowView: View {
                 Button(action: { viewModel.zoomIn() }) {
                     Image(systemName: "plus.magnifyingglass")
                 }
+                Picker("Snap", selection: $viewModel.arrangementSnapMode) {
+                    ForEach(SnapMode.allCases, id: \.self) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(width: 105)
+                .help("Arrangement snap grid (hold Command while dragging to bypass)")
             }
         }
         
@@ -1835,24 +1843,25 @@ struct TrackGridView: View {
     var body: some View {
         Canvas { context, size in
             let pixelsPerBeat = viewModel.pixelsPerBeat
-            let beatsPerBar = viewModel.transportState.timeSignature.beatsPerBar
+            let barLength = StudioMusicalGrid.beatsPerBar(viewModel.transportState.timeSignature)
             let totalBeats = Int(size.width / pixelsPerBeat) + 1
             
-            // Vertical beat lines
+            // Quarter-note beat grid with independent compound-meter bars.
             for beat in 0..<totalBeats {
                 let x = CGFloat(beat) * pixelsPerBeat
-                let isBar = beat % beatsPerBar == 0
-                
                 let path = Path { p in
                     p.move(to: CGPoint(x: x, y: 0))
                     p.addLine(to: CGPoint(x: x, y: size.height))
                 }
-                
-                context.stroke(
-                    path,
-                    with: .color(isBar ? Color.gray.opacity(0.4) : Color.gray.opacity(0.15)),
-                    lineWidth: isBar ? 1 : 0.5
-                )
+                context.stroke(path, with: .color(Color.gray.opacity(0.15)), lineWidth: 0.5)
+            }
+            for bar in 0...Int(ceil(Double(totalBeats) / barLength)) {
+                let x = CGFloat(Double(bar) * barLength) * pixelsPerBeat
+                let path = Path { p in
+                    p.move(to: CGPoint(x: x, y: 0))
+                    p.addLine(to: CGPoint(x: x, y: size.height))
+                }
+                context.stroke(path, with: .color(Color.gray.opacity(0.4)), lineWidth: 1)
             }
             
             // Bottom border
@@ -1876,25 +1885,26 @@ struct TimelineRulerContent: View {
     var body: some View {
         Canvas { context, size in
             let pixelsPerBeat = viewModel.pixelsPerBeat
-            let beatsPerBar = viewModel.transportState.timeSignature.beatsPerBar
+            let barLength = StudioMusicalGrid.beatsPerBar(viewModel.transportState.timeSignature)
             let totalBeats = Int(size.width / pixelsPerBeat) + 1
             
             for beat in 0..<totalBeats {
                 let x = CGFloat(beat) * pixelsPerBeat
-                let isBar = beat % beatsPerBar == 0
-                
-                let tickHeight: CGFloat = isBar ? 15 : 8
                 let path = Path { p in
-                    p.move(to: CGPoint(x: x, y: size.height - tickHeight))
+                    p.move(to: CGPoint(x: x, y: size.height - 8))
                     p.addLine(to: CGPoint(x: x, y: size.height))
                 }
-                context.stroke(path, with: .color(isBar ? .primary : .secondary.opacity(0.5)), lineWidth: isBar ? 1 : 0.5)
-                
-                if isBar {
-                    let barNum = beat / beatsPerBar + 1
-                    let text = Text("\(barNum)").font(.system(size: 10, weight: .medium))
-                    context.draw(text, at: CGPoint(x: x + 4, y: 8))
+                context.stroke(path, with: .color(.secondary.opacity(0.5)), lineWidth: 0.5)
+            }
+            for bar in 0...Int(ceil(Double(totalBeats) / barLength)) {
+                let x = CGFloat(Double(bar) * barLength) * pixelsPerBeat
+                let path = Path { p in
+                    p.move(to: CGPoint(x: x, y: size.height - 15))
+                    p.addLine(to: CGPoint(x: x, y: size.height))
                 }
+                context.stroke(path, with: .color(.primary), lineWidth: 1)
+                context.draw(Text("\(bar + 1)").font(.system(size: 10, weight: .medium)),
+                             at: CGPoint(x: x + 4, y: 8))
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
