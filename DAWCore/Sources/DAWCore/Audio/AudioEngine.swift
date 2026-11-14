@@ -402,7 +402,7 @@ public final class AudioEngine: ObservableObject {
         if isMicrophoneAuditionActive,
            (track.type == .midi || track.type == .instrument || track.type == .audio) {
             let sourceCount = Set(microphoneRoutes.map(\.sourceID)).count
-            if sourceCount >= Self.maximumAuditionSources {
+            if sourceCount + (hasVRackCaptureSource ? 1 : 0) >= Self.maximumAuditionSources {
                 // A newly created track must NEVER become inaudible just
                 // because the bounded mic graph has reached its source cap.
                 // Restore the original mix instead of creating a silent track.
@@ -739,18 +739,19 @@ public final class AudioEngine: ObservableObject {
             ($0.type == .midi || $0.type == .instrument || $0.type == .audio) &&
                 trackNodes[$0.id] != nil
         }
+        let rackSourceIncluded = hasVRackCaptureSource && vRackSourceMixer != nil
         if enabled {
             guard !microphones.isEmpty else {
                 throw AudioEngineError.microphoneRoutingUnavailable(
                     "Add a microphone in Rooms → Microphones first.")
             }
-            guard !sources.isEmpty else {
+            guard !sources.isEmpty || rackSourceIncluded else {
                 throw AudioEngineError.microphoneRoutingUnavailable(
-                    "No instrument or audio tracks have an active source node.")
+                    "No instrument, audio, or V-Rack sources are available.")
             }
-            guard sources.count <= Self.maximumAuditionSources else {
+            guard sources.count + (rackSourceIncluded ? 1 : 0) <= Self.maximumAuditionSources else {
                 throw AudioEngineError.microphoneRoutingUnavailable(
-                    "This first preview supports up to 16 instrument/audio tracks; the ordinary mix is unchanged.")
+                    "Mic audition supports up to 16 total sources, including one V-Rack aggregate. The original mix remains unchanged.")
             }
         }
 
@@ -779,6 +780,10 @@ public final class AudioEngine: ObservableObject {
                     attachMicrophoneCaptures(for: source, format: format)
                     updateMicrophoneCapture(for: source)
                 }
+                if rackSourceIncluded {
+                    attachVRackMicrophoneCaptures(format: format)
+                    updateVRackMicrophoneCapture()
+                }
                 applyMicrophoneChannelMix()
                 isMicrophoneAuditionActive = true
             } else {
@@ -789,6 +794,7 @@ public final class AudioEngine: ObservableObject {
                 node.setMicrophoneAuditionActive(enabled)
             }
             microphoneMasterMixer.outputVolume = enabled ? 1 : 0
+            vRackDirectMonitorMixer.outputVolume = enabled ? 0 : 1
             concertHallReturnMixer.outputVolume = enabled
                 ? concertHallOverallReverb * microphoneRoomWetLevel
                 : concertHallOverallReverb
@@ -800,6 +806,7 @@ public final class AudioEngine: ObservableObject {
             dismantleMicrophoneCaptures(format: format)
             isMicrophoneAuditionActive = false
             microphoneMasterMixer.outputVolume = 0
+            vRackDirectMonitorMixer.outputVolume = 1
             concertHallReturnMixer.outputVolume = concertHallOverallReverb
             for node in trackNodes.values {
                 node.setMicrophoneAuditionActive(false)
@@ -823,6 +830,7 @@ public final class AudioEngine: ObservableObject {
         }
         applyMicrophoneChannelMix()
         for track in tracks { updateMicrophoneCapture(for: track) }
+        updateVRackMicrophoneCapture()
     }
 
     private func applyMicrophoneChannelMix() {
@@ -966,6 +974,7 @@ public final class AudioEngine: ObservableObject {
             engine.detach(route.capture)
         }
         microphoneRoutes.removeAll()
+        removeVRackMicrophoneCaptures(format: format)
         for node in trackNodes.values {
             let original: AVAudioNode = node.stereoPositionNode ?? node.pannerNode
             engine.connect(node.gainNode, to: original, format: format)
@@ -977,6 +986,113 @@ public final class AudioEngine: ObservableObject {
         }
         microphoneChannelMixers.removeAll()
         routedMicrophones.removeAll()
+    }
+
+    /// A V-Rack's many MIDI channels are already mixed by PlaybackEngine.
+    /// This is an explicitly labeled aggregate source at the center of the
+    /// stage. Per-instrument rack positioning is not yet represented here.
+    private func attachVRackMicrophoneCaptures(format: AVAudioFormat) {
+        guard vRackSourceMixer != nil, hasVRackCaptureSource else { return }
+        if usesSharedMicrophoneMatrix {
+            let capture = AVAudioUnitEffect(
+                audioComponentDescription: NativeMicrophoneMatrixAudioUnit.componentDescription
+            )
+            engine.attach(capture)
+            for (index, mic) in routedMicrophones.enumerated() {
+                guard let bus = microphoneChannelMixers[mic.id] else { continue }
+                engine.connect(capture, to: bus,
+                               fromBus: AVAudioNodeBus(index),
+                               toBus: bus.nextAvailableInputBus, format: format)
+                vRackMicrophoneRoutes.append(VRackMicrophoneRoute(
+                    microphoneID: mic.id, capture: capture, microphoneBus: index
+                ))
+            }
+        } else {
+            for mic in routedMicrophones {
+                guard let bus = microphoneChannelMixers[mic.id] else { continue }
+                let capture = AVAudioUnitEffect(
+                    audioComponentDescription: NativeMicrophoneSpillAudioUnit.componentDescription
+                )
+                engine.attach(capture)
+                engine.connect(capture, to: bus, format: format)
+                vRackMicrophoneRoutes.append(VRackMicrophoneRoute(
+                    microphoneID: mic.id, capture: capture, microphoneBus: 0
+                ))
+            }
+        }
+        connectVRackMicrophoneFanout(format: format)
+    }
+
+    /// A stopped-engine source split to an always-connected dry monitor plus
+    /// the explicit mic capture. Never turn down the V-Rack sum mixer itself:
+    /// doing that would silence the inputs to both mics and recording taps.
+    private func connectVRackMicrophoneFanout(format: AVAudioFormat) {
+        guard let source = vRackSourceMixer else { return }
+        var destinations = [AVAudioConnectionPoint(
+            node: vRackDirectMonitorMixer, bus: 0
+        )]
+        var seen = Set<ObjectIdentifier>()
+        for route in vRackMicrophoneRoutes {
+            if seen.insert(ObjectIdentifier(route.capture)).inserted {
+                destinations.append(AVAudioConnectionPoint(
+                    node: route.capture, bus: 0
+                ))
+            }
+        }
+        engine.connect(source, to: destinations, fromBus: 0, format: format)
+    }
+
+    private func updateVRackMicrophoneCapture() {
+        guard hasVRackCaptureSource, !vRackMicrophoneRoutes.isEmpty else { return }
+        let position = StudioMicrophoneGeometry.approximateTrackPosition(
+            pan: 0, zone: 2, room: microphoneRoom
+        )
+        for route in vRackMicrophoneRoutes {
+            guard let mic = routedMicrophones.first(where: {
+                $0.id == route.microphoneID
+            }) else { continue }
+            let capture = StudioMicrophoneGeometry.capture(
+                source: position, microphone: mic
+            )
+            let gain = Float(capture.estimatedDirectAmplitude) * 0.25
+            let cutoff = max(1_800, min(17_000,
+                17_000 - 75 * capture.distanceMeters))
+            let alpha = Float(1 - exp(-2 * Double.pi * cutoff / sampleRate))
+            let gainAddress = usesSharedMicrophoneMatrix
+                ? NativeMicrophoneMatrixAudioUnit.gainAddress(route.microphoneBus)
+                : NativeMicrophoneSpillAudioUnit.signedGainAddress
+            let delayAddress = usesSharedMicrophoneMatrix
+                ? NativeMicrophoneMatrixAudioUnit.delayAddress(route.microphoneBus)
+                : NativeMicrophoneSpillAudioUnit.delayMillisecondsAddress
+            let filterAddress = usesSharedMicrophoneMatrix
+                ? NativeMicrophoneMatrixAudioUnit.filterAddress(route.microphoneBus)
+                : NativeMicrophoneSpillAudioUnit.lowPassAlphaAddress
+            let parameters = route.capture.auAudioUnit.parameterTree
+            parameters?.parameter(withAddress: gainAddress)?.value =
+                gain.isFinite ? min(2, max(-2, gain)) : 0
+            parameters?.parameter(withAddress: delayAddress)?.value = Float(min(
+                Double(NativeMicrophoneSpillProcessor.maximumDelayMilliseconds),
+                max(0, capture.propagationDelayMilliseconds +
+                    Double(mic.mixer.safeAlignmentMilliseconds))
+            ))
+            parameters?.parameter(withAddress: filterAddress)?.value =
+                alpha.isFinite ? min(1, max(0.00001, alpha)) : 1
+        }
+    }
+
+    /// Called with the engine stopped, before the mic channel busses detach.
+    private func removeVRackMicrophoneCaptures(format: AVAudioFormat) {
+        var detached = Set<ObjectIdentifier>()
+        for route in vRackMicrophoneRoutes {
+            if detached.insert(ObjectIdentifier(route.capture)).inserted {
+                engine.disconnectNodeOutput(route.capture)
+                engine.disconnectNodeInput(route.capture)
+                engine.detach(route.capture)
+            }
+        }
+        vRackMicrophoneRoutes.removeAll()
+        connectVRackMicrophoneFanout(format: format)
+        vRackDirectMonitorMixer.outputVolume = 1
     }
 
     /// Get track node for external access
