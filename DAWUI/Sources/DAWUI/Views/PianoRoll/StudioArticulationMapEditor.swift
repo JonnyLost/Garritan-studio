@@ -51,9 +51,23 @@ struct StudioArticulationMapEditor: View {
     @State private var library: [StudioArticulationMap] = []
     @State private var libraryMessage: String?
     let onSave: (StudioArticulationMap) -> Void
+    let garritanProgramID: String?
 
-    init(map: StudioArticulationMap?, onSave: @escaping (StudioArticulationMap) -> Void) {
-        _draft = State(initialValue: map ?? .starter)
+    private var factoryResolution: StudioGarritanArticulationFactory.Resolution {
+        StudioGarritanArticulationFactory.resolve(programID: garritanProgramID)
+    }
+
+    init(map: StudioArticulationMap?, garritanProgramID: String? = nil,
+         onSave: @escaping (StudioArticulationMap) -> Void) {
+        self.garritanProgramID = garritanProgramID
+        if let map {
+            _draft = State(initialValue: map)
+        } else if case .ready(let factory) =
+            StudioGarritanArticulationFactory.resolve(programID: garritanProgramID) {
+            _draft = State(initialValue: factory)
+        } else {
+            _draft = State(initialValue: .starter)
+        }
         self.onSave = onSave
     }
 
@@ -78,6 +92,13 @@ struct StudioArticulationMapEditor: View {
                         Button(saved.name) { draft = saved }
                     }
                 }
+                if case .ready(let factory) = factoryResolution {
+                    Button("Load GPO5 Factory") {
+                        draft = factory
+                        libraryMessage = "Loaded Standard-set map from the GPO5 owner’s manual. Apply to track to use it."
+                    }
+                    .help("Replace this draft with the exact verified GPO5 Standard keyswitch mapping")
+                }
                 Button("Duplicate Map") {
                     // Keep articulation IDs, but give this instrument its own
                     // editable map identity and library file.
@@ -96,14 +117,32 @@ struct StudioArticulationMapEditor: View {
                     }
                 }
                 Button("Apply to Track") {
-                    onSave(draft)
+                    var saved = draft
+                    // Once the composer edits or explicitly applies a map,
+                    // future instrument changes must preserve that choice.
+                    saved.isFactoryDefault = false
+                    onSave(saved)
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(draft.name.trimmingCharacters(in: .whitespaces).isEmpty)
             }
 
-            Text("Articulation names and stable IDs are separate from their MIDI commands. Factory/example names do not imply instrument-specific trigger notes.")
+            Group {
+                switch factoryResolution {
+                case .ready:
+                    Text("GPO5 Standard: verified keyswitch notes come from the owner's manual (C4 = MIDI 60).")
+                case .instantOrchestra:
+                    Text("Instant Orchestra has NO keyswitch articulations. Use CC1 / CC2 / CC11 for dynamics, CC104 for expression mode, and CC30–32 for Blending Textures.")
+                case .needsReview(let reason):
+                    Text("GPO5 manual reference only — no automatic triggers: \(reason)")
+                case .notKeyswitchInstrument:
+                    Text("Custom maps can be used with any instrument. No verified Garritan factory keyswitch map for this selection.")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            Text("Articulations are musical names; each instrument maps those names to its own MIDI messages. Library maps remain editable.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
