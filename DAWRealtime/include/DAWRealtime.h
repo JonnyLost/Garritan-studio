@@ -111,6 +111,19 @@ void daw_render_transport_set_playing(DAWRenderTransport *state, bool playing);
 int64_t daw_render_transport_position(const DAWRenderTransport *state);
 void daw_render_transport_set_position(DAWRenderTransport *state, int64_t frame);
 
+// Atomic opaque route snapshot exchange. The sole control writer owns each
+// published pointer and must retire replaced objects only on the control
+// thread after there are no readers. Readers never wait, allocate or release.
+// The exchange does NOT own/release snapshot contents itself.
+typedef struct DAWRenderRouteExchange DAWRenderRouteExchange;
+DAWRenderRouteExchange *daw_route_exchange_create(void *initialSnapshot);
+void daw_route_exchange_destroy(DAWRenderRouteExchange *exchange);
+void *daw_route_exchange_begin_read(DAWRenderRouteExchange *exchange);
+void daw_route_exchange_end_read(DAWRenderRouteExchange *exchange);
+void *daw_route_exchange_publish(DAWRenderRouteExchange *exchange, void *newSnapshot);
+bool daw_route_exchange_is_quiescent(const DAWRenderRouteExchange *exchange);
+void *daw_route_exchange_take_current_quiescent(DAWRenderRouteExchange *exchange);
+
 #ifdef __cplusplus
 }
 #endif
