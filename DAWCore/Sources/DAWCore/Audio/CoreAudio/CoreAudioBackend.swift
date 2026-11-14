@@ -197,6 +197,7 @@ public final class CoreAudioBackend: AudioBackend {
     
     public func start() throws {
         return try controlGate.perform {
+        try controlGate.ensureMutationAvailable()
         guard let unit = outputUnit, !_isRunning else { return }
         
         let status = AudioOutputUnitStart(unit)
@@ -211,6 +212,7 @@ public final class CoreAudioBackend: AudioBackend {
     
     public func stop() {
         controlGate.perform {
+        guard !controlGate.isBounceActive else { return }
         guard let unit = outputUnit, _isRunning else { return }
         let status = AudioOutputUnitStop(unit)
         guard status == noErr else { return }
@@ -229,6 +231,7 @@ public final class CoreAudioBackend: AudioBackend {
     /// Callers must serialize all experimental backend control operations.
     private func withDrainedOutput(_ body: () -> Void) {
         controlGate.perform {
+        guard !controlGate.isBounceActive else { return }
         let restart = _isRunning
         if restart, let outputUnit {
             let stopStatus = AudioOutputUnitStop(outputUnit)
@@ -254,6 +257,7 @@ public final class CoreAudioBackend: AudioBackend {
     /// The caller must serialize all experimental backend control operations.
     private func withDrainedOutputResult<T>(_ operation: () throws -> T) throws -> T {
         return try controlGate.perform {
+        try controlGate.ensureMutationAvailable()
         let restart = _isRunning
         if restart, let outputUnit {
             let status = AudioOutputUnitStop(outputUnit)
@@ -308,6 +312,7 @@ public final class CoreAudioBackend: AudioBackend {
     /// commands are never silently discarded.
     private func submitGraphCommand(_ command: StudioGraphParameterCommand) {
         controlGate.perform {
+        guard !controlGate.isBounceActive else { return }
         if !_isRunning {
             drainGraphCommandsWhileQuiescent()
             applyGraphCommandImmediately(command)
@@ -411,6 +416,7 @@ public final class CoreAudioBackend: AudioBackend {
     
     public func scheduleMIDIEvent(_ event: ScheduledMIDIEvent) {
         controlGate.perform {
+        guard !controlGate.isBounceActive else { return }
         midiScheduler.schedule(event)
         scheduledEventCount += 1
     
@@ -418,6 +424,7 @@ public final class CoreAudioBackend: AudioBackend {
     
     public func sendImmediateMIDI(status: UInt8, data1: UInt8, data2: UInt8, to trackID: TrackID) {
         controlGate.perform {
+        guard !controlGate.isBounceActive else { return }
         guard let unit = renderGraph.getInstrumentUnit(for: trackID) else {
             #if DEBUG
             print("[Preview MIDI] CoreAudio routing FAILED: no instrument unit for track=\(trackID.rawValue) status=\(status) pitch=\(data1)")
@@ -448,6 +455,7 @@ public final class CoreAudioBackend: AudioBackend {
         volume: Float
     ) throws {
         try controlGate.perform {
+            try controlGate.ensureMutationAvailable()
             guard !isPlaying else {
                 throw AudioBackendError.configurationError(
                     "Stop experimental Core Audio playback before editing audio clips"
@@ -550,11 +558,55 @@ public final class CoreAudioBackend: AudioBackend {
         outputURL: URL,
         progress: ((Double) -> Void)?
     ) async throws {
-        guard !isPlaying else {
-            throw AudioBackendError.configurationError(
-                "Stop realtime playback before offline bounce"
-            )
+        // Reserve the shared render graph across the entire asynchronous
+        // export, not just the first await. Hardware callbacks MUST be
+        // completely stopped before the offline renderer owns the AUs.
+        let shouldRestartOutput = try controlGate.perform { () throws -> Bool in
+            guard !controlGate.isBounceActive else {
+                throw StudioGraphLeaseError.alreadyExporting
+            }
+            guard !isPlaying else {
+                throw AudioBackendError.configurationError(
+                    "Stop realtime playback before offline bounce"
+                )
+            }
+            guard endSample > startSample, startSample >= 0 else {
+                throw AudioBackendError.configurationError(
+                    "Offline bounce range must have a positive duration"
+                )
+            }
+            let wasRunning = _isRunning
+            if wasRunning, let outputUnit {
+                let status = AudioOutputUnitStop(outputUnit)
+                guard status == noErr else {
+                    throw AudioBackendError.configurationError(
+                        "Cannot drain hardware output before bounce: \\(status)"
+                    )
+                }
+            }
+            // The callback is quiescent. Drain leftover render-owned commands
+            // and stop the clip prefetch worker before taking the graph lease.
+            drainGraphCommandsWhileQuiescent()
+            audioClipRenderer.pauseStreaming()
+            guard controlGate.beginBounceLease() else {
+                throw StudioGraphLeaseError.alreadyExporting
+            }
+            return wasRunning
         }
+
+        defer {
+            controlGate.perform {
+                controlGate.endBounceLease()
+                if shouldRestartOutput, let outputUnit {
+                    let status = AudioOutputUnitStart(outputUnit)
+                    if status != noErr {
+                        _isRunning = false
+                        daw_render_transport_set_playing(transport, false)
+                    }
+                }
+            }
+        }
+
         try await offlineBounce.bounce(
             from: startSample,
             to: endSample,
@@ -563,11 +615,12 @@ public final class CoreAudioBackend: AudioBackend {
             progress: progress
         )
     }
-    
+
     // MARK: - Configuration
     
     public func setBufferSize(_ size: UInt32) throws {
         return try controlGate.perform {
+        try controlGate.ensureMutationAvailable()
         guard let unit = outputUnit else { return }
         let restart = _isRunning
         if restart {
@@ -608,6 +661,7 @@ public final class CoreAudioBackend: AudioBackend {
     
     public func setMasterVolume(_ volume: Float) {
         controlGate.perform {
+        guard !controlGate.isBounceActive else { return }
         _masterVolume = volume
         submitGraphCommand(.masterVolume(volume))
     
