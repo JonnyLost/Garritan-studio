@@ -58,25 +58,28 @@ jobs:
           expected = {"small-treated", "medium-wood", "large-reflective", "default-holdout"}
           assert expected.issubset(scenarios)
           summary = ["## Six-band acoustic calibration suite", "",
-                     "Synthetic Studio DSP only. T20, not measured venue acoustics.",
-                     "", "| Scenario | Valid T20 bands | Mean absolute error | Worst absolute error |",
-                     "|---|---:|---:|---:|"]
+                     "Synthetic Studio DSP only; same rendered impulse, old versus new octave filters.",
+                     "", "| Scenario | Valid T20 bands | New mean error | Legacy mean error | New worst error |",
+                     "|---|---:|---:|---:|---:|"]
           for room in report["rooms"]:
               assert len(room["bands"]) == 6, f"Missing octave bands for {room['scenarioID']}"
               observed = room["validT20Bands"]
               mae = room["meanAbsoluteT20ErrorPercent"]
               worst = room["maximumAbsoluteT20ErrorPercent"]
+              previous = room["legacyMeanAbsoluteT20ErrorPercent"]
               assert 0 <= observed <= 6
               if observed:
                   assert mae is not None and worst is not None
               fmt = lambda x: "n/a" if x is None else f"{x:.1f}%"
-              summary.append(f"| {room['scenarioID']} | {observed}/6 | {fmt(mae)} | {fmt(worst)} |")
+              summary.append(f"| {room['scenarioID']} | {observed}/6 | {fmt(mae)} | {fmt(previous)} | {fmt(worst)} |")
               print(f"\\n{room['scenarioID']} — {room['targetProvenance']}")
               for band in room["bands"]:
                   measured = band.get("measuredT20Seconds")
                   error = band.get("t20ErrorPercent")
                   result = "n/a (insufficient range)" if measured is None else f"{measured:.2f}s ({error:+.1f}%)"
-                  print(f"  {band['centerHz']:>5.0f} Hz | target {band['intendedRT60Seconds']:.2f}s | T20 {result}")
+                  old = band.get("legacyWideBandT20Seconds")
+                  old_result = "n/a" if old is None else f"{old:.2f}s"
+                  print(f"  {band['centerHz']:>5.0f} Hz | target {band['intendedRT60Seconds']:.2f}s | T20 new {result} | old {old_result}")
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
               out.write("\n".join(summary) + "\n")
           PY
