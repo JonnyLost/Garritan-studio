@@ -167,6 +167,25 @@ public struct StudioSynthPanelView: View {
                     Label("Add Layer", systemImage: "plus")
                 }
                 .disabled(patch.layers.count >= 4)
+                if let targetLayer = selectedLayer, targetLayer.enabled {
+                    Menu {
+                        ForEach(StudioSynthModDestination.available(
+                            for: targetLayer.engine), id: \.self) { destination in
+                            Button(destination.name) {
+                                if !viewModel.addStudioSynthAutomationLane(
+                                    for: trackID, layerID: targetLayer.id,
+                                    destination: destination) {
+                                    panelError = "This parameter already has an automation lane."
+                                } else {
+                                    panelError = nil
+                                }
+                            }
+                        }
+                    } label: {
+                        Label("Automate", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
+                    }
+                    .help("Create an editable track automation lane for the selected Synth layer")
+                }
             }
             .padding(12)
             Divider()
