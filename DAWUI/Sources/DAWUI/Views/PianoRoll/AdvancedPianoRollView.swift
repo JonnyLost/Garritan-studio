@@ -71,6 +71,10 @@ public enum SnapMode: String, CaseIterable {
         case .triplet: return 1.0/3.0
         }
     }
+
+    func division(for timeSignature: TimeSignature) -> Double {
+        self == .bar ? StudioMusicalGrid.beatsPerBar(timeSignature) : division
+    }
 }
 
 // MARK: - CC Type
@@ -884,7 +888,7 @@ public struct AdvancedPianoRollView: View {
                     let pitch = pitchAt(value.startLocation.y)
                     let clickBeat = snapBeat(value.startLocation.x / pixelsPerBeat)
                     let currentBeat = snapBeat(value.location.x / pixelsPerBeat)
-                    let minDuration = snapMode.division > 0 ? snapMode.division : 0.25
+                    let minDuration = snapMode.division(for: viewModel.transportState.timeSignature) > 0 ? snapMode.division(for: viewModel.transportState.timeSignature) : 0.25
                     
                     // Handle dragging left or right - note starts at leftmost position
                     let noteStart = min(clickBeat, currentBeat)
@@ -1160,7 +1164,7 @@ public struct AdvancedPianoRollView: View {
 
         let beatDelta = delta.width / pixelsPerBeat
         let pitchDelta = -Int(delta.height / noteHeight)
-        let minDuration = snapMode.division > 0 ? snapMode.division : 0.0625  // 1/16th note minimum
+        let minDuration = snapMode.division(for: viewModel.transportState.timeSignature) > 0 ? snapMode.division(for: viewModel.transportState.timeSignature) : 0.0625  // 1/16th note minimum
 
         switch dragMode {
         case .move:
@@ -1386,8 +1390,8 @@ public struct AdvancedPianoRollView: View {
         if NSEvent.modifierFlags.contains(.command) {
             return beat
         }
-        guard snapMode != .off, snapMode.division > 0 else { return beat }
-        return round(beat / snapMode.division) * snapMode.division
+        guard snapMode != .off, snapMode.division(for: viewModel.transportState.timeSignature) > 0 else { return beat }
+        return round(beat / snapMode.division(for: viewModel.transportState.timeSignature)) * snapMode.division(for: viewModel.transportState.timeSignature)
     }
     
     private func noteRect(for event: MIDIEvent, noteData: NoteData) -> CGRect {
