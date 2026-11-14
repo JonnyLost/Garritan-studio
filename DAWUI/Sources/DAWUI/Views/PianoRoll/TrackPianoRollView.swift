@@ -1420,11 +1420,37 @@ public struct TrackPianoRollView: View {
                 copied.clips[index].content = .midi(source)
             }
             guard !newIDs.isEmpty else { return }
-            viewModel.updateTrack(copied, description: "Copy MIDI Notes")
+            viewModel.updateTrack(extendingEditedRegions(copied, noteIDs: newIDs),
+                                  description: "Copy MIDI Notes")
             selectedNoteIDs = newIDs
         } else {
-            viewModel.updateTrack(draft, description: "Edit MIDI Notes")
+            viewModel.updateTrack(extendingEditedRegions(draft, noteIDs: selectedNoteIDs),
+                                  description: "Edit MIDI Notes")
         }
+    }
+
+    /// Make notes moved beyond a MIDI region's right boundary playable without
+    /// revealing unrelated events that were deliberately hidden by trimming.
+    private func extendingEditedRegions(_ track: Track, noteIDs: Set<UUID>) -> Track {
+        guard !noteIDs.isEmpty else { return track }
+        var adjusted = track
+        let tempo = viewModel.transportState.tempo.bpm
+        let sampleRate = viewModel.project.sampleRate
+        for index in adjusted.clips.indices {
+            guard case .midi(let midi) = adjusted.clips[index].content else { continue }
+            let end = midi.events.compactMap { event -> Double? in
+                guard noteIDs.contains(event.id),
+                      case .note(let data) = event.type else { return nil }
+                return event.beatPosition + data.duration
+            }.max() ?? 0
+            let duration = adjusted.clips[index].timeRange.duration.beats(atTempo: tempo)
+            guard end > duration else { continue }
+            adjusted.clips[index].timeRange = TimeRange(
+                start: adjusted.clips[index].timeRange.start,
+                duration: TimePosition(beats: end, tempo: tempo, sampleRate: sampleRate)
+            )
+        }
+        return adjusted
     }
 
     // MARK: - CC Operations
