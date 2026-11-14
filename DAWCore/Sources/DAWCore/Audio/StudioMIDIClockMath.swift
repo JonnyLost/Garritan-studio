@@ -15,7 +15,9 @@ public enum StudioMIDIClockMath {
     ) -> Int64 {
         guard beats.isFinite, tempoBPM.isFinite, tempoBPM > 0,
               sampleRate.isFinite, sampleRate > 0 else { return 0 }
-        let result = beats * (60.0 / tempoBPM) * sampleRate
+        // Preserve the original DAW timing operation order for valid input.
+        let seconds = (beats / tempoBPM) * 60.0
+        let result = seconds * sampleRate
         guard result.isFinite else { return result.sign == .minus ? Int64.min : Int64.max }
         // Double(Int64.max) rounds to 2^63; do not pass that to Int64.init.
         if result >= 9_223_372_036_854_775_808.0 { return Int64.max }
@@ -30,7 +32,8 @@ public enum StudioMIDIClockMath {
     ) -> Double {
         guard tempoBPM.isFinite, tempoBPM > 0,
               sampleRate.isFinite, sampleRate > 0 else { return 0 }
-        let result = Double(samples) * (tempoBPM / (60.0 * sampleRate))
+        let seconds = Double(samples) / sampleRate
+        let result = (seconds / 60.0) * tempoBPM
         return result.isFinite ? result : 0
     }
 
