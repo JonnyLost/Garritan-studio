@@ -119,7 +119,6 @@ public enum StudioArticulationRenderer {
                 // a short lead-in so instruments can register the switch;
                 // at region start the MIDI-event order still precedes note-on.
                 let switchBeat = max(0, original.beatPosition - 0.01)
-                let sourceChannel = noteEvent.channel
                 for action in articulation.actions {
                     guard (0...15).contains(action.channel) else { continue }
                     let channel = UInt8(action.channel)
@@ -128,7 +127,7 @@ public enum StudioArticulationRenderer {
                         guard (0...127).contains(action.number),
                               (1...127).contains(action.value) else { continue }
                         let duration = action.holdForNote
-                            ? max(0.01, note.duration)
+                            ? max(0.01, note.duration + original.beatPosition - switchBeat)
                             : 0.04
                         let switchNote = MIDIEvent.note(
                             at: switchBeat, pitch: UInt8(action.number),
@@ -143,9 +142,10 @@ public enum StudioArticulationRenderer {
                             value: UInt8(action.value), channel: channel), 0, order))
                         if action.holdForNote {
                             result.append((MIDIEvent.controlChange(
-                                at: original.beatPosition + note.duration,
+                                at: max(original.beatPosition,
+                                        original.beatPosition + note.duration - 0.001),
                                 controller: UInt8(action.number), value: 0,
-                                channel: channel), 2, order))
+                                channel: channel), -1, order))
                         }
                     case .programChange:
                         guard (0...127).contains(action.number) else { continue }
@@ -156,7 +156,6 @@ public enum StudioArticulationRenderer {
                         break
                     }
                 }
-                _ = sourceChannel
             }
             result.append((noteEvent, 1, order))
         }
