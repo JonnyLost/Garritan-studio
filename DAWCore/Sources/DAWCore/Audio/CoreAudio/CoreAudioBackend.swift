@@ -44,6 +44,9 @@ public final class CoreAudioBackend: AudioBackend {
     private let graphCommands = StudioGraphParameterMailbox(capacity: 1024)
     /// Control-only; the audio callback must NEVER enter this gate.
     private let controlGate = StudioGraphControlGate()
+    /// One utility cleanup task handles all simultaneously fading tracks.
+    /// This is control-thread-only and never read by the audio callback.
+    private var transitionCleanupScheduled = false
     private var _tempo: Double = 120.0
     
     // MARK: - AudioBackend Protocol Properties
@@ -444,11 +447,18 @@ public final class CoreAudioBackend: AudioBackend {
     /// We retry briefly if a patch is muted/paused; after the deadline, old
     /// owners are retired even if no musical frames have been produced.
     private func scheduleInstrumentTransitionCleanup(attempt: Int = 0) {
+        let shouldSchedule = controlGate.perform { () -> Bool in
+            guard !transitionCleanupScheduled else { return false }
+            transitionCleanupScheduled = true
+            return true
+        }
+        guard shouldSchedule else { return }
         DispatchQueue.global(qos: .utility).asyncAfter(
             deadline: .now() + .milliseconds(100)
         ) { [weak self] in
             guard let self else { return }
             let pending = self.controlGate.perform { () -> Bool in
+                self.transitionCleanupScheduled = false
                 guard !self.controlGate.isBounceActive else { return true }
                 return self.renderGraph.reapInstrumentTransitions(
                     force: !self.isPlaying || attempt >= 10
