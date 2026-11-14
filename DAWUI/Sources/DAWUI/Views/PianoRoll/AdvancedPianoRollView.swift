@@ -850,7 +850,7 @@ public struct AdvancedPianoRollView: View {
             
             // Draw fractional meter boundaries FIRST, and quarter-note beat
             // lines from EACH bar start. 7/8's second bar begins at beat 3.5.
-            let totalBeats = Double(size.width / pixelsPerBeat) + 1
+            let totalBeats = Double(size.width) / pixelsPerBeat + 1
             let signature = viewModel.transportState.timeSignature
             let barLength = StudioMusicalGrid.beatsPerBar(signature)
             let quarterOffsets = StudioMusicalGrid.interiorQuarterBeats(signature)
