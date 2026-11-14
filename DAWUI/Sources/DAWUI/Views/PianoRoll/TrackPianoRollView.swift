@@ -34,6 +34,12 @@ public struct TrackPianoRollView: View {
     @State private var showVelocityLane: Bool = true
     @State private var showCCLane: Bool = false
     @State private var selectedCCType: CCType = .modulation
+    @State private var expressionChannel = 0
+    @State private var expressionStroke: [StudioMIDIExpressionPoint] = []
+    @State private var expressionTargetClipID: ClipID? = nil
+    @State private var expressionNewClip: Clip? = nil
+    @State private var keyswitchPitch = 24
+    @State private var showKeyswitchControls = false
     
     // Selection state
     @State private var selectedNoteIDs: Set<UUID> = []
@@ -153,12 +159,12 @@ public struct TrackPianoRollView: View {
             if case .midi(let midiData) = clip.content {
                 let clipStartBeat = clip.timeRange.start.beats(atTempo: viewModel.transportState.tempo.bpm)
                 for event in midiData.events {
-                    if case .controlChange(let controller, _) = event.type {
-                        if controller == selectedCCType.rawValue {
-                            var absoluteEvent = event
-                            absoluteEvent.beatPosition = clipStartBeat + event.beatPosition
-                            allCC.append(absoluteEvent)
-                        }
+                    if StudioMIDIExpressionEditing.normalizedValue(
+                        of: event, for: selectedCCType,
+                        channel: UInt8(expressionChannel)) != nil {
+                        var absoluteEvent = event
+                        absoluteEvent.beatPosition = clipStartBeat + event.beatPosition
+                        allCC.append(absoluteEvent)
                     }
                 }
             }
@@ -507,9 +513,38 @@ public struct TrackPianoRollView: View {
                     }
                 }
                 .pickerStyle(.menu)
-                .frame(width: 120)
+                .frame(width: 125)
             }
-            
+
+            Picker("Ch", selection: $expressionChannel) {
+                ForEach(0..<16, id: \.self) { channel in
+                    Text("\(channel + 1)").tag(channel)
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(width: 75)
+            .help("MIDI channel for expression and keyswitch input")
+
+            Button("Keyswitch") { showKeyswitchControls = true }
+                .buttonStyle(.bordered)
+                .help("Insert an instrument-specific articulation keyswitch note")
+                .popover(isPresented: $showKeyswitchControls) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Insert Articulation Keyswitch").font(.headline)
+                        Text("Choose the trigger note used by your instrument. Keys are not mapped automatically.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Stepper("Trigger: \(NoteData(pitch: UInt8(keyswitchPitch)).noteName) (\(keyswitchPitch))",
+                                value: $keyswitchPitch, in: 0...127)
+                        Button("Insert at Playhead") {
+                            insertKeyswitch()
+                            showKeyswitchControls = false
+                        }
+                    }
+                    .padding()
+                    .frame(width: 300)
+                }
+
             // Track name
             if let track = currentTrack {
                 Text(track.name)
@@ -829,63 +864,20 @@ public struct TrackPianoRollView: View {
     // MARK: - CC Canvas
     
     private var ccCanvas: some View {
-        Canvas { context, size in
-            let timeSignature = viewModel.transportState.timeSignature
-            let beatsPerBar = StudioMusicalGrid.beatsPerBar(timeSignature)
-            let totalBeats = Int(totalWidth / pixelsPerBeat) + 1
-            
-            // Quarter-note beat lines plus compound-meter bar boundaries.
-            for beat in 0...totalBeats {
-                let x = Double(beat) * pixelsPerBeat
-                let line = Path { path in
-                    path.move(to: CGPoint(x: x, y: 0))
-                    path.addLine(to: CGPoint(x: x, y: size.height))
-                }
-                context.stroke(line, with: .color(Color.gray.opacity(0.2)), lineWidth: 0.5)
-            }
-            for bar in 0...Int(ceil(Double(totalBeats) / beatsPerBar)) {
-                let x = Double(bar) * beatsPerBar * pixelsPerBeat
-                let line = Path { path in
-                    path.move(to: CGPoint(x: x, y: 0))
-                    path.addLine(to: CGPoint(x: x, y: size.height))
-                }
-                context.stroke(line, with: .color(Color.gray.opacity(0.5)), lineWidth: 1)
-            }
-            
-            // CC points
-            let sortedEvents = ccEvents.sorted { $0.beatPosition < $1.beatPosition }
-            var lastPoint: CGPoint? = nil
-            
-            for event in sortedEvents {
-                if case .controlChange(_, let value) = event.type {
-                    let x = event.beatPosition * pixelsPerBeat
-                    let y = size.height - (Double(value) / 127.0) * size.height
-                    let point = CGPoint(x: x, y: y)
-                    
-                    if let last = lastPoint {
-                        let linePath = Path { path in
-                            path.move(to: last)
-                            path.addLine(to: point)
-                        }
-                        context.stroke(linePath, with: .color(Color.orange), lineWidth: 1)
-                    }
-                    
-                    let pointRect = CGRect(x: x - 3, y: y - 3, width: 6, height: 6)
-                    context.fill(Path(ellipseIn: pointRect), with: .color(Color.orange))
-                    lastPoint = point
-                }
-            }
-            
-            // Playhead
-            let playheadPath = Path { path in
-                path.move(to: CGPoint(x: playheadX, y: 0))
-                path.addLine(to: CGPoint(x: playheadX, y: size.height))
-            }
-            context.stroke(playheadPath, with: .color(Color.accentColor), lineWidth: 1)
-        }
-        .background(Color.black.opacity(0.15))
+        StudioExpressionLaneCanvas(
+            events: ccEvents,
+            lane: selectedCCType,
+            channel: UInt8(expressionChannel),
+            pixelsPerBeat: pixelsPerBeat,
+            width: totalWidth,
+            height: ccLaneHeight,
+            beatsPerBar: StudioMusicalGrid.beatsPerBar(viewModel.transportState.timeSignature),
+            playheadBeat: currentPlayheadBeat,
+            onDraw: previewExpression,
+            onFinish: commitExpression
+        )
     }
-    
+
     // MARK: - Note Editing Gesture
     
     // Find note at a given position
@@ -1453,39 +1445,90 @@ public struct TrackPianoRollView: View {
         return adjusted
     }
 
-    // MARK: - CC Operations
-    
-    private func addCCPoint(at beat: Double, value: UInt8) {
-        guard var track = currentTrack else { return }
-        
-        if let clipIndex = track.clips.firstIndex(where: { $0.content.isMIDI }) {
-            if case .midi(var midiData) = track.clips[clipIndex].content {
-                let clipStartBeat = track.clips[clipIndex].timeRange.start.beats(atTempo: viewModel.transportState.tempo.bpm)
-                let ccEvent = MIDIEvent.controlChange(at: beat - clipStartBeat, controller: UInt8(selectedCCType.rawValue), value: value)
-                midiData.events.append(ccEvent)
-                track.clips[clipIndex].content = .midi(midiData)
-                viewModel.updateTrack(track, description: "Add CC")
+    // MARK: - Orchestral MIDI Expression
+
+    private func previewExpression(_ point: StudioMIDIExpressionPoint) {
+        guard let original = currentTrack, point.beat.isFinite,
+              point.beat >= 0 else { return }
+        let tempo = viewModel.transportState.tempo.bpm
+        let sampleRate = viewModel.project.sampleRate
+        let bar = StudioMusicalGrid.beatsPerBar(viewModel.transportState.timeSignature)
+
+        if expressionTargetClipID == nil {
+            if let clip = original.clips.first(where: { clip in
+                guard clip.content.isMIDI else { return false }
+                let start = clip.timeRange.start.beats(atTempo: tempo)
+                let end = clip.timeRange.end.beats(atTempo: tempo)
+                return point.beat >= start && point.beat < end
+            }) {
+                expressionTargetClipID = clip.id
+            } else {
+                // Drawing expression on an empty lane creates one MIDI region,
+                // together with its controller events in a single undo action.
+                let startBeat = floor(point.beat / bar) * bar
+                let region = Clip(name: "MIDI Expression",
+                    timeRange: TimeRange(
+                        start: TimePosition(beats: startBeat, tempo: tempo,
+                                            sampleRate: sampleRate),
+                        duration: TimePosition(beats: bar, tempo: tempo,
+                                                sampleRate: sampleRate)),
+                    content: .midi(MIDIClipData()))
+                expressionNewClip = region
+                expressionTargetClipID = region.id
             }
         }
-    }
-    
-    private func updateCCPoint(_ id: UUID, value: UInt8) {
-        guard var track = currentTrack else { return }
-        
-        for clipIndex in 0..<track.clips.count {
-            if case .midi(var midiData) = track.clips[clipIndex].content {
-                if let index = midiData.events.firstIndex(where: { $0.id == id }) {
-                    if case .controlChange(let controller, _) = midiData.events[index].type {
-                        midiData.events[index].type = .controlChange(controller: controller, value: value)
-                        track.clips[clipIndex].content = .midi(midiData)
-                        viewModel.updateTrack(track, description: "Edit CC")
-                        return
-                    }
-                }
-            }
+
+        var draft = original
+        if let newClip = expressionNewClip {
+            draft.clips.append(newClip)
         }
+        guard let targetID = expressionTargetClipID,
+              let index = draft.clips.firstIndex(where: { $0.id == targetID }),
+              case .midi(let originalData) = draft.clips[index].content else { return }
+        let clip = draft.clips[index]
+        let start = clip.timeRange.start.beats(atTempo: tempo)
+        let end = clip.timeRange.end.beats(atTempo: tempo)
+        guard point.beat >= start, point.beat < end else { return }
+
+        let division = snapMode.division(for: viewModel.transportState.timeSignature)
+        let step = division > 0 ? division : 0.125
+        if let last = expressionStroke.last,
+           Int((last.beat / step).rounded()) == Int((point.beat / step).rounded()) {
+            expressionStroke[expressionStroke.count - 1] = point
+        } else if expressionStroke.count < 4096 {
+            expressionStroke.append(point)
+        }
+
+        var edited = originalData
+        edited.events = StudioMIDIExpressionEditing.draw(
+            events: originalData.events, lane: selectedCCType,
+            points: expressionStroke, clipStartBeat: start,
+            division: step, channel: UInt8(expressionChannel))
+        draft.clips[index].content = .midi(edited)
+        previewTrack = draft
     }
-    
+
+    private func commitExpression() {
+        defer {
+            expressionStroke.removeAll()
+            expressionTargetClipID = nil
+            expressionNewClip = nil
+            previewTrack = nil
+        }
+        guard !expressionStroke.isEmpty, let draft = previewTrack else { return }
+        viewModel.updateTrack(draft, description: "Draw \(selectedCCType.name) MIDI Expression")
+    }
+
+    /// Instrument-specific articulation changes are ordinary keyswitch notes;
+    /// the user selects the pitch and channel required by the loaded patch.
+    private func insertKeyswitch() {
+        let beat = max(0, viewModel.transportState.playheadBeats)
+        let trigger = MIDIEvent.note(at: beat, pitch: UInt8(keyswitchPitch),
+                                     velocity: 100, duration: 0.125,
+                                     channel: UInt8(expressionChannel))
+        insertNotes([trigger], at: beat, description: "Insert Articulation Keyswitch")
+    }
+
     // MARK: - Quantize & Offset
     
     private func quantizeSelectedNotes(to grid: QuantizeGrid) {
