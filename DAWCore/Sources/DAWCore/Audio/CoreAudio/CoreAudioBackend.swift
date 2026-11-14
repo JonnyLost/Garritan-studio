@@ -48,12 +48,12 @@ public final class CoreAudioBackend: AudioBackend {
     
     // MARK: - AudioBackend Protocol Properties
     
-    public var isRunning: Bool { _isRunning }
+    public var isRunning: Bool { controlGate.perform { _isRunning } }
     public var sampleRate: Double { _sampleRate }
-    public var bufferSize: UInt32 { _bufferSize }
+    public var bufferSize: UInt32 { controlGate.perform { _bufferSize } }
     public var currentSamplePosition: Int64 { daw_render_transport_position(transport) }
     public var isPlaying: Bool { daw_render_transport_is_playing(transport) }
-    public var masterVolume: Float { _masterVolume }
+    public var masterVolume: Float { controlGate.perform { _masterVolume } }
     
     // MARK: - Initialization
     
