@@ -612,7 +612,9 @@ public final class CoreAudioBackend: AudioBackend {
             to: endSample,
             outputURL: outputURL,
             sampleRate: _sampleRate,
-            bufferSize: _bufferSize,
+            // Clip offline decoding currently uses a 4096-frame scratch page.
+            // Never request more than that or the graph's current capacity.
+            bufferSize: min(_bufferSize, UInt32(AudioClipRenderer.pageFrames)),
             progress: progress
         )
     }
