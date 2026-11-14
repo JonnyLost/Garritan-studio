@@ -205,3 +205,41 @@ regressions on this exact commit, then compare offline output against the
 existing per-pair renderer and benchmark realistic 16/32/64-source sessions
 before switching any live signal path. Device listening and larger
 orchestral performance remain unverified until the consolidated Mac test.
+
+## Experimental live shared-history backend (November 14, 2026)
+
+The **Mic Mixer** now offers an explicit, nonpersistent toggle:
+**Experimental shared-history capture (one Audio Unit per source)**.
+This is available only while microphone audition is inactive; the
+verified legacy per-(source,mic) capture remains the default. The new
+native `NativeMicrophoneMatrixAudioUnit` connects one pre-pan source
+to four dedicated stereo output busses, each routed to the existing
+mic mixer. All four capsule results are computed once per shared
+`AudioTimeStamp.mSampleTime`, with their output samples cached so a
+second output bus does not pull the source or advance its delay line again.
+Existing signed pickup, mic alignment, solo/mute/pan, smooth movement,
+per-track volume, stage sends, shared hall wet trim, and rollback to
+the original mix are retained. The Audio Unit uses the existing
+`NativeMicrophoneCaptureMatrix` with one source and four microphones,
+including a newly exposed pointer-buffer rendering API to avoid
+constructing Swift arrays in the audio callback.
+
+**Important architectural distinction:** this is **one Audio Unit per
+source**, not yet one Audio Unit for an entire 64-source orchestra.
+For a 16-source, 4-mic audition it changes the capture topology from
+64 processing Audio Units to 16, while sharing one source history across
+all four capsules in each unit. The 64-source capability of the standalone
+matrix DSP is NOT yet the live engine limit. Live audition still caps
+at 16 sources and 4 microphones, irrespective of the selected backend.
+V-Rack signal injection and single-AU multi-source synchronization
+remain separate engineering work.
+
+The experimental engine may fail on unsupported multi-output host graphs;
+its failure path removes the audition graph and restores Studio's original
+dry/hall routing. The toggle cannot change a running audition graph.
+Its only safe promotion path is a successful macOS build and deterministic
+multi-bus AVAudioEngine smoke test, then actual multi-source MacBook
+listening and CPU/underrun stress measurements. Do not declare latency,
+sound quality, multi-bus host compatibility, or 64-source scalability
+validated from DSP unit tests alone. No previously working route is
+made dependent on this experimental backend.
