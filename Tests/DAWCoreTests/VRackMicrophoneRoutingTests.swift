@@ -78,6 +78,12 @@ final class VRackMicrophoneRoutingTests: XCTestCase {
             )
             XCTAssertEqual(rackConnections.count, 2,
                            "Rack sum must feed monitor plus one mic capture")
+            let dryMonitor = rackConnections.compactMap {
+                $0.node as? AVAudioMixerNode
+            }.first
+            XCTAssertNotNil(dryMonitor)
+            XCTAssertEqual(dryMonitor?.outputVolume ?? -1, 0,
+                           "Original V-Rack direct monitor must start muted")
             let captureNode = rackConnections.compactMap {
                 $0.node as? AVAudioUnitEffect
             }.first
@@ -123,6 +129,15 @@ final class VRackMicrophoneRoutingTests: XCTestCase {
             let initialMicPeak = try renderPeak(engine)
             XCTAssertGreaterThan(initialMicPeak, 0.01,
                 "The V-Rack microphone must sound on initial graph construction")
+
+            // Diagnostic: temporarily re-enable only the original monitor.
+            // If this is also silent, the V-Rack input isn't reaching the
+            // graph during audition, irrespective of microphone processing.
+            dryMonitor?.outputVolume = 1
+            let dryProbePeak = try renderPeak(engine)
+            XCTAssertGreaterThan(dryProbePeak, 0.05,
+                "Rack source itself must render during microphone audition")
+            dryMonitor?.outputVolume = 0
 
             // Mute only the microphone channel; if rack dry monitoring
             // leaked into audition, a signal would remain.
