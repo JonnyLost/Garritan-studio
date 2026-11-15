@@ -2032,6 +2032,25 @@ struct TimelineRulerContent: View {
                 context.draw(Text("\(bar + 1)").font(.system(size: 10, weight: .medium)),
                              at: CGPoint(x: x + 4, y: 8))
             }
+
+            // Show picture hit points directly on the musical ruler, without
+            // changing MIDI clip positions or the existing grid behaviour.
+            if let picture = viewModel.project.studioPicture {
+                let bpm = viewModel.transportState.tempo.bpm
+                for hit in picture.hitPoints {
+                    let seconds = picture.projectSeconds(atMovieFrame: hit.frame)
+                    let x = CGFloat(seconds * bpm / 60) * pixelsPerBeat
+                    guard x >= 0 && x <= size.width else { continue }
+                    let stem = Path { path in
+                        path.move(to: CGPoint(x: x, y: size.height - 14))
+                        path.addLine(to: CGPoint(x: x, y: size.height))
+                    }
+                    context.stroke(stem, with: .color(.orange), lineWidth: 2)
+                    context.fill(Path(ellipseIn: CGRect(
+                        x: x - 3, y: size.height - 20, width: 6, height: 6)),
+                        with: .color(.orange))
+                }
+            }
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .contentShape(Rectangle())
