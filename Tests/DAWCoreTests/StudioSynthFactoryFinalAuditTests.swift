@@ -67,6 +67,36 @@ final class StudioSynthFactoryFinalAuditTests: XCTestCase {
         }, category: "Hybrid")
     }
 
+    /// The expanded bank is part of the native app, not a downloaded or
+    /// licensed library. Protect the breadth of each sound category.
+    func testExpandedFactoryBankHasAtLeastTwoHundredOriginalSounds() {
+        let counts: [(String, Int, Int)] = [
+            ("Analog", StudioAnalogFactoryLibrary.presets.count, 34),
+            ("FM", StudioFMFactoryLibrary.presets.count, 42),
+            ("Wavetable", StudioWavetableFactoryLibrary.presets.count, 30),
+            ("Additive", StudioAdditiveFactoryLibrary.presets.count, 26),
+            ("Granular", StudioGranularFactoryLibrary.presets.count, 22),
+            ("Physical", StudioPhysicalFactoryLibrary.presets.count, 25),
+            ("Hybrid", StudioSynthHybridFactoryLibrary.presets.count, 22)
+        ]
+        for (engine, actual, minimum) in counts {
+            XCTAssertGreaterThanOrEqual(actual, minimum, engine)
+        }
+        XCTAssertGreaterThanOrEqual(
+            counts.reduce(0) { $0 + $1.1 }, 200)
+    }
+
+    func testEveryHybridSoundContainsTwoToFourNativeLayers() {
+        for preset in StudioSynthHybridFactoryLibrary.presets {
+            XCTAssertTrue((2...4).contains(preset.patch.layers.count),
+                          preset.name)
+            XCTAssertEqual(preset.patch.layers.count,
+                           preset.patch.layers.filter(\\.enabled).count,
+                           preset.name)
+            XCTAssertTrue(preset.patch.validate(), preset.name)
+        }
+    }
+
     func testAllFactoryNamesAndIDsAreUnambiguousWithinTheirBrowser() {
         let families: [(String, [String], [String])] = [
             ("Analog",
