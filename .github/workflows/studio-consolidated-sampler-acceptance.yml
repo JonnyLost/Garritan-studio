@@ -85,3 +85,64 @@ jobs:
             Tests/StudioSamplerDSPStandalone/stream_stress.cpp \
             -o /tmp/studio-sampler-integrated-stress
           ASAN_OPTIONS=detect_leaks=1 /tmp/studio-sampler-integrated-stress
+
+  branch-reconciliation-audit:
+    name: Read-only true Git merge rehearsals
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Audit all independent product branches without publishing merges
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*'
+          git config user.name 'Studio CI Conflict Audit'
+          git config user.email 'studio-ci@users.noreply.github.com'
+          frozen="$(git rev-parse HEAD)"
+          echo '### Alpha 1 non-destructive source integration audit' >> "$GITHUB_STEP_SUMMARY"
+          echo 'The `integration/studio-alpha1-consolidated-2026-11-14` candidate is not changed by these rehearsals.' >> "$GITHUB_STEP_SUMMARY"
+          echo '| Source branch | Commit relation (ours/theirs) | Merge rehearsal |' >> "$GITHUB_STEP_SUMMARY"
+          echo '| --- | --- | --- |' >> "$GITHUB_STEP_SUMMARY"
+          branches=(
+            architecture/studio-independence
+            feature/stage-acoustics-sync
+            fix/studio-virtual-microphone-routing-2026-11-14
+            feature/studio-core-project-integrity
+            feature/studio-sampler-native
+            feature/studio-core-midi-export
+            integration/studio-complete-mac-test
+            windows-morning-build
+            windows-port-foundation
+          )
+          for source in "${branches[@]}"; do
+            remote="refs/remotes/origin/$source"
+            git show-ref --quiet --verify "$remote"
+            counts="$(git rev-list --left-right --count "$frozen...$remote")"
+            echo "SOURCE $source | $counts"
+            git reset --hard "$frozen" >/dev/null
+            if git merge --no-ff --no-commit "$remote" > /tmp/studio-alpha1-merge.log 2>&1; then
+              echo "CLEAN $source"
+              echo "| `$source` | $counts | clean |" >> "$GITHUB_STEP_SUMMARY"
+            else
+              conflicts="$(git diff --name-only --diff-filter=U)"
+              if [ -n "$conflicts" ]; then
+                echo "CONFLICT $source"
+                printf '%s\n' "$conflicts"
+                count="$(printf '%s\n' "$conflicts" | wc -l | tr -d ' ')"
+                echo "| `$source` | $counts | $count conflict paths; manual reconciliation needed |" >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "MERGE_ERROR $source"
+                tail -40 /tmp/studio-alpha1-merge.log
+                echo "| `$source` | $counts | merge error; inspect logs |" >> "$GITHUB_STEP_SUMMARY"
+              fi
+            fi
+            if [ -f "$(git rev-parse --git-path MERGE_HEAD)" ]; then
+              git merge --abort || true
+            fi
+            git reset --hard "$frozen" >/dev/null
+          done
+          test "$(git rev-parse HEAD)" = "$frozen"
+          echo 'NO remote refs were modified. Conflicts are **not** authorization to discard either side.' >> "$GITHUB_STEP_SUMMARY"
