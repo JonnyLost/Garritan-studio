@@ -86,7 +86,8 @@ public final class StudioPictureSession: ObservableObject {
 
         isLoading = true
         mediaTask = Task { [weak self] in
-            await self?.load(document: document, generation: generation)
+            guard let self else { return }
+            await self.load(document: document, generation: generation)
         }
     }
 
