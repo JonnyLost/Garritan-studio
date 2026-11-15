@@ -152,6 +152,11 @@ public struct StudioPictureWorkspaceView: View {
                 ZStack {
                     Color.black
                     StudioPicturePlayerSurface(player: session.player)
+                    if let cue = StudioPictureCueVisualPlanner.visual(
+                        picture: picture, projectSeconds: currentProjectSeconds()) {
+                        StudioPictureCueOverlay(cue: cue)
+                            .allowsHitTesting(false)
+                    }
                     if picture.showTimecodeOverlay ?? true {
                         VStack {
                             Spacer()
@@ -336,6 +341,34 @@ public struct StudioPictureWorkspaceView: View {
                         set: { enabled in updatePicture { $0.showTimecodeOverlay = enabled } }
                     ))
                     .font(.caption)
+                    Divider()
+                    Text("Scoring Cues").font(.subheadline.weight(.semibold))
+                    Toggle("Show streamers", isOn: Binding(
+                        get: { picture.showScoringStreamers ?? true },
+                        set: { enabled in updatePicture { $0.showScoringStreamers = enabled } }
+                    ))
+                    .font(.caption)
+                    Toggle("Flash punch at hit", isOn: Binding(
+                        get: { picture.showScoringPunches ?? true },
+                        set: { enabled in updatePicture { $0.showScoringPunches = enabled } }
+                    ))
+                    .font(.caption)
+                    HStack {
+                        Text("Streamer lead")
+                            .font(.caption)
+                        Spacer()
+                        Picker("Streamer lead", selection: Binding(
+                            get: { picture.streamerLeadSeconds ?? 3 },
+                            set: { seconds in updatePicture { $0.streamerLeadSeconds = seconds } }
+                        )) {
+                            Text("1 second").tag(1.0)
+                            Text("2 seconds").tag(2.0)
+                            Text("3 seconds").tag(3.0)
+                            Text("5 seconds").tag(5.0)
+                        }
+                        .labelsHidden()
+                        .frame(width: 115)
+                    }
 
                     HStack {
                         Text("Hit Points")
@@ -564,6 +597,51 @@ public struct StudioPictureWorkspaceView: View {
                 session.reportError(error)
             }
         }
+    }
+}
+
+/// Lightweight scoring streamer, anchored in picture-frame time. The moving
+/// bar sweeps from the left edge and lands exactly on the selected hit frame.
+/// A one-frame punch is overlaid without altering the media itself.
+private struct StudioPictureCueOverlay: View {
+    let cue: StudioPictureCueVisual
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                if cue.isPunch {
+                    Color.white.opacity(0.22)
+                    Circle()
+                        .strokeBorder(.white, lineWidth: 8)
+                        .frame(width: min(proxy.size.width, proxy.size.height) * 0.4)
+                        .shadow(color: .black.opacity(0.8), radius: 6)
+                } else {
+                    Rectangle()
+                        .fill(Color.orange)
+                        .frame(width: 7)
+                        .shadow(color: .black.opacity(0.85), radius: 5)
+                        .position(x: max(4, min(proxy.size.width - 4,
+                                                proxy.size.width * cue.progress)),
+                                  y: proxy.size.height / 2)
+                }
+                VStack {
+                    HStack {
+                        Text(cue.name)
+                            .font(.system(.caption, design: .rounded).weight(.bold))
+                            .lineLimit(1)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 5))
+                        Spacer()
+                    }
+                    Spacer()
+                }
+                .foregroundStyle(.white)
+                .padding(12)
+            }
+        }
+        .accessibilityLabel(cue.isPunch ? "Scoring punch: \(cue.name)" :
+            "Scoring streamer approaching \(cue.name)")
     }
 }
 
