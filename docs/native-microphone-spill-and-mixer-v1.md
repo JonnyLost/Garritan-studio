@@ -284,3 +284,19 @@ and fail-safe response to changing rack-source availability. These tests must
 pass on the target branch before this is considered build-verified. Manual
 MacBook listening, metering and large-session CPU/memory measurements remain
 outstanding. The original no-audition route is the default.
+
+### Mic return routing correction (November 15, 2026)
+
+On macOS, a graph test found that the extra always-attached microphone
+master mixer prevented the V-Rack player from joining the active render
+graph even when the capture processor itself was valid. To avoid that
+additional return layer, temporary microphone channel mixers now connect
+directly to AVAudioEngine's main mixer, with their individual level, pan,
+mute and solo controls intact. An optional zero-volume sink handles unused
+matrix output buses. All temporary mic channel nodes and sink inputs are
+disconnected/detached while the engine is stopped when audition ends, so
+the default original dry path does not depend on the experimental graph.
+The shared concert hall return remains independently connected.
+
+This routing must pass the dedicated V-Rack audio-output tests and full
+regression suite before being promoted to an Alpha 1 integration candidate.
