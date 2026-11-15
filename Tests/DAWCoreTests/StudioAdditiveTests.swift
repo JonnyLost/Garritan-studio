@@ -225,7 +225,11 @@ final class StudioAdditiveTests: XCTestCase {
             $0.patch.value(for:.partialEnvelopeMix)>0 &&
             $0.patch.value(for:.motionDepth)>0
         }
-        XCTAssertEqual(animated.count,6)
+        XCTAssertEqual(Set(animated.map(\.name)), Set([
+            "Tine Spark", "Warm String Bed", "Glass Bloom", "Spectral Aurora",
+            "Evolving Hollow", "Digital Prism", "Amber Ensemble", "Silk Harmonics",
+            "Solar Filaments", "Harmonic Rain"
+        ]))
         XCTAssertTrue(presets.first {
             $0.name=="Pure Foundation"
         }!.patch.value(for:.motionDepth)==0)
