@@ -243,4 +243,28 @@ final class OstinatoPatternTests: XCTestCase {
         XCTAssertEqual(source.name, "New Rhythm")
     }
 
+    func testResolvedRoutesRespectSoloAndExplicitDestinations() {
+        let strings = TrackID()
+        let brass = TrackID()
+        var pattern = OstinatoPattern.starter(mode: .melodic)
+        pattern.lanes[0].targetTrackID = strings
+        pattern.lanes[1].targetTrackID = brass
+        pattern.lanes[2].isMuted = true
+        let routes = pattern.resolvedRoutes(validTracks: [strings, brass], fallback: nil)
+        XCTAssertEqual(routes.count, 2)
+        XCTAssertEqual(routes[0].track, strings)
+        XCTAssertEqual(routes[1].track, brass)
+        pattern.lanes[1].isSolo = true
+        XCTAssertEqual(pattern.resolvedRoutes(validTracks: [strings, brass], fallback: nil).count, 1)
+    }
+
+    func testResolvedRoutesRejectMissingTracksWithoutFallback() {
+        let missing = TrackID()
+        let fallback = TrackID()
+        var pattern = OstinatoPattern.starter(mode: .rhythmic)
+        pattern.lanes[0].targetTrackID = missing
+        XCTAssertTrue(pattern.resolvedRoutes(validTracks: [], fallback: fallback).isEmpty)
+        XCTAssertEqual(pattern.resolvedRoutes(validTracks: [fallback], fallback: fallback).count, 3)
+    }
+
 }
