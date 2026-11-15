@@ -62,6 +62,7 @@ public struct StudioPictureWorkspaceView: View {
 
     @State private var newHitName = ""
     @State private var showingNewHit = false
+    @State private var showingMovieExport = false
     @State private var editingHit: StudioPictureHitPoint?
     @State private var startCodeDraft = ""
     @State private var tempoSpanBeats = 8.0
@@ -112,6 +113,11 @@ public struct StudioPictureWorkspaceView: View {
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("The cue is stored at the exact movie frame under the playhead.")
+        }
+        .sheet(isPresented: $showingMovieExport) {
+            if let picture = viewModel.project.studioPicture {
+                StudioPictureMovieExportView(picture: picture)
+            }
         }
         .sheet(item: $editingHit) { hit in
             if let picture = viewModel.project.studioPicture {
@@ -422,6 +428,12 @@ public struct StudioPictureWorkspaceView: View {
                     }
 
                     Divider()
+                    Button {
+                        showingMovieExport = true
+                    } label: {
+                        Label("Export Scored Movie…", systemImage: "film.stack")
+                    }
+                    .buttonStyle(.bordered)
                     Button("Relink Movie…") { chooseMovie(relink: true) }
                         .buttonStyle(.borderless)
                 }
