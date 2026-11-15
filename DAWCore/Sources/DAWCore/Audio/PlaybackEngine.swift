@@ -77,7 +77,10 @@ public final class PlaybackEngine: ObservableObject {
     
     // Scheduled events for the current playback session
     private var scheduledMIDIEvents: [ScheduledEvent] = []
-    private var activeNotes: [ActiveNote] = []
+    private let midiWorkerState = StudioMIDIWorkerState()
+    private var midiWorkerTimer: DispatchSourceTimer?
+    private var sessionEndBeat: Double?
+    private var preparedTempo: Double = 120
     
     // Last processed sample position (for tracking what's been played)
     private var lastProcessedSample: Int64 = 0
@@ -89,14 +92,8 @@ public final class PlaybackEngine: ObservableObject {
     private let midiProcessingQueue = DispatchQueue(label: "com.musio.midi-processing", qos: .userInteractive)
     // These fields are owned exclusively by midiProcessingQueue. The audio
     // tap submits buffer positions but never reads mutable transport state.
-    private var midiQueuePlaybackActive = false
-    private var midiQueueStartBeat: Double = 0
-    private var midiQueueStartSample: Int64 = 0
-    private var midiQueueSampleRate: Double = 44100
     // Playback workers consult queue-owned snapshots, never the mutable
     // MainActor registries used by UI and AU loading.
-    private var midiQueueTrackInstruments: [TrackID: TrackInstrument] = [:]
-    private var midiQueueRackInstruments: [UUID: TrackInstrument] = [:]
     // Native synth track scores, compiled before Play and executed directly
     // in each AVAudioSourceNode render callback.
     private var nativeSequencedTracks: Set<TrackID> = []
@@ -107,7 +104,6 @@ public final class PlaybackEngine: ObservableObject {
     // Timer for processing V-Rack MIDI events in hybrid mode
     // (When Core Audio backend is active, AVAudioEngine's timing tap may not fire)
     private var hybridMIDITimer: DispatchSourceTimer?
-    private var hybridPlaybackStartTime: UInt64 = 0
     private var lastMetronomeBeat: Int = -1  // Track last metronome click beat
     private var wasMetronomeEnabled: Bool = false  // Track previous state to detect toggle-on
     
@@ -137,7 +133,6 @@ public final class PlaybackEngine: ObservableObject {
         } else {
             print("[PlaybackEngine] Using legacy AVAudioEngine backend")
             self.coreAudioBackend = nil
-            setupLegacyAudioCallback()
         }
     }
     
@@ -183,16 +178,6 @@ public final class PlaybackEngine: ObservableObject {
             print("[PlaybackEngine] ⚠️ Failed to start Core Audio backend: \(error)")
             print("[PlaybackEngine] Falling back to legacy AVAudioEngine")
             coreAudioBackend = nil
-            setupLegacyAudioCallback()
-        }
-    }
-    
-    /// Set up the sample-accurate audio callback for MIDI timing (legacy mode)
-    private func setupLegacyAudioCallback() {
-        // This callback is called from the audio thread every buffer
-        // It's the ONLY place we should process time-critical MIDI events
-        audioEngine.midiEventCallback = { [weak self] bufferStartSample, frameCount, tempo in
-            self?.processAudioBuffer(startSample: bufferStartSample, frameCount: frameCount, tempo: tempo)
         }
     }
     
@@ -201,6 +186,13 @@ public final class PlaybackEngine: ObservableObject {
     public func bind(to transportState: TransportState) {
         self.transportState = transportState
         
+        audioEngine.midiSchedulingInvalidated
+            .sink { [weak self] in
+                self?.stopPlayback()
+                self?.transportState?.pause()
+            }
+            .store(in: &cancellables)
+
         transportState.transportEventSubject
             .receive(on: DispatchQueue.main)
             .sink { [weak self] event in
@@ -213,6 +205,12 @@ public final class PlaybackEngine: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] tempo in
                 guard let self else { return }
+                if self.isPlaying && self.preparedTempo != tempo.bpm {
+                    // A direct tempo edit outside ProjectViewModel is a safe
+                    // pause. Normal edits rebuild at the same musical beat.
+                    self.stopPlayback()
+                    self.transportState?.pause()
+                }
                 self.audioEngine.currentTempo = tempo.bpm
                 // Studio Synth follows the same authoritative project tempo.
                 // These are control-thread updates, never audio callbacks.
@@ -228,7 +226,9 @@ public final class PlaybackEngine: ObservableObject {
     private func handleTransportEvent(_ event: TransportEvent) {
         switch event {
         case .play:
-            startPlayback()
+            // ProjectViewModel prepares before starting. Starting here too
+            // could arm the previous project's score before preparation.
+            break
         case .stop:
             stopPlayback()
         case .pause:
@@ -296,7 +296,7 @@ public final class PlaybackEngine: ObservableObject {
         
         trackInstruments[track.id] = .sampler(sampler)
         midiProcessingQueue.sync {
-            midiQueueTrackInstruments[track.id] = .sampler(sampler)
+            midiWorkerState.trackInstruments[track.id] = .sampler(sampler)
         }
         print("[PlaybackEngine] Setup fallback sampler for track: \(track.name)")
     }
@@ -339,7 +339,7 @@ public final class PlaybackEngine: ObservableObject {
         let loaded = TrackInstrument.studioAnalog(synth)
         trackInstruments[trackID] = loaded
         midiProcessingQueue.sync {
-            midiQueueTrackInstruments[trackID] = loaded
+            midiWorkerState.trackInstruments[trackID] = loaded
         }
         if wasRunning { try engine.start() }
         print("[Studio Analog] Native synthesizer connected to track \(trackID.rawValue)")
@@ -374,7 +374,7 @@ public final class PlaybackEngine: ObservableObject {
         let loaded = TrackInstrument.studioFM(synth)
         trackInstruments[trackID] = loaded
         midiProcessingQueue.sync {
-            midiQueueTrackInstruments[trackID] = loaded
+            midiWorkerState.trackInstruments[trackID] = loaded
         }
         if wasRunning { try engine.start() }
         print("[Studio FM] Native synthesizer connected to track \(trackID.rawValue)")
@@ -408,7 +408,7 @@ public final class PlaybackEngine: ObservableObject {
         let loaded = TrackInstrument.studioSynth(synth)
         trackInstruments[trackID] = loaded
         midiProcessingQueue.sync {
-            midiQueueTrackInstruments[trackID] = loaded
+            midiWorkerState.trackInstruments[trackID] = loaded
         }
         if wasRunning { try engine.start() }
         print("[Studio Synth] Native layered instrument connected to \(trackID.rawValue)")
@@ -443,7 +443,7 @@ public final class PlaybackEngine: ObservableObject {
         let loaded = TrackInstrument.studioSampler(sampler)
         trackInstruments[trackID] = loaded
         midiProcessingQueue.sync {
-            midiQueueTrackInstruments[trackID] = loaded
+            midiWorkerState.trackInstruments[trackID] = loaded
         }
         if wasRunning { try engine.start() }
     }
@@ -462,7 +462,7 @@ public final class PlaybackEngine: ObservableObject {
             let loadedInstrument = TrackInstrument.auInstrument(audioUnit, pluginID: pluginID)
             trackInstruments[trackID] = loadedInstrument
             midiProcessingQueue.sync {
-                midiQueueTrackInstruments[trackID] = loadedInstrument
+                midiWorkerState.trackInstruments[trackID] = loadedInstrument
             }
             print("[PlaybackEngine] ✓ Instrument loaded via Core Audio backend")
             return
@@ -571,7 +571,7 @@ public final class PlaybackEngine: ObservableObject {
         let loadedInstrument = TrackInstrument.auInstrument(audioUnit, pluginID: pluginID)
         trackInstruments[trackID] = loadedInstrument
         midiProcessingQueue.sync {
-            midiQueueTrackInstruments[trackID] = loadedInstrument
+            midiWorkerState.trackInstruments[trackID] = loadedInstrument
         }
 
         // Verify we can get the instrument back
@@ -589,16 +589,8 @@ public final class PlaybackEngine: ObservableObject {
         // Drain the MIDI worker and release this track's active notes before
         // detaching its AU. Other tracks routed to V-Rack remain untouched.
         midiProcessingQueue.sync {
-            for note in activeNotes where note.trackID == trackID {
-                if case .rackInstrument = note.midiOutput { continue }
-                midiQueueTrackInstruments[trackID]?.stopNote(note.pitch, channel: note.channel)
-            }
-            activeNotes.removeAll { note in
-                guard note.trackID == trackID else { return false }
-                if case .rackInstrument = note.midiOutput { return false }
-                return true
-            }
-            midiQueueTrackInstruments.removeValue(forKey: trackID)
+            midiWorkerState.scheduler.remove(destination: .track(trackID), deliver: midiWorkerState.send)
+            midiWorkerState.trackInstruments.removeValue(forKey: trackID)
         }
 
         // AU and mixer detachment is a graph mutation. The instrument picker
@@ -726,7 +718,7 @@ public final class PlaybackEngine: ObservableObject {
         let loadedInstrument = TrackInstrument.auInstrument(audioUnit, pluginID: pluginID)
         rackInstruments[rackID] = loadedInstrument
         midiProcessingQueue.sync {
-            midiQueueRackInstruments[rackID] = loadedInstrument
+            midiWorkerState.rackInstruments[rackID] = loadedInstrument
         }
         audioEngine.setVRackCaptureSourcePresent(true)
 
@@ -749,19 +741,8 @@ public final class PlaybackEngine: ObservableObject {
         // Multiple MIDI tracks may share this AU. Release every active note
         // targeting the rack before the underlying graph nodes are detached.
         midiProcessingQueue.sync {
-            for note in activeNotes {
-                if case .rackInstrument(let destinationID, _) = note.midiOutput,
-                   destinationID == rackID {
-                    midiQueueRackInstruments[rackID]?.stopNote(note.pitch, channel: note.channel)
-                }
-            }
-            activeNotes.removeAll { note in
-                if case .rackInstrument(let destinationID, _) = note.midiOutput {
-                    return destinationID == rackID
-                }
-                return false
-            }
-            midiQueueRackInstruments.removeValue(forKey: rackID)
+            midiWorkerState.scheduler.remove(destination: .rack(rackID), deliver: midiWorkerState.send)
+            midiWorkerState.rackInstruments.removeValue(forKey: rackID)
         }
 
         // Match track-instrument removal: don't detach an actively rendered AU.
@@ -1202,31 +1183,45 @@ public final class PlaybackEngine: ObservableObject {
     // MARK: - Playback Control
     
     public func startPlayback() {
-        guard let transport = transportState else { return }
+        guard let transport = transportState, !isPlaying else { return }
 
         isPlaying = true
         
         // Calculate the starting sample position from beat position
         playbackStartBeat = transport.playbackStartBeat
-        let sampleRate = coreAudioBackend?.sampleRate ?? audioEngine.sampleRate
+        // Worker destinations render in AVAudioEngine even in hybrid mode.
+        let sampleRate = audioEngine.sampleRate
+        transport.sampleRate = sampleRate
         playbackStartSample = beatsToSamples(playbackStartBeat, tempo: transport.tempo.bpm, sampleRate: sampleRate)
         lastProcessedSample = playbackStartSample
 
-        // Start a new MIDI session only after any previous queued buffer work
-        // has drained. Events earlier than the seek position must not play.
+        let generation = audioEngine.midiClock.begin(at: playbackStartSample)
         midiProcessingQueue.sync {
-            midiQueueStartBeat = playbackStartBeat
-            midiQueueStartSample = playbackStartSample
-            midiQueueSampleRate = sampleRate
-            midiQueueTrackInstruments = trackInstruments
-            midiQueueRackInstruments = rackInstruments
-            for index in scheduledMIDIEvents.indices
-            where scheduledMIDIEvents[index].absoluteBeat < playbackStartBeat {
-                scheduledMIDIEvents[index].processed = true
+            midiWorkerState.scheduler.cancel(deliver: midiWorkerState.send)
+            midiWorkerState.trackInstruments = trackInstruments
+            midiWorkerState.rackInstruments = rackInstruments
+            let packets = scheduledMIDIEvents.flatMap { scheduled -> [StudioMIDIFrameEvent] in
+                let destination: StudioMIDIDestination
+                let channel: UInt8?
+                if case .rackInstrument(let id, let ch) = scheduled.midiOutput {
+                    destination = .rack(id)
+                    channel = min(16, max(1, ch)) - 1
+                } else {
+                    destination = .track(scheduled.trackID)
+                    channel = nil
+                }
+                return StudioMIDIFrameCompiler.messages(
+                    StudioMIDISessionEvent(clipID: scheduled.clipID,
+                        absoluteBeat: scheduled.absoluteBeat, event: scheduled.event),
+                    destination: destination, channel: channel,
+                    tempo: preparedTempo, sampleRate: sampleRate, until: sessionEndBeat)
             }
-            midiQueuePlaybackActive = true
+            midiWorkerState.scheduler.install(StudioMIDIFrameCompiler.ordered(packets), generation: generation)
+            midiWorkerState.active = true
         }
-        
+        startMIDIWorker()
+        startHybridMIDITimer(tempo: preparedTempo, sampleRate: sampleRate)
+
         // Core Audio backend path (HYBRID MODE)
         if let backend = coreAudioBackend {
             print("[PlaybackEngine] ========================================")
@@ -1240,21 +1235,12 @@ public final class PlaybackEngine: ObservableObject {
             print("[PlaybackEngine] ========================================")
             
             // Start playback via backend (for timing reference)
-            backend.play(from: playbackStartSample)
+            backend.play(from: beatsToSamples(playbackStartBeat,
+                tempo: transport.tempo.bpm, sampleRate: backend.sampleRate))
             
             // HYBRID: Start audio clips through AVAudioEngine
             // This keeps them in sync with V-Rack instruments
             startAllAudioPlayers()
-            
-            // HYBRID: Start timer to process V-Rack MIDI events, metronome, and audio clips
-            // This is needed because AVAudioEngine's timing tap may not fire
-            // if no audio is flowing through it initially
-            let hasVRackEvents = !scheduledMIDIEvents.isEmpty
-            let hasMetronome = transport.isMetronomeEnabled
-            let hasFutureAudioClips = audioClipInfo.values.contains { $0.clipStartBeat > playbackStartBeat }
-            if hasVRackEvents || hasMetronome || hasFutureAudioClips {
-                startHybridMIDITimer(tempo: transport.tempo.bpm, sampleRate: backend.sampleRate)
-            }
             
             // Start metering
             startMetering()
@@ -1266,7 +1252,7 @@ public final class PlaybackEngine: ObservableObject {
         audioEngine.currentTempo = transport.tempo.bpm
 
         print("[PlaybackEngine] ========================================")
-        print("[PlaybackEngine] Starting SAMPLE-ACCURATE playback (Legacy)")
+        print("[PlaybackEngine] Starting render-clock MIDI playback (AVAudioEngine)")
         print("[PlaybackEngine] Start beat: \(playbackStartBeat)")
         print("[PlaybackEngine] Start sample: \(playbackStartSample)")
         print("[PlaybackEngine] Sample rate: \(audioEngine.sampleRate)")
@@ -1289,8 +1275,7 @@ public final class PlaybackEngine: ObservableObject {
         // Start metering (UI only, not timing-critical)
         startMetering()
         
-        // Note: MIDI events are now processed in processAudioBuffer() 
-        // which is called from the audio thread - no Timer needed!
+        // MIDI deadlines now come from the shared render clock mailbox.
     }
     
     /// Convert beats to samples
@@ -1305,255 +1290,70 @@ public final class PlaybackEngine: ObservableObject {
         return StudioMIDIClockMath.beats(forSamples: samples, tempoBPM: tempo, sampleRate: sr)
     }
     
-    /// Process MIDI events for the current audio buffer (called from audio thread)
-    /// This is the heart of sample-accurate timing
-    private func processAudioBuffer(startSample: Int64, frameCount: AVAudioFrameCount, tempo: Double) {
-        // Do not inspect MainActor playback state on the render callback.
-        // Only submit scalar timing values; the serial MIDI worker owns the
-        // session snapshot, event cursor and active-note list.
-        let bufferEndSample = startSample + Int64(frameCount)
-        midiProcessingQueue.async { [weak self] in
-            guard let self = self, self.midiQueuePlaybackActive else { return }
-            let beatsPerSample = tempo / (60.0 * self.midiQueueSampleRate)
-            let bufferStartBeat = Double(startSample - self.midiQueueStartSample)
-                * beatsPerSample + self.midiQueueStartBeat
-            let bufferEndBeat = Double(bufferEndSample - self.midiQueueStartSample)
-                * beatsPerSample + self.midiQueueStartBeat
-
-            let window = MIDIPlaybackWindow(
-                sessionStartBeat: self.midiQueueStartBeat,
-                bufferEndBeat: bufferEndBeat
-            )
-            for index in self.scheduledMIDIEvents.indices {
-                guard !self.scheduledMIDIEvents[index].processed else { continue }
-                let disposition = window.disposition(
-                    for: self.scheduledMIDIEvents[index].absoluteBeat
-                )
-                switch disposition {
-                case .beforeSession:
-                    // Seeking past a note must not cause it to sound later.
-                    self.scheduledMIDIEvents[index].processed = true
-                case .due:
-                    // Process late-arriving work rather than losing the event.
-                    self.processEventSampleAccurate(
-                        self.scheduledMIDIEvents[index],
-                        sampleOffset: AUEventSampleTimeImmediate
-                    )
-                    self.scheduledMIDIEvents[index].processed = true
-                case .future:
-                    // Events are sorted: nothing else can be due yet.
-                    break
-                }
-                if disposition == .future { break }
+    /// Polling only wakes the worker. Event deadlines come exclusively from
+    /// render sample observations; polling time never advances musical time.
+    private func startMIDIWorker() {
+        midiWorkerTimer?.cancel()
+        let clock = audioEngine.midiClock
+        let timer = DispatchSource.makeTimerSource(queue: midiProcessingQueue)
+        timer.schedule(deadline: .now(), repeating: .milliseconds(1), leeway: .microseconds(100))
+        let state = midiWorkerState
+        timer.setEventHandler { [weak state] in
+            guard let state, state.active else { return }
+            guard let position = clock.snapshot(), clock.isCurrent(position.generation),
+                  position.generation == state.scheduler.generation else {
+                state.scheduler.cancel(deliver: state.send)
+                state.active = false
+                return
             }
-
-            self.processNoteOffsInBuffer(bufferEndBeat: bufferEndBeat)
-            self.lastProcessedSample = bufferEndSample
+            state.scheduler.advance(to: position.endFrame, generation: position.generation,
+                isCurrent: { clock.isCurrent(position.generation) }, deliver: state.send)
         }
+        midiWorkerTimer = timer
+        timer.resume()
     }
-    
-    // MARK: - Hybrid Mode Timer
-    
-    /// Start timer for processing V-Rack MIDI events in hybrid mode
+
+    // Auxiliary audio/metronome control remains on the control thread. Its
+    // 5 ms timer no longer delivers MIDI or derives a second wall-time clock.
     private func startHybridMIDITimer(tempo: Double, sampleRate: Double) {
         stopHybridMIDITimer()
-        
-        // Record the start time
-        hybridPlaybackStartTime = mach_absolute_time()
-        
-        // Initialize metronome tracking based on start position:
-        // - If starting exactly on a beat (e.g., 7.0), allow that beat's click
-        // - If starting between beats (e.g., 7.5), wait for the next beat
-        let startBeatFloor = floor(playbackStartBeat)
-        if playbackStartBeat == startBeatFloor {
-            // Exactly on a beat - set to previous so this beat's click will play
-            lastMetronomeBeat = Int(startBeatFloor) - 1
-        } else {
-            // Between beats - set to current floor so we wait for next beat
-            lastMetronomeBeat = Int(startBeatFloor)
-        }
-        
-        // Track initial metronome state for detecting toggle-on during playback
+        lastMetronomeBeat = Int(ceil(playbackStartBeat)) - 1
         wasMetronomeEnabled = transportState?.isMetronomeEnabled ?? false
-        
-        // Create a timer that fires every ~5ms (matches typical audio buffer interval)
-        let timer = DispatchSource.makeTimerSource(queue: midiProcessingQueue)
+        let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now(), repeating: .milliseconds(5))
-        
         timer.setEventHandler { [weak self] in
             self?.processHybridMIDIEvents(tempo: tempo, sampleRate: sampleRate)
         }
-        
         hybridMIDITimer = timer
         timer.resume()
-        
-        print("[PlaybackEngine] Started hybrid MIDI timer for V-Rack events")
     }
-    
-    /// Stop the hybrid MIDI timer
+
     private func stopHybridMIDITimer() {
         hybridMIDITimer?.cancel()
         hybridMIDITimer = nil
     }
-    
-    /// Process V-Rack MIDI events based on elapsed time
+
     private func processHybridMIDIEvents(tempo: Double, sampleRate: Double) {
-        // This timer runs on midiProcessingQueue, like legacy buffer work.
-        guard midiQueuePlaybackActive else { return }
-        
-        // Calculate elapsed time in nanoseconds
-        var timebaseInfo = mach_timebase_info_data_t()
-        mach_timebase_info(&timebaseInfo)
-        
-        let elapsed = mach_absolute_time() - hybridPlaybackStartTime
-        let elapsedNanos = elapsed * UInt64(timebaseInfo.numer) / UInt64(timebaseInfo.denom)
-        let elapsedSeconds = Double(elapsedNanos) / 1_000_000_000.0
-        
-        // Convert to beat position
-        let currentBeat = playbackStartBeat + (elapsedSeconds / 60.0) * tempo
-        
-        // Process metronome clicks
+        guard isPlaying, let position = audioEngine.midiClock.snapshot() else { return }
+        var currentBeat = StudioMIDIClockMath.beats(forSamples: position.endFrame,
+                                                   tempoBPM: tempo, sampleRate: sampleRate)
+        if let end = sessionEndBeat { currentBeat = min(currentBeat, end.nextDown) }
         if let transport = transportState {
-            let isMetronomeOn = transport.isMetronomeEnabled
-            
-            // Detect when metronome is toggled ON during playback
-            if isMetronomeOn && !wasMetronomeEnabled {
-                // Just enabled - set lastMetronomeBeat to current beat
-                // so we wait for the NEXT beat instead of clicking immediately
-                let currentBeatInt = Int(floor(currentBeat))
-                lastMetronomeBeat = currentBeatInt
-                print("[PlaybackEngine] Metronome toggled ON at beat \(currentBeat), waiting for beat \(currentBeatInt + 1)")
-            }
-            wasMetronomeEnabled = isMetronomeOn
-            
-            if isMetronomeOn {
-                let currentBeatInt = Int(floor(currentBeat))
-                while lastMetronomeBeat < currentBeatInt {
-                    lastMetronomeBeat += 1
-                    let beatsPerBar = transport.timeSignature.beatsPerBar
-                    let isDownbeat = (lastMetronomeBeat % beatsPerBar) == 0
-                    audioEngine.playMetronomeClick(isDownbeat: isDownbeat)
+            let enabled = transport.isMetronomeEnabled
+            if enabled && !wasMetronomeEnabled { lastMetronomeBeat = Int(floor(currentBeat)) }
+            wasMetronomeEnabled = enabled
+            if enabled {
+                // Bound catch-up clicks after a delayed control callback.
+                let beat = Int(floor(currentBeat))
+                if beat > lastMetronomeBeat {
+                    lastMetronomeBeat = beat
+                    audioEngine.playMetronomeClick(isDownbeat: beat % transport.timeSignature.beatsPerBar == 0)
                 }
             }
         }
-        
-        // Check and start any audio clips that the playhead has reached
         checkAndStartAudioClips(currentBeat: currentBeat, tempo: tempo)
-        
-        // Process events up to current beat
-        for i in 0..<scheduledMIDIEvents.count {
-            guard !scheduledMIDIEvents[i].processed else { continue }
-            
-            let eventBeat = scheduledMIDIEvents[i].absoluteBeat
-            
-            // Process events that should have played by now
-            if eventBeat <= currentBeat {
-                processEventSampleAccurate(scheduledMIDIEvents[i], sampleOffset: AUEventSampleTimeImmediate)
-                scheduledMIDIEvents[i].processed = true
-            }
-        }
-        
-        // Process note-offs - stop notes and remove from active list
-        var indicesToRemove: [Int] = []
-        for (index, note) in activeNotes.enumerated() {
-            if note.endBeat <= currentBeat {
-                let instrument: TrackInstrument? = {
-                    switch note.midiOutput {
-                    case .rackInstrument(let rackID, _):
-                        return midiQueueRackInstruments[rackID]
-                    case .trackInstrument, .none:
-                        return midiQueueTrackInstruments[note.trackID]
-                    }
-                }()
-                instrument?.stopNote(note.pitch, channel: note.channel)
-                indicesToRemove.append(index)
-            }
-        }
-        // Remove in reverse order to preserve indices
-        for index in indicesToRemove.reversed() {
-            activeNotes.remove(at: index)
-        }
     }
-    
-    /// Process a single MIDI event with sample-accurate timing
-    /// Called from midiProcessingQueue - NOT the audio thread
-    private func processEventSampleAccurate(_ scheduled: ScheduledEvent, sampleOffset: AUEventSampleTime) {
-        // Determine the instrument and channel based on midiOutput routing
-        let (instrument, channel): (TrackInstrument?, UInt8) = {
-            switch scheduled.midiOutput {
-            case .rackInstrument(let rackID, let ch):
-                // Saved V-Rack destinations are 1-based. Clamp malformed or
-                // old project values before subtraction to avoid UInt8 traps.
-                return (midiQueueRackInstruments[rackID], min(16, max(1, ch)) - 1)
-            case .trackInstrument, .none:
-                return (midiQueueTrackInstruments[scheduled.trackID], scheduled.event.channel)
-            }
-        }()
-        
-        guard let instrument = instrument else { return }
-        
-        switch scheduled.event.type {
-        case .note(let noteData):
-            // Send note immediately (we're already timed to the buffer)
-            instrument.startNoteSampleAccurate(
-                noteData.pitch,
-                velocity: noteData.velocity,
-                channel: channel,
-                sampleOffset: sampleOffset
-            )
-            
-            // Track active note for note-off
-            let noteEndBeat = scheduled.absoluteBeat + noteData.duration
-            activeNotes.append(ActiveNote(
-                trackID: scheduled.trackID,
-                pitch: noteData.pitch,
-                channel: channel,
-                endBeat: noteEndBeat,
-                midiOutput: scheduled.midiOutput
-            ))
-            
-        case .controlChange(let controller, let value):
-            instrument.sendController(controller, value: value, channel: channel,
-                                      sampleOffset: sampleOffset)
-            
-        case .programChange(let program):
-            instrument.sendProgramChange(program, channel: channel)
-            
-        case .pitchBend(let value):
-            let unsignedValue = UInt16(bitPattern: Int16(value + 8192))
-            instrument.sendPitchBend(unsignedValue, channel: channel,
-                                     sampleOffset: sampleOffset)
-            
-        default:
-            break
-        }
-    }
-    
-    /// Release all notes due by the end of this buffer, including overdue
-    /// notes when callback delivery or MIDI processing ran late. Previously
-    /// overdue notes were removed without sending their Note Off messages.
-    /// Called from midiProcessingQueue - NOT the audio thread.
-    private func processNoteOffsInBuffer(bufferEndBeat: Double) {
-        let notesToStop = activeNotes.filter { $0.endBeat < bufferEndBeat }
-        
-        for note in notesToStop {
-            let instrument: TrackInstrument? = {
-                switch note.midiOutput {
-                case .rackInstrument(let rackID, _):
-                    return midiQueueRackInstruments[rackID]
-                case .trackInstrument, .none:
-                    return midiQueueTrackInstruments[note.trackID]
-                }
-            }()
-            
-            if let instrument = instrument {
-                instrument.stopNoteSampleAccurate(note.pitch, channel: note.channel, sampleOffset: AUEventSampleTimeImmediate)
-            }
-        }
-        
-        activeNotes.removeAll { $0.endBeat < bufferEndBeat }
-    }
-    
+
     /// Start audio clips that should be playing immediately
     /// Clips scheduled for the future will be triggered by processHybridMIDIEvents
     private func startAllAudioPlayers() {
@@ -1652,6 +1452,11 @@ public final class PlaybackEngine: ObservableObject {
     }
     
     public func stopPlayback() {
+        // Invalidate BEFORE the worker barrier. Any old render observation
+        // or in-flight poll cannot become a valid new session.
+        audioEngine.midiClock.cancel()
+        midiWorkerTimer?.cancel()
+        midiWorkerTimer = nil
         isPlaying = false
         for trackID in nativeSequencedTracks {
             if let instrument = trackInstruments[trackID],
@@ -1663,7 +1468,7 @@ public final class PlaybackEngine: ObservableObject {
         // Barrier: drain any queued buffer processing and prevent callbacks
         // enqueued after stop from releasing or retriggering notes.
         midiProcessingQueue.sync {
-            midiQueuePlaybackActive = false
+            midiWorkerState.active = false
         }
 
         // Stop metering and restore the persistent preset base on every
@@ -1688,7 +1493,6 @@ public final class PlaybackEngine: ObservableObject {
             stopAllNotes()
             midiProcessingQueue.sync {
                 scheduledMIDIEvents.removeAll()
-                activeNotes.removeAll()
             }
             
             // Stop audio players (hybrid mode uses AVAudioEngine for audio clips)
@@ -1708,32 +1512,15 @@ public final class PlaybackEngine: ObservableObject {
         // Clear scheduled events (safe since isPlaying is false)
         midiProcessingQueue.sync {
             scheduledMIDIEvents.removeAll()
-            activeNotes.removeAll()
         }
         
         print("[PlaybackEngine] Stopped playback at sample \(lastProcessedSample)")
     }
     
     public func pausePlayback() {
-        isPlaying = false
-        // An armed source-node sequence must not keep playing during Pause.
-        // On resume a new schedule will be built from transport's seek beat.
-        for trackID in nativeSequencedTracks {
-            if let instrument = trackInstruments[trackID],
-               case .studioAnalog(let synth) = instrument {
-                synth.stopSequence()
-                synth.allNotesOff()
-            }
-        }
-        nativeSequencedTracks.removeAll()
-        midiProcessingQueue.sync {
-            midiQueuePlaybackActive = false
-        }
-        
-        // Note: We don't stop notes on pause - they'll continue until their natural end
-        // This matches DAW behavior where pausing doesn't cut notes off
+        stopPlayback()
     }
-    
+
     // MARK: - Event Scheduling
     
     /// Refresh a track's automation snapshot whenever its points or
@@ -1770,6 +1557,14 @@ public final class PlaybackEngine: ObservableObject {
 
     /// Prepare all clips for playback
     public func prepareForPlayback(project: Project) {
+        // Project replacement / seek / loop rebuild always cleans the old
+        // destination snapshot before publishing a new score.
+        stopPlayback()
+        preparedTempo = project.tempo.bpm
+        if let transport = transportState, transport.isLoopEnabled {
+            let end = transport.loopEnd.beats(atTempo: project.tempo.bpm)
+            sessionEndBeat = end > transport.playbackStartBeat ? end : nil
+        } else { sessionEndBeat = nil }
         synthAutomationLanes.removeAll()
         for track in project.tracks {
             updateSynthAutomation(for: track)
@@ -1792,7 +1587,7 @@ public final class PlaybackEngine: ObservableObject {
         // - Track instruments use Core Audio backend (future)
         
         // IMPORTANT: Stop the hybrid MIDI timer FIRST to prevent race conditions
-        // The timer accesses scheduledMIDIEvents and activeNotes on midiProcessingQueue
+        // The worker owns the compiled MIDI score on midiProcessingQueue
         stopHybridMIDITimer()
         
         // Clear previous events and players
@@ -1802,7 +1597,6 @@ public final class PlaybackEngine: ObservableObject {
         // Synchronize access to shared state with the MIDI processing queue
         midiProcessingQueue.sync {
             scheduledMIDIEvents.removeAll()
-            activeNotes.removeAll()
         }
         
         // Clean up audio players (hybrid mode uses AVAudioEngine for audio)
@@ -1855,7 +1649,7 @@ public final class PlaybackEngine: ObservableObject {
             // restores the last articulation/controller states without ever
             // replaying musical notes from before the playhead.
             let midiSession = StudioMIDISessionPlanner.events(
-                for: track, tempo: tempo, from: playbackStartBeat)
+                for: track, tempo: tempo, from: playbackStartBeat, until: sessionEndBeat)
             for entry in midiSession {
                 let event = entry.event
                 if routesToVRack, let info = vRackInfo {
@@ -1984,7 +1778,6 @@ public final class PlaybackEngine: ObservableObject {
         // Clear events with proper synchronization
         midiProcessingQueue.sync {
             scheduledMIDIEvents.removeAll()
-            activeNotes.removeAll()
         }
         
         hasLoggedPlaybackDebug = false
@@ -2045,7 +1838,7 @@ public final class PlaybackEngine: ObservableObject {
         // state are reconstructed at playbackStartBeat.
         for track in project.tracks where !track.isMuted {
             for entry in StudioMIDISessionPlanner.events(
-                for: track, tempo: project.tempo.bpm, from: playbackStartBeat
+                for: track, tempo: project.tempo.bpm, from: playbackStartBeat, until: sessionEndBeat
             ) {
                 localScheduledMIDIEvents.append(ScheduledEvent(
                     trackID: track.id, clipID: entry.clipID,
@@ -2088,7 +1881,7 @@ public final class PlaybackEngine: ObservableObject {
                         } else {
                             timeline.append(StudioAnalogTimedEvent(sampleFrame: start,
                                 status: 0x90 | channel, data1: note.pitch, data2: note.velocity))
-                            guard let end = frame(for: scheduled.absoluteBeat + note.duration) else {
+                            guard let end = frame(for: min(scheduled.absoluteBeat + note.duration, sessionEndBeat ?? .greatestFiniteMagnitude)) else {
                                 invalid = true
                                 continue
                             }
@@ -2432,72 +2225,10 @@ public final class PlaybackEngine: ObservableObject {
     /// mutating the list while stop is iterating it.
     private func stopAllNotes() {
         midiProcessingQueue.sync {
-            // ARIA/samplers may continue sustaining released voices while
-            // CC64/CC66 remains down. Track each actually used MIDI channel,
-            // not every channel of every orchestra instance.
-            var trackChannels: [TrackID: Set<UInt8>] = [:]
-            var rackChannels: [UUID: Set<UInt8>] = [:]
-            for scheduled in scheduledMIDIEvents {
-                switch scheduled.midiOutput {
-                case .rackInstrument(let rackID, let channel):
-                    rackChannels[rackID, default: []].insert(
-                        min(16, max(1, channel)) - 1)
-                case .trackInstrument, .none:
-                    trackChannels[scheduled.trackID, default: []].insert(
-                        scheduled.event.channel)
-                }
-            }
-            for note in activeNotes {
-                switch note.midiOutput {
-                case .rackInstrument(let rackID, _):
-                    rackChannels[rackID, default: []].insert(note.channel)
-                case .trackInstrument, .none:
-                    trackChannels[note.trackID, default: []].insert(note.channel)
-                }
-            }
-            for note in activeNotes {
-                let instrument: TrackInstrument?
-                switch note.midiOutput {
-                case .rackInstrument(let rackID, _):
-                    instrument = midiQueueRackInstruments[rackID]
-                case .trackInstrument, .none:
-                    instrument = midiQueueTrackInstruments[note.trackID]
-                }
-                instrument?.stopNote(note.pitch, channel: note.channel)
-            }
-            activeNotes.removeAll()
-            // Clear pedal-held voices in external ARIA/AU samplers as well as
-            // native synths. All-sound-off (CC120) is deliberately avoided:
-            // CC123/64/66 is the gentler channel-specific stop sequence.
-            for (trackID, channels) in trackChannels {
-                guard let instrument = midiQueueTrackInstruments[trackID] else { continue }
-                for channel in channels {
-                    instrument.sendController(64, value: 0, channel: channel)
-                    instrument.sendController(66, value: 0, channel: channel)
-                    instrument.sendController(123, value: 0, channel: channel)
-                }
-            }
-            for (rackID, channels) in rackChannels {
-                guard let instrument = midiQueueRackInstruments[rackID] else { continue }
-                for channel in channels {
-                    instrument.sendController(64, value: 0, channel: channel)
-                    instrument.sendController(66, value: 0, channel: channel)
-                    instrument.sendController(123, value: 0, channel: channel)
-                }
-            }
-            // Normal Note Off can be held by a sustain pedal. Stopping the
-            // transport always silences native synthesizers and clears their
-            // held note/pedal state without changing ARIA or sampler paths.
-            for instrument in midiQueueTrackInstruments.values {
-                switch instrument {
-                case .studioAnalog(let synth): synth.allNotesOff()
-                case .studioFM(let synth): synth.allNotesOff()
-                case .studioSynth(let synth): synth.allNotesOff()
-                case .studioSampler(let sampler): sampler.allNotesOff()
-                default: break
-                }
-            }
-            for instrument in midiQueueRackInstruments.values {
+            midiWorkerState.scheduler.cancel(deliver: midiWorkerState.send)
+            // Native render-local scores are not owned by the worker. Their
+            // emergency cleanup stays on the existing instrument APIs.
+            for instrument in Array(midiWorkerState.trackInstruments.values) + Array(midiWorkerState.rackInstruments.values) {
                 switch instrument {
                 case .studioAnalog(let synth): synth.allNotesOff()
                 case .studioFM(let synth): synth.allNotesOff()
@@ -2508,7 +2239,7 @@ public final class PlaybackEngine: ObservableObject {
             }
         }
     }
-    
+
     private func stopAllAudioPlayers() {
         print("[PlaybackEngine] Stopping all audio players")
         
@@ -2747,15 +2478,6 @@ private struct ScheduledEvent {
     let absoluteBeat: Double
     let event: MIDIEvent
     let midiOutput: MIDIOutputDestination?  // Where to route this event
-    var processed: Bool = false
-}
-
-private struct ActiveNote {
-    let trackID: TrackID
-    let pitch: UInt8
-    let channel: UInt8
-    let endBeat: Double
-    let midiOutput: MIDIOutputDestination?  // For proper note-off routing
 }
 
 /// Info about an audio clip for playback timing
@@ -2998,3 +2720,30 @@ public enum TrackInstrument {
     }
 }
 
+
+// Worker deadlines are project sample frames. Immediate delivery here is
+// explicit, because post-render tap observations cannot supply a future AU time.
+extension TrackInstrument {
+    func sendWorkerMIDI(_ event: StudioMIDIFrameEvent) {
+        switch event.status & 0xF0 {
+        case 0x80: stopNote(event.data1, channel: event.channel)
+        case 0x90:
+            if event.data2 == 0 { stopNote(event.data1, channel: event.channel) }
+            else { startNote(event.data1, velocity: event.data2, channel: event.channel) }
+        case 0xB0: sendController(event.data1, value: event.data2, channel: event.channel)
+        case 0xC0: sendProgramChange(event.data1, channel: event.channel)
+        case 0xE0: sendPitchBend(UInt16(event.data1) | (UInt16(event.data2) << 7), channel: event.channel)
+        case 0xA0, 0xD0:
+            // AUs and Apple's sampler support pressure messages. Native
+            // pressure support is unchanged and remains engine-dependent.
+            switch self {
+            case .auInstrument(let au, _):
+                MusicDeviceMIDIEvent(au.audioUnit, UInt32(event.status), UInt32(event.data1), UInt32(event.data2), 0)
+            case .sampler(let sampler):
+                MusicDeviceMIDIEvent(sampler.audioUnit, UInt32(event.status), UInt32(event.data1), UInt32(event.data2), 0)
+            default: break
+            }
+        default: break
+        }
+    }
+}
