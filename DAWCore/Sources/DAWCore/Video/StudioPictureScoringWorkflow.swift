@@ -46,7 +46,10 @@ public enum StudioPictureSyncPlanner {
         let target = min(latest, max(0, relative))
         let actual = movieSeconds.flatMap { $0.isFinite ? $0 : nil }
         let error = actual.map { abs($0 - target) } ?? .infinity
-        let threshold = isPlaying ? max(0.10, frameDuration * 2) : frameDuration * 0.5
+        // A two-frame sync budget respects 23.976 through 60 fps instead of
+        // accepting the same 100 ms error for every format. Seek correction
+        // stays throttled to keep long film sessions MacBook-friendly.
+        let threshold = isPlaying ? max(0.05, frameDuration * 2) : frameDuration * 0.5
         let allowed = discontinuity || !isPlaying ||
             secondsSinceCorrection >= 0.65
 
