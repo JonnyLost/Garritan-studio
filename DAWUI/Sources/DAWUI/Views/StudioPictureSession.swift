@@ -12,10 +12,17 @@ public final class StudioPictureSession: ObservableObject {
     @Published public private(set) var isLoading = false
     @Published public private(set) var errorMessage: String?
     @Published public private(set) var isReady = false
+    @Published public private(set) var hasGuideAudioTrack = false
+    @Published public private(set) var isPreparingGuideAudio = false
+    @Published public private(set) var guideAudioMessage: String?
     /// Eight low-resolution, lazily decoded filmstrip images (never full frames).
     @Published public private(set) var thumbnails: [Int: NSImage] = [:]
 
     private weak var transport: TransportState?
+    private weak var guideAudioBus: StudioPictureGuideAudioBus?
+    private var guideAudioTask: Task<Void, Never>?
+    private var guideExporter: AVAssetExportSession?
+    private var guideAudioURL: URL?
     private var subscriptions = Set<AnyCancellable>()
     private var currentDocument: StudioPictureProject?
     private var mediaTask: Task<Void, Never>?
@@ -34,10 +41,12 @@ public final class StudioPictureSession: ObservableObject {
         player.preventsDisplaySleepDuringVideoPlayback = false
     }
 
-    public func bind(to transport: TransportState) {
-        guard self.transport !== transport else { return }
+    public func bind(to transport: TransportState,
+                     guideAudioBus: StudioPictureGuideAudioBus) {
+        guard self.transport !== transport || self.guideAudioBus !== guideAudioBus else { return }
         subscriptions.removeAll()
         self.transport = transport
+        self.guideAudioBus = guideAudioBus
 
         transport.$isPlaying
             // @Published emits the incoming value *before* isPlaying updates.
@@ -65,6 +74,8 @@ public final class StudioPictureSession: ObservableObject {
         player.pause()
         mediaTask?.cancel()
         cancelThumbnails()
+        clearGuideAudio()
+        guideAudioBus = nil
         player.replaceCurrentItem(with: nil)
         currentDocument = nil
         isReady = false
@@ -85,10 +96,21 @@ public final class StudioPictureSession: ObservableObject {
         let changedAlignment = document?.timelineStartSeconds != currentDocument?.timelineStartSeconds ||
             document?.durationSeconds != currentDocument?.durationSeconds ||
             document?.frameRate != currentDocument?.frameRate
+        let changedGuide = document?.referenceAudioEnabled != currentDocument?.referenceAudioEnabled ||
+            document?.referenceAudioVolume != currentDocument?.referenceAudioVolume
         currentDocument = document
-        player.isMuted = !(document?.referenceAudioEnabled ?? false)
+        // AVPlayer always presents *silent video*. Guide audio is owned by
+        // the dedicated AudioEngine mixer, never played twice.
+        player.isMuted = true
+        updateGuideMix()
         if !changedSource {
-            if changedAlignment, let transport {
+            if changedGuide && document?.referenceAudioEnabled == true {
+                requestGuideAudioIfNeeded()
+            } else if changedGuide && document?.referenceAudioEnabled != true {
+                guideAudioTask?.cancel()
+                guideExporter?.cancelExport()
+            }
+            if changedAlignment || changedGuide, let transport {
                 synchronize(at: Double(transport.playheadPosition.samples) /
                             max(1, transport.sampleRate),
                             playing: transport.isPlaying, force: true)
@@ -98,6 +120,7 @@ public final class StudioPictureSession: ObservableObject {
 
         mediaTask?.cancel()
         cancelThumbnails()
+        clearGuideAudio()
         loadGeneration = UUID()
         let generation = loadGeneration
         player.pause()
@@ -160,10 +183,14 @@ public final class StudioPictureSession: ObservableObject {
                 throw StudioPictureMediaError.noVideo
             }
             guard generation == loadGeneration, !Task.isCancelled else { return }
+            let guideTracks = try await asset.loadTracks(withMediaType: .audio)
+            guard generation == loadGeneration, !Task.isCancelled else { return }
+            hasGuideAudioTrack = !guideTracks.isEmpty
             player.replaceCurrentItem(with: AVPlayerItem(asset: asset))
-            player.isMuted = !document.referenceAudioEnabled
+            player.isMuted = true
             isLoading = false
             isReady = true
+            requestGuideAudioIfNeeded()
             if let transport {
                 synchronize(at: Double(transport.playheadPosition.samples) /
                             max(1, transport.sampleRate),
@@ -251,6 +278,106 @@ public final class StudioPictureSession: ObservableObject {
         } else if player.rate != 0 {
             player.pause()
         }
+        guideAudioBus?.synchronize(
+            projectSeconds: projectSeconds,
+            pictureStartSeconds: document.timelineStartSeconds,
+            playing: playing, discontinuity: force || jumped)
+    }
+
+    private func updateGuideMix() {
+        let active = currentDocument?.referenceAudioEnabled ?? false
+        let volume = currentDocument?.referenceAudioVolume ?? 0.65
+        guideAudioBus?.setMix(enabled: active, volume: volume)
+    }
+
+    /// Extract only when explicitly enabled. This leaves video-only scoring
+    /// sessions battery-friendly and keeps potentially long production audio
+    /// out of RAM. Compression remains in a disposable M4A scratch file.
+    private func requestGuideAudioIfNeeded() {
+        guard currentDocument?.referenceAudioEnabled == true,
+              hasGuideAudioTrack, isReady,
+              guideAudioURL == nil, guideAudioTask == nil,
+              let asset = player.currentItem?.asset else { return }
+
+        isPreparingGuideAudio = true
+        guideAudioMessage = "Preparing reference dialogue…"
+        let generation = loadGeneration
+        guideAudioTask = Task { [weak self] in
+            guard let self else { return }
+            await self.prepareGuideAudio(asset: asset, generation: generation)
+        }
+    }
+
+    private func prepareGuideAudio(asset: AVAsset, generation: UUID) async {
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("studio-picture-guide-\(UUID().uuidString)")
+            .appendingPathExtension("m4a")
+        defer {
+            if generation == loadGeneration {
+                guideAudioTask = nil
+                isPreparingGuideAudio = false
+            }
+        }
+
+        do {
+            guard let exporter = AVAssetExportSession(
+                asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
+                throw StudioPictureGuideError.cannotExport
+            }
+            // Opt out of energy-intensive parallel encoding on a MacBook.
+            exporter.allowsParallelizedExport = false
+            exporter.outputURL = tempURL
+            exporter.outputFileType = .m4a
+            guideExporter = exporter
+
+            try await withCheckedThrowingContinuation {
+                (continuation: CheckedContinuation<Void, Error>) in
+                exporter.exportAsynchronously {
+                    if exporter.status == .completed {
+                        continuation.resume()
+                    } else {
+                        continuation.resume(throwing: exporter.error ??
+                            StudioPictureGuideError.cannotExport)
+                    }
+                }
+            }
+
+            guard generation == loadGeneration, !Task.isCancelled,
+                  currentDocument?.referenceAudioEnabled == true,
+                  let guideAudioBus else {
+                try? FileManager.default.removeItem(at: tempURL)
+                return
+            }
+            try guideAudioBus.load(fileURL: tempURL)
+            guideAudioURL = tempURL
+            guideAudioMessage = nil
+            updateGuideMix()
+            if let transport {
+                synchronize(at: Double(transport.playheadPosition.samples) /
+                            max(1, transport.sampleRate),
+                            playing: transport.isPlaying, force: true)
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: tempURL)
+            guard generation == loadGeneration, !Task.isCancelled else { return }
+            guideAudioMessage = "Could not route movie audio through Studio: \(error.localizedDescription)"
+        }
+        if generation == loadGeneration { guideExporter = nil }
+    }
+
+    private func clearGuideAudio() {
+        guideAudioTask?.cancel()
+        guideAudioTask = nil
+        guideExporter?.cancelExport()
+        guideExporter = nil
+        guideAudioBus?.clear()
+        if let guideAudioURL {
+            try? FileManager.default.removeItem(at: guideAudioURL)
+        }
+        guideAudioURL = nil
+        hasGuideAudioTrack = false
+        isPreparingGuideAudio = false
+        guideAudioMessage = nil
     }
 
     private func releaseSecurityScopedURL() {
@@ -263,6 +390,14 @@ public final class StudioPictureSession: ObservableObject {
         mediaTask?.cancel()
         // Deinit doesn't touch AVPlayer or NS security-scope APIs off-main.
         // Main-window lifecycle invokes unbind() while still on MainActor.
+    }
+}
+
+public enum StudioPictureGuideError: LocalizedError {
+    case cannotExport
+
+    public var errorDescription: String? {
+        "This movie's reference audio could not be extracted. Video scoring remains available."
     }
 }
 
