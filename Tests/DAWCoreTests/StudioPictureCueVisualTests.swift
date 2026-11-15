@@ -93,7 +93,7 @@ final class StudioPictureCueVisualTests: XCTestCase {
         var p = picture()
         p.hitPoints.append(StudioPictureHitPoint(name: "Extra", frame: 121))
         let cue = try XCTUnwrap(StudioPictureCueVisualPlanner.visual(
-            picture: p, projectSeconds: 17.0 + 1.0 / 24.0))
+            picture: p, projectSeconds: 12 + 121.5 / 24.0))
         XCTAssertEqual(cue.name, "Extra")
         XCTAssertTrue(cue.isPunch)
     }
