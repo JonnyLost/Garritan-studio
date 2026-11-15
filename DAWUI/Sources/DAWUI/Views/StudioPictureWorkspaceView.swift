@@ -281,6 +281,14 @@ public struct StudioPictureWorkspaceView: View {
                         .labelsHidden()
                         .frame(width: 115)
                     }
+                    if session.hasEmbeddedTimecodeTrack {
+                        Label("Embedded SMPTE track detected", systemImage: "checkmark.circle")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text("Start TC remains manual until the source timecode sample is verified.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                     HStack {
                         Text("Start TC")
                         TextField("01:00:00:00", text: $startCodeDraft)
