@@ -224,13 +224,16 @@ public final class MIDISequencer: ObservableObject {
     }
     
     private func processEvents(from startBeat: Double, to endBeat: Double) {
-        for scheduled in scheduledEvents {
+        for index in scheduledEvents.indices {
+            let scheduled = scheduledEvents[index]
             guard scheduled.absoluteBeat >= startBeat && scheduled.absoluteBeat < endBeat else {
                 continue
             }
-            
             guard !scheduled.processed else { continue }
-            
+
+            // The timer's look-ahead windows overlap. Mark an event as
+            // consumed before playback so it cannot retrigger each tick.
+            scheduledEvents[index].processed = true
             playEvent(scheduled)
         }
     }

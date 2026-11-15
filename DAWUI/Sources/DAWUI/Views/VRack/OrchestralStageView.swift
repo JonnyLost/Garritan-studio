@@ -2,11 +2,43 @@ import SwiftUI
 import DAWCore
 
 /// Stage placement is independent of the sample library. Horizontal placement
-/// controls existing track pan; L1-L5 are persisted room-send zones (audio later).
+/// controls existing track pan; L1-L5 drive the shared Concert Hall send.
 struct OrchestralStageView: View {
+    @Environment(\.studioPalette) private var palette
     @ObservedObject var viewModel: ProjectViewModel
     var expanded: Bool = false
     @State private var dragOrigins: [TrackID: CGPoint] = [:]
+    @State private var microphoneDragOrigins: [UUID: CGPoint] = [:]
+
+    private var microphones: [StudioVirtualMicrophone] {
+        viewModel.project.dawState.virtualMicrophones ?? []
+    }
+    private var roomForMicrophones: StudioAcousticRoomDesign {
+        viewModel.project.dawState.acousticRoomDesign ?? StudioAcousticRoomDesign()
+    }
+    private var selectedLayout: StageLayout {
+        StageLayout(rawValue: viewModel.project.dawState.stageLayoutID ?? "") ?? .symphony
+    }
+
+    private var layoutBinding: Binding<StageLayout> {
+        Binding(
+            get: { selectedLayout },
+            set: { layout in
+                viewModel.project.dawState.stageLayoutID = layout.rawValue
+            }
+        )
+    }
+
+    private enum StageLayout: String, CaseIterable, Identifiable {
+        case filmScore = "Film Score Orchestra"
+        case symphony = "Full Symphony Orchestra"
+        case chamber = "Chamber Orchestra"
+        case strings = "String Orchestra"
+        case concertBand = "Concert Band"
+        case jazz = "Jazz Band"
+        case choir = "Choir"
+        var id: String { rawValue }
+    }
 
     private var instrumentTracks: [Track] {
         viewModel.project.tracks.filter { $0.type == .midi || $0.type == .instrument }
@@ -23,8 +55,16 @@ struct OrchestralStageView: View {
     private var compactWorkspace: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Orchestral Stage").font(.headline)
-                Text("Drag a marker sideways to pan and between rows to assign a reverb zone.")
+                HStack {
+                    Text("Orchestral Stage").font(.headline)
+                    Spacer()
+                    Button("Add Spot Mic") {
+                        viewModel.addVirtualMicrophoneArray(.spot)
+                    }
+                    .disabled(microphones.count >= 32)
+                    .font(.caption)
+                }
+                Text("Drag instruments to set pan/depth, or microphones to set their 3D floor position.")
                     .font(.caption).foregroundStyle(.secondary)
 
                 GeometryReader { proxy in
@@ -40,8 +80,9 @@ struct OrchestralStageView: View {
                 .font(.system(size: 9)).foregroundStyle(.secondary)
 
                 selectedTrackControls
+                selectedMicrophoneControls
 
-                Text("Zones are saved with the project. Hall audio processing is temporarily disabled.")
+                Text("Instrument and microphone positions are saved with the project. Configure pickup patterns in Rooms → Microphones.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
             .padding(12)
@@ -55,16 +96,34 @@ struct OrchestralStageView: View {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Label("Orchestra seating", systemImage: "music.note.list")
-                            .font(.subheadline.weight(.semibold))
+                        StudioSectionHeading("Orchestra Seating", symbol: "music.note.list")
                         Spacer()
                         Text("CONCERT HALL")
                             .font(.system(size: 10, weight: .medium))
                             .tracking(1.5)
                             .foregroundStyle(.secondary)
+                        Picker("Stage Layout", selection: layoutBinding) {
+                            ForEach(StageLayout.allCases) { layout in
+                                Text(layout.rawValue).tag(layout)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 190)
                     }
+                    HStack {
+                        Spacer()
+                        Button("Auto Arrange") { autoArrangeTracks() }
+                            .disabled(instrumentTracks.isEmpty)
+                            .help("Place recognized instruments in the selected seating template")
+                        Button("Add Spot Mic") {
+                            viewModel.addVirtualMicrophoneArray(.spot)
+                        }
+                        .disabled(microphones.count >= 32)
+                        .help("Add a movable microphone. Use Rooms → Mic Mixer to audition its capture.")
+                    }
+                    .font(.caption)
                     fittedCurvedStage(
-                        availableWidth: max(300, geometry.size.width - 294),
+                        availableWidth: max(200, geometry.size.width - 328),
                         availableHeight: max(220, geometry.size.height - 66)
                     )
                     HStack(spacing: 14) {
@@ -79,10 +138,11 @@ struct OrchestralStageView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                VStack(alignment: .leading, spacing: 14) {
-                    Label("Instrument position", systemImage: "slider.horizontal.3")
-                        .font(.subheadline.weight(.semibold))
+                ScrollView(.vertical) {
+                  VStack(alignment: .leading, spacing: 14) {
+                    StudioSectionHeading("Instrument Position", symbol: "slider.horizontal.3")
                     selectedTrackControls
+                    selectedMicrophoneControls
                     Divider()
                     Text("REVERB ZONES")
                         .font(.system(size: 10, weight: .semibold))
@@ -102,17 +162,67 @@ struct OrchestralStageView: View {
                         }
                     }
                     Divider()
-                    Text("All instruments share the same stage. Reverb zones are saved but audio processing is temporarily disabled while we investigate startup.")
+                    Text("All instruments share one Concert Hall. Stage position controls stereo placement, distance and ambience.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
+                        .fixedSize(horizontal: false, vertical: true)
+                  }
+                  .padding(14)
+                  .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(14)
-                .frame(width: 246, alignment: .leading)
-                .background(Color(nsColor: .controlBackgroundColor).opacity(0.65))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                // GeometryReader does not constrain the ScrollView's height
+                // automatically in every split-editor configuration. Give it
+                // the available viewport so the bottom rows remain scrollable.
+                .frame(width: 280, height: max(120, geometry.size.height - 24))
+                .studioPanel()
             }
-            .padding(12)
+            .padding(14)
+        }
+        .background(palette.canvas)
+        .tint(palette.accent)
+    }
+
+    /// Conservative name-based matching. Unrecognized instruments retain their
+    /// current position; the command is explicit, never triggered by a picker change.
+    private func autoArrangeTracks() {
+        let sections = seating
+        for track in instrumentTracks {
+            let name = track.name.lowercased()
+            let matches = sections.filter { section in
+                let label = section.name.lowercased()
+                let aliases: [String]
+                if name.contains("violin") {
+                    aliases = name.contains("ii") || name.contains("2") ? ["violin ii"] : ["violin i"]
+                } else if name.contains("viola") { aliases = ["viola"]
+                } else if name.contains("cello") { aliases = ["cello"]
+                } else if name.contains("bassoon") { aliases = ["bassoon"]
+                } else if name.contains("clarinet") { aliases = ["clarinet"]
+                } else if name.contains("flute") || name.contains("piccolo") { aliases = ["flute", "picc"]
+                } else if name.contains("oboe") { aliases = ["oboe"]
+                } else if name.contains("horn") { aliases = ["horn"]
+                } else if name.contains("trumpet") { aliases = ["trumpet"]
+                } else if name.contains("trombone") { aliases = ["trombone"]
+                } else if name.contains("tuba") { aliases = ["tuba"]
+                } else if name.contains("timpani") { aliases = ["timp"]
+                } else if name.contains("harp") { aliases = ["harp"]
+                } else if name.contains("soprano") { aliases = ["soprano"]
+                } else if name.contains("alto") { aliases = ["alto"]
+                } else if name.contains("tenor") { aliases = ["tenor"]
+                } else if name.contains("choir") { aliases = ["choir"]
+                } else if name.contains("piano") { aliases = ["piano"]
+                } else if name.contains("guitar") { aliases = ["guitar"]
+                } else if name.contains("drum") { aliases = ["drum", "perc"]
+                } else if name.contains("sax") { aliases = ["sax"]
+                } else if name.contains("bass") { aliases = ["bass"]
+                } else { aliases = [] }
+                return aliases.contains { label.contains($0) }
+            }
+            guard let section = matches.first else { continue }
+            viewModel.setTrackStagePosition(
+                id: track.id,
+                pan: Float(section.pan),
+                zone: section.zone
+            )
         }
     }
 
@@ -159,7 +269,7 @@ struct OrchestralStageView: View {
         var id: String { "\(zone)-\(name)" }
     }
 
-    private let seating: [SeatSection] = [
+    private let symphonySeating: [SeatSection] = [
         .init(name: "Violin I", zone: 1, pan: -0.77, span: 0.40),
         .init(name: "Violin II", zone: 1, pan: -0.37, span: 0.35),
         .init(name: "Viola", zone: 1, pan: 0.00, span: 0.34),
@@ -190,6 +300,90 @@ struct OrchestralStageView: View {
         .init(name: "Basses", zone: 5, pan: 0.82, span: 0.29)
     ]
 
+    // Visual seating templates; changing them does not move project tracks.
+    private var seating: [SeatSection] {
+        switch selectedLayout {
+        case .symphony: return symphonySeating
+        case .filmScore: return [
+            .init(name: "Violin I", zone: 1, pan: -0.78, span: 0.40),
+            .init(name: "Violin II", zone: 1, pan: -0.36, span: 0.35),
+            .init(name: "Violas", zone: 1, pan: 0.03, span: 0.34),
+            .init(name: "Cellos", zone: 1, pan: 0.43, span: 0.37),
+            .init(name: "Basses", zone: 1, pan: 0.80, span: 0.35),
+            .init(name: "Harp / Piano", zone: 2, pan: -0.83, span: 0.30),
+            .init(name: "Flutes", zone: 2, pan: -0.50, span: 0.26),
+            .init(name: "Oboes", zone: 2, pan: -0.21, span: 0.26),
+            .init(name: "Clarinets", zone: 2, pan: 0.12, span: 0.28),
+            .init(name: "Bassoons", zone: 2, pan: 0.46, span: 0.30),
+            .init(name: "Timpani", zone: 2, pan: 0.83, span: 0.25),
+            .init(name: "Trumpets", zone: 3, pan: -0.63, span: 0.34),
+            .init(name: "Horns", zone: 3, pan: -0.21, span: 0.40),
+            .init(name: "Trombones", zone: 3, pan: 0.29, span: 0.39),
+            .init(name: "Tuba", zone: 3, pan: 0.75, span: 0.30),
+            .init(name: "Orch. Perc.", zone: 4, pan: -0.70, span: 0.43),
+            .init(name: "Taiko / Drums", zone: 4, pan: -0.20, span: 0.40),
+            .init(name: "Hybrid Perc.", zone: 4, pan: 0.34, span: 0.44),
+            .init(name: "Synth / FX", zone: 4, pan: 0.81, span: 0.29),
+            .init(name: "Sopranos", zone: 5, pan: -0.77, span: 0.34),
+            .init(name: "Altos", zone: 5, pan: -0.36, span: 0.34),
+            .init(name: "Choir", zone: 5, pan: 0.05, span: 0.32),
+            .init(name: "Tenors", zone: 5, pan: 0.44, span: 0.32),
+            .init(name: "Basses", zone: 5, pan: 0.81, span: 0.30)
+        ]
+        case .chamber: return [
+            .init(name: "Violin I", zone: 1, pan: -0.65, span: 0.55),
+            .init(name: "Violin II", zone: 1, pan: -0.1, span: 0.42),
+            .init(name: "Viola", zone: 1, pan: 0.35, span: 0.4),
+            .init(name: "Cello", zone: 1, pan: 0.76, span: 0.38),
+            .init(name: "Basses", zone: 2, pan: 0.79, span: 0.3),
+            .init(name: "Flutes", zone: 2, pan: -0.57, span: 0.32),
+            .init(name: "Oboes", zone: 2, pan: -0.18, span: 0.32),
+            .init(name: "Clarinets", zone: 2, pan: 0.19, span: 0.32),
+            .init(name: "Bassoons", zone: 2, pan: 0.52, span: 0.3),
+            .init(name: "Horns", zone: 3, pan: -0.4, span: 0.42),
+            .init(name: "Trumpets", zone: 3, pan: 0.13, span: 0.34),
+            .init(name: "Timpani", zone: 4, pan: 0.43, span: 0.34)
+        ]
+        case .strings: return [
+            .init(name: "Violin I", zone: 1, pan: -0.72, span: 0.53),
+            .init(name: "Violin II", zone: 1, pan: -0.19, span: 0.47),
+            .init(name: "Viola", zone: 1, pan: 0.3, span: 0.43),
+            .init(name: "Cello", zone: 1, pan: 0.74, span: 0.42),
+            .init(name: "Double Basses", zone: 2, pan: 0.6, span: 0.53)
+        ]
+        case .concertBand: return [
+            .init(name: "Flutes / Picc.", zone: 1, pan: -0.7, span: 0.48),
+            .init(name: "Clarinets", zone: 1, pan: -0.1, span: 0.62),
+            .init(name: "Saxophones", zone: 1, pan: 0.62, span: 0.52),
+            .init(name: "Oboes", zone: 2, pan: -0.73, span: 0.38),
+            .init(name: "Bassoons", zone: 2, pan: -0.28, span: 0.37),
+            .init(name: "Horns", zone: 2, pan: 0.22, span: 0.44),
+            .init(name: "Euphoniums", zone: 2, pan: 0.74, span: 0.4),
+            .init(name: "Trumpets", zone: 3, pan: -0.52, span: 0.56),
+            .init(name: "Trombones", zone: 3, pan: 0.15, span: 0.56),
+            .init(name: "Tubas", zone: 3, pan: 0.78, span: 0.35),
+            .init(name: "Percussion", zone: 4, pan: -0.3, span: 0.7),
+            .init(name: "Timpani", zone: 4, pan: 0.57, span: 0.42)
+        ]
+        case .jazz: return [
+            .init(name: "Saxophones", zone: 1, pan: -0.46, span: 0.86),
+            .init(name: "Trombones", zone: 2, pan: -0.38, span: 0.77),
+            .init(name: "Trumpets", zone: 3, pan: -0.38, span: 0.77),
+            .init(name: "Piano", zone: 1, pan: 0.72, span: 0.33),
+            .init(name: "Bass", zone: 2, pan: 0.67, span: 0.34),
+            .init(name: "Drums", zone: 3, pan: 0.67, span: 0.36),
+            .init(name: "Guitar", zone: 4, pan: 0.67, span: 0.36)
+        ]
+        case .choir: return [
+            .init(name: "Sopranos", zone: 2, pan: -0.7, span: 0.48),
+            .init(name: "Altos", zone: 2, pan: -0.21, span: 0.45),
+            .init(name: "Tenors", zone: 2, pan: 0.26, span: 0.43),
+            .init(name: "Basses", zone: 2, pan: 0.73, span: 0.43),
+            .init(name: "Organ / Piano", zone: 4, pan: 0, span: 0.42)
+        ]
+        }
+    }
+
     // All geometry is in a 1000 x 560 reference canvas. The complete stage
     // scales with its width instead of being clipped by a fixed-height editor.
     private func stageScale(_ width: CGFloat) -> CGFloat {
@@ -209,7 +403,7 @@ struct OrchestralStageView: View {
     private func curvedStageCanvas(width: CGFloat) -> some View {
         ZStack {
             RoundedRectangle(cornerRadius: 12)
-                .fill(Color(nsColor: .windowBackgroundColor))
+                .fill(palette.surface)
 
             ForEach((1...5).reversed(), id: \.self) { zone in
                 orchestralBand(zone, width: width)
@@ -221,6 +415,9 @@ struct OrchestralStageView: View {
                 curvedMarker(track, width: width)
             }
             conductorPodium(width: width)
+            ForEach(microphones) { microphone in
+                microphoneMarker(microphone, width: width, curved: true)
+            }
         }
         .frame(height: 560 * stageScale(width))
         .clipped()
@@ -325,7 +522,7 @@ struct OrchestralStageView: View {
         let isConductor = track.stageReverbZone == 0
         let point = isConductor
             ? CGPoint(x: width / 2, y: 477 * stageScale(width))
-            : stagePoint(pan: CGFloat(track.pan), zone: track.stageReverbZone ?? 1, width: width)
+            : stagePoint(pan: CGFloat(track.pan), zone: track.stageReverbZone ?? 2, width: width)
         return Circle()
             .fill(viewModel.selectedTrackID == track.id ? Color.accentColor : Color.orange)
             .frame(width: 25, height: 25)
@@ -336,7 +533,7 @@ struct OrchestralStageView: View {
                     .foregroundStyle(.white)
             )
             .position(point)
-            .help(track.stageReverbZone == 0 ? "\(track.name) — Conductor (center, dry)" : "\(track.name) — L\(track.stageReverbZone ?? 1)")
+            .help(track.stageReverbZone == 0 ? "\(track.name) — Conductor (center, dry)" : "\(track.name) — L\(track.stageReverbZone ?? 2)")
             .onTapGesture { viewModel.selectTrack(track.id) }
             .gesture(
                 DragGesture(minimumDistance: 3)
@@ -362,7 +559,7 @@ struct OrchestralStageView: View {
         guard let start = dragOrigins[trackID] else { return }
         let scale = stageScale(width)
         let dx = (start.x + translation.width - width / 2) / scale
-        let dy = max(CGFloat(0.001), 535 - (start.y + translation.height) / scale)
+        let dy = 535 - (start.y + translation.height) / scale
         let angle = atan2(dx, dy)
         let pan = Float(min(CGFloat(1), max(CGFloat(-1), angle / (.pi / 2))))
         let radius = hypot(dx, dy)
@@ -393,6 +590,9 @@ struct OrchestralStageView: View {
             ForEach(instrumentTracks) { track in
                 marker(track, width: width)
             }
+            ForEach(microphones) { microphone in
+                microphoneMarker(microphone, width: width, curved: false)
+            }
         }
     }
 
@@ -412,11 +612,11 @@ struct OrchestralStageView: View {
     private func marker(_ track: Track, width: CGFloat) -> some View {
         let usableWidth = max(CGFloat(1), width - 36)
         let x = CGFloat(18) + CGFloat((track.pan + 1) / 2) * usableWidth
-        let y = CGFloat(35 + (max(1, track.stageReverbZone ?? 1) - 1) * 43)
+        let y = CGFloat(35 + (max(1, track.stageReverbZone ?? 2) - 1) * 43)
         let selected = viewModel.selectedTrackID == track.id
 
         return Circle()
-            .fill(selected ? Color.accentColor : Color.orange)
+            .fill(selected ? palette.accent : Color.orange)
             .frame(width: 22, height: 22)
             .overlay(Circle().stroke(Color.white, lineWidth: 2))
             .overlay(
@@ -425,7 +625,7 @@ struct OrchestralStageView: View {
                     .foregroundStyle(.white)
             )
             .position(x: x, y: y)
-            .help("\(track.name) — L\(track.stageReverbZone ?? 1)")
+            .help("\(track.name) — L\(track.stageReverbZone ?? 2)")
             .onTapGesture { viewModel.selectTrack(track.id) }
             .gesture(
                 DragGesture(minimumDistance: 3)
@@ -465,6 +665,107 @@ struct OrchestralStageView: View {
         viewModel.setTrackStagePosition(id: trackID, pan: Float(clamped), zone: zone)
     }
 
+    /// Both stage canvases show the same persisted mic positions. This is a
+    /// flat projection of 3D position; adjust microphone height in Rooms.
+    private func microphoneCanvasPoint(_ mic: StudioVirtualMicrophone,
+                                       width: CGFloat, curved: Bool) -> CGPoint {
+        let room = roomForMicrophones
+        let xFraction = CGFloat(min(1, max(0,
+            mic.position.xMeters / room.safeWidth + 0.5)))
+        let depthFraction = CGFloat(min(1, max(0,
+            mic.position.yMeters / room.safeLength)))
+        if curved {
+            let scale = stageScale(width)
+            return CGPoint(x: (90 + xFraction * 820) * scale,
+                           y: (475 - depthFraction * 390) * scale)
+        }
+        return CGPoint(x: 18 + xFraction * max(1, width - 36),
+                       y: 215 - depthFraction * 175)
+    }
+
+    private func microphoneMarker(_ mic: StudioVirtualMicrophone,
+                                  width: CGFloat, curved: Bool) -> some View {
+        let position = microphoneCanvasPoint(mic, width: width, curved: curved)
+        let selected = viewModel.selectedVirtualMicrophoneID == mic.id
+        return Circle()
+            .fill(selected ? Color.cyan : Color.teal)
+            .frame(width: curved ? 28 : 23, height: curved ? 28 : 23)
+            .overlay(Circle().stroke(Color.white, lineWidth: selected ? 3 : 1.5))
+            .overlay(
+                Image(systemName: "mic.fill")
+                    .font(.system(size: curved ? 13 : 11, weight: .bold))
+                    .foregroundStyle(.white)
+            )
+            .position(position)
+            .help("\(mic.name): x \(String(format: "%.1f", mic.position.xMeters))m, y \(String(format: "%.1f", mic.position.yMeters))m, height \(String(format: "%.1f", mic.position.zMeters))m")
+            .accessibilityIdentifier("stage-microphone-" + mic.id.uuidString)
+            .onTapGesture { viewModel.selectVirtualMicrophone(mic.id) }
+            .gesture(
+                DragGesture(minimumDistance: 3)
+                    .onChanged { value in
+                        moveMicrophoneMarker(id: mic.id, current: position,
+                                             translation: value.translation,
+                                             width: width, curved: curved)
+                    }
+                    .onEnded { _ in
+                        microphoneDragOrigins.removeValue(forKey: mic.id)
+                    }
+            )
+    }
+
+    private func moveMicrophoneMarker(id: UUID, current: CGPoint,
+                                      translation: CGSize, width: CGFloat,
+                                      curved: Bool) {
+        if microphoneDragOrigins[id] == nil {
+            microphoneDragOrigins[id] = current
+        }
+        guard let start = microphoneDragOrigins[id],
+              let original = microphones.first(where: { $0.id == id }) else { return }
+        let x = start.x + translation.width
+        let y = start.y + translation.height
+        let xFraction: CGFloat
+        let depthFraction: CGFloat
+        if curved {
+            let scale = stageScale(width)
+            xFraction = (x / scale - 90) / 820
+            depthFraction = (475 - y / scale) / 390
+        } else {
+            xFraction = (x - 18) / max(1, width - 36)
+            depthFraction = (215 - y) / 175
+        }
+        let room = roomForMicrophones
+        let safeX = min(1, max(0, xFraction))
+        let safeDepth = min(1, max(0, depthFraction))
+        viewModel.selectVirtualMicrophone(id)
+        viewModel.setVirtualMicrophonePosition(
+            id: id,
+            position: StudioRoomPosition3D(
+                xMeters: (Double(safeX) - 0.5) * room.safeWidth,
+                yMeters: Double(safeDepth) * room.safeLength,
+                zMeters: original.position.zMeters
+            )
+        )
+    }
+
+    @ViewBuilder
+    private var selectedMicrophoneControls: some View {
+        if let selectedID = viewModel.selectedVirtualMicrophoneID,
+           let mic = microphones.first(where: { $0.id == selectedID }) {
+            Divider()
+            StudioSectionHeading("Virtual Microphone", symbol: "mic")
+            Text(mic.name).font(.subheadline.weight(.semibold))
+            Text(mic.pattern.displayName)
+                .font(.caption).foregroundStyle(.secondary)
+            Text(String(format: "x: %.2f m   y: %.2f m   height: %.2f m",
+                        mic.position.xMeters, mic.position.yMeters, mic.position.zMeters))
+                .font(.caption.monospacedDigit())
+            Text("Drag to move across the stage. Use Rooms → Microphones for height, aiming and pickup, then Rooms → Mic Mixer to audition direct sound and spill.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     @ViewBuilder
     private var selectedTrackControls: some View {
         if let id = viewModel.selectedTrackID,
@@ -486,12 +787,68 @@ struct OrchestralStageView: View {
                     Text("L\(zone)").tag(zone)
                 }
             }
-            Text("Conductor = center / dry · L1–L5 = increasing reverb")
+            Text("Moving the instrument changes its direct level and hall send.")
                 .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack {
+                    Text("Instrument Wet")
+                    Spacer()
+                    Text("\(Int(effectiveWetLevel(for: track) * 100))%")
+                        .monospacedDigit()
+                }
+                Slider(value: wetLevelBinding(for: id), in: 0...1)
+                    .disabled(track.stageReverbZone == 0)
+            }
+            Text("The wet level follows stage movement; adjust it to fine-tune the instrument.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack {
+                    Text("Overall Reverb")
+                    Spacer()
+                    Text("\(Int(viewModel.audioEngine.concertHallOverallReverb * 100))%")
+                        .monospacedDigit()
+                }
+                Slider(value: overallReverbBinding, in: 0...2)
+            }
+            Text("Overall Reverb affects the entire Concert Hall.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         } else {
             Text("Select a MIDI or instrument track to edit its stage position.")
                 .font(.caption).foregroundStyle(.secondary)
         }
+    }
+
+    private let stageSendLevels: [Double] = [0, 0.12, 0.20, 0.30, 0.43, 0.58]
+
+    private func effectiveWetLevel(for track: Track) -> Double {
+        let zone = min(5, max(0, track.stageReverbZone ?? 2))
+        return min(1, stageSendLevels[zone] * Double(track.stageWetTrim ?? 1))
+    }
+
+    private func wetLevelBinding(for id: TrackID) -> Binding<Double> {
+        Binding(
+            get: {
+                guard let track = viewModel.project.track(withID: id) else { return 0 }
+                return effectiveWetLevel(for: track)
+            },
+            set: { level in
+                guard let track = viewModel.project.track(withID: id) else { return }
+                let zone = min(5, max(0, track.stageReverbZone ?? 2))
+                let base = stageSendLevels[zone]
+                guard base > 0 else { return }
+                viewModel.setTrackStageWetTrim(id: id, trim: Float(min(2, max(0, level / base))))
+            }
+        )
+    }
+
+    private var overallReverbBinding: Binding<Double> {
+        Binding(
+            get: { Double(viewModel.audioEngine.concertHallOverallReverb) },
+            set: { viewModel.setConcertHallOverallReverb(Float($0)) }
+        )
     }
 
     private func panBinding(for id: TrackID) -> Binding<Double> {
@@ -503,7 +860,7 @@ struct OrchestralStageView: View {
 
     private func zoneBinding(for id: TrackID) -> Binding<Int> {
         Binding(
-            get: { viewModel.project.track(withID: id)?.stageReverbZone ?? 1 },
+            get: { viewModel.project.track(withID: id)?.stageReverbZone ?? 2 },
             set: { viewModel.setTrackStageZone(id: id, zone: $0) }
         )
     }

@@ -6,72 +6,81 @@ import DAWCore
 
 /// Mixing console view with channel strips
 public struct MixerView: View {
+    @Environment(\.studioPalette) private var palette
     @ObservedObject var viewModel: ProjectViewModel
     
     @State private var showPluginBrowser = false
     @State private var selectedPluginSlot: (TrackID, Int)?
-    
-    public init(viewModel: ProjectViewModel) {
+    @State private var showInsertSlots = true
+    @State private var showMeters = true
+    @State private var showMaster = true
+    private let openStageWorkspace: (() -> Void)?
+
+    public init(viewModel: ProjectViewModel, openStageWorkspace: (() -> Void)? = nil) {
         self.viewModel = viewModel
+        self.openStageWorkspace = openStageWorkspace
     }
     
     public var body: some View {
         VStack(spacing: 0) {
-            // Mixer header
-            HStack {
-                Text("Mixer")
-                    .font(.headline)
-                
-                Spacer()
-                
-                // View options
+            StudioWorkspaceHeader(
+                "Mixer",
+                subtitle: "Instrument channels, levels and master output",
+                symbol: "slider.vertical.3"
+            ) {
+                // Display options only; sends are edited in the existing
+                // Orchestral Stage workspace, not in a placeholder mixer panel.
                 Menu {
-                    Button("Show Sends") {}
-                    Button("Show Inserts") {}
-                    Button("Show I/O") {}
+                    Toggle("Show Insert Slots", isOn: $showInsertSlots)
+                    Toggle("Show Level Meters", isOn: $showMeters)
+                    Toggle("Show Master Channel", isOn: $showMaster)
+                    Divider()
+                    Button("Stage Sends & Reverb…") { openStageWorkspace?() }
+                        .disabled(openStageWorkspace == nil)
                 } label: {
                     Image(systemName: "slider.horizontal.3")
                 }
                 .menuStyle(.borderlessButton)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(Color(nsColor: .windowBackgroundColor))
-            
-            Divider()
             
             // Channel strips - left aligned
             HStack(spacing: 0) {
                 ScrollView(.horizontal, showsIndicators: true) {
-                    HStack(spacing: 0) {
+                    HStack(alignment: .top, spacing: 12) {
                         // Track channels
                         ForEach(viewModel.project.tracks) { track in
                             ChannelStripView(
                                 track: track,
                                 viewModel: viewModel,
                                 isPlaying: viewModel.transportState.isPlaying,
+                                showInsertSlots: showInsertSlots,
+                                showMeters: showMeters,
                                 onPluginSlotClick: { slotIndex in
                                     selectedPluginSlot = (track.id, slotIndex)
                                     showPluginBrowser = true
                                 }
                             )
-                            
-                            Divider()
+
                         }
                         
                         // Master channel
-                        MasterChannelStripView(
-                            track: viewModel.project.masterTrack,
-                            viewModel: viewModel,
-                            isPlaying: viewModel.transportState.isPlaying
-                        )
+                        if showMaster {
+                            MasterChannelStripView(
+                                track: viewModel.project.masterTrack,
+                                viewModel: viewModel,
+                                isPlaying: viewModel.transportState.isPlaying,
+                                showMeters: showMeters
+                            )
+                        }
                     }
+                    .padding(16)
                 }
                 
                 Spacer() // Push channels to the left
             }
         }
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(palette.canvas)
+        .tint(palette.accent)
         .sheet(isPresented: $showPluginBrowser) {
             PluginBrowserView(
                 viewModel: viewModel,
@@ -123,9 +132,12 @@ public struct MixerView: View {
 // MARK: - Channel Strip View
 
 struct ChannelStripView: View {
+    @Environment(\.studioPalette) private var palette
     let track: Track
     @ObservedObject var viewModel: ProjectViewModel
     let isPlaying: Bool
+    let showInsertSlots: Bool
+    let showMeters: Bool
     let onPluginSlotClick: (Int) -> Void
     
     private var meterLevels: (left: Float, right: Float) {
@@ -141,22 +153,24 @@ struct ChannelStripView: View {
                     .frame(height: 4)
                 
                 Text(track.name)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.system(size: 11, weight: .semibold))
                     .lineLimit(1)
             }
-            .padding(.horizontal, 4)
-            .padding(.top, 4)
+            .padding(.horizontal, 7)
+            .padding(.top, 7)
             
             // Plugin slot
-            let slot = track.pluginSlots.first
-            PluginSlotView(
-                slot: slot,
-                onClick: { onPluginSlotClick(0) },
-                onOpenEditor: slot?.pluginID != nil ? {
-                    openPluginEditor(for: track.id, slot: slot!)
-                } : nil
-            )
-            .padding(.vertical, 4)
+            if showInsertSlots {
+                let slot = track.pluginSlots.first
+                PluginSlotView(
+                    slot: slot,
+                    onClick: { onPluginSlotClick(0) },
+                    onOpenEditor: slot?.pluginID != nil ? {
+                        viewModel.openTrackEffectUI(track.id, slotIndex: 0)
+                    } : nil
+                )
+                .padding(.vertical, 4)
+            }
             
             // Pan knob
             KnobView(
@@ -173,8 +187,10 @@ struct ChannelStripView: View {
             
             // Meter and fader side by side
             HStack(spacing: 2) {
-                StereoMeterView(leftLevel: meterLevels.left, rightLevel: meterLevels.right)
-                    .frame(width: 12, height: 80)
+                if showMeters {
+                    StereoMeterView(leftLevel: meterLevels.left, rightLevel: meterLevels.right)
+                        .frame(width: 15, height: 145)
+                }
                 
                 FaderView(
                     value: Binding(
@@ -183,7 +199,7 @@ struct ChannelStripView: View {
                     ),
                     range: 0...1.4
                 )
-                .frame(width: 18, height: 80)
+                .frame(width: 26, height: 145)
             }
             
             Text(volumeText)
@@ -214,9 +230,14 @@ struct ChannelStripView: View {
             }
             .padding(.bottom, 6)
         }
-        .frame(width: 70, height: 260)
-        .background(isSelected ? Color.accentColor.opacity(0.15) : Color(nsColor: .controlBackgroundColor))
-        .cornerRadius(4)
+        .frame(width: 94, height: 335)
+        .background(isSelected ? palette.selectedBackground.opacity(0.6) : palette.panel)
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(isSelected ? palette.accent : palette.separator, lineWidth: 1)
+                .allowsHitTesting(false)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 10))
         .contentShape(Rectangle())
         .onTapGesture {
             // Instant selection with piano roll follow (no animation delay)
@@ -236,22 +257,16 @@ struct ChannelStripView: View {
         return String(format: "%.1f", db)
     }
     
-    private func openPluginEditor(for trackID: TrackID, slot: PluginSlot) {
-        guard let pluginID = slot.pluginID,
-              let loadedPlugin = viewModel.pluginHost.loadedPlugins.values.first(where: { $0.identifier == pluginID }) else {
-            return
-        }
-        
-        PluginWindowManager.shared.openPluginWindow(for: loadedPlugin, trackName: track.name)
-    }
 }
 
 // MARK: - Master Channel Strip View
 
 struct MasterChannelStripView: View {
+    @Environment(\.studioPalette) private var palette
     let track: Track
     @ObservedObject var viewModel: ProjectViewModel
     let isPlaying: Bool
+    let showMeters: Bool
     
     private var meterLevels: (left: Float, right: Float) {
         viewModel.playbackEngine.masterMeterLevel
@@ -262,7 +277,7 @@ struct MasterChannelStripView: View {
             // Master label
             VStack(spacing: 2) {
                 RoundedRectangle(cornerRadius: 2)
-                    .fill(Color.white)
+                    .fill(palette.accent)
                     .frame(height: 4)
                 
                 Text("MASTER")
@@ -275,8 +290,10 @@ struct MasterChannelStripView: View {
             
             // Meter and fader
             HStack(spacing: 4) {
-                StereoMeterView(leftLevel: meterLevels.left, rightLevel: meterLevels.right)
-                    .frame(width: 16, height: 140)
+                if showMeters {
+                    StereoMeterView(leftLevel: meterLevels.left, rightLevel: meterLevels.right)
+                        .frame(width: 17, height: 170)
+                }
                 
                 FaderView(
                     value: Binding(
@@ -285,7 +302,7 @@ struct MasterChannelStripView: View {
                     ),
                     range: 0...1.4
                 )
-                .frame(width: 24, height: 140)
+                .frame(width: 26, height: 170)
             }
             
             Text(masterVolumeText)
@@ -293,9 +310,14 @@ struct MasterChannelStripView: View {
                 .foregroundColor(.secondary)
                 .padding(.bottom, 8)
         }
-        .frame(width: 80, height: 260)
-        .background(Color(nsColor: .windowBackgroundColor).opacity(0.8))
-        .cornerRadius(4)
+        .frame(width: 104, height: 335)
+        .background(palette.raisedSurface)
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(palette.accent.opacity(0.65), lineWidth: 1)
+                .allowsHitTesting(false)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
     
     private var masterVolumeText: String {
@@ -345,7 +367,7 @@ struct PluginSlotView: View {
             }
             .padding(.horizontal, 4)
             .padding(.vertical, 2)
-            .frame(width: 70, height: 16)
+            .frame(width: 80, height: 22)
             .background(Color.gray.opacity(0.2))
             .cornerRadius(2)
         }
@@ -353,8 +375,6 @@ struct PluginSlotView: View {
         .contextMenu {
             if slot?.pluginID != nil {
                 Button("Open Editor") { onOpenEditor?() }
-                Divider()
-                Button("Remove Plugin", role: .destructive) { onClick() }
             }
         }
     }
@@ -363,6 +383,7 @@ struct PluginSlotView: View {
 // MARK: - Fader View
 
 struct FaderView: View {
+    @Environment(\.studioPalette) private var palette
     @Binding var value: Double
     let range: ClosedRange<Double>
     
@@ -378,7 +399,7 @@ struct FaderView: View {
                 VStack {
                     Spacer()
                     RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.accentColor.opacity(0.5))
+                        .fill(palette.accent.opacity(0.5))
                         .frame(width: 6, height: fillHeight(in: geometry.size.height))
                 }
                 
@@ -417,6 +438,7 @@ struct FaderView: View {
 // MARK: - Knob View
 
 struct KnobView: View {
+    @Environment(\.studioPalette) private var palette
     @Binding var value: Double
     let range: ClosedRange<Double>
     let label: String
@@ -433,7 +455,7 @@ struct KnobView: View {
                 Circle()
                     .trim(from: 0, to: 0.75)
                     .rotation(.degrees(135))
-                    .stroke(Color.accentColor, lineWidth: 3)
+                    .stroke(palette.accent, lineWidth: 3)
                     .frame(width: 26, height: 26)
                 
                 // Position indicator

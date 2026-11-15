@@ -269,7 +269,20 @@ public struct DAWState: Codable, Sendable {
     public var showVRack: Bool
     public var showMixer: Bool
     public var showInspector: Bool
-    
+    /// Optional for compatibility with projects saved before stage layouts.
+    public var stageLayoutID: String?
+    /// Nil or "apple-medium-hall" means the legacy Apple hall.
+    /// Optional to load projects created before native room selection.
+    public var acousticRoomProfileID: String?
+    /// Optional for backwards compatibility with projects created before the
+    /// native Acoustic Room Designer existed.
+    public var acousticRoomDesign: StudioAcousticRoomDesign?
+    /// Nil preserves the original close-listening behavior on older projects.
+    public var virtualMicrophoneSettings: StudioVirtualMicrophoneSettings?
+    /// Independent microphone capsules and array membership. Optional:
+    /// previous projects have no mic objects and retain their existing audio.
+    public var virtualMicrophones: [StudioVirtualMicrophone]?
+
     // Zoom and scroll
     public var zoomLevel: Double
     public var horizontalScrollOffset: Double
@@ -296,6 +309,11 @@ public struct DAWState: Codable, Sendable {
         self.showVRack = showVRack
         self.showMixer = showMixer
         self.showInspector = showInspector
+        self.stageLayoutID = nil
+        self.acousticRoomProfileID = nil
+        self.acousticRoomDesign = nil
+        self.virtualMicrophoneSettings = nil
+        self.virtualMicrophones = nil
         self.zoomLevel = zoomLevel
         self.horizontalScrollOffset = horizontalScrollOffset
         self.verticalScrollOffset = verticalScrollOffset

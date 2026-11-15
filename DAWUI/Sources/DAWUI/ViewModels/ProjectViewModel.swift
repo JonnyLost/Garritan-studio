@@ -21,7 +21,11 @@ public final class ProjectViewModel: ObservableObject {
             NotificationCenter.default.post(name: .projectDidChange, object: project)
         }
     }
+    @Published public var activeKeyswitchArticulationID: String?
+    @Published public var activeKeyswitchTrackID: TrackID?
     @Published public private(set) var selectedTrackID: TrackID?
+    /// UI selection only; microphone objects are stored in DAWState.
+    @Published public private(set) var selectedVirtualMicrophoneID: UUID?
     @Published public private(set) var selectedClipIDs: Set<ClipID> = []
     @Published public private(set) var isModified: Bool = false
     
@@ -52,6 +56,8 @@ public final class ProjectViewModel: ObservableObject {
     
     // Playback state
     @Published public private(set) var isEngineReady: Bool = false
+    @Published public private(set) var acousticRoomSelectionError: String?
+    @Published public private(set) var microphoneAuditionError: String?
     
     // MARK: - Subsystems
     
@@ -116,8 +122,9 @@ public final class ProjectViewModel: ObservableObject {
         // CRITICAL: Bind transport to audio engine for sample-accurate timing
         transportState.bind(to: audioEngine)
         
-        // Bind other subsystems to transport
-        midiSequencer.bind(to: transportState)
+        // PlaybackEngine owns clip MIDI scheduling and the audio-engine clock.
+        // The legacy MIDISequencer has no scheduled tracks here; binding it
+        // would start a second timer that repeatedly rewrites the playhead.
         playbackEngine.bind(to: transportState)
         midiRecorder.bind(to: transportState)
         // Note: Metronome is handled by PlaybackEngine - no separate binding needed
@@ -191,16 +198,18 @@ public final class ProjectViewModel: ObservableObject {
     
     private func routeMIDIToInstrument(_ event: IncomingMIDIEvent, trackID: TrackID) {
         guard let track = project.track(withID: trackID) else { return }
-        
+        // Share the exact filter with legacy and hybrid MIDI playback.
+        guard track.acceptsMIDIChannel(event.channel) else { return }
+
         // Determine the MIDI destination and channel
         let (instrument, channel): (TrackInstrument?, UInt8) = {
             switch track.midiOutput {
             case .rackInstrument(let rackID, let ch):
                 // Route to V-Rack instrument on specified channel
-                return (playbackEngine.rackInstrument(for: rackID), ch - 1)  // Convert 1-16 to 0-15
+                return (playbackEngine.rackInstrument(for: rackID), min(16, max(1, ch)) - 1)
             case .trackInstrument, .none:
-                // Route to track's own instrument on channel 0
-                return (playbackEngine.instrument(for: trackID), 0)
+                // Route to the track instrument on the incoming MIDI channel.
+                return (playbackEngine.instrument(for: trackID), event.channel)
             }
         }()
         
@@ -217,8 +226,9 @@ public final class ProjectViewModel: ObservableObject {
         
         switch event.type {
         case .note(let noteData):
-            // Note: Some keyboards send velocity=1 for note-off instead of 0
-            let isNoteOff = noteData.velocity == 0 || noteData.velocity == 1
+            // MIDIManager normalizes both Note Off and zero-velocity Note On
+            // to velocity 0; velocity 1 is a valid, quiet Note On.
+            let isNoteOff = noteData.velocity == 0
             
             if !isNoteOff {
                 instrument.startNote(noteData.pitch, velocity: noteData.velocity, channel: channel)
@@ -248,6 +258,27 @@ public final class ProjectViewModel: ObservableObject {
         Task {
             do {
                 print("Starting audio engine...")
+                // Restore the chosen native room before preparing track instruments.
+                // Previous projects default to the original close-microphone balance.
+                audioEngine.setVirtualMicrophone(
+                    project.dawState.virtualMicrophoneSettings ?? StudioVirtualMicrophoneSettings()
+                )
+                // A legacy project with no saved profile keeps the tested Apple hall.
+                if let design = project.dawState.acousticRoomDesign {
+                    try audioEngine.configureDesignedRoom(design)
+                }
+                if let id = project.dawState.acousticRoomProfileID,
+                   StudioRoomAcousticProfile.index(forID: id) != nil {
+                    do {
+                        try audioEngine.setNativeConcertHallReverbEnabled(true)
+                        _ = audioEngine.selectNativeRoomProfile(id: id)
+                    } catch {
+                        acousticRoomSelectionError = error.localizedDescription
+                        print("[Acoustics] Could not restore native room: \(error)")
+                        // Do not prevent legacy sessions from starting.
+                        try? audioEngine.setNativeConcertHallReverbEnabled(false)
+                    }
+                }
                 try audioEngine.start()
                 print("Audio engine started successfully. Running: \(audioEngine.engine.isRunning)")
                 print("Sample rate: \(audioEngine.sampleRate)")
@@ -326,15 +357,19 @@ public final class ProjectViewModel: ObservableObject {
         
         let action = AddTrackAction(track: track)
         undoManager.registerAction(action, project: &project)
+        print("[Track Creation] Undo action registered; creating audio node for \(track.name)")
         
         // Create audio node
         do {
             try audioEngine.createTrackNode(for: track)
+            print("[Track Creation] Audio node created for \(track.name)")
         } catch {
             print("Failed to create track node: \(error)")
         }
         
+        print("[Track Creation] Updating solo state")
         audioEngine.updateSoloState(tracks: project.tracks)
+        print("[Track Creation] Selecting track")
         selectedTrackID = track.id
     }
     
@@ -424,17 +459,42 @@ public final class ProjectViewModel: ObservableObject {
     
     public func deleteTrack(id: TrackID) {
         guard project.tracks.contains(where: { $0.id == id }) else { return }
-        
+
+        // Capture the currently edited ARIA and effect presets BEFORE the undo
+        // action snapshots this track. Otherwise undo can restore the model
+        // but cannot recreate the sound that was actually playing.
+        saveAllPluginStates()
+
         let action = RemoveTrackAction(from: project, trackID: id)
         undoManager.registerAction(action, project: &project)
         
+        // Release the hosted AU and its converter before removing the track
+        // mixer. Otherwise deleted tracks leave orphaned audio nodes behind.
+        unloadTrackInstrument(for: id)
         audioEngine.removeTrackNode(for: id)
-        
+
         if selectedTrackID == id {
             selectedTrackID = project.tracks.first?.id
         }
     }
     
+    /// Remove the track's audio unit and its corresponding host registry entry.
+    /// Use this for both track deletion and "Remove Instrument" in the header.
+    public func unloadTrackInstrument(for trackID: TrackID) {
+        let loadedPluginID: UUID?
+        if let instrument = playbackEngine.instrument(for: trackID),
+           case .auInstrument(_, let pluginID) = instrument {
+            loadedPluginID = pluginID
+        } else {
+            loadedPluginID = nil
+        }
+
+        playbackEngine.removeInstrument(for: trackID)
+        if let loadedPluginID {
+            pluginHost.unloadPlugin(id: loadedPluginID)
+        }
+    }
+
     public func updateTrack(_ track: Track, description: String = "Modify Track") {
         guard let oldTrack = project.track(withID: track.id) else { return }
         
@@ -536,7 +596,169 @@ public final class ProjectViewModel: ObservableObject {
         track.pan = zone == 0 ? 0 : min(1, max(-1, pan))
         track.stageReverbZone = min(5, max(0, zone))
         updateTrack(track, description: "Move Instrument on Stage")
-        playbackEngine.updateTrackConcertHallDepth(id, zone: min(5, max(0, zone)))
+    }
+
+    public func setTrackStageWetTrim(id: TrackID, trim: Float) {
+        guard var track = project.track(withID: id) else { return }
+        track.stageWetTrim = min(2, max(0, trim))
+        updateTrack(track, description: "Adjust Instrument Hall Send")
+    }
+
+    public func setConcertHallOverallReverb(_ level: Float) {
+        audioEngine.setConcertHallOverallReverb(level)
+    }
+
+    /// Virtual microphone changes use AU parameters and mixer gains, so the
+    /// listener can be moved without rebuilding the AVAudioEngine graph.
+    public func setVirtualMicrophone(_ settings: StudioVirtualMicrophoneSettings) {
+        let safe = StudioVirtualMicrophoneSettings(
+            perspective: settings.perspective, stereoWidth: settings.safeWidth
+        )
+        audioEngine.setVirtualMicrophone(safe)
+        project.dawState.virtualMicrophoneSettings = safe
+    }
+
+    /// Explicit, alternate monitoring mode. The normal track/hall path
+    /// remains the fallback; no saved project auto-activates mic audition.
+    public func setMicrophoneAuditionEnabled(_ enabled: Bool) {
+        guard isEngineReady, !transportState.isPlaying,
+              !transportState.isRecording, !isRecording else {
+            microphoneAuditionError = "Stop playback and recording to change microphone monitoring."
+            return
+        }
+        do {
+            try audioEngine.setMicrophoneAuditionEnabled(
+                enabled, tracks: project.tracks,
+                microphones: project.dawState.virtualMicrophones ?? [],
+                room: project.dawState.acousticRoomDesign ?? StudioAcousticRoomDesign()
+            )
+            microphoneAuditionError = nil
+        } catch {
+            microphoneAuditionError = error.localizedDescription
+        }
+    }
+
+    private func refreshAuditionMicrophones() {
+        audioEngine.refreshMicrophoneRouting(
+            tracks: project.tracks,
+            microphones: project.dawState.virtualMicrophones ?? [],
+            room: project.dawState.acousticRoomDesign ?? StudioAcousticRoomDesign()
+        )
+    }
+
+    /// Add/remove operations change graph cardinality. They intentionally
+    /// require mic audition to be disabled first, while live position and
+    /// mixer edits can continue without rebuilding AVAudioEngine.
+
+    public func addVirtualMicrophoneArray(_ preset: StudioMicrophoneArrayPreset) {
+        guard !audioEngine.isMicrophoneAuditionActive else {
+            microphoneAuditionError = "Turn off mic audition before adding microphones."
+            return
+        }
+        let room = project.dawState.acousticRoomDesign ?? StudioAcousticRoomDesign()
+        var microphones = project.dawState.virtualMicrophones ?? []
+        guard microphones.count + preset.microphoneCount <= 32 else { return }
+        let added = preset.makeMicrophones(in: room)
+        microphones.append(contentsOf: added)
+        project.dawState.virtualMicrophones = microphones
+        selectedVirtualMicrophoneID = added.first?.id
+    }
+
+    public func selectVirtualMicrophone(_ id: UUID?) {
+        guard id == nil || (project.dawState.virtualMicrophones ?? []).contains(where: {
+            $0.id == id
+        }) else { return }
+        selectedVirtualMicrophoneID = id
+    }
+
+    public func updateVirtualMicrophone(_ microphone: StudioVirtualMicrophone) {
+        guard var microphones = project.dawState.virtualMicrophones,
+              let index = microphones.firstIndex(where: { $0.id == microphone.id })
+        else { return }
+        let room = project.dawState.acousticRoomDesign ?? StudioAcousticRoomDesign()
+        microphones[index] = microphone.clamped(to: room)
+        project.dawState.virtualMicrophones = microphones
+        refreshAuditionMicrophones()
+    }
+
+    public func setVirtualMicrophonePosition(id: UUID, position: StudioRoomPosition3D) {
+        guard var microphone = project.dawState.virtualMicrophones?.first(where: {
+            $0.id == id
+        }) else { return }
+        microphone.position = position
+        updateVirtualMicrophone(microphone)
+    }
+
+    public func removeVirtualMicrophone(id: UUID) {
+        guard !audioEngine.isMicrophoneAuditionActive else {
+            microphoneAuditionError = "Turn off mic audition before removing microphones."
+            return
+        }
+        guard var microphones = project.dawState.virtualMicrophones else { return }
+        microphones.removeAll { $0.id == id }
+        project.dawState.virtualMicrophones = microphones
+        if selectedVirtualMicrophoneID == id {
+            selectedVirtualMicrophoneID = microphones.first?.id
+        }
+    }
+
+    /// Apply current room geometry/materials to our native FDN and source
+    /// reflections. The button is disabled during transport activity.
+    /// Save the new design only after the audio engine accepted it.
+    public func applyAcousticRoomDesign(_ design: StudioAcousticRoomDesign) {
+        guard isEngineReady,
+              !transportState.isPlaying, !transportState.isRecording,
+              !isRecording else { return }
+        do {
+            if !audioEngine.usesNativeConcertHallReverb {
+                try audioEngine.setNativeConcertHallReverbEnabled(true)
+            }
+            try audioEngine.configureDesignedRoom(design)
+            guard audioEngine.selectNativeRoomProfile(id: StudioAcousticRoomDesign.profileID)
+            else { return }
+            acousticRoomSelectionError = nil
+            project.dawState.acousticRoomDesign = design
+            if let microphones = project.dawState.virtualMicrophones {
+                project.dawState.virtualMicrophones = microphones.map {
+                    $0.clamped(to: design)
+                }
+            }
+            project.dawState.acousticRoomProfileID = StudioAcousticRoomDesign.profileID
+            refreshAuditionMicrophones()
+        } catch {
+            acousticRoomSelectionError =
+                "Could not apply custom room: \(error.localizedDescription)"
+        }
+    }
+
+    /// Legacy Apple hall or one of the modeled spaces. Project persistence uses
+    /// the stable room ID, not the Audio Unit's numeric parameter index.
+    /// Graph rebuilds only occur when changing between Apple and native engines;
+    /// while playback/recording is running this operation is intentionally blocked.
+    public func selectConcertHallRoom(id: String) {
+        guard isEngineReady,
+              !transportState.isPlaying, !transportState.isRecording,
+              !isRecording else { return }
+        if id == StudioAcousticRoomDesign.profileID {
+            applyAcousticRoomDesign(project.dawState.acousticRoomDesign ?? StudioAcousticRoomDesign())
+            return
+        }
+        let isLegacy = id == "apple-medium-hall"
+        guard isLegacy || StudioRoomAcousticProfile.index(forID: id) != nil else { return }
+        do {
+            if isLegacy {
+                try audioEngine.setNativeConcertHallReverbEnabled(false)
+            } else {
+                if !audioEngine.usesNativeConcertHallReverb {
+                    try audioEngine.setNativeConcertHallReverbEnabled(true)
+                }
+                _ = audioEngine.selectNativeRoomProfile(id: id)
+            }
+            acousticRoomSelectionError = nil
+            project.dawState.acousticRoomProfileID = isLegacy ? nil : id
+        } catch {
+            acousticRoomSelectionError = "Could not change acoustic room: \(error.localizedDescription)"
+        }
     }
 
     public func setTrackStageZone(id: TrackID, zone: Int) {
@@ -544,7 +766,6 @@ public final class ProjectViewModel: ObservableObject {
         track.stageReverbZone = min(5, max(0, zone))
         if zone == 0 { track.pan = 0 }
         updateTrack(track, description: "Change Stage Reverb Zone")
-        playbackEngine.updateTrackConcertHallDepth(id, zone: min(5, max(0, zone)))
     }
 
     public func setTrackPan(id: TrackID, pan: Float) {
@@ -1274,9 +1495,20 @@ public final class ProjectViewModel: ObservableObject {
             }
         }
         
-        // Remove from audio engine
+        // Remove from the graph and from the plug-in host registry. Keeping
+        // the host's AU reference after deleting a V-Rack slot leaks instances.
+        let hostedPluginID: UUID?
+        if let loadedInstrument = playbackEngine.rackInstrument(for: id),
+           case .auInstrument(_, let instanceID) = loadedInstrument {
+            hostedPluginID = instanceID
+        } else {
+            hostedPluginID = nil
+        }
         playbackEngine.removeRackInstrument(rackID: id)
-        
+        if let hostedPluginID {
+            pluginHost.unloadPlugin(id: hostedPluginID)
+        }
+
         // Remove from project
         project.vRack.removeInstrument(withID: id)
     }
@@ -1288,41 +1520,62 @@ public final class ProjectViewModel: ObservableObject {
         project.vRack.updateInstrument(instrument)
     }
     
-    /// Load a plugin into a rack instrument
+    /// Replace the V-Rack's hosted Audio Unit only after loading a fresh
+    /// instance. Never overwrite the registry entry of the still-attached AU.
     public func loadRackInstrumentPlugin(_ rackID: UUID, pluginID: PluginIdentifier) async {
         guard var instrument = project.vRack.instrument(withID: rackID) else { return }
-        
-        // Find the plugin description
-        guard let pluginDesc = pluginHost.availableInstruments.first(where: {
+        guard pluginHost.availableInstruments.contains(where: {
             $0.identifier == pluginID
         }) else {
             print("[V-Rack] Plugin not found: \(pluginID.name)")
             return
         }
-        
+
+        let previousIdentifier = instrument.pluginSlot.pluginID
+        let previousHostedID: UUID?
+        if let existing = playbackEngine.rackInstrument(for: rackID),
+           case .auInstrument(_, let instanceID) = existing {
+            previousHostedID = instanceID
+        } else {
+            previousHostedID = nil
+        }
+
         do {
-            // Load the AU using the same method as track instruments
-            let format = AVAudioFormat(standardFormatWithSampleRate: audioEngine.sampleRate, channels: 2)!
-            let loadedPlugin = try await pluginHost.loadPlugin(
-                identifier: pluginID,
-                format: format,
-                instanceID: instrument.pluginSlot.id
+            let format = AVAudioFormat(
+                standardFormatWithSampleRate: audioEngine.sampleRate, channels: 2
+            )!
+            let loaded = try await pluginHost.loadPlugin(
+                identifier: pluginID, format: format, instanceID: UUID()
             )
-            
-            // Load into engine
-            try await playbackEngine.loadRackInstrument(loadedPlugin.audioUnit, rackID: rackID, pluginID: instrument.pluginSlot.id)
-            
-            // Update the rack instrument
+            guard project.vRack.instrument(withID: rackID) != nil else {
+                pluginHost.unloadPlugin(id: loaded.id)
+                return
+            }
+            do {
+                try await playbackEngine.loadRackInstrument(
+                    loaded.audioUnit, rackID: rackID, pluginID: loaded.id
+                )
+            } catch {
+                pluginHost.unloadPlugin(id: loaded.id)
+                throw error
+            }
+            if let previousHostedID, previousHostedID != loaded.id {
+                pluginHost.unloadPlugin(id: previousHostedID)
+            }
+            instrument = project.vRack.instrument(withID: rackID) ?? instrument
+            instrument.pluginSlot.id = loaded.id
             instrument.pluginSlot.pluginID = pluginID
+            if previousIdentifier != pluginID {
+                instrument.pluginSlot.stateData = nil
+            }
             instrument.name = pluginID.name
             project.vRack.updateInstrument(instrument)
-            
             print("[V-Rack] Loaded plugin: \(pluginID.name)")
         } catch {
             print("[V-Rack] Failed to load plugin: \(error)")
         }
     }
-    
+
     /// Open the plugin UI for a rack instrument
     public func openRackInstrumentUI(_ rackID: UUID, preferNativeARIA: Bool = false) {
         guard let instrument = project.vRack.instrument(withID: rackID),
@@ -1342,21 +1595,32 @@ public final class ProjectViewModel: ObservableObject {
         PluginWindowManager.shared.openPluginWindow(for: loadedPlugin, trackName: instrument.name, preferNativeARIA: preferNativeARIA)
     }
     
-    /// Open the plugin instance already attached to the selected track.
-    /// Never instantiate a second ARIA Player just to display its controls.
+    /// Open the exact Audio Unit instance hosted by this track, including
+    /// non-Garritan instruments. Never substitute another track's instance
+    /// just because both use the same Audio Unit description.
     public func openTrackInstrumentUI(_ trackID: TrackID, preferNativeARIA: Bool = false) {
         guard let track = project.track(withID: trackID),
-              let pluginID = track.instrumentSlot?.pluginID,
-              pluginID.name.localizedCaseInsensitiveContains("aria"),
-              pluginID.manufacturer.localizedCaseInsensitiveContains("garr"),
+              track.instrumentSlot?.pluginID != nil,
               let instrument = playbackEngine.instrument(for: trackID),
               case .auInstrument(_, let loadedID) = instrument,
               let loadedPlugin = pluginHost.loadedPlugins[loadedID] else {
-            print("[Track ARIA] Cannot open controls: no loaded ARIA instance on track")
+            print("[Track Instrument] Cannot open controls: no loaded AU instance on track")
             return
         }
         PluginWindowManager.shared.openPluginWindow(
             for: loadedPlugin, trackName: track.name, preferNativeARIA: preferNativeARIA)
+    }
+
+    /// Open an effect editor for the instance actually inserted in this
+    /// track's audio graph. Identical plug-in types may be loaded on many
+    /// tracks, so matching PluginIdentifier alone is not safe.
+    public func openTrackEffectUI(_ trackID: TrackID, slotIndex: Int) {
+        guard let track = project.track(withID: trackID),
+              let node = audioEngine.pluginNode(on: trackID, at: slotIndex),
+              let loaded = pluginHost.loadedPlugins.values.first(where: { $0.audioUnit === node }) else {
+            return
+        }
+        PluginWindowManager.shared.openPluginWindow(for: loaded, trackName: track.name)
     }
 
     // MARK: - Plugin State Management
@@ -1369,6 +1633,48 @@ public final class ProjectViewModel: ObservableObject {
         print("[PluginState] Loaded plugins count: \(pluginHost.loadedPlugins.count)")
         print("[PluginState] Loaded plugin IDs: \(pluginHost.loadedPlugins.keys.map { $0.uuidString.prefix(8) })")
         
+        // Capture track-level instrument state as well as V-Rack state.
+        // Otherwise edits made inside ARIA after choosing a program are lost
+        // when the saved project is reopened.
+        for index in project.tracks.indices {
+            let track = project.tracks[index]
+            guard track.instrumentSlot?.pluginID != nil,
+                  let instrument = playbackEngine.instrument(for: track.id),
+                  case .auInstrument(_, let loadedID) = instrument else {
+                continue
+            }
+            do {
+                let stateData = try pluginHost.savePreset(pluginID: loadedID)
+                project.tracks[index].instrumentSlot?.stateData = stateData
+                print("[PluginState] Saved track \(track.name): \(stateData.count) bytes")
+            } catch {
+                print("[PluginState] Could not save track \(track.name): \(error)")
+            }
+        }
+
+        // Effects also carry user-edited AU state. Track and V-Rack
+        // instruments are not the only Audio Units that must survive reopening.
+        // Resolve by the stable slot ID, or by exact AU node for old projects
+        // created before effect instance IDs matched their slot IDs.
+        for trackIndex in project.tracks.indices {
+            let track = project.tracks[trackIndex]
+            for slotIndex in track.pluginSlots.indices {
+                let slot = track.pluginSlots[slotIndex]
+                guard slot.pluginID != nil,
+                      let node = audioEngine.pluginNode(on: track.id, at: slotIndex),
+                      let loaded = pluginHost.loadedPlugins[slot.id] ??
+                          pluginHost.loadedPlugins.values.first(where: {
+                              $0.audioUnit === node
+                          }) else { continue }
+                do {
+                    project.tracks[trackIndex].pluginSlots[slotIndex].stateData =
+                        try pluginHost.savePreset(pluginID: loaded.id)
+                } catch {
+                    print("[PluginState] Could not save insert \(slotIndex) on \(track.name): \(error)")
+                }
+            }
+        }
+
         // Save rack instrument plugin states
         for (index, instrument) in project.vRack.instruments.enumerated() {
             print("[PluginState] Processing: \(instrument.name) (slot: \(instrument.pluginSlot.id.uuidString.prefix(8)))")
@@ -1407,22 +1713,110 @@ public final class ProjectViewModel: ObservableObject {
         // First scan for plugins so we have them available
         await pluginHost.scanForPlugins()
         
-        // Restore track-level Garritan instruments as well as V-Rack instruments.
-        for track in project.tracks where track.garritanProgramID != nil {
+        // Restore saved track instruments without leaking an unattached AU
+        // if the audio graph rejects it. A malformed preset must not discard
+        // a successfully loaded instrument.
+        for track in project.tracks {
             guard let slot = track.instrumentSlot, let pluginID = slot.pluginID else { continue }
             do {
                 let format = AVAudioFormat(standardFormatWithSampleRate: audioEngine.sampleRate, channels: 2)!
                 let loaded = try await pluginHost.loadPlugin(identifier: pluginID, format: format)
-                try await playbackEngine.loadInstrument(loaded.audioUnit, for: track.id, pluginID: loaded.id)
-                if let data = slot.stateData,
-                   let state = try PropertyListSerialization.propertyList(
-                       from: data, options: [], format: nil) as? [String: Any] {
-                    loaded.audioUnit.auAudioUnit.fullState = state
+                // The project may have been replaced while instantiation was awaiting.
+                guard project.track(withID: track.id)?.instrumentSlot?.pluginID == pluginID else {
+                    pluginHost.unloadPlugin(id: loaded.id)
+                    continue
+                }
+                let previousPluginID: UUID?
+                if let instrument = playbackEngine.instrument(for: track.id),
+                   case .auInstrument(_, let existingID) = instrument {
+                    previousPluginID = existingID
+                } else {
+                    previousPluginID = nil
+                }
+                do {
+                    try await playbackEngine.loadInstrument(
+                        loaded.audioUnit, for: track.id, pluginID: loaded.id
+                    )
+                } catch {
+                    pluginHost.unloadPlugin(id: loaded.id)
+                    throw error
+                }
+                if let previousPluginID, previousPluginID != loaded.id {
+                    pluginHost.unloadPlugin(id: previousPluginID)
+                }
+                if let data = slot.stateData {
+                    do {
+                        try pluginHost.loadPreset(pluginID: loaded.id, data: data)
+                    } catch {
+                        print("[PluginState] Instrument restored but preset for \\(track.name) failed: \\(error)")
+                    }
                 }
                 restoreInstrumentLevel(for: track.id)
-                print("[PluginState] Restored Garritan track: \\(track.name)")
+                print("[PluginState] Restored instrument for track \\(track.name)")
             } catch {
-                print("[PluginState] Could not restore Garritan track \\(track.name): \\(error)")
+                print("[PluginState] Could not restore track \\(track.name): \\(error)")
+            }
+        }
+
+        // Restore insert effects as well as instruments. Preserve their
+        // persisted instance IDs so editor selection and later state saves
+        // resolve the exact hosted Audio Unit on each track.
+        for track in project.tracks {
+            let effectSlots = track.pluginSlots.filter { $0.pluginID != nil }
+            guard !effectSlots.isEmpty else { continue }
+            guard audioEngine.trackNode(for: track.id) != nil else {
+                print("[PluginState] Track graph unavailable for effect restoration: \(track.name)")
+                continue
+            }
+            if let trackIndex = project.tracks.firstIndex(where: { $0.id == track.id }) {
+                // Remove legacy empty placeholders so model indices match
+                // AudioEngine's contiguous ordered AU insert chain.
+                project.tracks[trackIndex].pluginSlots = effectSlots
+            }
+            for slot in effectSlots {
+                guard let identifier = slot.pluginID else { continue }
+                do {
+                    // Avoid adding a second copy when restoration is requested
+                    // again in the same session.
+                    if let existing = pluginHost.loadedPlugins[slot.id],
+                       (0..<audioEngine.pluginCount(on: track.id)).contains(where: {
+                           audioEngine.pluginNode(on: track.id, at: $0) === existing.audioUnit
+                       }) {
+                        continue
+                    }
+                    let format = AVAudioFormat(
+                        standardFormatWithSampleRate: audioEngine.sampleRate, channels: 2
+                    )!
+                    let loaded = try await pluginHost.loadPlugin(
+                        identifier: identifier,
+                        format: format,
+                        instanceID: slot.id
+                    )
+                    // Do not recreate a deleted or replaced track after await.
+                    guard project.track(withID: track.id) != nil else {
+                        pluginHost.unloadPlugin(id: loaded.id)
+                        continue
+                    }
+                    do {
+                        try audioEngine.insertPlugin(
+                            loaded.audioUnit,
+                            on: track.id,
+                            at: audioEngine.pluginCount(on: track.id)
+                        )
+                    } catch {
+                        pluginHost.unloadPlugin(id: loaded.id)
+                        throw error
+                    }
+                    if let state = slot.stateData {
+                        do {
+                            try pluginHost.loadPreset(pluginID: loaded.id, data: state)
+                        } catch {
+                            print("[PluginState] Effect preset for \(track.name) failed: \(error)")
+                        }
+                    }
+                } catch {
+                    print("[PluginState] Could not restore insert on \(track.name): \(error)")
+                }
             }
         }
 
@@ -1440,7 +1834,8 @@ public final class ProjectViewModel: ObservableObject {
             await loadRackInstrumentPlugin(instrument.id, pluginID: pluginID)
             
             // Check if it loaded
-            guard let loaded = pluginHost.loadedPlugins[instrument.pluginSlot.id] else {
+            guard let activeSlot = project.vRack.instrument(withID: instrument.id)?.pluginSlot,
+                  let loaded = pluginHost.loadedPlugins[activeSlot.id] else {
                 print("[PluginState]   ❌ Plugin failed to load")
                 continue
             }
@@ -1454,7 +1849,7 @@ public final class ProjectViewModel: ObservableObject {
             // Then restore its state if we have it
             if let stateData = instrument.pluginSlot.stateData {
                 do {
-                    try pluginHost.loadPreset(pluginID: instrument.pluginSlot.id, data: stateData)
+                    try pluginHost.loadPreset(pluginID: loaded.id, data: stateData)
                     print("[PluginState]   ✅ State restored (\(stateData.count) bytes)")
                     
                     // Give the plugin time to apply the state
@@ -1486,11 +1881,27 @@ public final class ProjectViewModel: ObservableObject {
             playbackEngine.removeRackInstrument(rackID: instrument.id)
         }
         
+        // Remove hosted insert effects before dropping the host registry.
+        // Otherwise their AVAudioUnits stay attached to the audio graph
+        // after a project switch even though the host no longer tracks them.
+        for track in project.tracks {
+            let count = audioEngine.pluginCount(on: track.id)
+            if count > 0 {
+                for index in (0..<count).reversed() {
+                    do {
+                        try audioEngine.removePlugin(at: index, from: track.id)
+                    } catch {
+                        print("[PluginState] Failed removing insert \(index) on \(track.name): \(error)")
+                    }
+                }
+            }
+        }
+
         // Remove all track instruments from audio engine
         for track in project.tracks {
             playbackEngine.removeInstrument(for: track.id)
         }
-        
+
         // Unload all plugins from host
         pluginHost.unloadAllPlugins()
         
@@ -1501,12 +1912,157 @@ public final class ProjectViewModel: ObservableObject {
     
     public func undo() {
         undoManager.undo(project: &project)
+        synchronizeTrackAudioAfterHistoryChange()
     }
-    
+
     public func redo() {
         undoManager.redo(project: &project)
+        synchronizeTrackAudioAfterHistoryChange()
+    }
+
+    /// Undo/redo updates the model directly. Reconcile added or removed
+    /// mixer graphs as well as scalar track parameters. Structural changes
+    /// stop transport so no callback can address an AU being detached.
+    private func synchronizeTrackAudioAfterHistoryChange() {
+        let desiredIDs = Set(project.tracks.map { $0.id })
+        let attachedIDs = audioEngine.activeTrackIDs
+        let removedIDs = attachedIDs.subtracting(desiredIDs)
+        let addedIDs = desiredIDs.subtracting(attachedIDs)
+
+        if !removedIDs.isEmpty || !addedIDs.isEmpty {
+            if isRecording { stopRecording() }
+            playbackEngine.stopPlayback()
+            transportState.stop()
+        }
+
+        for id in removedIDs {
+            unloadTrackInstrument(for: id)
+            let count = audioEngine.pluginCount(on: id)
+            if count > 0 {
+                for index in (0..<count).reversed() {
+                    let node = audioEngine.pluginNode(on: id, at: index)
+                    let hostedID = pluginHost.loadedPlugins.values.first(where: {
+                        guard let node else { return false }
+                        return $0.audioUnit === node
+                    })?.id
+                    do {
+                        try audioEngine.removePlugin(at: index, from: id)
+                        if let hostedID { pluginHost.unloadPlugin(id: hostedID) }
+                    } catch {
+                        print("[Undo] Failed to detach insert \(index): \(error)")
+                    }
+                }
+            }
+            audioEngine.removeTrackNode(for: id)
+        }
+
+        for track in project.tracks where addedIDs.contains(track.id) {
+            do {
+                try audioEngine.createTrackNode(for: track)
+                Task { [weak self] in
+                    await self?.restoreTrackAfterHistoryChange(track.id)
+                }
+            } catch {
+                print("[Undo] Failed to reconstruct track graph \(track.name): \(error)")
+            }
+        }
+
+        for track in project.tracks {
+            audioEngine.updateTrackParameters(for: track)
+        }
+        audioEngine.updateSoloState(tracks: project.tracks)
     }
     
+    /// Rehydrate a track restored by Undo. All work happens after its mixer
+    /// node is attached, and every awaited AU load checks the track still exists
+    /// so a subsequent Redo cannot revive a deleted instrument.
+    private func restoreTrackAfterHistoryChange(_ id: TrackID) async {
+        guard let track = project.track(withID: id),
+              audioEngine.trackNode(for: id) != nil else { return }
+
+        if let identifier = track.instrumentSlot?.pluginID {
+            do {
+                let format = AVAudioFormat(
+                    standardFormatWithSampleRate: audioEngine.sampleRate, channels: 2
+                )!
+                let loaded = try await pluginHost.loadPlugin(
+                    identifier: identifier, format: format
+                )
+                guard project.track(withID: id)?.instrumentSlot?.pluginID == identifier,
+                      audioEngine.trackNode(for: id) != nil else {
+                    pluginHost.unloadPlugin(id: loaded.id)
+                    return
+                }
+                do {
+                    try await playbackEngine.loadInstrument(
+                        loaded.audioUnit, for: id, pluginID: loaded.id
+                    )
+                } catch {
+                    pluginHost.unloadPlugin(id: loaded.id)
+                    throw error
+                }
+                if let state = track.instrumentSlot?.stateData {
+                    do {
+                        try pluginHost.loadPreset(pluginID: loaded.id, data: state)
+                    } catch {
+                        print("[Undo] Could not restore instrument preset on \(track.name): \(error)")
+                    }
+                }
+                restoreInstrumentLevel(for: id)
+            } catch {
+                print("[Undo] Could not restore instrument on \(track.name): \(error)")
+            }
+        } else if track.type == .midi || track.type == .instrument {
+            do {
+                try await playbackEngine.setupMIDITrack(track)
+            } catch {
+                print("[Undo] Could not restore fallback sampler on \(track.name): \(error)")
+            }
+        }
+
+        // Recreate saved insert effects in their persisted order.
+        for slot in track.pluginSlots {
+            guard let identifier = slot.pluginID,
+                  project.track(withID: id) != nil,
+                  audioEngine.trackNode(for: id) != nil else { continue }
+            do {
+                let format = AVAudioFormat(
+                    standardFormatWithSampleRate: audioEngine.sampleRate, channels: 2
+                )!
+                let loaded = try await pluginHost.loadPlugin(
+                    identifier: identifier, format: format, instanceID: slot.id
+                )
+                guard project.track(withID: id) != nil,
+                      audioEngine.trackNode(for: id) != nil else {
+                    pluginHost.unloadPlugin(id: loaded.id)
+                    return
+                }
+                do {
+                    try audioEngine.insertPlugin(
+                        loaded.audioUnit, on: id,
+                        at: audioEngine.pluginCount(on: id)
+                    )
+                } catch {
+                    pluginHost.unloadPlugin(id: loaded.id)
+                    throw error
+                }
+                if let state = slot.stateData {
+                    do {
+                        try pluginHost.loadPreset(pluginID: loaded.id, data: state)
+                    } catch {
+                        print("[Undo] Could not restore effect preset on \(track.name): \(error)")
+                    }
+                }
+            } catch {
+                print("[Undo] Could not restore insert on \(track.name): \(error)")
+            }
+        }
+        if let refreshed = project.track(withID: id) {
+            audioEngine.updateTrackParameters(for: refreshed)
+        }
+        audioEngine.updateSoloState(tracks: project.tracks)
+    }
+
     // MARK: - Recording
     
     public func startRecording() {

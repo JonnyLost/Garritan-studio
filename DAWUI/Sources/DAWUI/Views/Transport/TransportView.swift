@@ -5,6 +5,7 @@ import DAWCore
 
 /// Transport control bar with play/stop, tempo, time display
 public struct TransportView: View {
+    @Environment(\.studioPalette) private var palette
     @ObservedObject var viewModel: ProjectViewModel
     @ObservedObject var transportState: TransportState
     
@@ -31,14 +32,15 @@ public struct TransportView: View {
             .focusable(false)
             .help("Return to Zero")
             
-            // Rewind
-            Button(action: {}) {
+            // Move to the previous bar boundary using the existing safe seek path.
+            Button(action: { jumpByBars(-1) }) {
                 Image(systemName: "backward.fill")
                     .font(.system(size: 14))
             }
             .buttonStyle(.plain)
             .focusable(false)
-            .help("Rewind")
+            .help("Previous Bar")
+            .disabled(viewModel.isRecording)
             
             // Play/Pause (no separate Stop button - modern DAW style)
             Button(action: { viewModel.togglePlayPause() }) {
@@ -66,14 +68,15 @@ public struct TransportView: View {
             .focusable(false)
             .help(viewModel.isRecording ? "Stop Recording" : "Record")
             
-            // Fast forward
-            Button(action: {}) {
+            // Move to the next bar boundary.
+            Button(action: { jumpByBars(1) }) {
                 Image(systemName: "forward.fill")
                     .font(.system(size: 14))
             }
             .buttonStyle(.plain)
             .focusable(false)
-            .help("Fast Forward")
+            .help("Next Bar")
+            .disabled(viewModel.isRecording)
             
             Divider()
                 .frame(height: 24)
@@ -87,13 +90,13 @@ public struct TransportView: View {
                         .foregroundColor(.secondary)
                     Text(barsDisplay)
                         .font(.system(size: 18, weight: .bold, design: .monospaced))
-                        .foregroundColor(.white)
+                        .foregroundColor(palette.primaryText)
                         .fixedSize(horizontal: true, vertical: false)
                 }
                 .frame(minWidth: 80)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(Color.black.opacity(0.4))
+                .background(palette.raisedSurface)
                 .cornerRadius(4)
                 
                 // Time display (MM:SS:FF)
@@ -103,13 +106,13 @@ public struct TransportView: View {
                         .foregroundColor(.secondary)
                     Text(timeDisplay)
                         .font(.system(size: 18, weight: .bold, design: .monospaced))
-                        .foregroundColor(.green)
+                        .foregroundColor(palette.accent)
                         .fixedSize(horizontal: true, vertical: false)
                 }
                 .frame(minWidth: 90)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(Color.black.opacity(0.4))
+                .background(palette.raisedSurface)
                 .cornerRadius(4)
             }
             
@@ -140,7 +143,7 @@ public struct TransportView: View {
                     } else {
                         Text(String(format: "%.1f", transportState.tempo.bpm))
                             .font(.system(size: 16, weight: .bold, design: .monospaced))
-                            .foregroundColor(.orange)
+                            .foregroundColor(palette.accent)
                             .onTapGesture(count: 2) {
                                 tempoText = String(format: "%.1f", transportState.tempo.bpm)
                                 isEditingTempo = true
@@ -149,7 +152,7 @@ public struct TransportView: View {
                 }
                 .frame(width: 55)
                 .padding(.horizontal, 4)
-                .background(Color.black.opacity(0.3))
+                .background(palette.raisedSurface)
                 .cornerRadius(4)
                 
                 Button(action: { transportState.nudgeTempo(by: 1) }) {
@@ -171,7 +174,7 @@ public struct TransportView: View {
             }
             .frame(width: 35)
             .padding(.horizontal, 4)
-            .background(Color.black.opacity(0.3))
+            .background(palette.raisedSurface)
             .cornerRadius(4)
             
             Divider()
@@ -181,7 +184,7 @@ public struct TransportView: View {
             Button(action: { transportState.toggleLoop() }) {
                 Image(systemName: "repeat")
                     .font(.system(size: 14))
-                    .foregroundColor(transportState.isLoopEnabled ? .accentColor : .secondary)
+                    .foregroundColor(transportState.isLoopEnabled ? palette.accent : .secondary)
             }
             .buttonStyle(.plain)
             .help("Toggle Loop")
@@ -190,7 +193,7 @@ public struct TransportView: View {
             Button(action: { transportState.isMetronomeEnabled.toggle() }) {
                 Image(systemName: "metronome")
                     .font(.system(size: 14))
-                    .foregroundColor(transportState.isMetronomeEnabled ? .accentColor : .secondary)
+                    .foregroundColor(transportState.isMetronomeEnabled ? palette.accent : .secondary)
             }
             .buttonStyle(.plain)
             .help("Toggle Metronome")
@@ -204,15 +207,13 @@ public struct TransportView: View {
             
             Spacer()
             
-            // CPU meter (placeholder)
+            // Avoid displaying a fictitious CPU load until real engine
+            // metering is available.
             HStack(spacing: 4) {
-                Text("CPU")
+                Text("CPU —")
                     .font(.system(size: 9))
                     .foregroundColor(.secondary)
-                
-                ProgressView(value: 0.15)
-                    .progressViewStyle(.linear)
-                    .frame(width: 40)
+                    .help("CPU usage metering is not implemented yet")
             }
             
             // Undo/Redo
@@ -236,7 +237,7 @@ public struct TransportView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(palette.panel)
         // Real-time playhead updates (using smooth interpolated position)
         .onReceive(transportState.$smoothPlayheadBeats) { beats in
             currentBeats = beats
@@ -251,6 +252,16 @@ public struct TransportView: View {
     }
     
     // Bars display - uses local state for real-time updates
+    /// One-bar navigation is safe while stopped or playing. Seek through
+    /// ProjectViewModel so live MIDI playback restarts from the new position.
+    /// Recording disables the buttons above to avoid moving the capture clock.
+    private func jumpByBars(_ direction: Int) {
+        guard !viewModel.isRecording else { return }
+        let barLength = Double(max(1, transportState.timeSignature.beatsPerBar))
+        let currentBarStart = (max(0, transportState.playheadBeats) / barLength).rounded(.down) * barLength
+        viewModel.seekTo(beat: max(0, currentBarStart + Double(direction) * barLength))
+    }
+
     private var barsDisplay: String {
         let beats = currentBeats
         let timeSig = transportState.timeSignature

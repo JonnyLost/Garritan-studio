@@ -1127,25 +1127,34 @@ public struct PluginListView: View {
     }
     
     private func openPlugin(at index: Int) {
-        guard let slot = slotAt(index),
-              let pluginID = slot.pluginID,
-              let loadedPlugin = viewModel.pluginHost.loadedPlugins.values.first(where: { $0.identifier == pluginID }),
-              let track = viewModel.project.track(withID: trackID) else { return }
-        
-        PluginWindowManager.shared.openPluginWindow(for: loadedPlugin, trackName: track.name)
+        viewModel.openTrackEffectUI(trackID, slotIndex: index)
     }
     
     private func removePlugin(at index: Int) {
         guard var track = viewModel.project.track(withID: trackID),
-              track.pluginSlots.indices.contains(index) else { return }
-        
-        track.pluginSlots[index] = PluginSlot()
-        viewModel.updateTrack(track, description: "Remove Plugin")
-        
+              track.pluginSlots.indices.contains(index),
+              let audioUnit = viewModel.audioEngine.pluginNode(on: trackID, at: index) else {
+            return
+        }
+
+        // Identify the actual hosted AU before detaching it. Never unload
+        // another track's effect merely because it has the same plugin type.
+        let instanceID = viewModel.pluginHost.loadedPlugins.values.first(where: {
+            $0.audioUnit === audioUnit
+        })?.id
         do {
             try viewModel.audioEngine.removePlugin(at: index, from: trackID)
         } catch {
+            // Leave model and registry untouched if the graph edit failed.
             print("Failed to remove plugin: \(error)")
+            return
+        }
+        // AudioEngine removes the AU from the ordered effect chain; shift
+        // project slots too instead of leaving an untracked empty placeholder.
+        track.pluginSlots.remove(at: index)
+        viewModel.updateTrack(track, description: "Remove Plugin")
+        if let instanceID {
+            viewModel.pluginHost.unloadPlugin(id: instanceID)
         }
     }
     
@@ -1305,37 +1314,55 @@ struct PluginBrowserSheet: View {
     
     private func loadPlugin(_ description: PluginDescription) {
         isLoading = true
-        
+
         Task {
             do {
-                let format = AVAudioFormat(standardFormatWithSampleRate: viewModel.audioEngine.sampleRate, channels: 2)!
-                let loadedPlugin = try await viewModel.pluginHost.loadPlugin(
-                    identifier: description.identifier,
-                    format: format
-                )
-                
-                if var track = viewModel.project.track(withID: trackID) {
-                    while track.pluginSlots.count <= slotIndex {
-                        track.pluginSlots.append(PluginSlot())
-                    }
-                    
-                    track.pluginSlots[slotIndex].pluginID = description.identifier
-                    track.pluginSlots[slotIndex].isEnabled = true
-                    
-                    await MainActor.run {
-                        viewModel.updateTrack(track, description: "Add Plugin")
-                    }
-                    
-                    try viewModel.audioEngine.insertPlugin(loadedPlugin.audioUnit, on: trackID, at: slotIndex)
-                    
-                    await MainActor.run {
-                        PluginWindowManager.shared.openPluginWindow(for: loadedPlugin, trackName: track.name)
-                        isPresented = false
-                    }
+                guard var track = viewModel.project.track(withID: trackID) else {
+                    isLoading = false
+                    return
                 }
+                let format = AVAudioFormat(
+                    standardFormatWithSampleRate: viewModel.audioEngine.sampleRate, channels: 2
+                )!
+                let slot = PluginSlot(pluginID: description.identifier, isEnabled: true)
+                // The persisted slot ID is also the plugin-host instance key.
+                // Preserve it so save/restore can find this exact Audio Unit.
+                let loaded = try await viewModel.pluginHost.loadPlugin(
+                    identifier: description.identifier,
+                    format: format,
+                    instanceID: slot.id
+                )
+
+                // A delayed AU instantiation must not revive a deleted track.
+                guard viewModel.project.track(withID: trackID) != nil else {
+                    viewModel.pluginHost.unloadPlugin(id: loaded.id)
+                    isLoading = false
+                    return
+                }
+                // AudioEngine inserts effects and shifts existing slots. The
+                // project model must do the same, not overwrite an old slot.
+                let insertIndex = min(max(0, slotIndex),
+                                      viewModel.audioEngine.pluginCount(on: trackID))
+                do {
+                    try viewModel.audioEngine.insertPlugin(
+                        loaded.audioUnit, on: trackID, at: insertIndex
+                    )
+                } catch {
+                    viewModel.pluginHost.unloadPlugin(id: loaded.id)
+                    throw error
+                }
+                track = viewModel.project.track(withID: trackID) ?? track
+                track.pluginSlots.insert(
+                    slot, at: min(insertIndex, track.pluginSlots.count)
+                )
+                viewModel.updateTrack(track, description: "Add Plugin")
+                PluginWindowManager.shared.openPluginWindow(
+                    for: loaded, trackName: track.name
+                )
+                isPresented = false
             } catch {
                 print("Failed to load plugin: \(error)")
-                await MainActor.run { isLoading = false }
+                isLoading = false
             }
         }
     }

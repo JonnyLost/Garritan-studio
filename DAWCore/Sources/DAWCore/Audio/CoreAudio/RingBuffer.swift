@@ -224,20 +224,20 @@ public final class MIDIEventRingBuffer {
     ///   - endSample: End of the buffer range
     /// - Returns: The event if it's in range, nil otherwise
     public func peekIfInRange(startSample: Int64, endSample: Int64) -> ScheduledMIDIEvent? {
-        guard let event = buffer.peek() else { return nil }
-        
-        // If event is in the past, skip it
-        if event.samplePosition < startSample {
-            buffer.pop()
-            return peekIfInRange(startSample: startSample, endSample: endSample)
+        // An edit or seek can leave thousands of stale events in the queue.
+        // Discard them iteratively: recursive calls could overflow the audio
+        // render thread's limited stack.
+        while let event = buffer.peek() {
+            if event.samplePosition < startSample {
+                buffer.pop()
+                continue
+            }
+            if event.samplePosition >= endSample {
+                return nil
+            }
+            return event
         }
-        
-        // If event is in the future, don't return it yet
-        if event.samplePosition >= endSample {
-            return nil
-        }
-        
-        return event
+        return nil
     }
     
     /// Pop the current event

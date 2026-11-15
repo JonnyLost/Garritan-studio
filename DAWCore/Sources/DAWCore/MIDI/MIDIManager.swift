@@ -315,8 +315,10 @@ public final class MIDIManager: ObservableObject {
     // MARK: - MIDI Input Handling
     
     private func handleMIDIInput(eventList: UnsafePointer<MIDIEventList>) {
-        // CRITICAL: Capture host time IMMEDIATELY at callback time
-        // This is the most accurate timestamp we can get
+        // CoreMIDI UMP packets carry their original host timestamps.
+        // Capture callback time only as a fallback for packets marked
+        // immediate (timestamp == 0). This preserves device-side timing
+        // when input delivery is delayed or batched.
         let callbackHostTime = mach_absolute_time()
         
         let eventList = eventList.pointee
@@ -349,7 +351,9 @@ public final class MIDIManager: ObservableObject {
                                     data1: data1,
                                     data2: data2,
                                     timestamp: packet.pointee.timeStamp,
-                                    hostTime: callbackHostTime
+                                    hostTime: packet.pointee.timeStamp == 0
+                                        ? callbackHostTime
+                                        : packet.pointee.timeStamp
                                 )
                                 
                                 if let event = event {
@@ -399,7 +403,10 @@ public final class MIDIManager: ObservableObject {
             eventType = .programChange(program: data1)
             
         case 0xE0:  // Pitch Bend
-            let value = Int16(data1) | (Int16(data2) << 7) - 8192
+            // MIDI pitch bend is a 14-bit unsigned value (LSB first),
+            // centered at 8192. Parenthesize decoding before subtraction.
+            let unsignedValue = (Int(data2) << 7) | Int(data1)
+            let value = Int16(unsignedValue - 8192)
             eventType = .pitchBend(value: value)
             
         case 0xA0:  // Poly Aftertouch

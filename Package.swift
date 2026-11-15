@@ -12,16 +12,26 @@ let package = Package(
         .library(name: "DAWCore", targets: ["DAWCore"]),
         .library(name: "DAWUI", targets: ["DAWUI"]),
         .library(name: "VST3Bridge", targets: ["VST3Bridge"]),
-        .executable(name: "DAWApp", targets: ["DAWApp"])
+        .executable(name: "DAWApp", targets: ["DAWApp"]),
+        .executable(name: "RoomAcousticCalibration", targets: ["RoomAcousticCalibration"])
     ],
     dependencies: [
         .package(url: "https://github.com/supabase/supabase-swift", from: "2.0.0")
     ],
     targets: [
+        // MARK: - Real-time callback primitives (C11 atomics)
+        .target(
+            name: "DAWRealtime",
+            path: "DAWRealtime",
+            sources: ["DAWRealtime.c"],
+            publicHeadersPath: "include"
+        ),
+
         // MARK: - Core Audio/MIDI Engine
         .target(
             name: "DAWCore",
             dependencies: [
+                "DAWRealtime",
                 .product(name: "Supabase", package: "supabase-swift")
             ],
             path: "DAWCore/Sources/DAWCore",
@@ -62,7 +72,10 @@ let package = Package(
         .target(
             name: "DAWUI",
             dependencies: ["DAWCore"],
-            path: "DAWUI/Sources/DAWUI"
+            path: "DAWUI/Sources/DAWUI",
+            resources: [
+                .copy("Resources/GPO5_keyswitch_catalog.json")
+            ]
         ),
         
         // MARK: - Main Application
@@ -72,10 +85,17 @@ let package = Package(
             path: "DAWApp/Sources/DAWApp"
         ),
         
+        // MARK: - Offline room impulse calibration (never runs in the DAW)
+        .executableTarget(
+            name: "RoomAcousticCalibration",
+            dependencies: ["DAWCore"],
+            path: "Tools/RoomAcousticCalibration"
+        ),
+
         // MARK: - Tests
         .testTarget(
             name: "DAWCoreTests",
-            dependencies: ["DAWCore"],
+            dependencies: ["DAWCore", "DAWRealtime"],
             path: "Tests/DAWCoreTests"
         )
     ]

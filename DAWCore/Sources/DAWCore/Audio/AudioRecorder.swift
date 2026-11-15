@@ -32,8 +32,8 @@ public final class AudioRecorder: ObservableObject {
     
     private let audioEngine: AudioEngine
     private var inputNode: AVAudioInputNode?
-    private var recordingFile: AVAudioFile?
-    private var recordingFormat: AVAudioFormat?
+    private var recordingCapture: BufferedAudioCapture?
+    @Published public private(set) var lastRecordingError: String?
     
     // Recording state
     @Published public private(set) var isRecording: Bool = false
@@ -62,11 +62,8 @@ public final class AudioRecorder: ObservableObject {
     // Level metering
     private var meterTimer: Timer?
     
-    // Waveform buffer for visualization
+    // Waveform history is collected on the writer queue, not in the tap.
     private var waveformBuffer: [Float] = []
-    private let waveformDownsampleFactor: Int = 512  // Samples per waveform point
-    private var sampleAccumulator: Float = 0
-    private var sampleCount: Int = 0
     
     // Combine
     private var cancellables = Set<AnyCancellable>()
@@ -74,6 +71,7 @@ public final class AudioRecorder: ObservableObject {
     // Input monitoring
     private var isMonitoringInput: Bool = false
     private var monitoringTapInstalled: Bool = false
+    private var monitoringMeter: RealtimePeakMeter?
     
     // MARK: - Initialization
     
@@ -127,11 +125,6 @@ public final class AudioRecorder: ObservableObject {
             let granted = await requestMicrophonePermission()
             guard granted else {
                 debugLog("Microphone permission not granted - cannot monitor input")
-                // Try anyway for non-sandboxed apps
-                debugLog("Attempting to start monitoring anyway...")
-                await MainActor.run {
-                    self.startInputMonitoringInternal()
-                }
                 return
             }
             
@@ -142,6 +135,9 @@ public final class AudioRecorder: ObservableObject {
     }
     
     private func startInputMonitoringInternal() {
+        // Permission requests are async. The user may have started recording
+        // while permission was pending; never replace a recording tap.
+        guard !isMonitoringInput && !isRecording else { return }
         debugLog("startInputMonitoringInternal: Starting...")
         do {
             // Make sure audio engine is running
@@ -152,6 +148,11 @@ public final class AudioRecorder: ObservableObject {
             let inputNode = audioEngine.engine.inputNode
             debugLog("Got input node: \(inputNode)")
             
+            guard let meter = RealtimePeakMeter() else {
+                debugLog("Failed to allocate input peak meter")
+                return
+            }
+
             // Get the input format from the hardware
             let hardwareFormat = inputNode.inputFormat(forBus: 0)
             debugLog("Hardware input format: \(hardwareFormat)")
@@ -177,12 +178,14 @@ public final class AudioRecorder: ObservableObject {
                 }
                 
                 // Install tap with nil format (use default)
-                inputNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buffer, _ in
-                    self?.processMonitoringBuffer(buffer)
+                inputNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { buffer, _ in
+                    meter.measure(buffer)
                 }
-                
+
+                monitoringMeter = meter
                 monitoringTapInstalled = true
                 isMonitoringInput = true
+                startLevelMetering()
                 debugLog("Started input monitoring with default format")
                 return
             }
@@ -194,12 +197,14 @@ public final class AudioRecorder: ObservableObject {
             }
             
             // Install tap for monitoring
-            inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-                self?.processMonitoringBuffer(buffer)
+            inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+                meter.measure(buffer)
             }
-            
+
+            monitoringMeter = meter
             monitoringTapInstalled = true
             isMonitoringInput = true
+            startLevelMetering()
             debugLog("Started input monitoring with format: \(format)")
             
         } catch {
@@ -218,33 +223,10 @@ public final class AudioRecorder: ObservableObject {
         }
         
         isMonitoringInput = false
+        monitoringMeter = nil
+        stopLevelMetering()
         inputLevel = 0
         debugLog("Stopped input monitoring")
-    }
-    
-    private var monitoringBufferCount = 0
-    
-    private func processMonitoringBuffer(_ buffer: AVAudioPCMBuffer) {
-        guard let channelData = buffer.floatChannelData else { return }
-        
-        var maxSample: Float = 0
-        let frameLength = Int(buffer.frameLength)
-        
-        for channel in 0..<Int(buffer.format.channelCount) {
-            for sample in 0..<frameLength {
-                let absSample = abs(channelData[channel][sample])
-                maxSample = max(maxSample, absSample)
-            }
-        }
-        
-        monitoringBufferCount += 1
-        if monitoringBufferCount % 50 == 1 {
-            debugLog("Input monitoring: buffer #\(monitoringBufferCount), level: \(maxSample)")
-        }
-        
-        Task { @MainActor in
-            self.inputLevel = maxSample
-        }
     }
     
     // MARK: - Input Device Setup
@@ -343,53 +325,28 @@ public final class AudioRecorder: ObservableObject {
     
     // MARK: - Recording Control
     
-    /// Start recording to a file
+    /// Start recording to a WAV file. Disk writing runs on the capture
+    /// worker; the input tap performs only a bounded memory copy.
     public func startRecording(
         trackID: TrackID,
         filename: String? = nil
     ) throws -> URL {
-        guard !isRecording else {
-            throw RecordingError.alreadyRecording
-        }
-        
-        // Stop monitoring if active (we'll use the recording tap instead)
-        if isMonitoringInput {
-            stopInputMonitoring()
-        }
-        
-        // Ensure audio engine is running
+        guard !isRecording else { throw RecordingError.alreadyRecording }
+        if isMonitoringInput { stopInputMonitoring() }
         try audioEngine.ensureRunning()
-        
-        // Ensure recording directory exists
+
         let directory = recordingDirectory ?? FileManager.default.temporaryDirectory
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        
-        // Generate filename
         let name = filename ?? "Recording_\(Date().timeIntervalSince1970)"
         let fileURL = directory.appendingPathComponent("\(name).wav")
-        
-        // Get input node
-        inputNode = audioEngine.engine.inputNode
-        guard let inputNode = inputNode else {
-            throw RecordingError.noInputAvailable
-        }
-        
-        // Get input format - use the output format of the input node (what comes from the tap)
-        let tapFormat = inputNode.outputFormat(forBus: 0)
-        
-        // We want to record in stereo - create a stereo format at the same sample rate
-        let recordingSampleRate = tapFormat.sampleRate > 0 ? tapFormat.sampleRate : 48000.0
-        sampleRate = recordingSampleRate
-        
-        // Create a stereo recording format
-        guard let stereoFormat = AVAudioFormat(standardFormatWithSampleRate: recordingSampleRate, channels: 2) else {
+        let node = audioEngine.engine.inputNode
+        let tapFormat = node.outputFormat(forBus: 0)
+        guard tapFormat.sampleRate > 0,
+              tapFormat.channelCount > 0,
+              tapFormat.commonFormat == .pcmFormatFloat32 else {
             throw RecordingError.invalidFormat
         }
-        
-        debugLog("Tap format: \(tapFormat)")
-        debugLog("Recording stereo format: \(stereoFormat)")
-        
-        // Create output file settings - stereo WAV at input sample rate
+        let recordingSampleRate = tapFormat.sampleRate
         let outputSettings: [String: Any] = [
             AVFormatIDKey: kAudioFormatLinearPCM,
             AVSampleRateKey: recordingSampleRate,
@@ -399,205 +356,126 @@ public final class AudioRecorder: ObservableObject {
             AVLinearPCMIsBigEndianKey: false,
             AVLinearPCMIsNonInterleaved: false
         ]
-        
-        // Create recording file
-        recordingFile = try AVAudioFile(
-            forWriting: fileURL,
-            settings: outputSettings
-        )
-        
-        recordingFormat = stereoFormat
-        channelCount = 2
-        
-        // Clear waveform data
+
+        let capture: BufferedAudioCapture
+        do {
+            let file = try AVAudioFile(forWriting: fileURL, settings: outputSettings)
+            capture = try BufferedAudioCapture(file: file, sampleRate: recordingSampleRate)
+        } catch {
+            try? FileManager.default.removeItem(at: fileURL)
+            throw error
+        }
+
         waveformBuffer.removeAll()
         waveformSamples.removeAll()
-        sampleAccumulator = 0
-        sampleCount = 0
-        
-        // Install tap on input node - use nil format to get default
-        inputNode.installTap(
-            onBus: 0,
-            bufferSize: 4096,
-            format: nil  // Use default format from the node
-        ) { [weak self] buffer, time in
-            self?.processRecordingBuffer(buffer)
+        recordingSampleCount = 0
+        recordingDuration = 0
+        lastRecordingError = nil
+        peakLevel = 0
+        inputLevel = 0
+        sampleRate = recordingSampleRate
+        channelCount = 2
+
+        node.installTap(onBus: 0, bufferSize: 4096, format: tapFormat) { buffer, _ in
+            capture.append(buffer)
         }
-        
-        // Update state
+        inputNode = node
+        recordingCapture = capture
         isRecording = true
         recordingStartTime = Date()
         recordingURL = fileURL
-        recordingSampleCount = 0
-        peakLevel = 0
-        
-        // Start level metering
         startLevelMetering()
-        
-        debugLog("Started recording to: \(fileURL)")
-        
+        debugLog("Started buffered recording to: \(fileURL)")
         return fileURL
     }
-    
-    /// Stop recording and finalize the file
+
+    /// Finalize the capture only after removing its audio tap, so the
+    /// worker can flush every remaining frame. Never return a truncated file
+    /// as a successful recording if the buffer overflowed or writing failed.
     public func stopRecording() -> RecordingResult? {
-        guard isRecording, let inputNode = inputNode else { return nil }
-        
-        // Remove tap
+        guard isRecording, let inputNode, let capture = recordingCapture else { return nil }
+
         inputNode.removeTap(onBus: 0)
-        
-        // Stop level metering
+        let completion = capture.finish()
         stopLevelMetering()
-        
-        // Finalize file
-        let result: RecordingResult?
-        if let url = recordingURL,
-           let startTime = recordingStartTime,
-           let file = recordingFile {
-            result = RecordingResult(
-                fileURL: url,
-                duration: Date().timeIntervalSince(startTime),
-                sampleCount: recordingSampleCount,
-                sampleRate: sampleRate,
-                channelCount: channelCount,
-                peakLevel: peakLevel
-            )
-        } else {
-            result = nil
-        }
-        
-        // Reset state
+
+        let fileURL = recordingURL
+        let peak = peakLevel
+        recordingSampleCount = completion.writtenFrames
+        recordingDuration = Double(completion.writtenFrames) / sampleRate
+
         isRecording = false
-        recordingFile = nil
+        recordingCapture = nil
         recordingURL = nil
         recordingStartTime = nil
         self.inputNode = nil
-        
-        return result
+
+        guard completion.succeeded, let url = fileURL else {
+            lastRecordingError = completion.writeError ??
+                "Recording input overflow: \(completion.droppedFrames) frames lost"
+            debugLog("Recording failed: \(lastRecordingError ?? "Unknown error")")
+            if let fileURL { try? FileManager.default.removeItem(at: fileURL) }
+            return nil
+        }
+
+        return RecordingResult(
+            fileURL: url,
+            duration: recordingDuration,
+            sampleCount: completion.writtenFrames,
+            sampleRate: sampleRate,
+            channelCount: channelCount,
+            peakLevel: peak
+        )
     }
-    
-    /// Cancel recording and delete the file
+
     public func cancelRecording() {
         guard isRecording else { return }
-        
         let url = recordingURL
         _ = stopRecording()
-        
-        // Delete the file
-        if let url = url {
-            try? FileManager.default.removeItem(at: url)
-        }
+        if let url { try? FileManager.default.removeItem(at: url) }
     }
-    
-    // MARK: - Buffer Processing
-    
-    private func processRecordingBuffer(_ buffer: AVAudioPCMBuffer) {
-        guard let file = recordingFile,
-              let channelData = buffer.floatChannelData else { return }
-        
-        let frameLength = Int(buffer.frameLength)
-        let inputChannelCount = Int(buffer.format.channelCount)
-        
-        // Convert to stereo if needed
-        do {
-            // Create a stereo buffer at the same sample rate
-            guard let stereoFormat = AVAudioFormat(standardFormatWithSampleRate: buffer.format.sampleRate, channels: 2),
-                  let stereoBuffer = AVAudioPCMBuffer(pcmFormat: stereoFormat, frameCapacity: buffer.frameCapacity) else {
-                debugLog("Failed to create stereo buffer")
-                return
-            }
-            
-            stereoBuffer.frameLength = buffer.frameLength
-            
-            guard let stereoChannelData = stereoBuffer.floatChannelData else { return }
-            
-            // Mix input channels to stereo
-            // If input has 1 channel: mono to both L/R
-            // If input has 2 channels: copy directly
-            // If input has more: use first 2 or mix
-            for frame in 0..<frameLength {
-                if inputChannelCount == 1 {
-                    // Mono to stereo
-                    let sample = channelData[0][frame]
-                    stereoChannelData[0][frame] = sample
-                    stereoChannelData[1][frame] = sample
-                } else if inputChannelCount >= 2 {
-                    // Use first two channels
-                    stereoChannelData[0][frame] = channelData[0][frame]
-                    stereoChannelData[1][frame] = channelData[1][frame]
+
+    // MARK: - Level Metering
+
+    /// All polling and waveform publication runs on the main run loop.
+    /// No Task or DispatchQueue.main.async is created per tap buffer.
+    private func startLevelMetering() {
+        meterTimer?.invalidate()
+        meterTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if let meter = self.monitoringMeter {
+                    self.inputLevel = max(meter.takePeak(), self.inputLevel * 0.7)
+                }
+                if let capture = self.recordingCapture {
+                    capture.requestProgress { [weak self] progress in
+                        Task { @MainActor [weak self] in
+                            guard let self, self.recordingCapture === capture else { return }
+                            self.inputLevel = max(progress.peak, self.inputLevel * 0.7)
+                            self.peakLevel = max(self.peakLevel, progress.peak)
+                            self.recordingSampleCount = progress.writtenFrames
+                            self.recordingDuration = Double(progress.writtenFrames) / self.sampleRate
+                            if !progress.waveformPoints.isEmpty {
+                                self.waveformBuffer.append(contentsOf: progress.waveformPoints)
+                                if self.waveformBuffer.count > 20_000 {
+                                    self.waveformBuffer.removeFirst(self.waveformBuffer.count - 20_000)
+                                }
+                                self.waveformSamples = self.waveformBuffer
+                                self.waveformUpdateSubject.send(self.waveformBuffer)
+                            }
+                        }
+                    }
                 }
             }
-            
-            // Write stereo buffer to file
-            try file.write(from: stereoBuffer)
-            recordingSampleCount += Int64(buffer.frameLength)
-            
-            // Update duration
-            Task { @MainActor in
-                self.recordingDuration = Double(self.recordingSampleCount) / self.sampleRate
-            }
-        } catch {
-            debugLog("Error writing audio buffer: \(error)")
-        }
-        
-        // Calculate levels and update waveform
-        var maxSample: Float = 0
-        var newWaveformPoints: [Float] = []
-        
-        for sample in 0..<frameLength {
-            // Mix channels to mono for visualization
-            var monoSample: Float = 0
-            for channel in 0..<min(2, inputChannelCount) {
-                monoSample += channelData[channel][sample]
-            }
-            monoSample /= Float(min(2, inputChannelCount))
-            
-            let absSample = abs(monoSample)
-            maxSample = max(maxSample, absSample)
-            
-            // Accumulate for waveform downsampling
-            sampleAccumulator = max(sampleAccumulator, absSample)
-            sampleCount += 1
-            
-            if sampleCount >= waveformDownsampleFactor {
-                newWaveformPoints.append(sampleAccumulator)
-                sampleAccumulator = 0
-                sampleCount = 0
-            }
-        }
-        
-        Task { @MainActor in
-            self.inputLevel = maxSample
-            self.peakLevel = max(self.peakLevel, maxSample)
-            
-            // Update waveform
-            if !newWaveformPoints.isEmpty {
-                self.waveformBuffer.append(contentsOf: newWaveformPoints)
-                self.waveformSamples = self.waveformBuffer
-                self.waveformUpdateSubject.send(self.waveformBuffer)
-            }
         }
     }
-    
-    // MARK: - Level Metering
-    
-    private func startLevelMetering() {
-        // Decay peak level over time
-        meterTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self = self else { return }
-                // Decay input level when not receiving audio
-                self.inputLevel *= 0.9
-            }
-        }
-    }
-    
+
     private func stopLevelMetering() {
         meterTimer?.invalidate()
         meterTimer = nil
         inputLevel = 0
     }
-    
+
     // MARK: - Input Monitoring
     
     /// Enable/disable input monitoring (hear yourself while recording)
@@ -751,7 +629,13 @@ public final class MIDIRecorderManager: ObservableObject {
     private var recordedEvents: [MIDIEvent] = []
     private var recordingStartBeat: Double = 0
     private var recordingStartSamplePosition: Int64 = 0  // Sample position when recording started
-    private var pendingNotes: [UInt8: (startBeat: Double, velocity: UInt8, channel: UInt8)] = [:]
+    private struct PendingNoteKey: Hashable {
+        let pitch: UInt8
+        let channel: UInt8
+    }
+
+    // A pitch may sound simultaneously on different MIDI channels.
+    private var pendingNotes: [PendingNoteKey: (startBeat: Double, velocity: UInt8)] = [:]
     
     // Minimum time between Note Ons to be considered a retrigger (not a duplicate)
     private let minRetriggerBeats: Double = 0.02  // ~10ms at 120bpm
@@ -806,17 +690,17 @@ public final class MIDIRecorderManager: ObservableObject {
         let currentSamplePosition = transport.getCurrentSamplePosition()
         let currentBeat = transport.samplePositionToBeats(currentSamplePosition)
         
-        for (pitch, noteInfo) in pendingNotes {
+        for (key, noteInfo) in pendingNotes {
             let duration = max(0.01, currentBeat - noteInfo.startBeat)
             let event = MIDIEvent.note(
                 at: noteInfo.startBeat - recordingStartBeat,
-                pitch: pitch,
+                pitch: key.pitch,
                 velocity: noteInfo.velocity,
                 duration: duration,
-                channel: noteInfo.channel
+                channel: key.channel
             )
             recordedEvents.append(event)
-            print("[MIDIRecorder] Closing pending note \(pitch) with duration \(String(format: "%.3f", duration))")
+            print("[MIDIRecorder] Closing pending note \(key.pitch) with duration \(String(format: "%.3f", duration))")
         }
         
         isRecording = false
@@ -863,16 +747,13 @@ public final class MIDIRecorderManager: ObservableObject {
         case .note(let noteData):
             midiLog("RAW NOTE: pitch=\(noteData.pitch), velocity=\(noteData.velocity), beat=\(String(format: "%.3f", relativeBeat))")
             
-            // Check if this is a note-off:
-            // - velocity = 0 (standard note-off)
-            // - velocity = 1 (some keyboards use this for note-off)
-            // - OR there's already a pending note for this pitch (re-trigger = complete old note first)
-            let isNoteOff = noteData.velocity == 0 || noteData.velocity == 1
-            let hasPendingNote = pendingNotes[noteData.pitch] != nil
-            
-            if isNoteOff || (hasPendingNote && noteData.velocity < 10) {
+            // MIDI Note Off and Note On with velocity zero are normalized to
+            // velocity zero by MIDIManager. Velocity one is a valid quiet Note On.
+            let noteKey = PendingNoteKey(pitch: noteData.pitch, channel: event.channel)
+
+            if noteData.velocity == 0 {
                 // Note off - complete the pending note
-                if let pending = pendingNotes.removeValue(forKey: noteData.pitch) {
+                if let pending = pendingNotes.removeValue(forKey: noteKey) {
                     let duration = max(0.01, eventBeat - pending.startBeat)
                     let relativeStart = pending.startBeat - recordingStartBeat
                     let noteEvent = MIDIEvent.note(
@@ -880,7 +761,7 @@ public final class MIDIRecorderManager: ObservableObject {
                         pitch: noteData.pitch,
                         velocity: pending.velocity,
                         duration: duration,
-                        channel: pending.channel
+                        channel: noteKey.channel
                     )
                     recordedEvents.append(noteEvent)
                     recordedEventCount = recordedEvents.count
@@ -893,7 +774,7 @@ public final class MIDIRecorderManager: ObservableObject {
             } else if noteData.velocity > 0 {
                 // Note on - store as pending with precise beat position
                 // Check if there's already a pending note for this pitch
-                if let pending = pendingNotes[noteData.pitch] {
+                if let pending = pendingNotes[noteKey] {
                     let timeSincePending = eventBeat - pending.startBeat
                     
                     // If very close in time, this is likely a duplicate from multiple MIDI ports - ignore it
@@ -903,7 +784,7 @@ public final class MIDIRecorderManager: ObservableObject {
                     }
                     
                     // Otherwise it's a real retrigger - complete the previous note
-                    pendingNotes.removeValue(forKey: noteData.pitch)
+                    pendingNotes.removeValue(forKey: noteKey)
                     let duration = max(0.01, timeSincePending)
                     let relativeStart = pending.startBeat - recordingStartBeat
                     let noteEvent = MIDIEvent.note(
@@ -911,18 +792,18 @@ public final class MIDIRecorderManager: ObservableObject {
                         pitch: noteData.pitch,
                         velocity: pending.velocity,
                         duration: duration,
-                        channel: pending.channel
+                        channel: noteKey.channel
                     )
                     recordedEvents.append(noteEvent)
+                    recordedEventCount = recordedEvents.count
                     // Update live events for real-time display
                     liveRecordedEvents = recordedEvents
                     midiLog("  -> AUTO NOTE OFF (retrigger): start=\(String(format: "%.3f", relativeStart)), dur=\(String(format: "%.3f", duration))")
                 }
                 
-                pendingNotes[noteData.pitch] = (
+                pendingNotes[noteKey] = (
                     startBeat: eventBeat,
-                    velocity: noteData.velocity,
-                    channel: event.channel
+                    velocity: noteData.velocity
                 )
                 midiLog("  -> NOTE ON stored")
             }
