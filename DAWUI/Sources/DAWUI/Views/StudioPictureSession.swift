@@ -13,6 +13,10 @@ public final class StudioPictureSession: ObservableObject {
     @Published public private(set) var errorMessage: String?
     @Published public private(set) var isReady = false
     @Published public private(set) var hasGuideAudioTrack = false
+    /// Signals that the media contains a dedicated SMPTE timecode track.
+    /// Presence does not imply an interpretable label: manual Start TC stays
+    /// authoritative until source timecode samples can be validated.
+    @Published public private(set) var hasEmbeddedTimecodeTrack = false
     @Published public private(set) var isPreparingGuideAudio = false
     @Published public private(set) var guideAudioMessage: String?
     /// Eight low-resolution, lazily decoded filmstrip images (never full frames).
@@ -80,6 +84,7 @@ public final class StudioPictureSession: ObservableObject {
         player.replaceCurrentItem(with: nil)
         currentDocument = nil
         isReady = false
+        hasEmbeddedTimecodeTrack = false
         lastProjectSeconds = nil
         lastObservedUptime = nil
         releaseSecurityScopedURL()
@@ -129,6 +134,7 @@ public final class StudioPictureSession: ObservableObject {
         lastCorrectionUptime = -.infinity
         releaseSecurityScopedURL()
         isReady = false
+        hasEmbeddedTimecodeTrack = false
         errorMessage = nil
 
         guard let document else {
@@ -183,7 +189,12 @@ public final class StudioPictureSession: ObservableObject {
             }
             guard generation == loadGeneration, !Task.isCancelled else { return }
             let guideTracks = try await asset.loadTracks(withMediaType: .audio)
+            // Only advertise source timecode when the container contains a
+            // dedicated SMPTE timecode track. Never invent a start label from
+            // the movie's frame rate or unrelated creation-date metadata.
+            let tcTracks = (try? await asset.loadTracks(withMediaType: .timecode)) ?? []
             guard generation == loadGeneration, !Task.isCancelled else { return }
+            hasEmbeddedTimecodeTrack = !tcTracks.isEmpty
             hasGuideAudioTrack = !guideTracks.isEmpty
             player.replaceCurrentItem(with: AVPlayerItem(asset: asset))
             player.isMuted = true
@@ -388,6 +399,7 @@ public final class StudioPictureSession: ObservableObject {
         }
         guideAudioURL = nil
         hasGuideAudioTrack = false
+        hasEmbeddedTimecodeTrack = false
         isPreparingGuideAudio = false
         guideAudioMessage = nil
     }
