@@ -54,6 +54,8 @@ public actor ProjectFileManager {
             packageURL = url.deletingPathExtension().appendingPathExtension(Self.projectExtension)
         }
         
+        try StudioInterruptedSaveRecovery.restoreIfNecessary(at: packageURL)
+
         // Assemble a complete replacement beside the original package. Never
         // delete the user's last successful save before all files are ready.
         let parentURL = packageURL.deletingLastPathComponent()
@@ -132,6 +134,9 @@ public actor ProjectFileManager {
             let originalSource = findAudioFile(for: audioRef)
             let sourceURL = originalSource.flatMap { Self.isRegularFile($0) ? $0 : nil }
                 ?? existingPackagedFile.flatMap { Self.isRegularFile($0) ? $0 : nil }
+                ?? (try? fm.contentsOfDirectory(at: packageURL.appendingPathComponent(Self.audioFolderName), includingPropertiesForKeys: nil))?.first(where: {
+                    $0.deletingPathExtension().lastPathComponent == audioRef.fileID.uuidString && Self.isRegularFile($0)
+                })
             guard let sourceURL else {
                 // Never silently replace a valid project with missing audio
                 // or a directory masquerading as an audio file.
@@ -194,24 +199,7 @@ public actor ProjectFileManager {
         let projectFileURL = stagingURL.appendingPathComponent(Self.projectFileName)
         try data.write(to: projectFileURL, options: .atomic)
 
-        // Promote the complete staging package. If promotion fails, restore the
-        // previous package instead of leaving a corrupt or partial project.
-        let hadPreviousPackage = fm.fileExists(atPath: packageURL.path)
-        if hadPreviousPackage {
-            try fm.moveItem(at: packageURL, to: backupURL)
-        }
-        do {
-            try fm.moveItem(at: stagingURL, to: packageURL)
-        } catch {
-            if hadPreviousPackage {
-                try? fm.moveItem(at: backupURL, to: packageURL)
-            }
-            throw error
-        }
-        if hadPreviousPackage {
-            // A cleanup failure must not turn a completed save into an error.
-            try? fm.removeItem(at: backupURL)
-        }
+        try StudioPackageReplacement.promote(staging: stagingURL, destination: packageURL, backup: backupURL)
 
         print("[ProjectFileManager] Saved project to: \(packageURL.path)")
     }
@@ -369,6 +357,7 @@ public actor ProjectFileManager {
     /// Load project from a URL
     public func load(from url: URL) async throws -> Project {
         let fm = FileManager.default
+        try StudioInterruptedSaveRecovery.restoreIfNecessary(at: url)
         
         // Determine if it's a package or single file
         var isDirectory: ObjCBool = false
@@ -449,6 +438,7 @@ public actor ProjectFileManager {
     /// Quick load for recent files check - just get metadata
     public func loadMetadata(from url: URL) async throws -> ProjectMetadataInfo {
         let fm = FileManager.default
+        try StudioInterruptedSaveRecovery.restoreIfNecessary(at: url)
         
         var isDirectory: ObjCBool = false
         guard fm.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
