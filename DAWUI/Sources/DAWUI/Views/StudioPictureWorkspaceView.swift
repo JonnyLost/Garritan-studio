@@ -65,6 +65,9 @@ public struct StudioPictureWorkspaceView: View {
     @State private var showingMovieExport = false
     @State private var editingHit: StudioPictureHitPoint?
     @State private var startCodeDraft = ""
+    @State private var locateCodeDraft = ""
+    @State private var cueSearch = ""
+    @State private var cueKindFilter = "all"
     @State private var tempoSpanBeats = 8.0
 
     public init(viewModel: ProjectViewModel, session: StudioPictureSession,
@@ -287,6 +290,22 @@ public struct StudioPictureWorkspaceView: View {
                         Button("Set") { applyStartTimecode(picture) }
                             .buttonStyle(.borderless)
                     }
+                    HStack(spacing: 6) {
+                        TextField("Go to SMPTE", text: $locateCodeDraft)
+                            .font(.system(.caption, design: .monospaced))
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit { goToTimecode(picture) }
+                            .accessibilityLabel("Locate picture SMPTE frame")
+                        Button("Go") { goToTimecode(picture) }
+                            .buttonStyle(.borderless)
+                        Button {
+                            locateCodeDraft = picture.timecode(atMovieFrame: currentFrame(picture))
+                        } label: {
+                            Image(systemName: "scope")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Copy current picture timecode into locator")
+                    }
                     HStack {
                         Text("Picture offset")
                         TextField("Seconds", value: Binding(
@@ -382,8 +401,27 @@ public struct StudioPictureWorkspaceView: View {
                         } label: { Image(systemName: "plus") }
                             .buttonStyle(.borderless)
                     }
+                    HStack(spacing: 6) {
+                        TextField("Find cue, note, timecode", text: $cueSearch)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.caption)
+                            .accessibilityLabel("Filter picture hit points")
+                        Picker("Cue type", selection: $cueKindFilter) {
+                            Text("All").tag("all")
+                            ForEach(StudioPictureHitKind.allCases) { kind in
+                                Text(kind.label).tag(kind.rawValue)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 90)
+                    }
+                    let visibleHits = StudioPictureCueNavigation.matching(
+                        picture, query: cueSearch, kind: selectedCueKind)
+                    Text("\(visibleHits.count) of \(picture.hitPoints.count) cues")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                     Divider()
-                    ForEach(picture.hitPoints.sorted(by: { $0.frame < $1.frame })) { hit in
+                    ForEach(visibleHits) { hit in
                         HStack(spacing: 6) {
                             Button {
                                 seek(toMovieFrame: hit.frame, picture: picture)
@@ -432,6 +470,10 @@ public struct StudioPictureWorkspaceView: View {
                         Text("Add a hit at any key frame, cut or dramatic moment.")
                             .font(.caption).foregroundStyle(.secondary)
                     } else {
+                        if visibleHits.isEmpty {
+                            Text("No cues match these filters.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                         Button {
                             exportCueSheet(picture)
                         } label: {
@@ -493,12 +535,24 @@ public struct StudioPictureWorkspaceView: View {
         viewModel.seekTo(beat: seconds * bpm / 60)
     }
 
+    private var selectedCueKind: StudioPictureHitKind? {
+        cueKindFilter == "all" ? nil : StudioPictureHitKind(rawValue: cueKindFilter)
+    }
+
+    private func goToTimecode(_ picture: StudioPictureProject) {
+        guard let frame = StudioPictureCueNavigation.frame(
+            forEnteredTimecode: locateCodeDraft, picture: picture) else {
+            session.reportError(StudioPictureImportError.invalidLocator)
+            return
+        }
+        if transport.isPlaying { viewModel.togglePlayPause() }
+        seek(toMovieFrame: frame, picture: picture)
+    }
+
     private func goToAdjacentHit(direction: Int, picture: StudioPictureProject) {
-        let frame = currentFrame(picture)
-        let ordered = picture.hitPoints.sorted(by: { $0.frame < $1.frame })
-        guard let hit = direction < 0
-                ? ordered.last(where: { $0.frame < frame })
-                : ordered.first(where: { $0.frame > frame }) else { return }
+        guard let hit = StudioPictureCueNavigation.adjacent(
+            picture, currentFrame: currentFrame(picture), direction: direction,
+            query: cueSearch, kind: selectedCueKind) else { return }
         seek(toMovieFrame: hit.frame, picture: picture)
     }
 
@@ -646,12 +700,13 @@ private struct StudioPictureCueOverlay: View {
 }
 
 private enum StudioPictureImportError: LocalizedError {
-    case invalidTimecode, invalidDuration
+    case invalidTimecode, invalidDuration, invalidLocator
 
     var errorDescription: String? {
         switch self {
         case .invalidTimecode: return "Enter a valid SMPTE timecode for the selected frame rate."
         case .invalidDuration: return "This movie does not have a usable duration."
+        case .invalidLocator: return "That SMPTE frame is invalid or outside the movie."
         }
     }
 }
