@@ -113,6 +113,28 @@ final class StudioSoundPatchRefinerTests: XCTestCase {
                        original.layers[0].physicalPatch?.model)
     }
 
+    func testPhysicalAttackChoosesControlsUsedByEachAcousticModel() throws {
+        let bowed = try sound("physical modeling strings pad")
+        let bowedOriginal = try XCTUnwrap(bowed.layers[0].physicalPatch)
+        XCTAssertEqual(bowedOriginal.model, .bowed)
+        let bowedResult = try StudioSoundPatchRefiner.refine(
+            "slower attack", patch: bowed)
+        let bowedEdited = try XCTUnwrap(bowedResult.patch.layers[0].physicalPatch)
+        XCTAssertLessThan(bowedEdited.value(for: .bowPressure),
+                          bowedOriginal.value(for: .bowPressure))
+        XCTAssertEqual(bowedEdited.value(for: .pickHardness),
+                       bowedOriginal.value(for: .pickHardness))
+
+        let brass = try sound("physical modeling brass")
+        let brassOriginal = try XCTUnwrap(brass.layers[0].physicalPatch)
+        XCTAssertEqual(brassOriginal.model, .brass)
+        let brassEdited = try StudioSoundPatchRefiner.refine(
+            "slower attack", patch: brass)
+        XCTAssertLessThan(brassEdited.patch.layers[0].physicalPatch!.value(for: .breath),
+                          brassOriginal.value(for: .breath))
+        XCTAssertTrue(brassEdited.patch.validate())
+    }
+
     func testInvalidAndUnrecognizedRequestsNeverMutateOriginal() throws {
         let original = try sound("analog pad")
         XCTAssertThrowsError(try StudioSoundPatchRefiner.refine(
