@@ -36,6 +36,7 @@ final class StudioPictureFloatingWindowController: NSWindowController, NSWindowD
         window.title = "Studio Picture"
         window.minSize = NSSize(width: 600, height: 400)
         window.isReleasedWhenClosed = false
+        window.collectionBehavior.insert(.fullScreenPrimary)
         window.contentView = NSHostingView(rootView: content)
         super.init(window: window)
         window.delegate = self
@@ -112,9 +113,13 @@ public struct StudioPictureWorkspaceView: View {
             Text("The cue is stored at the exact movie frame under the playhead.")
         }
         .onAppear {
+            session.requestThumbnails()
             if let picture = viewModel.project.studioPicture {
                 startCodeDraft = picture.timecode(atMovieFrame: 0)
             }
+        }
+        .onChange(of: session.isReady) { _, ready in
+            if ready { session.requestThumbnails() }
         }
         .onChange(of: viewModel.project.studioPicture?.startTimecodeFrame) { _, _ in
             if let picture = viewModel.project.studioPicture {
@@ -193,6 +198,7 @@ public struct StudioPictureWorkspaceView: View {
 
                 StudioPictureScrubber(
                     picture: picture,
+                    thumbnails: session.thumbnails,
                     playheadFrame: currentFrame(picture),
                     seek: { seek(toMovieFrame: $0, picture: picture) }
                 )
@@ -462,6 +468,7 @@ private enum StudioPictureImportError: LocalizedError {
 /// A lightweight film ruler with frame-based hit markers and scrubbing.
 private struct StudioPictureScrubber: View {
     let picture: StudioPictureProject
+    let thumbnails: [Int: NSImage]
     let playheadFrame: Int64
     let seek: (Int64) -> Void
 
@@ -472,6 +479,21 @@ private struct StudioPictureScrubber: View {
             ZStack(alignment: .leading) {
                 RoundedRectangle(cornerRadius: 5)
                     .fill(Color.secondary.opacity(0.12))
+                HStack(spacing: 0) {
+                    ForEach(0..<8, id: \.self) { index in
+                        Group {
+                            if let image = thumbnails[index] {
+                                Image(nsImage: image).resizable().scaledToFill()
+                            } else {
+                                Color.black.opacity(0.18)
+                            }
+                        }
+                        .frame(width: width / 8, height: 62)
+                        .clipped()
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .opacity(0.65)
                 ForEach(picture.hitPoints) { hit in
                     Rectangle()
                         .fill(.orange)
