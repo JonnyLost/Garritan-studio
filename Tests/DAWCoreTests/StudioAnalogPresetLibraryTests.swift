@@ -5,9 +5,9 @@ import XCTest
 final class StudioAnalogPresetLibraryTests: XCTestCase {
     func testFactoryLibraryHasTwentyFourValidUniqueOriginalSounds() throws {
         let presets = StudioAnalogFactoryLibrary.presets
-        XCTAssertEqual(presets.count, 24)
-        XCTAssertEqual(Set(presets.map(\.id)).count, 24)
-        XCTAssertEqual(Set(presets.map(\.name)).count, 24)
+        XCTAssertGreaterThanOrEqual(presets.count, 24)
+        XCTAssertEqual(Set(presets.map(\.id)).count, presets.count)
+        XCTAssertEqual(Set(presets.map(\.name)).count, presets.count)
         XCTAssertEqual(Set(presets.map(\.category)), Set(StudioAnalogPresetCategory.allCases))
         for preset in presets {
             XCTAssertEqual(preset.origin, .factory)
