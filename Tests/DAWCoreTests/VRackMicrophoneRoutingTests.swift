@@ -56,6 +56,10 @@ final class VRackMicrophoneRoutingTests: XCTestCase {
             engine.attach(rackSum)
             engine.connect(player, to: rackSum, format: format)
             studio.registerVRackSumMixer(rackSum)
+            let dryMonitor = engine.outputConnectionPoints(
+                for: rackSum, outputBus: 0
+            ).compactMap { $0.node as? AVAudioMixerNode }.first
+            XCTAssertNotNil(dryMonitor, "V-Rack must have its original monitor")
             studio.setVRackCaptureSourcePresent(true)
             studio.setSharedMicrophoneMatrixEnabled(shared)
 
@@ -83,22 +87,18 @@ final class VRackMicrophoneRoutingTests: XCTestCase {
             let rackConnections = engine.outputConnectionPoints(
                 for: rackSum, outputBus: 0
             )
-            XCTAssertEqual(rackConnections.count, 2,
-                           "Rack sum must feed monitor plus one mic capture")
-            let dryMonitor = rackConnections.compactMap {
-                $0.node as? AVAudioMixerNode
-            }.first
-            XCTAssertNotNil(dryMonitor)
+            XCTAssertEqual(rackConnections.count, 1,
+                           "Rack sum must exclusively feed its mic capture AU")
             XCTAssertEqual(dryMonitor?.outputVolume ?? -1, 0,
-                           "Original V-Rack direct monitor must start muted")
+                           "Disconnected direct V-Rack monitor must start muted")
             let captureNode = rackConnections.compactMap {
                 $0.node as? AVAudioUnitEffect
             }.first
             XCTAssertNotNil(captureNode, "Rack sum must connect to the mic AU")
             if let captureNode {
-                let gainAddress = shared
-                    ? NativeMicrophoneMatrixAudioUnit.gainAddress(0)
-                    : NativeMicrophoneSpillAudioUnit.signedGainAddress
+                // V-Rack always uses its four-output matrix, including
+                // when other tracks use the legacy capture backend.
+                let gainAddress = NativeMicrophoneMatrixAudioUnit.gainAddress(0)
                 let actualGain = captureNode.auAudioUnit.parameterTree?
                     .parameter(withAddress: gainAddress)?.value ?? 0
                 XCTAssertGreaterThan(abs(actualGain), 0.01,
@@ -137,17 +137,8 @@ final class VRackMicrophoneRoutingTests: XCTestCase {
             XCTAssertGreaterThan(initialMicPeak, 0.01,
                 "The V-Rack microphone must sound on initial graph construction")
 
-            // Diagnostic: temporarily re-enable only the original monitor.
-            // If this is also silent, the V-Rack input isn't reaching the
-            // graph during audition, irrespective of microphone processing.
-            dryMonitor?.outputVolume = 1
-            let dryProbePeak = try renderPeak(engine)
-            XCTAssertGreaterThan(dryProbePeak, 0.05,
-                "Rack source itself must render during microphone audition")
-            dryMonitor?.outputVolume = 0
-
-            // Mute only the microphone channel; if rack dry monitoring
-            // leaked into audition, a signal would remain.
+            // Mute only the microphone channel. There must be no other
+            // connected V-Rack direct monitor signal during audition.
             mic.mixerSettings = StudioMicrophoneChannelSettings(level: 0)
             studio.refreshMicrophoneRouting(
                 tracks: [], microphones: [mic], room: room
