@@ -68,6 +68,14 @@ Keyboard shortcuts: **Option-Command-P** opens Picture; **Option-Command-H** add
 
 **Still required:** audio-device latency calibration, fully tempo-map-aware locator/navigation, host-clock/video presentation verification, and a consolidated MacBook video listening/viewing check. The visual punch is selected from the current published transport frame; actual display latency must be measured on the Mac, not assumed from passing unit tests.
 
+## Milestone 8 — SMPTE locator and professional cue navigation
+
+- **Go to SMPTE** accepts an absolute timecode label and seeks to the exact picture-relative frame after validating the frame rate, drop-frame numbering, project offset and movie duration.
+- **Cue search** filters hit-point names, notes and timecode; **Cue type** filters action/cut/dialogue/impact/custom. Previous/next cue navigation follows the visible filtered set.
+- Reference movies are inspected for dedicated embedded SMPTE timecode tracks. Presence is shown without fabricating the starting label. Manual **Start TC** remains authoritative: reading and validating timecode *samples* is a separate future capability, as is MTC/LTC synchronization.
+- Cue search/filter is display-only and does not rewrite project hit points, tempo, or audio routing.
+- Tests cover cue selection, empty matches, filtered traversal, SMPTE jumps, out-of-range labels and 29.97 DF invalid labels.
+
 ## Persistence and media safety
 
 - Only a video **reference** (path plus security-scoped bookmark when available), project offset, frame-rate mode, source timecode, audio/overlay preferences and hit-point data are encoded in the DAW project.
