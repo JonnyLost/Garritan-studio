@@ -114,10 +114,9 @@ final class VRackMicrophoneRoutingTests: XCTestCase {
                     let channelOutputs = engine.outputConnectionPoints(
                         for: micChannel, outputBus: 0
                     )
-                    let micMaster = channelOutputs.first?.node as? AVAudioMixerNode
-                    XCTAssertNotNil(micMaster, "Mic channel must reach mic master")
-                    XCTAssertGreaterThan(micMaster?.outputVolume ?? -1, 0.9,
-                        "Mic master bus must be enabled")
+                    let monitorOutput = channelOutputs.first?.node
+                    XCTAssertTrue(monitorOutput === engine.mainMixerNode,
+                        "Mic channel must reach the main mixer directly")
                 }
             }
             XCTAssertGreaterThan(rackSum.outputVolume, 0.9,
