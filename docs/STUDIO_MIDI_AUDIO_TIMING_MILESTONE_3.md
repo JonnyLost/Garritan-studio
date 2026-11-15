@@ -236,7 +236,8 @@ seamless device switching/resumption is not implemented.
 The clock is a fixed-size coalescing mailbox, not a queue of MIDI packets.
 100,000/unbounded position observations can coalesce while the worker is busy
 without losing any compiled release. The score retains all packets in memory;
-there is no old 32,768-packet worker preparation ceiling. Each worker poll
+there is no fixed packet capacity in this worker score. The optional Core Audio
+ring's 32,768-slot capacity is unchanged. Each worker poll
 examines at most 2,048 packets. Remaining packets, including releases, are
 retained for later polls, even if no new clock observation arrives. A cancelled
 session uses independent cleanup instead of draining obsolete ordinary events.
@@ -323,3 +324,23 @@ macOS validation also caught a new fixture setup error: AudioEngine prepares
 its device graph during initialization, so the offline clock test must fully
 stop that graph before enabling manual rendering (the established V-Rack test
 pattern). The fixture was corrected without skips or relaxed assertions.
+
+### Verified macOS source validation
+
+At source commit `6755f676f9b52cfb0109ad993ebcfce3d86b4250`,
+[Sampler acceptance](https://github.com/JonnyLost/Garritan-studio/actions/runs/43739915103)
+passed dependency resolution, complete Swift build, all 460 regressions,
+optimized DAWApp build and native DSP sanitizer checks. This includes the
+actual offline render-clock source test and all 24 new 3B tests.
+[Consolidated acceptance](https://github.com/JonnyLost/Garritan-studio/actions/runs/43739915088)
+provides the independent full-suite, sampler/disk/MIDI sanitizer and read-only
+reconciliation evidence; inspect that run for its release/final conclusion.
+The subsequent documentation-only commit records this evidence. Draft PR #29
+links the final head's consolidated run separately; no M3 success was reused
+as a substitute for 3B validation.
+
+A spontaneous backwards source timestamp fails MIDI closed. If a structural
+graph restart does not also issue a device-configuration notification, the
+transport display may require Stop then Play to re-arm. Seamless live graph
+replacement, receiver queue acceptance/backpressure and measured acoustic
+synchronization remain explicit 3C/hardware gaps.
