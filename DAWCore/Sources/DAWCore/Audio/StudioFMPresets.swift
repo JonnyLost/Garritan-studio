@@ -401,6 +401,88 @@ public enum StudioFMFactoryLibrary {
                 .op3Sustain: 0.75, .op3Release: 6.2,
                 .op4Ratio: 4.13, .op4Level: 0.25, .op4Attack: 5.1,
                 .op4Sustain: 0.44, .op4Release: 4.8
+             ]),
+// Extended original four-operator FM sound recipes.
+        make("keys.satin-electric", "Satin Electric", .keys,
+             "Rounded electric keyboard with a delicate second harmonic.", [
+                .algorithm: 1, .outputGain: 0.64, .velocityBrightness: 0.45,
+                .op1Level: 0.76, .op1Decay: 2.1, .op1Sustain: 0.28,
+                .op1Release: 0.85, .op2Ratio: 2, .op2Level: 0.27,
+                .op2Decay: 0.22, .op2Sustain: 0.01,
+                .op3Ratio: 1, .op3Level: 0.14, .op4Level: 0
+             ]),
+        make("keys.silver-steps", "Silver Steps", .keys,
+             "Crisp digital mallet keyboard with a bright short attack.", [
+                .algorithm: 0, .outputGain: 0.61,
+                .op1Level: 0.8, .op1Decay: 0.82, .op1Sustain: 0.08,
+                .op2Ratio: 4, .op2Level: 0.53, .op2Decay: 0.12,
+                .op3Ratio: 7, .op3Level: 0.16, .op3Decay: 0.11,
+                .op4Level: 0
+             ]),
+        make("bells.orbit-bell", "Orbit Bell", .bells,
+             "Slow decaying inharmonic bell with a bright FM strike.", [
+                .algorithm: 2, .outputGain: 0.56, .feedback: 0.12,
+                .op1Level: 0.72, .op1Decay: 5.6, .op1Sustain: 0,
+                .op1Release: 3.8, .op2Ratio: 3.51, .op2Level: 0.62,
+                .op2Decay: 2.1, .op2Sustain: 0,
+                .op3Ratio: 6.17, .op3Level: 0.24, .op3Decay: 0.8,
+                .op4Ratio: 9.37, .op4Level: 0.08
+             ]),
+        make("mallets.bamboo-drops", "Bamboo Drops", .mallets,
+             "Soft mallet attack with woody overtones and a short tail.", [
+                .algorithm: 1, .outputGain: 0.63,
+                .op1Level: 0.77, .op1Decay: 0.61, .op1Sustain: 0,
+                .op2Ratio: 3, .op2Level: 0.3, .op2Decay: 0.11,
+                .op3Ratio: 5, .op3Level: 0.09, .op4Level: 0
+             ]),
+        make("bass.reactor-low", "Reactor Low", .bass,
+             "Compact growling FM bass with velocity-driven brightness.", [
+                .algorithm: 0, .outputGain: 0.58, .feedback: 0.43,
+                .velocityBrightness: 0.82, .op1Level: 0.83,
+                .op1Decay: 0.3, .op1Sustain: 0.72,
+                .op2Ratio: 1, .op2Level: 0.52, .op2Decay: 0.18,
+                .op2Sustain: 0.14, .op3Ratio: 2, .op3Level: 0.13,
+                .op4Level: 0
+             ]),
+        make("bass.deep-quartz", "Deep Quartz", .bass,
+             "Sine-centered low foundation with a percussive upper edge.", [
+                .algorithm: 1, .outputGain: 0.68,
+                .op1Ratio: 0.5, .op1Level: 0.82, .op1Sustain: 0.78,
+                .op2Ratio: 2, .op2Level: 0.18, .op2Decay: 0.14,
+                .op3Ratio: 1, .op3Level: 0.14, .op4Level: 0
+             ]),
+        make("lead.arc-light", "Arc Light", .lead,
+             "Brilliant singing FM lead with expressive wheel vibrato.", [
+                .algorithm: 0, .outputGain: 0.53, .feedback: 0.24,
+                .modTarget: 0, .modDepth: 0.55, .modRate: 5.4,
+                .op1Level: 0.75, .op1Sustain: 0.86,
+                .op2Ratio: 2, .op2Level: 0.43, .op2Sustain: 0.4,
+                .op3Ratio: 3, .op3Level: 0.2, .op4Level: 0
+             ]),
+        make("pad.halo-choir", "Halo Choir", .pad,
+             "Slow harmonic vowel-like FM pad with warm movement.", [
+                .algorithm: 2, .outputGain: 0.45, .feedback: 0.09,
+                .op1Level: 0.64, .op1Attack: 1.6, .op1Release: 4.8,
+                .op2Ratio: 2, .op2Level: 0.31, .op2Attack: 2.1,
+                .op2Release: 3.5, .op3Ratio: 3, .op3Level: 0.18,
+                .op3Attack: 2.6, .op4Level: 0
+             ]),
+        make("texture.glass-storm", "Glass Storm", .texture,
+             "Sparse evolving inharmonic tones for cinematic soundscapes.", [
+                .algorithm: 3, .outputGain: 0.43, .feedback: 0.39,
+                .op1Level: 0.52, .op1Attack: 0.9, .op1Release: 5.7,
+                .op2Ratio: 4.11, .op2Level: 0.29, .op2Attack: 1.4,
+                .op3Ratio: 7.07, .op3Level: 0.22, .op3Attack: 2.2,
+                .op4Ratio: 11.3, .op4Level: 0.15, .op4Attack: 2.7
+             ]),
+        make("percussion.circuit-clack", "Circuit Clack", .percussion,
+             "Short noisy FM click for rhythmic synthetic percussion.", [
+                .algorithm: 0, .outputGain: 0.5, .feedback: 0.62,
+                .op1Level: 0.67, .op1Decay: 0.09, .op1Sustain: 0,
+                .op1Release: 0.07, .op2Ratio: 8, .op2Level: 0.72,
+                .op2Decay: 0.025, .op2Sustain: 0,
+                .op3Ratio: 13, .op3Level: 0.35, .op3Decay: 0.02,
+                .op4Level: 0
              ])
     ]
 }
