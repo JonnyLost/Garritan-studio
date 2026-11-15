@@ -1,0 +1,55 @@
+name: Studio consolidated Sampler acceptance
+
+on:
+  push:
+    branches:
+      - integration/studio-sampler-portable-packages-2026-11-14
+  pull_request:
+    branches:
+      - integration/studio-safe-consolidation-2026-11-14
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-sampler-acceptance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mac-integration:
+    name: macOS integrated build, regression and release
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@v4
+      - name: Report toolchain and candidate SHA
+        run: |
+          sw_vers
+          swift --version
+          git rev-parse HEAD
+      - name: Resolve dependencies
+        run: swift package resolve
+      - name: Build complete Studio package
+        run: swift build
+      - name: Run complete Swift regression suite
+        run: swift test --parallel
+      - name: Build optimized DAW application
+        run: swift build -c release --product DAWApp
+      - name: Validate Sampler and integration surfaces remain present
+        shell: bash
+        run: |
+          set -euo pipefail
+          for path in \
+            DAWCore/Sources/DAWCore/Audio/StudioSamplerInstrumentPackage.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioSamplerInstrumentFactory.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioSamplerFactoryRecovery.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioSamplerFactoryProcessor.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioSamplerFactoryStarterLibrary.swift \
+            DAWUI/Sources/DAWUI/Views/StudioSamplerFactoryView.swift \
+            DAWUI/Sources/DAWUI/Views/StudioSamplerLibraryBrowser.swift \
+            Tests/DAWCoreTests/StudioSamplerInstrumentPackageTests.swift \
+            Tests/DAWCoreTests/StudioSamplerInstrumentFactoryTests.swift; do
+            test -f "$path" || { echo "Required integration surface missing: $path"; exit 1; }
+          done
