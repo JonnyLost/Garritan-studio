@@ -98,9 +98,16 @@ final class StudioMIDIWorkerScheduler {
     var isInstalled: Bool { generation != 0 }
 
     func install(_ events: [StudioMIDIFrameEvent], generation: UInt64) {
+        prepare(events)
+        activate(generation: generation)
+    }
+    func activate(generation: UInt64) {
+        precondition(!isInstalled && generation != 0)
+        self.generation = generation
+    }
+    func prepare(_ events: [StudioMIDIFrameEvent]) {
         precondition(!isInstalled, "Cancel and clean old voices before replacing a session")
         self.events = events
-        self.generation = generation
         cursor = 0
         targetFrame = .min
         var seen: Set<Channel> = []

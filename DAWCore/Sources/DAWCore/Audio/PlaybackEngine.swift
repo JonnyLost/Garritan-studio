@@ -1195,7 +1195,7 @@ public final class PlaybackEngine: ObservableObject {
         playbackStartSample = beatsToSamples(playbackStartBeat, tempo: transport.tempo.bpm, sampleRate: sampleRate)
         lastProcessedSample = playbackStartSample
 
-        let generation = audioEngine.midiClock.begin(at: playbackStartSample)
+        audioEngine.midiClock.cancel()
         midiProcessingQueue.sync {
             midiWorkerState.scheduler.cancel(deliver: midiWorkerState.send)
             midiWorkerState.trackInstruments = trackInstruments
@@ -1216,7 +1216,11 @@ public final class PlaybackEngine: ObservableObject {
                     destination: destination, channel: channel,
                     tempo: preparedTempo, sampleRate: sampleRate, until: sessionEndBeat)
             }
-            midiWorkerState.scheduler.install(StudioMIDIFrameCompiler.ordered(packets), generation: generation)
+            midiWorkerState.scheduler.prepare(StudioMIDIFrameCompiler.ordered(packets))
+            // Compilation and channel bookkeeping must finish BEFORE the
+            // render clock starts, especially for orchestral scores.
+            let generation = audioEngine.midiClock.begin(at: playbackStartSample)
+            midiWorkerState.scheduler.activate(generation: generation)
             midiWorkerState.active = true
         }
         startMIDIWorker()
