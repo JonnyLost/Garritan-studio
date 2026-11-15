@@ -188,6 +188,19 @@ public struct StudioPictureProject: Codable, Equatable, Sendable {
         timelineStartSeconds + Double(max(0, frame)) / frameRate.framesPerSecond
     }
 
+    /// Converts a user-entered SMPTE label back to a picture-relative frame.
+    /// Handles the 24-hour label wrap used by standard SMPTE clocks.
+    public func movieFrame(forTimecode label: String) -> Int64? {
+        guard let absolute = StudioPictureTimecode.frameNumber(label, rate: frameRate),
+              totalFrames > 0 else { return nil }
+        let drop = frameRate.droppedLabelsPerMinute
+        let framesInDay = frameRate.nominalFPS * 86_400 - drop * (1_440 - 144)
+        var relative = absolute - startTimecodeFrame
+        if relative < 0 { relative += framesInDay }
+        guard relative >= 0, relative < totalFrames else { return nil }
+        return relative
+    }
+
     public func timecode(atMovieFrame frame: Int64) -> String {
         StudioPictureTimecode.string(frameNumber: startTimecodeFrame + frame, rate: frameRate)
     }
