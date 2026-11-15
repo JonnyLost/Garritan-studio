@@ -41,9 +41,10 @@ clocks remain different. Worker delivery must not be described as sample accurat
   StudioMIDIClockMath. Analog previously rounded to the nearest frame; this
   removes that sub-frame rounding discrepancy with the transport conversion.
 * Buffers are half-open `[start, end)`. The end belongs to the next callback.
-* Core Audio late events deliver at offset zero rather than disappearing.
-  This policy assumes events still belong to the current session; it is not a
-  substitute for generation filtering on seek or replacement.
+* Core Audio late note-offs deliver at offset zero rather than disappearing.
+  Other overdue events retain the baseline discard policy so a seek does not
+  newly retrigger old notes. This is not a substitute for generation filtering
+  on seek or replacement; old releases also require generation ownership.
 * Core Audio AU block receives `max(eventFrame, bufferStart)` in the same
   session sample coordinate as its following AU render timestamp. Legacy
   MusicDevice delivery retains the buffer-relative offset.
@@ -123,4 +124,4 @@ future picture interfaces should consume the existing session clock.
 
 Primary regression risks: AU implementations interpreting absolute scheduling
 differently, one-frame Analog quantization differences, and previously dropped
-late events becoming audible. Keep the PR draft pending macOS and hardware review.
+late releases affecting a newer voice after an unguarded seek. Keep the PR draft pending macOS and hardware review.

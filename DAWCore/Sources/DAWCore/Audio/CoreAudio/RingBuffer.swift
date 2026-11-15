@@ -160,11 +160,18 @@ public final class MIDIEventRingBuffer {
         // An edit or seek can leave thousands of stale events in the queue.
         // Discard them iteratively: recursive calls could overflow the audio
         // render thread's limited stack.
-        guard startSample < endSample, let event = buffer.peek(),
-              event.samplePosition < endSample else { return nil }
-        // Late events belong to this session too. Deliver at offset zero;
-        // dropping a late note-off can leave a voice sounding indefinitely.
-        return event
+        guard startSample < endSample else { return nil }
+        while let event = buffer.peek() {
+            guard event.samplePosition < endSample else { return nil }
+            if event.samplePosition >= startSample || event.isNoteOff {
+                // Preserve overdue releases at offset zero. Other overdue
+                // events retain the baseline discard policy: until transport
+                // generations exist, do not retrigger old notes after a seek.
+                return event
+            }
+            buffer.pop()
+        }
+        return nil
     }
     
     /// Pop the current event

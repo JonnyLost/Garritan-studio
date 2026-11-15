@@ -81,6 +81,7 @@ final class StudioMIDITimingTests: XCTestCase {
     func testLateNoteOffAndExclusiveBoundary() {
         let scheduler = MIDIScheduler()
         let track = Track(name: "Late release", type: .instrument).id
+        scheduler.schedule(.noteOn(trackID: track, samplePosition: 8, note: 60, velocity: 100))
         scheduler.schedule(.noteOff(trackID: track, samplePosition: 9, note: 60))
         scheduler.schedule(.noteOn(trackID: track, samplePosition: 20, note: 60, velocity: 100))
         var frames: [UInt32] = []
