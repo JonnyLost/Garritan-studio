@@ -31,6 +31,9 @@ public struct Project: Identifiable, Codable, Sendable {
 
     // Markers
     public var markers: [Marker]
+
+    /// Optional movie reference and SMPTE hit points; absent in older projects.
+    public var studioPicture: StudioPictureProject?
     
     // Loop region
     public var loopRegion: TimeRange?
@@ -73,6 +76,7 @@ public struct Project: Identifiable, Codable, Sendable {
         self.vRack = VRack()
         self.ostinatoPatterns = []
         self.markers = []
+        self.studioPicture = nil
         self.loopRegion = nil
         self.isLoopEnabled = false
         self.audioFiles = []
