@@ -174,4 +174,42 @@ final class OstinatoPatternTests: XCTestCase {
         XCTAssertEqual(decoded.lanes[1].isSolo, true)
     }
 
+    func testVariationsPreserveOriginalAndOrchestralRouting() throws {
+        var original = OstinatoPattern.starter(mode: .melodic)
+        let track = TrackID()
+        original.lanes[0].targetTrackID = track
+        original.lanes[1].isMuted = true
+        let snapshot = try JSONEncoder().encode(original)
+        for kind in OstinatoVariation.allCases {
+            let variation = OstinatoVariationEngine.makeVariation(of: original, kind: kind)
+            XCTAssertNotEqual(variation.id, original.id)
+            XCTAssertEqual(variation.lanes[0].targetTrackID, track)
+            XCTAssertEqual(variation.lanes[1].isMuted, true)
+            XCTAssertEqual(variation.stepCount, original.stepCount)
+            XCTAssertTrue(variation.lanes.allSatisfy { lane in
+                lane.steps.allSatisfy { $0.index >= 0 && $0.index < variation.stepCount }
+            })
+        }
+        XCTAssertEqual(try JSONEncoder().encode(original), snapshot)
+    }
+
+    func testSeededVariationsAreReproducible() {
+        let source = OstinatoPattern.starter(mode: .rhythmic)
+        for kind in [OstinatoVariation.sparse, .dense] {
+            let first = OstinatoVariationEngine.makeVariation(of: source, kind: kind, seed: 42)
+            let second = OstinatoVariationEngine.makeVariation(of: source, kind: kind, seed: 42)
+            XCTAssertEqual(first.lanes.map { $0.steps }, second.lanes.map { $0.steps })
+        }
+    }
+
+    func testVariationOctavesClampToMIDIAndReverseStaysOnGrid() {
+        var source = OstinatoPattern.starter(mode: .melodic)
+        source.lanes[0].changePitch(to: 125)
+        let raised = OstinatoVariationEngine.makeVariation(of: source, kind: .octaveUp)
+        XCTAssertEqual(raised.lanes[0].pitch, 127)
+        let reversed = OstinatoVariationEngine.makeVariation(of: source, kind: .reverse)
+        XCTAssertEqual(reversed.lanes[0].steps.first?.index,
+                       source.stepCount - 1 - (source.lanes[0].steps.last?.index ?? 0))
+    }
+
 }
