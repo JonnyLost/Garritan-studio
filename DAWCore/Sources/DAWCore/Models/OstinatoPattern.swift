@@ -116,6 +116,20 @@ public struct OstinatoPattern: Identifiable, Codable, Sendable {
         return lanes.filter { $0.isMuted != true && (!hasSolo || $0.isSolo == true) }
     }
 
+    /// Shared routing plan for audition and timeline placement.
+    /// Invalid/missing destinations fall back to a valid selected track.
+    /// A missing fallback is allowed when every audible lane is explicitly routed.
+    public func resolvedRoutes(validTracks: Set<TrackID>,
+                               fallback: TrackID?) -> [(track: TrackID, lane: OstinatoLane)] {
+        audibleLanes.compactMap { lane in
+            guard !lane.steps.isEmpty else { return nil }
+            let assigned = lane.targetTrackID.flatMap { validTracks.contains($0) ? $0 : nil }
+            let defaultTrack = fallback.flatMap { validTracks.contains($0) ? $0 : nil }
+            guard let track = assigned ?? defaultTrack else { return nil }
+            return (track: track, lane: lane)
+        }
+    }
+
     /// Return per-lane MIDI without losing its orchestral destination.
     public func routedMIDIEvents() -> [(lane: OstinatoLane, events: [MIDIEvent])] {
         let division = Double(min(8, max(1, stepsPerBeat)))
