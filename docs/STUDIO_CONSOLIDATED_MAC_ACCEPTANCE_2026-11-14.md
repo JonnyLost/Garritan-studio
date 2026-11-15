@@ -1,31 +1,25 @@
 # Garritan Studio — consolidated Mac acceptance checklist
 
-**Candidate**: `integration/studio-sampler-portable-packages-2026-11-14`  
-**Protected parent**: `integration/studio-safe-consolidation-2026-11-14` (`513804f9097b37eb440a6969d76c2476c9fae9d7`)  
-**Scope**: professional MIDI, native Sampler and Synth, stage/Rooms/virtual mics, Ostinato, project save, stems and MIDI export.
+**Validated snapshot:** `checkpoint/studio-alpha1-ci-green-2026-11-14` — commit `47f6d887be3a5f781d33fb83e98472f2c343e3a1`.  
+**GitHub validation:** [Final unified Alpha 1 CI passed](https://github.com/JonnyLost/Garritan-studio/actions/runs/43663886947) — macOS full debug build, complete Swift tests, release DAWApp, native Sampler sanitizers and 72-zone stress.  
+**Scope:** MIDI, Sampler, Synth, Granular, Ostinato, Rooms and virtual mics, audio/stems export, and project save/reopen.
 
-This is **one integration acceptance session**, not a demand to repeat every prior development test. GitHub macOS CI validates the Swift debug and release builds, the entire automated Swift test suite and Sampler native DSP sanitizers. Only hardware/audio interaction must be verified on the user's Mac.
+This is one hands-on Mac acceptance session, not a request to repeat all completed automated tests. It is **not** a claim that runtime audio, physical MIDI devices, ARIA, or window/document workflow have passed.
 
-## Safe launch — do not touch the working checkout or real music projects
+## Safe launch — tested code frozen, existing projects untouched
 
-1. Open Terminal on the Mac. Run the following block (stop if any step reports an error):
+Use a Mac with Xcode/Swift and the existing Studio checkout at `~/Developer/Garritan-studio`. Open Terminal and paste this **single block**:
 
 ```bash
 cd ~/Developer/Garritan-studio
 git fetch origin
-git worktree add --detach ~/Developer/Garritan-studio-Acceptance origin/integration/studio-sampler-portable-packages-2026-11-14
-cd ~/Developer/Garritan-studio-Acceptance
-git rev-parse --short HEAD
-swift build
-swift test --parallel
-swift build -c release --product DAWApp
-swift run DAWApp
+git show origin/integration/studio-alpha1-consolidated-2026-11-14:Tools/alpha1_mac_launch.sh > /tmp/studio-alpha1-launch.sh
+bash /tmp/studio-alpha1-launch.sh
 ```
 
-If `~/Developer/Garritan-studio-Acceptance` already exists, stop rather than deleting or overwriting it. A worktree keeps the normal Studio checkout and its current branch intact. Do not run `git reset --hard`, `git clean -fd`, or alter existing projects during these tests.
+The launcher validates the immutable green checkpoint, then creates `~/Developer/Garritan-studio-Alpha1` as an isolated detached worktree and builds/runs its `DAWApp`. The normal Studio checkout is **not** switched, cleaned or reset. It will stop rather than overwrite any existing unrelated folder. Build and runtime output is saved locally in `~/Library/Logs/GarritanStudio/Alpha1/` for investigating failures. The script is downloaded from our own GitHub branch; review it in the repository first if desired.
 
-2. Create a **throwaway project** named `Studio-Acceptance`. Save it to a test folder, never on top of an existing composition. Keep the audio output at a comfortable monitor level.
-3. Record **Pass / Fail / Not Tested** per section. For a failure, retain the error message, reproduction sequence and whether audio is silent, distorted or missing.
+Create a brand-new throwaway project called `Studio-Acceptance` in a test folder. **Do not open or save over your important projects.** Keep speakers at a conservative volume. For each feature below record **Pass**, **Fail** or **Not Tested**. A failure is useful evidence, not a reason to delete the worktree or reset a branch.
 
 ## One-session interaction matrix
 
@@ -58,9 +52,9 @@ If GPO5 and Instant Orchestra are installed and already working on this Mac, loa
 
 | Gate | Evidence | Result |
 | --- | --- | --- |
-| Swift debug + complete regression suite | GitHub Actions candidate-head run | Pending final candidate run |
-| Optimized `DAWApp` | GitHub Actions candidate-head run | Pending final candidate run |
-| Native Sampler ASan/UBSan and 72-zone stream stress | GitHub Actions candidate-head run | Pending final candidate run |
+| Swift debug + complete regression suite | GitHub Actions candidate-head run | Passed on immutable checkpoint 47f6d887 (GitHub run 43663886947) |
+| Optimized `DAWApp` | GitHub Actions candidate-head run | Passed on immutable checkpoint 47f6d887 (GitHub run 43663886947) |
+| Native Sampler ASan/UBSan and 72-zone stream stress | GitHub Actions candidate-head run | Passed on immutable checkpoint 47f6d887 (GitHub run 43663886947) |
 | Actual Mac audio playback and saving | One-session interaction matrix above | Not yet tested |
 | Final promotion decision | Human owner authorization required for shared branch merges | Not authorized |
 
