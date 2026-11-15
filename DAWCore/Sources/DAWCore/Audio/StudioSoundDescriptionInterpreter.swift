@@ -307,6 +307,8 @@ public enum StudioSoundDescriptionInterpreter {
         .init("short tail", .releaseTime, false),
         .init("tight release", .releaseTime, false),
         .init("staccato", .releaseTime, false),
+        .init("gradually emerge", .movement, true),
+        .init("slowly evolving", .movement, true),
         .init("evolving", .movement, true), .init("movement", .movement, true),
         .init("motion", .movement, true), .init("swirling", .movement, true),
         .init("pulsing", .movement, true), .init("animated", .movement, true),
