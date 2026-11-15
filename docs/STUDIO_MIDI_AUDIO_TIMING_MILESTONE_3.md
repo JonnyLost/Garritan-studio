@@ -318,3 +318,8 @@ A regression verifies its synchronous pause/rebuild sequence and that locating
 a stopped transport never starts it (24 new Swift tests total in 3B). The first
 macOS test build exposed a Swift type-check timeout in the dense fixture; an
 explicitly typed loop retains the same 70,000 packets and assertions.
+
+macOS validation also caught a new fixture setup error: AudioEngine prepares
+its device graph during initialization, so the offline clock test must fully
+stop that graph before enabling manual rendering (the established V-Rack test
+pattern). The fixture was corrected without skips or relaxed assertions.

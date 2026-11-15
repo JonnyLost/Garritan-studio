@@ -9,6 +9,9 @@ final class StudioMIDIRenderClockTests: XCTestCase {
         let studio = AudioEngine()
         let rate = studio.sampleRate
         let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2))
+        // AudioEngine prepares its device graph in init. Match the existing
+        // V-Rack offline tests: fully stop before enabling manual rendering.
+        studio.engine.stop()
         try studio.engine.enableManualRenderingMode(.offline, format: format, maximumFrameCount: 256)
         try studio.engine.start()
         defer { studio.engine.stop(); studio.engine.disableManualRenderingMode() }
