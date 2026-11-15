@@ -156,6 +156,13 @@ public struct StudioPictureProject: Codable, Equatable, Sendable {
     /// Optional so first-generation Studio Picture projects remain readable.
     /// Nil means the normal visible overlay default.
     public var showTimecodeOverlay: Bool?
+    /// Optional for backwards-compatible decoding; defaults to enabled.
+    public var showScoringStreamers: Bool?
+    /// Optional for backwards-compatible decoding; defaults to enabled.
+    public var showScoringPunches: Bool?
+    /// Time before each hit at which a three-beat visual streamer begins.
+    /// Nil defaults to three seconds, and is independent from tempo.
+    public var streamerLeadSeconds: Double?
     public var hitPoints: [StudioPictureHitPoint]
 
     public init(url: URL, durationSeconds: Double, frameRate: StudioPictureFrameRate,
@@ -164,6 +171,9 @@ public struct StudioPictureProject: Codable, Equatable, Sendable {
                 startTimecodeFrame: Int64? = nil, referenceAudioEnabled: Bool = false,
                 referenceAudioVolume: Float? = nil,
                 showTimecodeOverlay: Bool = true,
+                showScoringStreamers: Bool? = nil,
+                showScoringPunches: Bool? = nil,
+                streamerLeadSeconds: Double? = nil,
                 hitPoints: [StudioPictureHitPoint] = []) {
         self.filename = url.lastPathComponent
         self.filePath = url.path
@@ -177,6 +187,9 @@ public struct StudioPictureProject: Codable, Equatable, Sendable {
         self.referenceAudioEnabled = referenceAudioEnabled
         self.referenceAudioVolume = referenceAudioVolume
         self.showTimecodeOverlay = showTimecodeOverlay
+        self.showScoringStreamers = showScoringStreamers
+        self.showScoringPunches = showScoringPunches
+        self.streamerLeadSeconds = streamerLeadSeconds
         self.hitPoints = hitPoints
     }
 
