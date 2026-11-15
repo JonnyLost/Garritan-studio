@@ -155,7 +155,8 @@ public final class ProjectViewModel: ObservableObject {
         
         // Listen for transport record start
         transportState.transportEventSubject
-            .receive(on: DispatchQueue.main)
+            // TransportState is MainActor-owned. Keep control transitions
+            // synchronous so queued Play cannot outlive a later Stop/seek.
             .sink { [weak self] event in
                 self?.handleTransportEvent(event)
             }

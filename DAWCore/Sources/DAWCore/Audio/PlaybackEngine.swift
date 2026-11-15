@@ -194,7 +194,8 @@ public final class PlaybackEngine: ObservableObject {
             .store(in: &cancellables)
 
         transportState.transportEventSubject
-            .receive(on: DispatchQueue.main)
+            // TransportState is MainActor-owned. Keep control transitions
+            // synchronous so queued Play cannot outlive a later Stop/seek.
             .sink { [weak self] event in
                 self?.handleTransportEvent(event)
             }
@@ -202,7 +203,6 @@ public final class PlaybackEngine: ObservableObject {
         
         // Update audio engine tempo when transport tempo changes
         transportState.tempoSubject
-            .receive(on: DispatchQueue.main)
             .sink { [weak self] tempo in
                 guard let self else { return }
                 if self.isPlaying && self.preparedTempo != tempo.bpm {

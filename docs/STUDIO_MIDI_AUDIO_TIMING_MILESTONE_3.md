@@ -298,3 +298,11 @@ native Sampler/control support, replace control-thread loop rebuilds with
 render-owned boundary transitions, schedule metronome/audio on that contract,
 and measure MacBook output timing before claiming synchronized acoustic output.
 Do not integrate Picture or a competing time authority to solve these gaps.
+
+3B control-order follow-up: MainActor transport/tempo subscriptions and audio
+position delivery now remain synchronous. An unnecessary main-queue hop could
+otherwise let a queued Play or old sample position execute after a later Stop,
+seek or loop rebuild. Added manual AVAudioEngine rendering coverage of the
+actual silent clock source (progress, silence, cancellation, re-anchor), plus
+synchronous seek/stop/restart transport-subject coverage. These are additional
+to the 20 worker/compiler tests; UI hardware behavior remains an acceptance item.

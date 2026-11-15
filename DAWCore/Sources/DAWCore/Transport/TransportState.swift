@@ -124,7 +124,8 @@ public final class TransportState: ObservableObject {
         
         // Subscribe to sample position updates from audio engine
         samplePositionCancellable = engine.samplePositionSubject
-            .receive(on: DispatchQueue.main)
+            // AudioEngine publishes only on MainActor. A queued old position
+            // must not wrap or seek a newly installed MIDI generation.
             .sink { [weak self] samplePosition in
                 self?.updatePlayheadFromSamplePosition(samplePosition)
             }
