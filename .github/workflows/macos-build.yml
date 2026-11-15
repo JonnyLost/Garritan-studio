@@ -35,6 +35,9 @@ jobs:
 
       # Fail quickly on mic-bus graph regressions before the full app build.
       # The same compiled test products are reused by the full suite below.
+      - name: Verify prepared Studio mixer baseline
+        run: swift test --filter VRackMicrophoneRoutingTests/testPreparedStudioMainMixerCanRenderOffline
+
       - name: Verify V-Rack microphone graph
         run: swift test --filter VRackMicrophoneRoutingTests
 
