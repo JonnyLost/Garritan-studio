@@ -269,7 +269,8 @@ public struct MainWindowView: View {
         }
         .onAppear {
             setupInitialState()
-            pictureSession.bind(to: viewModel.transportState)
+            pictureSession.bind(to: viewModel.transportState,
+                                guideAudioBus: viewModel.pictureGuideAudioBus)
             pictureSession.update(document: viewModel.project.studioPicture)
         }
         .onDisappear {
