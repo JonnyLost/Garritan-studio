@@ -286,6 +286,22 @@ public struct MainWindowView: View {
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("toggleStudioKeyboard"))) { _ in
             showDockedKeyboard.toggle()
         }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("openStudioPicture"))) { _ in
+            selectWorkspace("Picture")
+            compactLowerWorkspace = false
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("markStudioPictureHit"))) { _ in
+            guard var picture = viewModel.project.studioPicture else {
+                selectWorkspace("Picture")
+                return
+            }
+            let positionSeconds = Double(viewModel.transportState.playheadPosition.samples) /
+                                  max(1, viewModel.transportState.sampleRate)
+            picture.hitPoints.append(StudioPictureHitPoint(
+                name: "Hit \(picture.hitPoints.count + 1)",
+                frame: picture.movieFrame(atProjectSeconds: positionSeconds)))
+            viewModel.project.studioPicture = picture
+        }
         .onReceive(NotificationCenter.default.publisher(for: .performUndo)) { _ in
             viewModel.undo()
         }
