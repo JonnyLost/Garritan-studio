@@ -810,7 +810,6 @@ public final class AudioEngine: ObservableObject {
                 for microphone in routedMicrophones {
                     let bus = AVAudioMixerNode()
                     engine.attach(bus)
-                    engine.connect(bus, to: masterMixer, format: format)
                     microphoneChannelMixers[microphone.id] = bus
                 }
                 for source in sources {
@@ -820,6 +819,18 @@ public final class AudioEngine: ObservableObject {
                 if rackSourceIncluded {
                     attachVRackMicrophoneCaptures(format: format)
                     updateVRackMicrophoneCapture()
+                }
+                // Complete all capture-to-channel input connections before
+                // connecting channel outputs to the master. AVAudioEngine
+                // otherwise silently drops the earlier output edges when
+                // a custom multi-output AU later adds a mixer input bus.
+                for microphone in routedMicrophones {
+                    if let bus = microphoneChannelMixers[microphone.id] {
+                        engine.connect(bus, to: masterMixer, format: format)
+                    }
+                }
+                if let sink = microphoneUnusedOutputSink {
+                    engine.connect(sink, to: masterMixer, format: format)
                 }
                 applyMicrophoneChannelMix()
                 isMicrophoneAuditionActive = true
@@ -1054,7 +1065,6 @@ public final class AudioEngine: ObservableObject {
         } else {
             let created = AVAudioMixerNode()
             engine.attach(created)
-            engine.connect(created, to: masterMixer, format: format)
             created.outputVolume = 0
             microphoneUnusedOutputSink = created
             sink = created
