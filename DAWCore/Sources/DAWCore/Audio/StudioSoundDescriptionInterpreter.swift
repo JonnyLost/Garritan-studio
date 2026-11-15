@@ -81,7 +81,7 @@ public struct StudioSoundDescriptionIntent: Codable, Equatable, Sendable {
     }
 }
 
-public enum StudioSoundDescriptionError: Error, LocalizedError {
+public enum StudioSoundDescriptionError: Error, LocalizedError, Equatable {
     case emptyDescription
     case descriptionTooLong
 
