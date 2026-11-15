@@ -1296,15 +1296,13 @@ public final class PlaybackEngine: ObservableObject {
     /// Convert beats to samples
     private func beatsToSamples(_ beats: Double, tempo: Double, sampleRate: Double? = nil) -> Int64 {
         let sr = sampleRate ?? coreAudioBackend?.sampleRate ?? audioEngine.sampleRate
-        let seconds = (beats / tempo) * 60.0
-        return Int64(seconds * sr)
+        return StudioMIDIClockMath.samples(forBeats: beats, tempoBPM: tempo, sampleRate: sr)
     }
     
     /// Convert samples to beats
     private func samplesToBeats(_ samples: Int64, tempo: Double, sampleRate: Double? = nil) -> Double {
         let sr = sampleRate ?? coreAudioBackend?.sampleRate ?? audioEngine.sampleRate
-        let seconds = Double(samples) / sr
-        return (seconds / 60.0) * tempo
+        return StudioMIDIClockMath.beats(forSamples: samples, tempoBPM: tempo, sampleRate: sr)
     }
     
     /// Process MIDI events for the current audio buffer (called from audio thread)
@@ -2067,7 +2065,8 @@ public final class PlaybackEngine: ObservableObject {
             let relative = (beat - playbackStartBeat) * (60.0 / bpm) * sampleRate
             guard relative.isFinite && relative >= 0 &&
                   relative < Double(UInt64.max) / 4 else { return nil }
-            return UInt64(relative.rounded())
+            return UInt64(StudioMIDIClockMath.samples(
+                forBeats: beat - playbackStartBeat, tempoBPM: bpm, sampleRate: sampleRate))
         }
         if bpm > 0 && sampleRate > 0 {
             for (trackID, instrument) in trackInstruments {
@@ -2138,7 +2137,12 @@ public final class PlaybackEngine: ObservableObject {
                 }
             }
         }
-        localScheduledMIDIEvents.sort { $0.absoluteBeat < $1.absoluteBeat }
+        localScheduledMIDIEvents = localScheduledMIDIEvents.enumerated().sorted {
+            if $0.element.absoluteBeat != $1.element.absoluteBeat {
+                return $0.element.absoluteBeat < $1.element.absoluteBeat
+            }
+            return $0.offset < $1.offset
+        }.map(\.element)
         let prepared = nativeSequencedTracks
         let workerEvents = localScheduledMIDIEvents.filter { event in
             guard prepared.contains(event.trackID) else { return true }

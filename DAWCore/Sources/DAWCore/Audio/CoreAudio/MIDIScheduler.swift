@@ -96,21 +96,28 @@ public final class MIDIScheduler {
         endSample: Int64,
         renderGraph: RenderGraph
     ) -> Int {
+        processEvents(startSample: startSample, endSample: endSample) { event, offset in
+            renderGraph.sendMIDI(to: event.trackID, status: event.status,
+                                 data1: event.data1, data2: event.data2,
+                                 sampleOffset: offset,
+                                 sampleTime: max(startSample, event.samplePosition))
+        }
+    }
+
+    /// Deterministic delivery seam, also used by the timestamp measurement harness.
+    /// Times and offsets refer to the same half-open render window.
+    @discardableResult
+    func processEvents(startSample: Int64, endSample: Int64,
+                       deliver: (ScheduledMIDIEvent, UInt32) -> Void) -> Int {
         var processed = 0
         
         // Process events from the ring buffer
         while let event = eventBuffer.peekIfInRange(startSample: startSample, endSample: endSample) {
             // Calculate sample offset within this buffer
-            let sampleOffset = UInt32(max(0, event.samplePosition - startSample))
+            let sampleOffset = StudioMIDIClockMath.offset(eventSample: event.samplePosition, bufferStart: startSample)
             
             // Send the MIDI event
-            renderGraph.sendMIDI(
-                to: event.trackID,
-                status: event.status,
-                data1: event.data1,
-                data2: event.data2,
-                sampleOffset: sampleOffset
-            )
+            deliver(event, sampleOffset)
             
             // Track note-on for later note-off
             if isNoteOn(event.status) {

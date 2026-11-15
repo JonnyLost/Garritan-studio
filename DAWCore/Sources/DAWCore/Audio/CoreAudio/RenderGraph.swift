@@ -301,15 +301,20 @@ public final class RenderGraph {
     
     private var renderErrorCount = 0
     
-    func sendMIDI(to trackID: TrackID, status: UInt8, data1: UInt8, data2: UInt8, sampleOffset: UInt32) {
+    func sendMIDI(to trackID: TrackID, status: UInt8, data1: UInt8, data2: UInt8, sampleOffset: UInt32, sampleTime: Int64) {
         guard let track = tracks[trackID] else { return }
 
         // Called by the real-time scheduler: never log or format strings here.
         if let auAudioUnit = track.auAudioUnit,
            let scheduleMIDIEventBlock = auAudioUnit.scheduleMIDIEventBlock {
-            let midiData: [UInt8] = [status, data1, data2]
-            midiData.withUnsafeBufferPointer { buffer in
-                scheduleMIDIEventBlock(AUEventSampleTimeImmediate, 0, 3, buffer.baseAddress!)
+            // The render graph uses the session sample position for its AU
+            // render timestamp. Submit MIDI in that SAME coordinate, before
+            // rendering this buffer. Never substitute a buffer-relative offset.
+            var packet = (status, data1, data2)
+            withUnsafeBytes(of: &packet) { bytes in
+                scheduleMIDIEventBlock(sampleTime, 0,
+                    StudioMIDIClockMath.packetLength(status: status),
+                    bytes.baseAddress!.assumingMemoryBound(to: UInt8.self))
             }
         } else if let unit = track.instrumentUnit {
             _ = MusicDeviceMIDIEvent(

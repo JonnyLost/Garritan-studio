@@ -63,6 +63,24 @@ void daw_sample_position_destroy(DAWAtomicSamplePosition *position);
 void daw_sample_position_publish(DAWAtomicSamplePosition *position, int64_t frames);
 int64_t daw_sample_position_load(const DAWAtomicSamplePosition *position);
 
+// C11 atomic ownership cursor for a preallocated Swift SPSC ring.
+// Exactly one producer calls write_index/commit_write and exactly one consumer
+// calls read_index/commit_read. The producer writes the Swift slot BEFORE
+// publishing, and the consumer reads it BEFORE releasing the slot.
+// An empty/full query returns UINT32_MAX. Never reset while either side runs.
+typedef struct DAWSPSCCursor DAWSPSCCursor;
+DAWSPSCCursor *daw_spsc_cursor_create(uint32_t capacity);
+void daw_spsc_cursor_destroy(DAWSPSCCursor *cursor);
+uint32_t daw_spsc_write_index(const DAWSPSCCursor *cursor);
+void daw_spsc_commit_write(DAWSPSCCursor *cursor);
+uint32_t daw_spsc_read_index(const DAWSPSCCursor *cursor);
+void daw_spsc_commit_read(DAWSPSCCursor *cursor);
+uint32_t daw_spsc_count(const DAWSPSCCursor *cursor);
+void daw_spsc_clear_quiescent(DAWSPSCCursor *cursor);
+void daw_spsc_reset_quiescent(DAWSPSCCursor *cursor);
+
+
+
 #ifdef __cplusplus
 }
 #endif
