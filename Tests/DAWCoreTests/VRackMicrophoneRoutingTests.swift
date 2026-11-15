@@ -115,12 +115,14 @@ final class VRackMicrophoneRoutingTests: XCTestCase {
                         for: micChannel, outputBus: 0
                     )
                     let monitorOutput = channelOutputs.first?.node
-                    let nodeNames = channelOutputs.map { $0.node.name }
-                    let masterOut = engine.outputConnectionPoints(
+                    let destinationTypes = channelOutputs.map {
+                        String(describing: type(of: $0.node))
+                    }
+                    let masterOutCount = engine.outputConnectionPoints(
                         for: engine.mainMixerNode, outputBus: 0
-                    ).map { $0.node.name }
+                    ).count
                     XCTAssertTrue(monitorOutput === engine.mainMixerNode,
-                        "Mic channel destination: \(nodeNames), expected main mixer \(engine.mainMixerNode.name), main mixer destinations: \(masterOut)")
+                        "Mic channel destinations: \(destinationTypes), output edge count: \(channelOutputs.count), main output edge count: \(masterOutCount)")
                 }
             }
             XCTAssertGreaterThan(rackSum.outputVolume, 0.9,
@@ -270,8 +272,12 @@ final class VRackMicrophoneRoutingTests: XCTestCase {
             }
             let channelEdges = engine.outputConnectionPoints(
                 for: micChannel, outputBus: 0
-            ).map { $0.node.name }
-            print("[STUDIO-MIC-GRAPH] capture=\(feedCapture) micChannelEdges=\(channelEdges) mainOut=\(engine.outputConnectionPoints(for: engine.mainMixerNode, outputBus: 0).map { $0.node.name })")
+            )
+            let isMain = channelEdges.map { $0.node === engine.mainMixerNode }
+            let mainEdgeCount = engine.outputConnectionPoints(
+                for: engine.mainMixerNode, outputBus: 0
+            ).count
+            print("[STUDIO-MIC-GRAPH] capture=\(feedCapture) micChannelEdgeCount=\(channelEdges.count) isMain=\(isMain) mainOutCount=\(mainEdgeCount)")
             engine.stop()
             try engine.enableManualRenderingMode(
                 .offline, format: format, maximumFrameCount: 512
