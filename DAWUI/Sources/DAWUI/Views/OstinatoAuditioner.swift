@@ -13,7 +13,6 @@ final class OstinatoAuditioner: ObservableObject {
     private var session = UUID()
     private var sounding: Set<NoteKey> = []
     private weak var engine: PlaybackEngine?
-    private var destinations: [UUID: TrackID] = [:]
 
     private struct NoteKey: Hashable {
         let track: TrackID
@@ -29,13 +28,12 @@ final class OstinatoAuditioner: ObservableObject {
         let isOn: Bool
     }
 
-    func start(pattern: OstinatoPattern, track: TrackID, validTracks: Set<TrackID>, tempo: Double, engine: PlaybackEngine) {
+    func start(pattern: OstinatoPattern, fallback: TrackID?, validTracks: Set<TrackID>, tempo: Double, engine: PlaybackEngine) {
         stop()
         guard tempo.isFinite, tempo > 0, pattern.durationInBeats > 0 else { return }
-        let events = Self.events(for: pattern, fallback: track, validTracks: validTracks)
+        let events = Self.events(for: pattern, fallback: fallback, validTracks: validTracks)
         guard !events.isEmpty else { return }
         self.engine = engine
-        destinations = Dictionary(uniqueKeysWithValues: pattern.audibleLanes.map { ($0.id, ($0.targetTrackID.flatMap { validTracks.contains($0) ? $0 : nil }) ?? track) })
         isAuditioning = true
         let token = session
         playbackTask = Task { [weak self] in
@@ -69,7 +67,6 @@ final class OstinatoAuditioner: ObservableObject {
         playbackTask = nil
         releaseNotes()
         isAuditioning = false
-        destinations.removeAll()
         engine = nil
     }
 
@@ -98,18 +95,17 @@ final class OstinatoAuditioner: ObservableObject {
         sounding.removeAll()
     }
 
-    private static func events(for pattern: OstinatoPattern, fallback: TrackID,
+    private static func events(for pattern: OstinatoPattern, fallback: TrackID?,
                                validTracks: Set<TrackID>) -> [Event] {
         var result: [Event] = []
-        for routed in pattern.routedMIDIEvents() {
-            let track = routed.lane.targetTrackID.flatMap {
-                validTracks.contains($0) ? $0 : nil
-            } ?? fallback
-            for note in routed.events {
+        for route in pattern.resolvedRoutes(validTracks: validTracks, fallback: fallback) {
+            var segment = pattern
+            segment.lanes = [route.lane]
+            for note in segment.midiEvents() {
                 guard case .note(let data) = note.type else { continue }
-                result.append(Event(beat: note.beatPosition, track: track, pitch: data.pitch,
+                result.append(Event(beat: note.beatPosition, track: route.track, pitch: data.pitch,
                                     velocity: data.velocity, channel: note.channel, isOn: true))
-                result.append(Event(beat: note.beatPosition + data.duration, track: track,
+                result.append(Event(beat: note.beatPosition + data.duration, track: route.track,
                                     pitch: data.pitch, velocity: 0, channel: note.channel, isOn: false))
             }
         }
