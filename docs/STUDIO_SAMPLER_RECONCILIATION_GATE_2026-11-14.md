@@ -16,7 +16,7 @@ GitHub compare (baseline...source) reported **diverged: source ahead 211, behind
 
 ## New Sampler capabilities needing selective port
 
-Observed in the source-branch compare but absent from the shared staging tree:
+Originally flagged by a reverse-direction compare, but **verified present byte-for-byte in the consolidated staging branch**:
 - `DAWCore/Sources/DAWCore/Audio/StudioSamplerInstrumentFactory.swift`
 - `DAWCore/Sources/DAWCore/Audio/StudioSamplerInstrumentPackage.swift`
 - `DAWCore/Sources/DAWCore/Audio/StudioSamplerFactoryProcessor.swift`
@@ -26,12 +26,12 @@ Observed in the source-branch compare but absent from the shared staging tree:
 - `DAWUI/Sources/DAWUI/Views/StudioSamplerLibraryBrowser.swift`
 - Accompanying tests for instrument factory/packages/orchestral patches and source documentation.
 
-The source also changes shared `StudioSamplerInstrument.swift`, `StudioSamplerMappingBuilder.swift`, `StudioSamplerPatch.swift`, `StudioSamplerSampleLibrary.swift`, `StudioSamplerDSP.{h,cpp}`, `PlaybackEngine.swift`, `ProjectViewModel.swift`, `MainWindowView.swift`, `TrackHeaderView.swift`, `ProjectPersistence.swift`, `Package.swift`, and sampler views. **These must be reconciled API-by-API**, not wholesale copied. Source `DAWApp/Resources/Info.plist` changes also require review and are not automatically imported.
+The source and staging also share `StudioSamplerInstrument.swift`, `StudioSamplerMappingBuilder.swift`, `StudioSamplerPatch.swift`, `StudioSamplerSampleLibrary.swift`, `StudioSamplerDSP.{h,cpp}`, `PlaybackEngine.swift`, `ProjectViewModel.swift`, `MainWindowView.swift`, `TrackHeaderView.swift`, `ProjectPersistence.swift`, `Package.swift`, and sampler views. **These must be reconciled API-by-API**, not wholesale copied. Source `DAWApp/Resources/Info.plist` changes also require review and are not automatically imported.
 
 ## Port order
 
-1. Review factory and package model dependencies and import narrowly scoped new files; adapt to current `StudioSamplerPatch` and shared PCM APIs. Add direct package round-trip and missing-sample recovery tests.
-2. Port factory processing/starter library and instrument-builder workflow, preserving offline, bounded memory allocation and render-thread safety. Add generated-patch validation, deterministic mapping, orchestral velocity/round-robin/legato/release tests.
+1. DONE by repository file checks: factory, package, starter library and recovery already exist on the protected staging branch, along with package and factory unit tests. Do not reimport them. Instead test their integration on the exact consolidated head.
+2. Verify current factory processing/starter library and instrument-builder workflow with macOS CI and targeted integration tests; address failures only if reproduced.
 3. Reconcile source Sampler DSP structures and mapping enhancements with current render graph **one feature at a time**, preserving all recent dry/reverb/mic routing. Verify note-off/voice theft/underruns at 44.1 and 48 kHz.
 4. Connect factory and library UI into current instrument picker/track type without replacing the Main Window's Rooms/Ostinato, MIDI articulation editing, audio export or Save/Discard/Cancel flows.
 5. Validate project save/reopen with native Sampler package references, missing files, edited sample paths and Audio Unit state, plus legacy GPO project compatibility.
@@ -49,4 +49,4 @@ The source also changes shared `StudioSamplerInstrument.swift`, `StudioSamplerMa
 
 ## Current verification status
 
-Repository branch comparisons and baseline file inspection completed remotely on 2026-11-14. No cross-branch sampler code merge, full macOS build, automated suite execution, physical audio verification or final candidate CI is claimed by this audit. This gate intentionally protects the consolidated milestone while defining the next code-port step.
+Repository branch comparisons and baseline file inspection completed remotely on 2026-11-14. **Correction:** the first comparison was interpreted backwards: an 'added' entry for the source side does not mean staging lacks that file. Subsequent exact `fetch_file` checks found matching blob SHA for `StudioSamplerInstrumentPackage.swift` (`35d3f837`), `StudioSamplerInstrumentFactory.swift` (`7a537136`), `StudioSamplerFactoryRecovery.swift` (`ab3c2f23`), and package tests (`e6668482`) on both source and staging. Do not create duplicate files. The next candidate adds a combined macOS acceptance gate. No full macOS build, automated suite execution, physical audio verification or final candidate CI is claimed by this audit.
