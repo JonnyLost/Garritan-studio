@@ -174,6 +174,51 @@ final class VRackMicrophoneRoutingTests: XCTestCase {
         }
     }
 
+    /// Standalone host reproduction: identify whether a mixer can feed the
+    /// native four-output AU before introducing Studio's hall/mic returns.
+    func testMixerOutputFeedsFourBusCaptureInSmallAVAudioEngine() throws {
+        NativeMicrophoneMatrixAudioUnit.registerIfNeeded()
+        let format = try XCTUnwrap(AVAudioFormat(
+            standardFormatWithSampleRate: 48_000, channels: 2
+        ))
+        let engine = AVAudioEngine()
+        let player = AVAudioPlayerNode()
+        let source = AVAudioMixerNode()
+        let capture = AVAudioUnitEffect(
+            audioComponentDescription: NativeMicrophoneMatrixAudioUnit.componentDescription
+        )
+        engine.attach(player)
+        engine.attach(source)
+        engine.attach(capture)
+        engine.connect(player, to: source, format: format)
+        engine.connect(source, to: capture, format: format)
+        let channels = (0..<4).map { _ in AVAudioMixerNode() }
+        for (index, channel) in channels.enumerated() {
+            engine.attach(channel)
+            engine.connect(capture, to: channel,
+                           fromBus: AVAudioNodeBus(index),
+                           toBus: channel.nextAvailableInputBus, format: format)
+            engine.connect(channel, to: engine.mainMixerNode, format: format)
+            channel.outputVolume = index == 0 ? 1 : 0
+        }
+        capture.auAudioUnit.parameterTree?.parameter(
+            withAddress: NativeMicrophoneMatrixAudioUnit.gainAddress(0)
+        )?.value = 1
+        capture.auAudioUnit.parameterTree?.parameter(
+            withAddress: NativeMicrophoneMatrixAudioUnit.filterAddress(0)
+        )?.value = 1
+        try engine.enableManualRenderingMode(
+            .offline, format: format, maximumFrameCount: 512
+        )
+        try engine.start()
+        defer { engine.stop() }
+        let input = try makeInput(format)
+        player.scheduleBuffer(input, at: nil, options: [.loops])
+        player.play()
+        XCTAssertGreaterThan(try renderPeak(engine), 0.01,
+                             "Four-output capture must accept mixer input")
+    }
+
     func testRackOnlyMIDITracksAreCountedThroughRackAggregate() {
         let rackID = UUID()
         var tracks: [Track] = []
