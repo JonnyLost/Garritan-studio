@@ -29,6 +29,20 @@ Keyboard shortcuts: **Option-Command-P** opens Picture; **Option-Command-H** add
 
 **Validation status**: Swift build and tests are run by the Picture macOS CI workflow. Manual video-frame presentation, multiple-monitor floating windows, and live orchestral playback remain a separate Mac acceptance step.
 
+## Milestone 3 — Native picture guide audio and media acceptance
+
+- Movie sound is always muted in AVPlayer. This prevents two unsynchronized copies of dialogue.
+- A **dedicated Studio Picture Guide mixer bus** connects to Studio's existing main mixer before the audio engine starts. It bypasses orchestral inserts, stage reverb and track solo/mute; existing audio routing is unchanged.
+- Guide audio is **off by default**. When enabled, AVFoundation lazily extracts the movie's audio into an M4A scratch file; playback is file-backed through AVAudioPlayerNode and the Studio mixer, not an uncompressed in-memory copy.
+- The Picture lower workspace provides a reference-audio on/off switch, volume, availability and extraction status; Studio's Mixer also contains a named **PICTURE / Guide Audio** channel with its own fader/mute.
+- Guide audio schedules from the source file frame corresponding to the film offset, reschedules after a timeline seek or loop wrap, and remains silent before/after the picture.
+- Project save persists the reference-audio preference and optional linear gain. Older Picture documents decode with a 65% default when no gain field exists.
+- During standard Studio score/stem exports, the guide bus is automatically suppressed, preventing dialogue leakage. Picture audio must never become a track stem accidentally.
+- Audio extraction is cancellable; changing pictures or closing the project releases temporary media and bookmark access.
+- The new CI tests create a tiny H.264 movie on macOS and verify real video decoding and timecode alignment, alongside source-frame scheduling, offsets, looping, bounds and older project compatibility.
+
+**Runtime acceptance still required on a Mac:** listening to dialogue beside a large orchestrated session, checking long-video seek/loop sync, audio-device changes, and making a final actual file export to confirm guide exclusion. The generated-video CI test validates decoding, not live monitor latency.
+
 ## Persistence and media safety
 
 - Only a video **reference** (path plus security-scoped bookmark when available), project offset, frame-rate mode, source timecode, audio/overlay preferences and hit-point data are encoded in the DAW project.
