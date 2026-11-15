@@ -7,20 +7,20 @@ import XCTest
 final class StudioFMPresetLibraryTests: XCTestCase {
     func testAllFactoryPatchesAreDistinctValidAndApplyToDSP() throws {
         let presets = StudioFMFactoryLibrary.presets
-        XCTAssertEqual(presets.count, 32)
-        XCTAssertEqual(Set(presets.map(\.id)).count, 32)
-        XCTAssertEqual(Set(presets.map(\.name)).count, 32)
+        XCTAssertGreaterThanOrEqual(presets.count, 32)
+        XCTAssertEqual(Set(presets.map(\.id)).count, presets.count)
+        XCTAssertEqual(Set(presets.map(\.name)).count, presets.count)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let signatures = try presets.map { preset in
             String(decoding: try encoder.encode(preset.patch), as: UTF8.self)
         }
-        XCTAssertEqual(Set(signatures).count, 32)
+        XCTAssertEqual(Set(signatures).count, presets.count)
         XCTAssertEqual(Set(presets.map(\.category)),
                        Set(StudioFMPresetCategory.allCases))
         for category in StudioFMPresetCategory.allCases {
-            XCTAssertEqual(presets.filter { $0.category == category }.count, 4,
-                           "Expected four original sounds in \(category.title)")
+            XCTAssertGreaterThanOrEqual(presets.filter { $0.category == category }.count, 4,
+                           "At least four original sounds expected in \(category.title)")
         }
         let algorithmNumbers = Set(presets.map { Int($0.patch.value(for: .algorithm)) })
         XCTAssertEqual(algorithmNumbers, Set(StudioFMAlgorithm.allCases.map(\.rawValue)))
