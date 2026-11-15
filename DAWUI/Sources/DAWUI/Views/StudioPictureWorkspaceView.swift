@@ -130,6 +130,23 @@ public struct StudioPictureWorkspaceView: View {
                 ZStack {
                     Color.black
                     StudioPicturePlayerSurface(player: session.player)
+                    if picture.showTimecodeOverlay {
+                        VStack {
+                            Spacer()
+                            HStack {
+                                Spacer()
+                                Text(picture.timecode(atMovieFrame: currentFrame(picture)))
+                                    .font(.system(.caption, design: .monospaced).weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(.black.opacity(0.7))
+                                    .cornerRadius(4)
+                            }
+                        }
+                        .padding(12)
+                        .allowsHitTesting(false)
+                    }
                     if session.isLoading {
                         ProgressView("Loading picture…")
                             .padding()
@@ -243,6 +260,11 @@ public struct StudioPictureWorkspaceView: View {
                     Toggle("Play guide audio", isOn: Binding(
                         get: { picture.referenceAudioEnabled },
                         set: { enabled in updatePicture { $0.referenceAudioEnabled = enabled } }
+                    ))
+                    .font(.caption)
+                    Toggle("Timecode overlay", isOn: Binding(
+                        get: { picture.showTimecodeOverlay },
+                        set: { enabled in updatePicture { $0.showTimecodeOverlay = enabled } }
                     ))
                     .font(.caption)
 
