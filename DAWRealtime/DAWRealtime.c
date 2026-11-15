@@ -310,3 +310,66 @@ void daw_spsc_reset_quiescent(DAWSPSCCursor *cursor) {
     atomic_store_explicit(&cursor->tail, 0, memory_order_relaxed);
     atomic_store_explicit(&cursor->head, 0, memory_order_release);
 }
+
+struct DAWMIDIClock {
+    _Atomic(uint64_t) generation;
+    _Atomic(int64_t) startFrame;
+    _Atomic(int64_t) endFrame;
+    _Atomic(uint64_t) positionGeneration;
+    // Accessed only by the single audio/tap producer.
+    uint64_t renderGeneration;
+    int64_t engineOrigin;
+};
+DAWMIDIClock *daw_midi_clock_create(void) {
+    DAWMIDIClock *clock = calloc(1, sizeof(*clock));
+    if (!clock) return NULL;
+    atomic_init(&clock->generation, 1);
+    atomic_init(&clock->startFrame, 0);
+    atomic_init(&clock->endFrame, 0);
+    atomic_init(&clock->positionGeneration, 0);
+    return clock;
+}
+void daw_midi_clock_destroy(DAWMIDIClock *clock) { free(clock); }
+void daw_midi_clock_cancel(DAWMIDIClock *clock) {
+    uint64_t g = atomic_load_explicit(&clock->generation, memory_order_relaxed);
+    atomic_store_explicit(&clock->generation, (g & 1u) ? g + 2 : g + 1, memory_order_release);
+}
+uint64_t daw_midi_clock_begin(DAWMIDIClock *clock, int64_t startFrame) {
+    daw_midi_clock_cancel(clock);
+    atomic_store_explicit(&clock->startFrame, startFrame, memory_order_relaxed);
+    return atomic_fetch_add_explicit(&clock->generation, 1, memory_order_release) + 1;
+}
+bool daw_midi_clock_is_current(const DAWMIDIClock *clock, uint64_t generation) {
+    return !(generation & 1u) && generation == atomic_load_explicit(&clock->generation, memory_order_acquire);
+}
+bool daw_midi_clock_observe(DAWMIDIClock *clock, int64_t engineFrame, uint32_t frames) {
+    uint64_t g = atomic_load_explicit(&clock->generation, memory_order_acquire);
+    if (g & 1u) return false;
+    int64_t base = atomic_load_explicit(&clock->startFrame, memory_order_relaxed);
+    if (!daw_midi_clock_is_current(clock, g)) return false;
+    if (clock->renderGeneration != g) {
+        clock->engineOrigin = engineFrame;
+        clock->renderGeneration = g;
+    }
+    // A backwards device timestamp is a discontinuity, not a huge unsigned delta.
+    // Control-side reconfiguration cancels the session; ignore invalid windows.
+    if (engineFrame < clock->engineOrigin) return false;
+    uint64_t delta = (uint64_t)engineFrame - (uint64_t)clock->engineOrigin;
+    if (delta > INT64_MAX || base > INT64_MAX - (int64_t)delta) return false;
+    int64_t start = base + (int64_t)delta;
+    int64_t end = start > INT64_MAX - frames ? INT64_MAX : start + frames;
+    atomic_store_explicit(&clock->endFrame, end, memory_order_relaxed);
+    atomic_store_explicit(&clock->positionGeneration, g, memory_order_release);
+    return daw_midi_clock_is_current(clock, g);
+}
+bool daw_midi_clock_snapshot(const DAWMIDIClock *clock, uint64_t *generation, int64_t *endFrame) {
+    uint64_t g = atomic_load_explicit(&clock->generation, memory_order_acquire);
+    if (g & 1u) return false;
+    uint64_t pg = atomic_load_explicit(&clock->positionGeneration, memory_order_acquire);
+    int64_t frame = pg == g ? atomic_load_explicit(&clock->endFrame, memory_order_relaxed)
+                            : atomic_load_explicit(&clock->startFrame, memory_order_relaxed);
+    if (!daw_midi_clock_is_current(clock, g)) return false;
+    *generation = g;
+    *endFrame = frame;
+    return true;
+}

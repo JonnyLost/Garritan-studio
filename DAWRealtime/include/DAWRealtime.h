@@ -81,6 +81,19 @@ void daw_spsc_reset_quiescent(DAWSPSCCursor *cursor);
 
 
 
+// Single-render-writer, coalescing MIDI clock mailbox. Control calls are
+// serialized. No reset of render-owned anchor state is needed on discontinuity.
+// Even generations are active; odd generations are cancelled. No MIDI packets
+// are stored here, so coalescing cannot drop a note-off under queue pressure.
+typedef struct DAWMIDIClock DAWMIDIClock;
+DAWMIDIClock *daw_midi_clock_create(void);
+void daw_midi_clock_destroy(DAWMIDIClock *clock);
+uint64_t daw_midi_clock_begin(DAWMIDIClock *clock, int64_t startFrame);
+void daw_midi_clock_cancel(DAWMIDIClock *clock);
+bool daw_midi_clock_observe(DAWMIDIClock *clock, int64_t engineFrame, uint32_t frames);
+bool daw_midi_clock_snapshot(const DAWMIDIClock *clock, uint64_t *generation, int64_t *endFrame);
+bool daw_midi_clock_is_current(const DAWMIDIClock *clock, uint64_t generation);
+
 #ifdef __cplusplus
 }
 #endif
