@@ -91,7 +91,7 @@ final class StudioSynthFactoryFinalAuditTests: XCTestCase {
             XCTAssertTrue((2...4).contains(preset.patch.layers.count),
                           preset.name)
             XCTAssertEqual(preset.patch.layers.count,
-                           preset.patch.layers.filter(\\.enabled).count,
+                           preset.patch.layers.filter(\.enabled).count,
                            preset.name)
             XCTAssertTrue(preset.patch.validate(), preset.name)
         }
