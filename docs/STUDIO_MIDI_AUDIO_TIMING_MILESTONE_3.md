@@ -311,3 +311,10 @@ A backwards render sample timestamp now fails closed with a single atomic CAS
 that cannot overwrite a newer control generation. The worker cleans old voices;
 a new Play re-anchors instead of reusing the invalid device clock. Added a
 deterministic regression for this path (23 total new Swift tests in 3B).
+
+The transport toolbar's Return to Zero (and Go to End) now uses pause/locate/play
+while running, instead of moving only the UI playhead over an unchanged score.
+A regression verifies its synchronous pause/rebuild sequence and that locating
+a stopped transport never starts it (24 new Swift tests total in 3B). The first
+macOS test build exposed a Swift type-check timeout in the dense fixture; an
+explicitly typed loop retains the same 70,000 packets and assertions.

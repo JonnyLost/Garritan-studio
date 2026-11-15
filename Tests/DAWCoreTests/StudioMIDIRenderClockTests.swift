@@ -64,4 +64,25 @@ final class StudioMIDIRenderClockTests: XCTestCase {
         transport.stop()
         XCTAssertFalse(playing)
     }
+    @MainActor
+    func testToolbarReturnToZeroRebuildsPlaybackButDoesNotStartStoppedTransport() {
+        let transport = TransportState()
+        var playStarts: [Double] = []
+        var pauses = 0
+        let subscription = transport.transportEventSubject.sink { event in
+            if case .play = event { playStarts.append(transport.playbackStartBeat) }
+            if case .pause = event { pauses += 1 }
+        }
+        defer { subscription.cancel(); transport.stop() }
+        transport.setPlayheadBeats(8)
+        transport.play()
+        transport.returnToZero()
+        XCTAssertEqual(playStarts, [8, 0])
+        XCTAssertEqual(pauses, 1)
+        XCTAssertEqual(transport.playbackStartBeat, 0)
+        transport.stop()
+        transport.returnToZero()
+        XCTAssertFalse(transport.isPlaying)
+        XCTAssertEqual(playStarts, [8, 0])
+    }
 }

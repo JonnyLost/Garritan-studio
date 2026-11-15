@@ -484,12 +484,19 @@ public final class TransportState: ObservableObject {
     }
     
     public func returnToZero() {
+        // This toolbar action is a real seek, not only a UI playhead edit.
+        let resume = isPlaying
+        if resume { pause() }
         setPlayheadPosition(TimePosition(sampleRate: sampleRate))
         transportEventSubject.send(.returnToZero)
+        if resume { play() }
     }
     
     public func goToEnd(projectDuration: TimePosition) {
+        let resume = isPlaying
+        if resume { pause() }
         setPlayheadPosition(projectDuration)
+        if resume { play() }
     }
     
     // MARK: - Playhead Control
