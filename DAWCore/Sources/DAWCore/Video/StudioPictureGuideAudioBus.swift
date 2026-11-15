@@ -95,9 +95,13 @@ public final class StudioPictureGuideAudioBus {
             return
         }
 
-        let offset = projectSeconds - pictureStartSeconds
-        guard offset >= 0, offset < Double(file.length) / file.processingFormat.sampleRate
-        else {
+        // The file may be 44.1 or 48 kHz. Schedule in its decoded source
+        // frame domain; the mixer converts to Studio's device sample rate.
+        guard let segment = StudioPictureGuideScheduler.segment(
+            projectSeconds: projectSeconds,
+            pictureStartSeconds: pictureStartSeconds,
+            fileSampleRate: file.processingFormat.sampleRate,
+            totalFrames: file.length) else {
             if scheduled {
                 player.stop()
                 scheduled = false
@@ -105,23 +109,11 @@ public final class StudioPictureGuideAudioBus {
             }
             return
         }
-
-        // The source's actual decoded sample rate determines its frame number;
-        // the mixer handles conversion to the current Mac output sample rate.
-        let frame = AVAudioFramePosition((offset * file.processingFormat.sampleRate).rounded(.down))
-        guard frame >= 0, frame < file.length else { return }
-        // Scheduling is authoritative even before the first render callback:
-        // AVAudioPlayerNode.isPlaying can lag behind a just-submitted segment.
         if scheduled && !discontinuity { return }
 
         player.stop()
-        let remaining = file.length - frame
-        let frameCount = AVAudioFrameCount(min(remaining, Int64(UInt32.max)))
-        guard frameCount > 0 else {
-            scheduled = false
-            scheduledStartFrame = nil
-            return
-        }
+        let frame = segment.startingFrame
+        let frameCount = AVAudioFrameCount(segment.frameCount)
         player.scheduleSegment(file, startingFrame: frame,
                                frameCount: frameCount, at: nil)
         player.play()
