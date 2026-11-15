@@ -101,10 +101,9 @@ public final class AudioEngine: ObservableObject {
     private let microphoneMasterMixer = AVAudioMixerNode()
     private var microphoneChannelMixers: [UUID: AVAudioMixerNode] = [:]
 
-    // V-Rack is a separate audio graph, not part of the track input mixers.
-    // Keep its recording sum at unity and control only a dedicated dry
-    // monitor return. Microphone audition may receive this sum as ONE
-    // aggregate source without changing existing rack recording taps.
+    // V-Rack is a separate audio graph. Keep its recording sum at unity.
+    // Switch its output exclusively between the direct monitor and a
+    // four-capsule matrix during mic audition; never duplicate its dry mix.
     private weak var vRackSourceMixer: AVAudioMixerNode?
     private let vRackDirectMonitorMixer = AVAudioMixerNode()
     private var vRackDirectMonitorAttached = false
@@ -136,8 +135,8 @@ public final class AudioEngine: ObservableObject {
         usesSharedMicrophoneMatrix = enabled
     }
     /// Register the V-Rack sum as an independent audio source. PlaybackEngine
-    /// calls this after attaching its sum mixer, with graph edits stopped.
-    /// Re-registration is idempotent while the monitor edge is intact.
+    /// calls this when its sum mixer is first attached. Topology changes run
+    /// with the engine stopped and are idempotent when edges are intact.
     public func registerVRackSumMixer(_ sumMixer: AVAudioMixerNode) {
         let existing = engine.outputConnectionPoints(for: sumMixer, outputBus: 0)
         let needsConnection = !vRackDirectMonitorAttached ||
@@ -1029,63 +1028,43 @@ public final class AudioEngine: ObservableObject {
         routedMicrophones.removeAll()
     }
 
-    /// A V-Rack's many MIDI channels are already mixed by PlaybackEngine.
-    /// This is an explicitly labeled aggregate source at the center of the
-    /// stage. Per-instrument rack positioning is not yet represented here.
+    /// V-Rack instruments already share one summed audio feed. Route that
+    /// feed through exactly one four-capsule Audio Unit, even when the
+    /// independent track sources use the legacy per-pair engine.
+    ///
+    /// Crucially, the V-Rack sum has only ONE downstream destination at
+    /// any given time: normal dry monitoring OR this microphone AU. The
+    /// former muted fan-out looked connected on macOS but rendered silence
+    /// through its microphone branch. Switching the edge while stopped
+    /// prevents silent captures and accidental doubled direct audio.
     private func attachVRackMicrophoneCaptures(format: AVAudioFormat) {
         guard vRackSourceMixer != nil, hasVRackCaptureSource else { return }
-        if usesSharedMicrophoneMatrix {
-            let capture = AVAudioUnitEffect(
-                audioComponentDescription: NativeMicrophoneMatrixAudioUnit.componentDescription
-            )
-            engine.attach(capture)
-            for (index, mic) in routedMicrophones.enumerated() {
-                guard let bus = microphoneChannelMixers[mic.id] else { continue }
-                engine.connect(capture, to: bus,
-                               fromBus: AVAudioNodeBus(index),
-                               toBus: bus.nextAvailableInputBus, format: format)
-                vRackMicrophoneRoutes.append(VRackMicrophoneRoute(
-                    microphoneID: mic.id, capture: capture, microphoneBus: index
-                ))
-            }
-        } else {
-            for mic in routedMicrophones {
-                guard let bus = microphoneChannelMixers[mic.id] else { continue }
-                let capture = AVAudioUnitEffect(
-                    audioComponentDescription: NativeMicrophoneSpillAudioUnit.componentDescription
-                )
-                engine.attach(capture)
-                engine.connect(capture, to: bus, format: format)
-                vRackMicrophoneRoutes.append(VRackMicrophoneRoute(
-                    microphoneID: mic.id, capture: capture, microphoneBus: 0
-                ))
-            }
+        NativeMicrophoneMatrixAudioUnit.registerIfNeeded()
+        let capture = AVAudioUnitEffect(
+            audioComponentDescription: NativeMicrophoneMatrixAudioUnit.componentDescription
+        )
+        engine.attach(capture)
+        for (index, mic) in routedMicrophones.enumerated() {
+            guard let bus = microphoneChannelMixers[mic.id] else { continue }
+            engine.connect(capture, to: bus,
+                           fromBus: AVAudioNodeBus(index),
+                           toBus: bus.nextAvailableInputBus, format: format)
+            vRackMicrophoneRoutes.append(VRackMicrophoneRoute(
+                microphoneID: mic.id, capture: capture, microphoneBus: index
+            ))
         }
         connectVRackMicrophoneFanout(format: format)
     }
 
-    /// A stopped-engine source split to an always-connected dry monitor plus
-    /// the explicit mic capture. Never turn down the V-Rack sum mixer itself:
-    /// doing that would silence the inputs to both mics and recording taps.
+    /// Exclusive V-Rack monitor/capture switching; caller has stopped the
+    /// engine before topology changes. The source mixer remains at unity
+    /// for recording and input metering taps regardless of destination.
     private func connectVRackMicrophoneFanout(format: AVAudioFormat) {
         guard let source = vRackSourceMixer else { return }
-        var destinations = [AVAudioConnectionPoint(
-            node: vRackDirectMonitorMixer, bus: 0
-        )]
-        var seen = Set<ObjectIdentifier>()
-        for route in vRackMicrophoneRoutes {
-            if seen.insert(ObjectIdentifier(route.capture)).inserted {
-                destinations.append(AVAudioConnectionPoint(
-                    node: route.capture, bus: 0
-                ))
-            }
-        }
-        if destinations.count == 1 {
-            // AVAudioEngine's connection-point fanout API requires two or
-            // more destinations. Normal rack monitoring has only one.
-            engine.connect(source, to: vRackDirectMonitorMixer, format: format)
+        if let capture = vRackMicrophoneRoutes.first?.capture {
+            engine.connect(source, to: capture, format: format)
         } else {
-            engine.connect(source, to: destinations, fromBus: 0, format: format)
+            engine.connect(source, to: vRackDirectMonitorMixer, format: format)
         }
     }
 
@@ -1105,15 +1084,11 @@ public final class AudioEngine: ObservableObject {
             let cutoff = max(1_800, min(17_000,
                 17_000 - 75 * capture.distanceMeters))
             let alpha = Float(1 - exp(-2 * Double.pi * cutoff / sampleRate))
-            let gainAddress = usesSharedMicrophoneMatrix
-                ? NativeMicrophoneMatrixAudioUnit.gainAddress(route.microphoneBus)
-                : NativeMicrophoneSpillAudioUnit.signedGainAddress
-            let delayAddress = usesSharedMicrophoneMatrix
-                ? NativeMicrophoneMatrixAudioUnit.delayAddress(route.microphoneBus)
-                : NativeMicrophoneSpillAudioUnit.delayMillisecondsAddress
-            let filterAddress = usesSharedMicrophoneMatrix
-                ? NativeMicrophoneMatrixAudioUnit.filterAddress(route.microphoneBus)
-                : NativeMicrophoneSpillAudioUnit.lowPassAlphaAddress
+            // V-Rack aggregate always has its own four-output matrix AU,
+            // regardless of the selected independent track capture backend.
+            let gainAddress = NativeMicrophoneMatrixAudioUnit.gainAddress(route.microphoneBus)
+            let delayAddress = NativeMicrophoneMatrixAudioUnit.delayAddress(route.microphoneBus)
+            let filterAddress = NativeMicrophoneMatrixAudioUnit.filterAddress(route.microphoneBus)
             let parameters = route.capture.auAudioUnit.parameterTree
             parameters?.parameter(withAddress: gainAddress)?.value =
                 gain.isFinite ? min(2, max(-2, gain)) : 0
