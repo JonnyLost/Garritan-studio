@@ -89,12 +89,11 @@ final class StudioMIDIWorkerScheduler {
     private(set) var generation: UInt64 = 0
     private(set) var cursor = 0
     private var events: [StudioMIDIFrameEvent] = []
-    private var active: Set<Voice> = []
+    private var active: [Channel: Set<UInt8>] = [:]
     private var channels: [Channel] = []
     private var targetFrame: Int64 = .min
     private var removed: Set<StudioMIDIDestination> = []
     private struct Channel: Hashable { let destination: StudioMIDIDestination; let channel: UInt8 }
-    private struct Voice: Hashable { let channel: Channel; let pitch: UInt8 }
     var isInstalled: Bool { generation != 0 }
 
     func install(_ events: [StudioMIDIFrameEvent], generation: UInt64) {
@@ -130,9 +129,9 @@ final class StudioMIDIWorkerScheduler {
                 count += 1
                 continue
             }
-            let key = Voice(channel: Channel(destination: event.destination, channel: event.channel), pitch: event.data1)
-            if event.isNoteOff { active.remove(key) }
-            else if event.status & 0xF0 == 0x90 { active.insert(key) }
+            let key = Channel(destination: event.destination, channel: event.channel)
+            if event.isNoteOff { active[key]?.remove(event.data1) }
+            else if event.status & 0xF0 == 0x90 { active[key, default: []].insert(event.data1) }
             deliver(event)
             cursor += 1
             count += 1
@@ -147,11 +146,10 @@ final class StudioMIDIWorkerScheduler {
     }
 
     private func cleanup(_ channel: Channel, deliver: (StudioMIDIFrameEvent) -> Void) {
-        for pitch in active.filter({ $0.channel == channel }).map(\.pitch).sorted() {
+        for pitch in (active.removeValue(forKey: channel) ?? []).sorted() {
             deliver(StudioMIDIFrameEvent(frame: 0, destination: channel.destination,
                 status: 0x80 | channel.channel, data1: pitch, data2: 0))
         }
-        active = active.filter { $0.channel != channel }
         for cc in [UInt8(64), 66, 123] {
             deliver(StudioMIDIFrameEvent(frame: 0, destination: channel.destination,
                 status: 0xB0 | channel.channel, data1: cc, data2: 0))
