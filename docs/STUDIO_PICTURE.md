@@ -43,6 +43,20 @@ Keyboard shortcuts: **Option-Command-P** opens Picture; **Option-Command-H** add
 
 **Runtime acceptance still required on a Mac:** listening to dialogue beside a large orchestrated session, checking long-video seek/loop sync, audio-device changes, and making a final actual file export to confirm guide exclusion. The generated-video CI test validates decoding, not live monitor latency.
 
+## Milestone 4 — Export a scored QuickTime movie
+
+- From **Studio Picture → Export Scored Movie…**, choose a **Stereo Mix WAV** produced by Studio's existing audio export, then choose a destination MOV.
+- Studio uses native AVFoundation composition/export to copy the film video and add a newly rendered music track. The original movie and WAV are not modified.
+- The saved **picture offset** is respected: if picture frame zero sits at project second 12, export uses the WAV from second 12 onward. The scored MOV starts at movie time zero.
+- **Include original dialogue and production audio** is a separate, explicit delivery option (on by default) with an independent level. Turn it off to deliver a music-only scored picture.
+- Output duration remains the movie duration; shorter score mixes end in silence rather than stretching the picture. The output is a QuickTime MOV, not yet an H.264 codec-selector interface.
+- The exporter works from a previously bounced WAV, not the live audio graph. There is no change to AudioEngine's realtime render path or orchestral session state.
+- All rendering is written to a unique staging file, then moved into the destination only on successful completion; source media are never overwritten and existing output names are rejected.
+- The UI supports progress and cancellation; incomplete staging files are removed.
+- Automated acceptance creates a small H.264 video and Studio-style WAV and verifies a scored MOV contains one video and one audio track, plus duration and output overwrite protections.
+
+**Current boundaries:** This milestone uses the existing Studio stereo mix bounce rather than an all-in-one render. Original embedded movie audio is included only when selected, and burn-in timecode, custom codecs, and frame-level quality assurance are planned separately. Mac playback and end-to-end listening remain required.
+
 ## Persistence and media safety
 
 - Only a video **reference** (path plus security-scoped bookmark when available), project offset, frame-rate mode, source timecode, audio/overlay preferences and hit-point data are encoded in the DAW project.
