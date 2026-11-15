@@ -242,6 +242,94 @@ public enum StudioAnalogFactoryLibrary {
             .lfoDepth: 0.64, .amplitudeAttack: 1.1,
             .amplitudeRelease: 3.9, .modulationTarget: 1,
             .modulationDepth: 0.35
+        ]),
+// Expanded Studio-owned factory bank: cinematic, performance and sound design.
+        make("bass.obsidian-engine", "Obsidian Engine", .bass,
+             "Dark pulsing saw bass with a snappy resonant contour.", [
+            .oscillator1Wave: 2, .oscillator2Wave: 3, .oscillator1Level: 0.65,
+            .oscillator2Level: 0.25, .pulseWidth: 0.35,
+            .filterCutoff: 410, .resonance: 0.47, .filterEnvelopeDepth: 0.72,
+            .filterDecay: 0.24, .filterSustain: 0.12,
+            .amplitudeDecay: 0.32, .amplitudeSustain: 0.68,
+            .masterGain: 0.38
+        ]),
+        make("bass.round-trip", "Round Trip", .bass,
+             "Soft sine-and-triangle bass for sparse arrangements.", [
+            .oscillator1Wave: 0, .oscillator2Wave: 1, .oscillator1Level: 0.72,
+            .oscillator2Level: 0.21, .oscillator2Semitones: -12,
+            .filterCutoff: 2200, .resonance: 0.07,
+            .amplitudeAttack: 0.012, .amplitudeRelease: 0.36,
+            .masterGain: 0.44
+        ]),
+        make("lead.copper-sky", "Copper Sky", .lead,
+             "Open dual-saw lead with expressive wheel vibrato.", [
+            .oscillator1Wave: 2, .oscillator2Wave: 2,
+            .oscillator1Level: 0.48, .oscillator2Level: 0.39,
+            .filterCutoff: 4700, .resonance: 0.22,
+            .amplitudeAttack: 0.025, .amplitudeRelease: 0.32,
+            .lfoRate: 5.2, .lfoDepth: 0.08, .modulationDepth: 0.6,
+            .masterGain: 0.36
+        ]),
+        make("lead.narrow-beam", "Narrow Beam", .lead,
+             "Nasal pulse lead with velocity-sensitive filter articulation.", [
+            .oscillator1Wave: 3, .oscillator2Wave: 1,
+            .pulseWidth: 0.19, .oscillator1Level: 0.67,
+            .oscillator2Level: 0.2, .filterCutoff: 1900,
+            .resonance: 0.43, .velocityToFilter: 0.8,
+            .amplitudeRelease: 0.16, .masterGain: 0.4
+        ]),
+        make("pad.midnight-strings", "Midnight Strings", .pad,
+             "Slow warm ensemble-like saw swell for cinematic harmony.", [
+            .oscillator1Wave: 2, .oscillator2Wave: 1,
+            .oscillator1Level: 0.44, .oscillator2Level: 0.34,
+            .filterCutoff: 1650, .resonance: 0.11,
+            .amplitudeAttack: 1.8, .amplitudeRelease: 4.2,
+            .lfoRate: 0.32, .lfoDepth: 0.22, .masterGain: 0.33
+        ]),
+        make("pad.northern-lights", "Northern Lights", .pad,
+             "Bright, slowly opening harmonic pad with subtle motion.", [
+            .oscillator1Wave: 1, .oscillator2Wave: 2,
+            .oscillator1Level: 0.49, .oscillator2Level: 0.3,
+            .filterCutoff: 3600, .filterEnvelopeDepth: 0.38,
+            .filterAttack: 2.2, .filterRelease: 3.6,
+            .amplitudeAttack: 1.4, .amplitudeRelease: 4.8,
+            .lfoRate: 0.21, .lfoDepth: 0.29, .masterGain: 0.34
+        ]),
+        make("keys.soft-circuit", "Soft Circuit", .keys,
+             "Muted analog keyboard with a short filter pluck.", [
+            .oscillator1Wave: 1, .oscillator2Wave: 3,
+            .oscillator1Level: 0.59, .oscillator2Level: 0.19,
+            .filterCutoff: 1250, .resonance: 0.19,
+            .filterEnvelopeDepth: 0.54, .filterDecay: 0.3,
+            .amplitudeDecay: 0.55, .amplitudeSustain: 0.27,
+            .amplitudeRelease: 0.44, .masterGain: 0.43
+        ]),
+        make("pluck.clockwork", "Clockwork", .pluck,
+             "Short metallic pulse pluck for sequenced patterns.", [
+            .oscillator1Wave: 3, .oscillator2Wave: 2,
+            .pulseWidth: 0.25, .oscillator1Level: 0.52,
+            .oscillator2Level: 0.27, .filterCutoff: 2900,
+            .resonance: 0.55, .filterEnvelopeDepth: 0.8,
+            .filterDecay: 0.1, .filterSustain: 0.01,
+            .amplitudeDecay: 0.13, .amplitudeSustain: 0.02,
+            .amplitudeRelease: 0.12, .masterGain: 0.35
+        ]),
+        make("texture.signal-fog", "Signal Fog", .texture,
+             "Airy noise-and-triangle drone with slow filter motion.", [
+            .oscillator1Wave: 1, .oscillator1Level: 0.34,
+            .oscillator2Level: 0.11, .noiseLevel: 0.31,
+            .filterCutoff: 850, .resonance: 0.3,
+            .amplitudeAttack: 2.6, .amplitudeRelease: 5.5,
+            .lfoRate: 0.14, .lfoDepth: 0.68, .masterGain: 0.29
+        ]),
+        make("texture.ghost-machine", "Ghost Machine", .texture,
+             "Hollow evolving pulse texture with long release.", [
+            .oscillator1Wave: 3, .oscillator2Wave: 1,
+            .pulseWidth: 0.69, .oscillator1Level: 0.41,
+            .oscillator2Level: 0.26, .filterCutoff: 1100,
+            .resonance: 0.38, .amplitudeAttack: 1.1,
+            .amplitudeRelease: 6.0, .lfoRate: 0.43,
+            .lfoDepth: 0.52, .masterGain: 0.31
         ])
     ]
 }
