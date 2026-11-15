@@ -148,11 +148,13 @@ public struct StudioPictureProject: Codable, Equatable, Sendable {
     /// SMPTE label assigned to the first movie frame (e.g. 01:00:00:00).
     public var startTimecodeFrame: Int64
     public var referenceAudioEnabled: Bool
+    public var showTimecodeOverlay: Bool
     public var hitPoints: [StudioPictureHitPoint]
 
     public init(url: URL, durationSeconds: Double, frameRate: StudioPictureFrameRate,
                 securityBookmark: Data? = nil, timelineStartSeconds: Double = 0,
                 startTimecodeFrame: Int64? = nil, referenceAudioEnabled: Bool = false,
+                showTimecodeOverlay: Bool = true,
                 hitPoints: [StudioPictureHitPoint] = []) {
         self.filename = url.lastPathComponent
         self.filePath = url.path
@@ -163,6 +165,7 @@ public struct StudioPictureProject: Codable, Equatable, Sendable {
         self.startTimecodeFrame = startTimecodeFrame ??
             (StudioPictureTimecode.frameNumber("01:00:00:00", rate: frameRate) ?? 0)
         self.referenceAudioEnabled = referenceAudioEnabled
+        self.showTimecodeOverlay = showTimecodeOverlay
         self.hitPoints = hitPoints
     }
 
