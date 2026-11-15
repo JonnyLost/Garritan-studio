@@ -21,6 +21,7 @@ public final class StudioPictureSession: ObservableObject {
     private weak var transport: TransportState?
     private weak var guideAudioBus: StudioPictureGuideAudioBus?
     private var guideAudioTask: Task<Void, Never>?
+    private var guidePreparationID = UUID()
     private var guideExporter: AVAssetExportSession?
     private var guideAudioURL: URL?
     private var subscriptions = Set<AnyCancellable>()
@@ -107,8 +108,7 @@ public final class StudioPictureSession: ObservableObject {
             if changedGuide && document?.referenceAudioEnabled == true {
                 requestGuideAudioIfNeeded()
             } else if changedGuide && document?.referenceAudioEnabled != true {
-                guideAudioTask?.cancel()
-                guideExporter?.cancelExport()
+                cancelGuidePreparation()
             }
             if changedAlignment || changedGuide, let transport {
                 synchronize(at: Double(transport.playheadPosition.samples) /
@@ -302,20 +302,25 @@ public final class StudioPictureSession: ObservableObject {
         isPreparingGuideAudio = true
         guideAudioMessage = "Preparing reference dialogue…"
         let generation = loadGeneration
+        let preparationID = UUID()
+        guidePreparationID = preparationID
         guideAudioTask = Task { [weak self] in
             guard let self else { return }
-            await self.prepareGuideAudio(asset: asset, generation: generation)
+            await self.prepareGuideAudio(
+                asset: asset, generation: generation, preparationID: preparationID)
         }
     }
 
-    private func prepareGuideAudio(asset: AVAsset, generation: UUID) async {
+    private func prepareGuideAudio(asset: AVAsset, generation: UUID,
+                                   preparationID: UUID) async {
         let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("studio-picture-guide-\(UUID().uuidString)")
             .appendingPathExtension("m4a")
         defer {
-            if generation == loadGeneration {
+            if generation == loadGeneration && preparationID == guidePreparationID {
                 guideAudioTask = nil
                 isPreparingGuideAudio = false
+                guideExporter = nil
             }
         }
 
@@ -342,7 +347,8 @@ public final class StudioPictureSession: ObservableObject {
                 }
             }
 
-            guard generation == loadGeneration, !Task.isCancelled,
+            guard generation == loadGeneration,
+                  preparationID == guidePreparationID, !Task.isCancelled,
                   currentDocument?.referenceAudioEnabled == true,
                   let guideAudioBus else {
                 try? FileManager.default.removeItem(at: tempURL)
@@ -359,17 +365,24 @@ public final class StudioPictureSession: ObservableObject {
             }
         } catch {
             try? FileManager.default.removeItem(at: tempURL)
-            guard generation == loadGeneration, !Task.isCancelled else { return }
+            guard generation == loadGeneration,
+                  preparationID == guidePreparationID, !Task.isCancelled else { return }
             guideAudioMessage = "Could not route movie audio through Studio: \(error.localizedDescription)"
         }
-        if generation == loadGeneration { guideExporter = nil }
     }
 
-    private func clearGuideAudio() {
+    private func cancelGuidePreparation() {
+        guidePreparationID = UUID()
         guideAudioTask?.cancel()
         guideAudioTask = nil
         guideExporter?.cancelExport()
         guideExporter = nil
+        isPreparingGuideAudio = false
+        guideAudioMessage = nil
+    }
+
+    private func clearGuideAudio() {
+        cancelGuidePreparation()
         guideAudioBus?.clear()
         if let guideAudioURL {
             try? FileManager.default.removeItem(at: guideAudioURL)
