@@ -22,7 +22,7 @@ if [[ -e "$checkout" ]]; then
 fi
 
 cd "$repo"
-git fetch origin "$candidate"
+git fetch origin
 git worktree add --detach "$checkout" "origin/$candidate"
 cd "$checkout"
 echo "Alpha 1 exact source commit: $(git rev-parse HEAD)"
