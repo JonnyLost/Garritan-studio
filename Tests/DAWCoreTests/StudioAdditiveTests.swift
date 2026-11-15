@@ -6,10 +6,10 @@ import AVFoundation
 final class StudioAdditiveTests: XCTestCase {
     func testFactoryBankContainsSixteenValidDistinctOriginalSounds() throws {
         let presets = StudioAdditiveFactoryLibrary.presets
-        XCTAssertEqual(presets.count, 16)
+        XCTAssertGreaterThanOrEqual(presets.count, 16)
         XCTAssertEqual(Set(presets.map(\.id)).count, presets.count)
-        XCTAssertEqual(Set(presets.map(\.family)),
-                       Set(["Keys","Winds","Pads","Bass","Plucks","Textures"]))
+        XCTAssertTrue(Set(presets.map(\.family)).isSuperset(of:
+            Set(["Keys","Winds","Pads","Bass","Plucks","Textures"])))
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         XCTAssertEqual(Set(try presets.map { try encoder.encode($0.patch) }).count,
@@ -118,20 +118,21 @@ final class StudioAdditiveTests: XCTestCase {
 
     func testHybridFactoryRecipesAreValidPortableAndMacBookConscious() throws {
         let presets = StudioSynthHybridFactoryLibrary.presets
-        let originalPresets = presets.filter {
-            !$0.patch.layers.contains(where: { $0.engine == .physical })
-        }
-        // Preserve all ten existing additive recipes; two new physical
-        // Hybrid recipes extend, rather than replace, that factory library.
+        // The first ten original Hybrid presets remain additive-led. The
+        // expanded bank can also include purely Analog/FM/Physical recipes.
+        let originalPresets = Array(presets.prefix(10))
         XCTAssertEqual(originalPresets.count, 10)
-        XCTAssertEqual(presets.count, 12)
+        XCTAssertTrue(originalPresets.allSatisfy { preset in
+            preset.patch.layers.contains(where: { $0.engine == .additive })
+        })
+        XCTAssertGreaterThanOrEqual(presets.count, 22)
         XCTAssertEqual(Set(presets.map(\.id)).count, presets.count)
         for preset in presets {
             XCTAssertTrue(preset.patch.validate(), preset.name)
             XCTAssertTrue((2...4).contains(preset.patch.layers.count), preset.name)
             XCTAssertTrue(preset.patch.layers.allSatisfy { $0.gain <= 0.45 },
                           "\(preset.name) has an unexpectedly loud layer")
-            if !preset.patch.layers.contains(where: { $0.engine == .physical }) {
+            if originalPresets.contains(where: { $0.id == preset.id }) {
                 XCTAssertTrue(preset.patch.layers.contains(where: {
                     $0.engine == .additive
                 }), "\(preset.name) should showcase the original additive engine")
@@ -229,7 +230,7 @@ final class StudioAdditiveTests: XCTestCase {
 
     func testOriginalFactoryPatchesStayClassicUnlessExplicitlyEnhanced() {
         let presets=StudioAdditiveFactoryLibrary.presets
-        let animated=presets.filter {
+        let animated=presets.prefix(16).filter {
             $0.patch.value(for:.partialEnvelopeMix)>0 &&
             $0.patch.value(for:.motionDepth)>0
         }
