@@ -1,21 +1,22 @@
-name: Studio Sound Designer — Offline Interpreter
+name: Studio Sound Designer — Native Sound Creation
 
 on:
   push:
     branches:
       - feature/studio-sound-designer-m1-interpreter
+      - feature/studio-sound-designer-m2-patch-generation
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: studio-sound-designer-m1
+  group: studio-sound-designer-${{ github.ref_name }}
   cancel-in-progress: true
 
 jobs:
   syntax:
-    name: Native description interpreter syntax
+    name: Native Sound Designer syntax
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,7 +24,9 @@ jobs:
         run: |
           swiftc -frontend -parse \
             DAWCore/Sources/DAWCore/Audio/StudioSoundDescriptionInterpreter.swift \
-            Tests/DAWCoreTests/StudioSoundDescriptionInterpreterTests.swift
+            DAWCore/Sources/DAWCore/Audio/StudioSoundPatchGenerator.swift \
+            Tests/DAWCoreTests/StudioSoundDescriptionInterpreterTests.swift \
+            Tests/DAWCoreTests/StudioSoundPatchGeneratorTests.swift
 
   macos:
     name: macOS full build, tests and release
@@ -37,6 +40,8 @@ jobs:
         run: swift build
       - name: Run Sound Designer interpreter tests
         run: swift test --filter StudioSoundDescriptionInterpreterTests
+      - name: Run Sound Designer patch generation tests
+        run: swift test --filter StudioSoundPatchGeneratorTests
       - name: Run full DAW and native instrument regression suite
         run: swift test --parallel
       - name: Build optimized Studio
