@@ -39,7 +39,13 @@ public enum StudioPictureCueVisualPlanner {
         let requestedLead = picture.streamerLeadSeconds ?? 3
         let leadSeconds = requestedLead.isFinite ? min(10, max(0.5, requestedLead)) : 3
         let leadFrames = max(1, Int64((leadSeconds * rate).rounded()))
-        let currentFrame = Int64(framePosition.rounded(.down))
+        // Seconds-to-frames uses a fractional NTSC rate. The exact nominal
+        // boundary may round to 299.99999999999994 instead of 300; snap only
+        // tiny floating-point error so SMPTE punches land on the correct frame.
+        let nearestFrame = framePosition.rounded()
+        let stablePosition = abs(framePosition - nearestFrame) < 1e-7
+            ? nearestFrame : framePosition
+        let currentFrame = Int64(stablePosition.rounded(.down))
         let upcoming = picture.hitPoints
             .filter { $0.frame >= currentFrame && $0.frame < picture.totalFrames }
             .min { lhs, rhs in
