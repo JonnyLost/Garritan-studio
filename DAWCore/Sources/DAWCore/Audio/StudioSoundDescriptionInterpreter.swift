@@ -231,7 +231,6 @@ public enum StudioSoundDescriptionInterpreter {
             .replacingOccurrences(of: ";", with: " clausebreak ")
             .replacingOccurrences(of: ".", with: " clausebreak ")
             .replacingOccurrences(of: ":", with: " clausebreak ")
-            .replacingOccurrences(of: "\n", with: " clausebreak ")
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }
     }
