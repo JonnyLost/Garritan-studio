@@ -136,10 +136,12 @@ final class StudioPictureScoringWorkflowTests: XCTestCase {
         var json = try XCTUnwrap(
             JSONSerialization.jsonObject(with: data) as? [String: Any])
         json.removeValue(forKey: "mediaRevisionID")
+        json.removeValue(forKey: "referenceAudioVolume")
         json.removeValue(forKey: "showTimecodeOverlay")
         let legacy = try JSONSerialization.data(withJSONObject: json)
         let restored = try JSONDecoder().decode(StudioPictureProject.self, from: legacy)
         XCTAssertNil(restored.mediaRevisionID)
+        XCTAssertNil(restored.referenceAudioVolume)
         XCTAssertNil(restored.showTimecodeOverlay)
     }
 }
