@@ -40,11 +40,13 @@ public final class StudioPictureSession: ObservableObject {
         self.transport = transport
 
         transport.$isPlaying
-            .sink { [weak self, weak transport] _ in
+            // @Published emits the incoming value *before* isPlaying updates.
+            // Use that incoming value so Pause freezes video immediately.
+            .sink { [weak self, weak transport] playing in
                 guard let self, let transport else { return }
                 self.synchronize(at: Double(transport.playheadPosition.samples) /
                                  max(1, transport.sampleRate),
-                                 playing: transport.isPlaying, force: true)
+                                 playing: playing, force: true)
             }
             .store(in: &subscriptions)
         transport.$playheadPosition
