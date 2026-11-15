@@ -1,3 +1,4 @@
+import AppKit
 import AVFoundation
 import Combine
 import DAWCore
@@ -11,6 +12,8 @@ public final class StudioPictureSession: ObservableObject {
     @Published public private(set) var isLoading = false
     @Published public private(set) var errorMessage: String?
     @Published public private(set) var isReady = false
+    /// Eight low-resolution, lazily decoded filmstrip images (never full frames).
+    @Published public private(set) var thumbnails: [Int: NSImage] = [:]
 
     private weak var transport: TransportState?
     private var subscriptions = Set<AnyCancellable>()
@@ -20,6 +23,8 @@ public final class StudioPictureSession: ObservableObject {
     private var accessedURL: URL?
     private var isAccessingResource = false
     private var lastCorrection = Date.distantPast
+    private var thumbnailTask: Task<Void, Never>?
+    private var thumbnailGenerator: AVAssetImageGenerator?
 
     public init() {
         player.isMuted = true
@@ -55,6 +60,7 @@ public final class StudioPictureSession: ObservableObject {
         transport = nil
         player.pause()
         mediaTask?.cancel()
+        cancelThumbnails()
         releaseSecurityScopedURL()
     }
 
@@ -71,6 +77,7 @@ public final class StudioPictureSession: ObservableObject {
         guard changedSource else { return }
 
         mediaTask?.cancel()
+        cancelThumbnails()
         loadGeneration = UUID()
         let generation = loadGeneration
         player.pause()
@@ -148,6 +155,43 @@ public final class StudioPictureSession: ObservableObject {
         }
     }
 
+    /// Only decode previews while a scoring viewport is actually displayed.
+    public func requestThumbnails() {
+        guard isReady, thumbnails.isEmpty, thumbnailTask == nil,
+              let asset = player.currentItem?.asset,
+              let document = currentDocument else { return }
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 160, height: 90)
+        generator.requestedTimeToleranceBefore = CMTime(seconds: 1, preferredTimescale: 600)
+        generator.requestedTimeToleranceAfter = CMTime(seconds: 1, preferredTimescale: 600)
+        thumbnailGenerator = generator
+        let generation = loadGeneration
+        thumbnailTask = Task { [weak self] in
+            for index in 0..<8 {
+                guard !Task.isCancelled else { break }
+                let seconds = document.durationSeconds * (Double(index) + 0.5) / 8
+                let time = CMTime(seconds: seconds, preferredTimescale: 600)
+                if let frame = try? await generator.image(at: time).image {
+                    guard let self, self.loadGeneration == generation else { break }
+                    self.thumbnails[index] = NSImage(
+                        cgImage: frame, size: NSSize(width: frame.width, height: frame.height))
+                }
+            }
+            if let self, self.loadGeneration == generation {
+                self.thumbnailTask = nil
+            }
+        }
+    }
+
+    private func cancelThumbnails() {
+        thumbnailTask?.cancel()
+        thumbnailTask = nil
+        thumbnailGenerator?.cancelAllCGImageGeneration()
+        thumbnailGenerator = nil
+        thumbnails.removeAll()
+    }
+
     /// Synchronize from the DAW sample clock. A coarse seek is used only for
     /// material video drift; repeated frame seeks would hurt decode performance.
     private func synchronize(at projectSeconds: Double, playing: Bool, force: Bool = false) {
@@ -163,8 +207,8 @@ public final class StudioPictureSession: ObservableObject {
         let tolerance = 1 / document.frameRate.framesPerSecond
         let actual = player.currentTime().seconds
         let deviation = actual.isFinite ? abs(actual - wanted) : Double.infinity
-        let canCorrect = force || Date().timeIntervalSince(lastCorrection) > 0.4
-        let threshold = playing ? max(0.12, 4 * tolerance) : tolerance
+        let canCorrect = force || Date().timeIntervalSince(lastCorrection) > 0.75
+        let threshold = playing ? max(0.06, 1.5 * tolerance) : tolerance
 
         if canCorrect && (force || deviation > threshold) {
             lastCorrection = Date()
