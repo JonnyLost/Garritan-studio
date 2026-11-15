@@ -53,6 +53,28 @@ final class StudioPictureScoringWorkflowTests: XCTestCase {
         XCTAssertEqual(drifting.targetSeconds, 10, accuracy: 0.00001)
     }
 
+    func testDriftBudgetScalesWithActualFilmFrameRate() {
+        // 60 fps: three frames (~50 ms) must be corrected once the throttle
+        // permits it; an identical 50 ms was below the old fixed 100 ms gate.
+        let picture = movie(rate: .fps60)
+        let small = StudioPictureSyncPlanner.plan(
+            picture: picture, projectSeconds: 10,
+            movieSeconds: 10 - 1.0 / 60.0,
+            isPlaying: true, secondsSinceCorrection: 1)
+        XCTAssertFalse(small.shouldSeek)
+        let threeFrames = StudioPictureSyncPlanner.plan(
+            picture: picture, projectSeconds: 10,
+            movieSeconds: 10 - 3.2 / 60.0,
+            isPlaying: true, secondsSinceCorrection: 1)
+        XCTAssertTrue(threeFrames.shouldSeek)
+
+        let recent = StudioPictureSyncPlanner.plan(
+            picture: picture, projectSeconds: 10,
+            movieSeconds: 9.5, isPlaying: true,
+            secondsSinceCorrection: 0.1)
+        XCTAssertFalse(recent.shouldSeek)
+    }
+
     func testLoopWrapSeeksImmediatelyAndBoundsEndOfMovie() {
         let picture = movie()
         XCTAssertTrue(StudioPictureSyncPlanner.isDiscontinuity(
