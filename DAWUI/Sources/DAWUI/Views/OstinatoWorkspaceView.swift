@@ -102,6 +102,15 @@ public struct OstinatoWorkspaceView: View {
             .textFieldStyle(.roundedBorder)
             .frame(maxWidth: 190)
 
+            Menu {
+                ForEach(OstinatoVariation.allCases, id: \.self) { kind in
+                    Button(kind.rawValue) { createVariation(pattern, kind: kind) }
+                }
+            } label: {
+                Label("Variation", systemImage: "shuffle")
+            }
+            .help("Create a new editable pattern without changing the original")
+
             Text(pattern.mode == .rhythmic ? "Rhythmic lanes" : "Pitched lanes")
                 .font(.caption)
                 .foregroundStyle(palette.secondaryText)
@@ -323,6 +332,14 @@ public struct OstinatoWorkspaceView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+    }
+
+    private func createVariation(_ pattern: OstinatoPattern, kind: OstinatoVariation) {
+        auditioner.stop()
+        let variation = OstinatoVariationEngine.makeVariation(of: pattern, kind: kind)
+        viewModel.saveOstinatoPattern(variation)
+        selectedPatternID = variation.id
+        statusMessage = "Created \(kind.rawValue) variation; original preserved."
     }
 
     private func createPattern(_ mode: OstinatoMode) {
