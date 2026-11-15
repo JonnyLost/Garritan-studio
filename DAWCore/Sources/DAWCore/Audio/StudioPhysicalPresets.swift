@@ -79,6 +79,76 @@ public enum StudioPhysicalFactoryLibrary {
         make("Short Tom", family: "Percussion", description: "Short damped membrane impulse.",
              model: .membrane, controls: [
                 (.percussionHardness, 0.74), (.percussionDecay, 0.13),
-                (.percussionInharmonicity, 0.9), (.percussionAttackNoise, 0.55)])
+                (.percussionInharmonicity, 0.9), (.percussionAttackNoise, 0.55)]),
+// Additional modeled-instrument recipes. Acoustic realism requires
+        // a later listening pass; these are expressive DSP starting points.
+        make("Fingerstyle Cedar", family: "Strings",
+             description: "Gentle warm pluck with a woody resonant body.",
+             model: .plucked, controls: [
+                (.brightness,0.31),(.damping,0.76),(.pickHardness,0.17),
+                (.bodyMix,0.59),(.bodySize,0.72),(.release,0.49)]),
+        make("Mandolin Spark", family: "Strings",
+             description: "Small bright picked string with a quick decay.",
+             model: .plucked, controls: [
+                (.brightness,0.9),(.damping,0.47),(.pickHardness,0.84),
+                (.stiffness,0.44),(.bodySize,0.21),(.release,0.2)]),
+        make("Felt Upright", family: "Keys",
+             description: "Soft struck-string keyboard with muted upper harmonics.",
+             model: .struck, controls: [
+                (.brightness,0.27),(.damping,0.64),(.pickHardness,0.13),
+                (.bodyMix,0.68),(.bodySize,0.73),(.release,0.76)]),
+        make("Hard Hammer", family: "Keys",
+             description: "Bright percussive struck string with a firm transient.",
+             model: .struck, controls: [
+                (.brightness,0.81),(.damping,0.78),(.pickHardness,0.92),
+                (.stiffness,0.37),(.bodyMix,0.36),(.release,0.58)]),
+        make("Soft Bow", family: "Strings",
+             description: "Gentle bowed-string prototype with low bow noise.",
+             model: .bowed, controls: [
+                (.bowPressure,0.39),(.bowSpeed,0.58),(.bowNoise,0.035),
+                (.brightness,0.39),(.bodyMix,0.55),(.release,0.82)]),
+        make("Rosin Edge", family: "Strings",
+             description: "Energetic bow texture with pronounced attack friction.",
+             model: .bowed, controls: [
+                (.bowPressure,0.86),(.bowSpeed,0.81),(.bowNoise,0.24),
+                (.brightness,0.72),(.bodyMix,0.3),(.release,0.36)]),
+        make("Dark Clarinet", family: "Winds",
+             description: "Rounded low-register reed-model starting point.",
+             model: .reed, controls: [
+                (.breath,0.68),(.reedStiffness,0.72),(.bore,0.3),
+                (.airNoise,0.045),(.brightness,0.28),(.release,0.33)]),
+        make("Bright Oboe", family: "Winds",
+             description: "Narrow and bright reed-like modeled solo voice.",
+             model: .reed, controls: [
+                (.breath,0.82),(.reedStiffness,0.86),(.bore,0.62),
+                (.airNoise,0.12),(.brightness,0.83),(.release,0.19)]),
+        make("Mellow Horn", family: "Brass",
+             description: "Warm lip-reed horn prototype with a rounded bore.",
+             model: .brass, controls: [
+                (.breath,0.69),(.reedStiffness,0.43),(.bore,0.8),
+                (.airNoise,0.035),(.brightness,0.36),(.release,0.45)]),
+        make("Bright Fanfare", family: "Brass",
+             description: "Brilliant modeled brass attack for short phrases.",
+             model: .brass, controls: [
+                (.breath,0.97),(.reedStiffness,0.68),(.bore,0.55),
+                (.airNoise,0.1),(.brightness,0.9),(.release,0.17)]),
+        make("Woodblock Bloom", family: "Percussion",
+             description: "Dry resonant bar with a short wooden transient.",
+             model: .mallet, controls: [
+                (.percussionHardness,0.68),(.percussionDecay,0.22),
+                (.percussionInharmonicity,0.78),
+                (.percussionAttackNoise,0.23),(.bodyMix,0.42)]),
+        make("Temple Gong", family: "Percussion",
+             description: "Dark metallic resonance with a long decaying tail.",
+             model: .bell, controls: [
+                (.percussionHardness,0.42),(.percussionDecay,0.98),
+                (.percussionInharmonicity,0.57),
+                (.percussionAttackNoise,0.12),(.position,0.72)]),
+        make("Low Timpani", family: "Percussion",
+             description: "Soft membrane attack with a sustained tuned resonance.",
+             model: .membrane, controls: [
+                (.percussionHardness,0.28),(.percussionDecay,0.84),
+                (.percussionInharmonicity,0.94),
+                (.percussionAttackNoise,0.21),(.bodySize,0.84)])
     ]
 }
