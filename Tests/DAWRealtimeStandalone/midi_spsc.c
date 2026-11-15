@@ -49,7 +49,8 @@ static void testClock(void) {
     assert(g == second && frame == 96000);
     assert(daw_midi_clock_observe(clockState, 1024, 64));
     assert(!daw_midi_clock_observe(clockState, 0, 64));
-    assert(daw_midi_clock_snapshot(clockState, &g, &frame) && frame == 96064);
+    assert(!daw_midi_clock_snapshot(clockState, &g, &frame));
+    daw_midi_clock_begin(clockState, 96000);
 
     atomic_init(&clockDone, false);
     pthread_t render;

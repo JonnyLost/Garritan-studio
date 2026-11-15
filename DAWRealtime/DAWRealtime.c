@@ -319,6 +319,7 @@ struct DAWMIDIClock {
     // Accessed only by the single audio/tap producer.
     uint64_t renderGeneration;
     int64_t engineOrigin;
+    int64_t lastEngineFrame;
 };
 DAWMIDIClock *daw_midi_clock_create(void) {
     DAWMIDIClock *clock = calloc(1, sizeof(*clock));
@@ -349,8 +350,18 @@ bool daw_midi_clock_observe(DAWMIDIClock *clock, int64_t engineFrame, uint32_t f
     if (!daw_midi_clock_is_current(clock, g)) return false;
     if (clock->renderGeneration != g) {
         clock->engineOrigin = engineFrame;
+        clock->lastEngineFrame = engineFrame;
         clock->renderGeneration = g;
     }
+    if (engineFrame < clock->lastEngineFrame) {
+        // One nonblocking CAS invalidates this generation without overwriting
+        // a control-side replacement. The worker will release old voices.
+        uint64_t expected = g;
+        atomic_compare_exchange_strong_explicit(&clock->generation, &expected, g + 1,
+                                               memory_order_acq_rel, memory_order_acquire);
+        return false;
+    }
+    clock->lastEngineFrame = engineFrame;
     // A backwards device timestamp is a discontinuity, not a huge unsigned delta.
     // Control-side reconfiguration cancels the session; ignore invalid windows.
     if (engineFrame < clock->engineOrigin) return false;

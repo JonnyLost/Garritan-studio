@@ -306,3 +306,8 @@ seek or loop rebuild. Added manual AVAudioEngine rendering coverage of the
 actual silent clock source (progress, silence, cancellation, re-anchor), plus
 synchronous seek/stop/restart transport-subject coverage. These are additional
 to the 20 worker/compiler tests; UI hardware behavior remains an acceptance item.
+
+A backwards render sample timestamp now fails closed with a single atomic CAS
+that cannot overwrite a newer control generation. The worker cleans old voices;
+a new Play re-anchors instead of reusing the invalid device clock. Added a
+deterministic regression for this path (23 total new Swift tests in 3B).

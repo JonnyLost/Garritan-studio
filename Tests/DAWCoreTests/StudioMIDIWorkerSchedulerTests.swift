@@ -201,6 +201,18 @@ final class StudioMIDIWorkerSchedulerTests: XCTestCase {
         XCTAssertEqual(slow.map(\.frame), fast.map(\.frame))
         XCTAssertEqual(slow.map(\.frame), [48000, 96000])
     }
+    func testBackwardsDeviceTimestampCancelsWithoutReusingOldAnchor() {
+        let clock = StudioMIDITransportClock()
+        let g = clock.begin(at: 0)
+        clock.observe(engineFrame: 1000, frames: 128)
+        clock.observe(engineFrame: 1256, frames: 128)
+        XCTAssertFalse(clock.observe(engineFrame: 1100, frames: 128))
+        XCTAssertFalse(clock.isCurrent(g))
+        XCTAssertNil(clock.snapshot())
+        clock.begin(at: 24000)
+        XCTAssertTrue(clock.observe(engineFrame: 0, frames: 128))
+        XCTAssertEqual(clock.snapshot()?.endFrame, 24128)
+    }
     func testNoAllNotesOffDuringNormalUninterruptedPlayback() {
         let scheduler = StudioMIDIWorkerScheduler()
         scheduler.install([event(0), event(100, 0x80)], generation: 2)
