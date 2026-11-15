@@ -34,6 +34,8 @@ if [[ -e "$checkout" ]]; then
   checkout_sha="$(git -C "$checkout" rev-parse HEAD 2>/dev/null)" ||
     die "The folder $checkout exists but is not a valid Git checkout."
   checkout_root="$(git -C "$checkout" rev-parse --show-toplevel 2>/dev/null)"
+  git -C "$repo" worktree list --porcelain | grep -Fxq "worktree $checkout" ||
+    die "The existing Alpha 1 directory is not an owned worktree of Studio."
   [[ "$checkout_root" == "$checkout" && "$checkout_sha" == "$frozen_sha" ]] ||
     die "The existing Alpha 1 folder has different files/commit. It was not modified."
   [[ -z "$(git -C "$checkout" status --porcelain)" ]] ||
