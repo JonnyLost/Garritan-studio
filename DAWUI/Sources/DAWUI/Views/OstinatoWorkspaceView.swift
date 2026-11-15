@@ -10,6 +10,7 @@ public struct OstinatoWorkspaceView: View {
     @StateObject private var auditioner = OstinatoAuditioner()
     @State private var selectedPatternID: UUID?
     @State private var statusMessage: String?
+    @State private var evolutionRepetitions = 8
 
     public init(viewModel: ProjectViewModel) {
         self.viewModel = viewModel
@@ -28,6 +29,15 @@ public struct OstinatoWorkspaceView: View {
               let track = viewModel.project.track(withID: id),
               track.type == .instrument || track.type == .midi else { return nil }
         return track
+    }
+
+    private var orchestralTracks: [Track] {
+        viewModel.project.tracks.filter { $0.type == .instrument || $0.type == .midi }
+    }
+
+    private func routeCount(for pattern: OstinatoPattern) -> Int {
+        pattern.resolvedRoutes(validTracks: Set(orchestralTracks.map(\.id)),
+                               fallback: selectedMIDITarget?.id).count
     }
 
     public var body: some View {
@@ -98,6 +108,26 @@ public struct OstinatoWorkspaceView: View {
             .textFieldStyle(.roundedBorder)
             .frame(maxWidth: 190)
 
+            Menu {
+                ForEach(OstinatoVariation.allCases, id: \.self) { kind in
+                    Button(kind.rawValue) { createVariation(pattern, kind: kind) }
+                }
+            } label: {
+                Label("Variation", systemImage: "shuffle")
+            }
+            .help("Create a new editable pattern without changing the original")
+
+            Menu {
+                Stepper("Repetitions: \(evolutionRepetitions)", value: $evolutionRepetitions, in: 2...32)
+                Divider()
+                ForEach(OstinatoEvolutionShape.allCases, id: \.self) { shape in
+                    Button(shape.rawValue) { createEvolution(pattern, shape: shape) }
+                }
+            } label: {
+                Label("Evolve", systemImage: "waveform.path")
+            }
+            .help("Generate an editable sequence of evolving MIDI clips on assigned tracks")
+
             Text(pattern.mode == .rhythmic ? "Rhythmic lanes" : "Pitched lanes")
                 .font(.caption)
                 .foregroundStyle(palette.secondaryText)
@@ -164,9 +194,9 @@ public struct OstinatoWorkspaceView: View {
             ScrollView([.horizontal, .vertical]) {
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 3) {
-                        Text("LANE / PITCH")
+                        Text("LANE / PITCH / ROUTING")
                             .font(.system(size: 10, weight: .semibold))
-                            .frame(width: 170, alignment: .leading)
+                            .frame(width: 365, alignment: .leading)
                         ForEach(0..<pattern.stepCount, id: \.self) { step in
                             Text(step % pattern.stepsPerBeat == 0 ?
                                  "\(step / pattern.stepsPerBeat + 1)" : "·")
@@ -198,8 +228,34 @@ public struct OstinatoWorkspaceView: View {
                                 }
                                 .controlSize(.small)
                                 .fixedSize()
+
+                                Toggle("M", isOn: Binding(
+                                    get: { selectedPattern?.lanes.first(where: { $0.id == lane.id })?.isMuted == true },
+                                    set: { value in editLane(lane.id) { $0.isMuted = value } }
+                                ))
+                                .toggleStyle(.checkbox)
+                                .help("Mute lane")
+
+                                Toggle("S", isOn: Binding(
+                                    get: { selectedPattern?.lanes.first(where: { $0.id == lane.id })?.isSolo == true },
+                                    set: { value in editLane(lane.id) { $0.isSolo = value } }
+                                ))
+                                .toggleStyle(.checkbox)
+                                .help("Solo lane")
+
+                                Picker("Track", selection: Binding(
+                                    get: { lane.targetTrackID },
+                                    set: { value in editLane(lane.id) { $0.targetTrackID = value } }
+                                )) {
+                                    Text("Selected track").tag(Optional<TrackID>.none)
+                                    ForEach(orchestralTracks) { track in
+                                        Text(track.name).tag(Optional(track.id))
+                                    }
+                                }
+                                .labelsHidden()
+                                .frame(width: 115)
                             }
-                            .frame(width: 170, alignment: .leading)
+                            .frame(width: 365, alignment: .leading)
 
                             ForEach(0..<pattern.stepCount, id: \.self) { index in
                                 let note = lane.steps.first(where: { $0.index == index })
@@ -246,7 +302,7 @@ public struct OstinatoWorkspaceView: View {
                     Text("Destination: \(track.name)")
                         .font(.caption.weight(.medium))
                 } else {
-                    Text("Select a MIDI or instrument track to apply")
+                    Text("Assign lanes to tracks, or select a MIDI/instrument track")
                         .font(.caption.weight(.medium))
                 }
                 Text(statusMessage ?? "Pattern source remains editable after MIDI placement")
@@ -255,15 +311,18 @@ public struct OstinatoWorkspaceView: View {
             }
 
             Spacer()
+            Text("\(routeCount(for: pattern)) routed lane(s)")
+                .font(.caption2)
+                .foregroundStyle(palette.secondaryText)
             Toggle("Loop", isOn: $auditioner.loops)
                 .toggleStyle(.checkbox)
                 .fixedSize()
             Button {
                 if auditioner.isAuditioning {
                     auditioner.stop()
-                } else if let track = selectedMIDITarget,
-                          !viewModel.transportState.isPlaying {
-                    auditioner.start(pattern: pattern, track: track.id,
+                } else if !viewModel.transportState.isPlaying && routeCount(for: pattern) > 0 {
+                    auditioner.start(pattern: pattern, fallback: selectedMIDITarget?.id,
+                        validTracks: Set(orchestralTracks.map(\.id)),
                         tempo: viewModel.transportState.tempo.bpm,
                         engine: viewModel.playbackEngine)
                 }
@@ -272,26 +331,56 @@ public struct OstinatoWorkspaceView: View {
                       systemImage: auditioner.isAuditioning ? "stop.fill" : "play.fill")
             }
             .disabled(!auditioner.isAuditioning &&
-                (selectedMIDITarget == nil || pattern.midiEvents().isEmpty ||
+                (routeCount(for: pattern) == 0 ||
                  viewModel.transportState.isPlaying))
             Text("\(pattern.midiEvents().count) notes · \(pattern.durationInBeats.formatted()) beats")
                 .font(.caption)
                 .foregroundStyle(palette.secondaryText)
 
             Button {
-                guard let track = selectedMIDITarget else { return }
+                auditioner.stop()
                 let beat = max(0, viewModel.transportState.playheadBeats)
-                let success = viewModel.applyOstinatoPattern(pattern, to: track.id, atBeat: beat)
-                statusMessage = success ? "MIDI clip created at beat \(beat.formatted())." :
+                let count = viewModel.applyRoutedOstinatoPattern(pattern, fallbackTrackID: selectedMIDITarget?.id, atBeat: beat)
+                statusMessage = count > 0 ? "Created \(count) MIDI clips at beat \(beat.formatted())." :
                                           "No notes could be placed."
             } label: {
-                Label("Apply MIDI at Playhead", systemImage: "square.and.arrow.down")
+                Label("Apply to Tracks", systemImage: "square.and.arrow.down")
             }
             .buttonStyle(.borderedProminent)
-            .disabled(selectedMIDITarget == nil || pattern.midiEvents().isEmpty)
+            .disabled(routeCount(for: pattern) == 0 || viewModel.transportState.isPlaying)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+    }
+
+    private func createEvolution(_ pattern: OstinatoPattern, shape: OstinatoEvolutionShape) {
+        auditioner.stop()
+        guard routeCount(for: pattern) > 0 else {
+            statusMessage = "Assign a lane destination or select an instrument track."
+            return
+        }
+        guard !viewModel.transportState.isPlaying else {
+            statusMessage = "Stop transport before generating evolution clips."
+            return
+        }
+        let sequence = OstinatoEvolutionEngine.sequence(
+            from: pattern, repetitions: evolutionRepetitions, shape: shape)
+        let startBeat = max(0, viewModel.transportState.playheadBeats)
+        var clips = 0
+        for (index, evolved) in sequence.enumerated() {
+            let beat = startBeat + Double(index) * pattern.durationInBeats
+            clips += viewModel.applyRoutedOstinatoPattern(
+                evolved, fallbackTrackID: selectedMIDITarget?.id, atBeat: beat)
+        }
+        statusMessage = "Created \(clips) evolving MIDI clips across \(sequence.count) repetitions."
+    }
+
+    private func createVariation(_ pattern: OstinatoPattern, kind: OstinatoVariation) {
+        auditioner.stop()
+        let variation = OstinatoVariationEngine.makeVariation(of: pattern, kind: kind)
+        viewModel.saveOstinatoPattern(variation)
+        selectedPatternID = variation.id
+        statusMessage = "Created \(kind.rawValue) variation; original preserved."
     }
 
     private func createPattern(_ mode: OstinatoMode) {

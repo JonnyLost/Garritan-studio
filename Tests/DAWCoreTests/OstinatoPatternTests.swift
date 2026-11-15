@@ -152,4 +152,123 @@ final class OstinatoPatternTests: XCTestCase {
         XCTAssertEqual(try encoder.encode(original), before)
     }
 
+    func testSoloAndMuteDetermineRoutedOrchestralLanes() {
+        let strings = TrackID()
+        let brass = TrackID()
+        var pattern = OstinatoPattern.starter(mode: .melodic)
+        pattern.lanes[0].targetTrackID = strings
+        pattern.lanes[1].targetTrackID = brass
+        pattern.lanes[0].isSolo = true
+        XCTAssertEqual(pattern.routedMIDIEvents().count, 1)
+        XCTAssertEqual(pattern.routedMIDIEvents().first?.lane.targetTrackID, strings)
+        pattern.lanes[0].isMuted = true
+        XCTAssertTrue(pattern.midiEvents().isEmpty)
+    }
+
+    func testOrchestralRoutingSurvivesProjectPatternSerialization() throws {
+        var pattern = OstinatoPattern.starter(mode: .rhythmic)
+        let destination = TrackID()
+        pattern.lanes[0].targetTrackID = destination
+        pattern.lanes[0].isMuted = true
+        pattern.lanes[1].isSolo = true
+        let decoded = try JSONDecoder().decode(OstinatoPattern.self,
+            from: JSONEncoder().encode(pattern))
+        XCTAssertEqual(decoded.lanes[0].targetTrackID, destination)
+        XCTAssertEqual(decoded.lanes[0].isMuted, true)
+        XCTAssertEqual(decoded.lanes[1].isSolo, true)
+    }
+
+    func testVariationsPreserveOriginalAndOrchestralRouting() throws {
+        var original = OstinatoPattern.starter(mode: .melodic)
+        let track = TrackID()
+        original.lanes[0].targetTrackID = track
+        original.lanes[1].isMuted = true
+        let snapshot = try JSONEncoder().encode(original)
+        for kind in OstinatoVariation.allCases {
+            let variation = OstinatoVariationEngine.makeVariation(of: original, kind: kind)
+            XCTAssertNotEqual(variation.id, original.id)
+            XCTAssertEqual(variation.lanes[0].targetTrackID, track)
+            XCTAssertEqual(variation.lanes[1].isMuted, true)
+            XCTAssertEqual(variation.stepCount, original.stepCount)
+            XCTAssertTrue(variation.lanes.allSatisfy { lane in
+                lane.steps.allSatisfy { $0.index >= 0 && $0.index < variation.stepCount }
+            })
+        }
+        XCTAssertEqual(try JSONEncoder().encode(original), snapshot)
+    }
+
+    func testSeededVariationsAreReproducible() {
+        let source = OstinatoPattern.starter(mode: .rhythmic)
+        for kind in [OstinatoVariation.sparse, .dense] {
+            let first = OstinatoVariationEngine.makeVariation(of: source, kind: kind, seed: 42)
+            let second = OstinatoVariationEngine.makeVariation(of: source, kind: kind, seed: 42)
+            XCTAssertEqual(first.lanes.map { $0.steps }, second.lanes.map { $0.steps })
+        }
+    }
+
+    func testVariationOctavesClampToMIDIAndReverseStaysOnGrid() {
+        var source = OstinatoPattern.starter(mode: .melodic)
+        source.lanes[0].changePitch(to: 125)
+        let raised = OstinatoVariationEngine.makeVariation(of: source, kind: .octaveUp)
+        XCTAssertEqual(raised.lanes[0].pitch, 127)
+        let reversed = OstinatoVariationEngine.makeVariation(of: source, kind: .reverse)
+        XCTAssertEqual(reversed.lanes[0].steps.first?.index,
+                       source.stepCount - 1 - (source.lanes[0].steps.last?.index ?? 0))
+    }
+
+    func testEvolutionProducesBoundedEditableRepetitions() {
+        let source = OstinatoPattern.starter(mode: .melodic)
+        for shape in OstinatoEvolutionShape.allCases {
+            let result = OstinatoEvolutionEngine.sequence(
+                from: source, repetitions: 8, shape: shape, seed: 25)
+            XCTAssertEqual(result.count, 8)
+            XCTAssertEqual(Set(result.map(\.id)).count, 8)
+            XCTAssertTrue(result.allSatisfy { $0.stepCount == source.stepCount })
+            XCTAssertTrue(result.allSatisfy { pattern in
+                pattern.lanes.allSatisfy { lane in
+                    lane.steps.allSatisfy { $0.index >= 0 && $0.index < pattern.stepCount }
+                }
+            })
+        }
+    }
+
+    func testEvolutionIsDeterministicAndPreservesSourceRouting() {
+        var source = OstinatoPattern.starter(mode: .rhythmic)
+        let destination = TrackID()
+        source.lanes[0].targetTrackID = destination
+        let first = OstinatoEvolutionEngine.sequence(
+            from: source, repetitions: 6, shape: .wave, seed: 99)
+        let second = OstinatoEvolutionEngine.sequence(
+            from: source, repetitions: 6, shape: .wave, seed: 99)
+        XCTAssertEqual(first.map { $0.lanes.map(\.steps) },
+                       second.map { $0.lanes.map(\.steps) })
+        XCTAssertTrue(first.allSatisfy { $0.lanes[0].targetTrackID == destination })
+        XCTAssertEqual(source.lanes[0].targetTrackID, destination)
+        XCTAssertEqual(source.name, "New Rhythm")
+    }
+
+    func testResolvedRoutesRespectSoloAndExplicitDestinations() {
+        let strings = TrackID()
+        let brass = TrackID()
+        var pattern = OstinatoPattern.starter(mode: .melodic)
+        pattern.lanes[0].targetTrackID = strings
+        pattern.lanes[1].targetTrackID = brass
+        pattern.lanes[2].isMuted = true
+        let routes = pattern.resolvedRoutes(validTracks: [strings, brass], fallback: nil)
+        XCTAssertEqual(routes.count, 2)
+        XCTAssertEqual(routes[0].track, strings)
+        XCTAssertEqual(routes[1].track, brass)
+        pattern.lanes[1].isSolo = true
+        XCTAssertEqual(pattern.resolvedRoutes(validTracks: [strings, brass], fallback: nil).count, 1)
+    }
+
+    func testResolvedRoutesRejectMissingTracksWithoutFallback() {
+        let missing = TrackID()
+        let fallback = TrackID()
+        var pattern = OstinatoPattern.starter(mode: .rhythmic)
+        pattern.lanes[0].targetTrackID = missing
+        XCTAssertTrue(pattern.resolvedRoutes(validTracks: [], fallback: fallback).isEmpty)
+        XCTAssertEqual(pattern.resolvedRoutes(validTracks: [fallback], fallback: fallback).count, 3)
+    }
+
 }

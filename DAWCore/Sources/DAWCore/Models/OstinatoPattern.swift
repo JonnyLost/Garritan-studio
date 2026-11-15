@@ -31,6 +31,9 @@ public struct OstinatoLane: Identifiable, Codable, Sendable {
     public var channel: UInt8
     /// Optional future orchestration destination. V1 renders into the selected track.
     public var targetTrackID: TrackID?
+    /// Optional for compatibility with patterns saved before orchestration.
+    public var isMuted: Bool?
+    public var isSolo: Bool?
     public var steps: [OstinatoStep]
 
     public init(
@@ -39,6 +42,8 @@ public struct OstinatoLane: Identifiable, Codable, Sendable {
         pitch: UInt8,
         channel: UInt8 = 0,
         targetTrackID: TrackID? = nil,
+        isMuted: Bool? = nil,
+        isSolo: Bool? = nil,
         steps: [OstinatoStep] = []
     ) {
         self.id = id
@@ -46,6 +51,8 @@ public struct OstinatoLane: Identifiable, Codable, Sendable {
         self.pitch = min(127, pitch)
         self.channel = min(15, channel)
         self.targetTrackID = targetTrackID
+        self.isMuted = isMuted
+        self.isSolo = isSolo
         self.steps = steps
     }
 
@@ -103,28 +110,47 @@ public struct OstinatoPattern: Identifiable, Codable, Sendable {
         Double(stepCount) / Double(min(8, max(1, stepsPerBeat)))
     }
 
+    /// Only audible lanes participate in preview and rendering.
+    public var audibleLanes: [OstinatoLane] {
+        let hasSolo = lanes.contains { $0.isSolo == true }
+        return lanes.filter { $0.isMuted != true && (!hasSolo || $0.isSolo == true) }
+    }
+
+    /// Shared routing plan for audition and timeline placement.
+    /// Invalid/missing destinations fall back to a valid selected track.
+    /// A missing fallback is allowed when every audible lane is explicitly routed.
+    public func resolvedRoutes(validTracks: Set<TrackID>,
+                               fallback: TrackID?) -> [(track: TrackID, lane: OstinatoLane)] {
+        audibleLanes.compactMap { lane in
+            guard !lane.steps.isEmpty else { return nil }
+            let assigned = lane.targetTrackID.flatMap { validTracks.contains($0) ? $0 : nil }
+            let defaultTrack = fallback.flatMap { validTracks.contains($0) ? $0 : nil }
+            guard let track = assigned ?? defaultTrack else { return nil }
+            return (track: track, lane: lane)
+        }
+    }
+
+    /// Return per-lane MIDI without losing its orchestral destination.
+    public func routedMIDIEvents() -> [(lane: OstinatoLane, events: [MIDIEvent])] {
+        let division = Double(min(8, max(1, stepsPerBeat)))
+        return audibleLanes.map { lane in
+            var seen: Set<Int> = []
+            let events = lane.steps.sorted { $0.index < $1.index }.compactMap { step -> MIDIEvent? in
+                guard step.index >= 0, step.index < stepCount,
+                      seen.insert(step.index).inserted else { return nil }
+                let gate = step.gate.isFinite ? min(1, max(0.1, step.gate)) : 0.85
+                return MIDIEvent.note(at: Double(step.index) / division,
+                    pitch: step.pitch, velocity: max(1, min(127, step.velocity)),
+                    duration: gate / division, channel: min(15, lane.channel))
+            }
+            return (lane: lane, events: events)
+        }
+    }
+
     /// Pure, deterministic conversion. Empty/out-of-range steps emit no notes.
     /// Duplicate step indices within a lane are ignored to prevent stacked note-ons.
     public func midiEvents() -> [MIDIEvent] {
-        let division = Double(min(8, max(1, stepsPerBeat)))
-        var events: [MIDIEvent] = []
-        for lane in lanes {
-            var emittedIndices: Set<Int> = []
-            for step in lane.steps.sorted(by: { $0.index < $1.index }) {
-                guard step.index >= 0 && step.index < stepCount,
-                      emittedIndices.insert(step.index).inserted else { continue }
-                let gate = step.gate.isFinite ? min(1, max(0.1, step.gate)) : 0.85
-                let note = MIDIEvent.note(
-                    at: Double(step.index) / division,
-                    pitch: step.pitch,
-                    velocity: max(1, min(127, step.velocity)),
-                    duration: gate / division,
-                    channel: min(15, lane.channel)
-                )
-                events.append(note)
-            }
-        }
-        return events.sorted {
+        routedMIDIEvents().flatMap { $0.events }.sorted {
             if $0.beatPosition != $1.beatPosition { return $0.beatPosition < $1.beatPosition }
             return $0.channel < $1.channel
         }

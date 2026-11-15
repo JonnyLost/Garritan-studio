@@ -603,6 +603,32 @@ public final class ProjectViewModel: ObservableObject {
         return true
     }
 
+    /// Route a pattern to all valid destination tracks using Studio's existing
+    /// clip insertion/undo path. A selected fallback is optional when lanes are routed.
+    @discardableResult
+    public func applyRoutedOstinatoPattern(_ pattern: OstinatoPattern,
+                                           fallbackTrackID: TrackID?,
+                                           atBeat beat: Double) -> Int {
+        guard beat.isFinite, beat >= 0 else { return 0 }
+        let validTracks = Set(project.tracks.filter {
+            $0.type == .midi || $0.type == .instrument
+        }.map(\.id))
+        let routes = pattern.resolvedRoutes(validTracks: validTracks, fallback: fallbackTrackID)
+        var groups: [TrackID: [OstinatoLane]] = [:]
+        for route in routes {
+            groups[route.track, default: []].append(route.lane)
+        }
+        var placed = 0
+        for track in project.tracks where groups[track.id] != nil {
+            var segment = pattern
+            segment.lanes = groups[track.id] ?? []
+            if applyOstinatoPattern(segment, to: track.id, atBeat: beat) {
+                placed += 1
+            }
+        }
+        return placed
+    }
+
     // MARK: - Clip Management
     
     /// Create a new MIDI clip on a track

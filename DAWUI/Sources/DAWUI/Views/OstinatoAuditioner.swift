@@ -13,27 +13,27 @@ final class OstinatoAuditioner: ObservableObject {
     private var session = UUID()
     private var sounding: Set<NoteKey> = []
     private weak var engine: PlaybackEngine?
-    private var destination: TrackID?
 
     private struct NoteKey: Hashable {
+        let track: TrackID
         let pitch: UInt8
         let channel: UInt8
     }
     private struct Event {
         let beat: Double
+        let track: TrackID
         let pitch: UInt8
         let velocity: UInt8
         let channel: UInt8
         let isOn: Bool
     }
 
-    func start(pattern: OstinatoPattern, track: TrackID, tempo: Double, engine: PlaybackEngine) {
+    func start(pattern: OstinatoPattern, fallback: TrackID?, validTracks: Set<TrackID>, tempo: Double, engine: PlaybackEngine) {
         stop()
         guard tempo.isFinite, tempo > 0, pattern.durationInBeats > 0 else { return }
-        let events = Self.events(for: pattern)
+        let events = Self.events(for: pattern, fallback: fallback, validTracks: validTracks)
         guard !events.isEmpty else { return }
         self.engine = engine
-        destination = track
         isAuditioning = true
         let token = session
         playbackTask = Task { [weak self] in
@@ -47,7 +47,7 @@ final class OstinatoAuditioner: ObservableObject {
                         try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
                     }
                     if Task.isCancelled || token != self.session { return }
-                    self.send(event, to: track)
+                    self.send(event)
                     previousBeat = event.beat
                 }
                 let remaining = max(0, pattern.durationInBeats - previousBeat) * 60 / tempo
@@ -67,12 +67,12 @@ final class OstinatoAuditioner: ObservableObject {
         playbackTask = nil
         releaseNotes()
         isAuditioning = false
-        destination = nil
         engine = nil
     }
 
-    private func send(_ event: Event, to track: TrackID) {
-        let key = NoteKey(pitch: event.pitch, channel: event.channel)
+    private func send(_ event: Event) {
+        let track = event.track
+        let key = NoteKey(track: track, pitch: event.pitch, channel: event.channel)
         if event.isOn {
             // Retrigger safely if two lanes share a pitch/channel.
             if sounding.contains(key) {
@@ -88,23 +88,26 @@ final class OstinatoAuditioner: ObservableObject {
     }
 
     private func releaseNotes() {
-        if let destination {
-            for key in sounding {
-                engine?.sendOstinatoPreviewNote(pitch: key.pitch, velocity: 0,
-                    channel: key.channel, on: destination, isNoteOn: false)
-            }
+        for key in sounding {
+            engine?.sendOstinatoPreviewNote(pitch: key.pitch, velocity: 0,
+                channel: key.channel, on: key.track, isNoteOn: false)
         }
         sounding.removeAll()
     }
 
-    private static func events(for pattern: OstinatoPattern) -> [Event] {
+    private static func events(for pattern: OstinatoPattern, fallback: TrackID?,
+                               validTracks: Set<TrackID>) -> [Event] {
         var result: [Event] = []
-        for note in pattern.midiEvents() {
-            guard case .note(let data) = note.type else { continue }
-            result.append(Event(beat: note.beatPosition, pitch: data.pitch,
-                                velocity: data.velocity, channel: note.channel, isOn: true))
-            result.append(Event(beat: note.beatPosition + data.duration, pitch: data.pitch,
-                                velocity: 0, channel: note.channel, isOn: false))
+        for route in pattern.resolvedRoutes(validTracks: validTracks, fallback: fallback) {
+            var segment = pattern
+            segment.lanes = [route.lane]
+            for note in segment.midiEvents() {
+                guard case .note(let data) = note.type else { continue }
+                result.append(Event(beat: note.beatPosition, track: route.track, pitch: data.pitch,
+                                    velocity: data.velocity, channel: note.channel, isOn: true))
+                result.append(Event(beat: note.beatPosition + data.duration, track: route.track,
+                                    pitch: data.pitch, velocity: 0, channel: note.channel, isOn: false))
+            }
         }
         return result.sorted {
             if $0.beat != $1.beat { return $0.beat < $1.beat }
