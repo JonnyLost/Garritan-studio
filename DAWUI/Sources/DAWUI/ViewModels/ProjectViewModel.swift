@@ -420,22 +420,20 @@ public final class ProjectViewModel: ObservableObject {
         return true
     }
 
-    /// Place audible ostinato lanes onto their assigned instrument tracks.
-    /// Unassigned lanes use the selected fallback track; no empty clips are created.
+    /// Route a pattern to all valid destination tracks using Studio's existing
+    /// clip insertion/undo path. A selected fallback is optional when lanes are routed.
     @discardableResult
     public func applyRoutedOstinatoPattern(_ pattern: OstinatoPattern,
-                                           fallbackTrackID: TrackID,
+                                           fallbackTrackID: TrackID?,
                                            atBeat beat: Double) -> Int {
+        guard beat.isFinite, beat >= 0 else { return 0 }
         let validTracks = Set(project.tracks.filter {
             $0.type == .midi || $0.type == .instrument
         }.map(\.id))
-        guard validTracks.contains(fallbackTrackID) else { return 0 }
+        let routes = pattern.resolvedRoutes(validTracks: validTracks, fallback: fallbackTrackID)
         var groups: [TrackID: [OstinatoLane]] = [:]
-        for lane in pattern.audibleLanes where !lane.steps.isEmpty {
-            let destination = lane.targetTrackID.flatMap {
-                validTracks.contains($0) ? $0 : nil
-            } ?? fallbackTrackID
-            groups[destination, default: []].append(lane)
+        for route in routes {
+            groups[route.track, default: []].append(route.lane)
         }
         var placed = 0
         for track in project.tracks where groups[track.id] != nil {
