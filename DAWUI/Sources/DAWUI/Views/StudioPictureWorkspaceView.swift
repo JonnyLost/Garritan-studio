@@ -286,11 +286,45 @@ public struct StudioPictureWorkspaceView: View {
                             .textFieldStyle(.roundedBorder)
                         Text("sec").font(.caption).foregroundStyle(.secondary)
                     }
-                    Toggle("Play guide audio", isOn: Binding(
-                        get: { picture.referenceAudioEnabled },
-                        set: { enabled in updatePicture { $0.referenceAudioEnabled = enabled } }
-                    ))
-                    .font(.caption)
+                    HStack {
+                        Toggle("Guide audio", isOn: Binding(
+                            get: { picture.referenceAudioEnabled },
+                            set: { enabled in updatePicture { $0.referenceAudioEnabled = enabled } }
+                        ))
+                        .font(.caption)
+                        Spacer()
+                        if !session.hasGuideAudioTrack {
+                            Text("No audio track")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                    HStack(spacing: 8) {
+                        Image(systemName: "speaker.fill")
+                            .foregroundStyle(.secondary)
+                        Slider(value: Binding(
+                            get: { Double(picture.referenceAudioVolume ?? 0.65) },
+                            set: { newValue in
+                                updatePicture { $0.referenceAudioVolume = Float(newValue) }
+                            }
+                        ), in: 0...1)
+                        .disabled(!picture.referenceAudioEnabled)
+                        Text(String(format: "%.0f%%", (picture.referenceAudioVolume ?? 0.65) * 100))
+                            .font(.system(.caption2, design: .monospaced))
+                            .frame(width: 40, alignment: .trailing)
+                    }
+                    if session.isPreparingGuideAudio {
+                        HStack {
+                            ProgressView().controlSize(.small)
+                            Text("Preparing guide audio")
+                                .font(.caption2)
+                        }
+                    } else if let message = session.guideAudioMessage {
+                        Text(message).font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
+                    Text("Dialogue follows Studio's audio engine and is excluded from score exports.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                     Toggle("Timecode overlay", isOn: Binding(
                         get: { picture.showTimecodeOverlay ?? true },
                         set: { enabled in updatePicture { $0.showTimecodeOverlay = enabled } }
