@@ -420,6 +420,34 @@ public final class ProjectViewModel: ObservableObject {
         return true
     }
 
+    /// Place audible ostinato lanes onto their assigned instrument tracks.
+    /// Unassigned lanes use the selected fallback track; no empty clips are created.
+    @discardableResult
+    public func applyRoutedOstinatoPattern(_ pattern: OstinatoPattern,
+                                           fallbackTrackID: TrackID,
+                                           atBeat beat: Double) -> Int {
+        let validTracks = Set(project.tracks.filter {
+            $0.type == .midi || $0.type == .instrument
+        }.map(\.id))
+        guard validTracks.contains(fallbackTrackID) else { return 0 }
+        var groups: [TrackID: [OstinatoLane]] = [:]
+        for lane in pattern.audibleLanes where !lane.steps.isEmpty {
+            let destination = lane.targetTrackID.flatMap {
+                validTracks.contains($0) ? $0 : nil
+            } ?? fallbackTrackID
+            groups[destination, default: []].append(lane)
+        }
+        var placed = 0
+        for track in project.tracks where groups[track.id] != nil {
+            var segment = pattern
+            segment.lanes = groups[track.id] ?? []
+            if applyOstinatoPattern(segment, to: track.id, atBeat: beat) {
+                placed += 1
+            }
+        }
+        return placed
+    }
+
     // MARK: - Clip Management
     
     /// Create a new MIDI clip on a track
