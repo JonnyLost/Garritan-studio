@@ -150,6 +150,21 @@ struct DAWApp: App {
                 .keyboardShortcut("m", modifiers: [.command, .shift])
             }
             
+            // Native film-scoring commands
+            CommandMenu("Picture") {
+                Button("Show Studio Picture") {
+                    NotificationCenter.default.post(
+                        name: Notification.Name("openStudioPicture"), object: nil)
+                }
+                .keyboardShortcut("p", modifiers: [.command, .option])
+
+                Button("Add Hit Point at Playhead") {
+                    NotificationCenter.default.post(
+                        name: Notification.Name("markStudioPictureHit"), object: nil)
+                }
+                .keyboardShortcut("h", modifiers: [.command, .option])
+            }
+
             // Track commands
             CommandMenu("Track") {
                 Button("Add Instrument") {
