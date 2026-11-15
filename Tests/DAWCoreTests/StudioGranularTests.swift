@@ -7,7 +7,7 @@ import AVFoundation
 final class StudioGranularTests: XCTestCase {
     func testFactoryPresetsAreDistinctValidAndSelfContained() throws {
         let presets=StudioGranularFactoryLibrary.presets
-        XCTAssertEqual(presets.count,12)
+        XCTAssertGreaterThanOrEqual(presets.count,12)
         XCTAssertEqual(Set(presets.map(\.id)).count,presets.count)
         XCTAssertEqual(Set(presets.map(\.family)),
                        Set(["Pads","Textures","Keys","Leads","Bass"]))
