@@ -119,7 +119,13 @@ final class StudioMIDIWorkerSchedulerTests: XCTestCase {
     }
     func testBudgetSaturationPreservesEveryRelease() {
         let scheduler = StudioMIDIWorkerScheduler()
-        let notes = (0..<35000).flatMap { i in [event(Int64(i * 2)), event(Int64(i * 2 + 1), 0x80)] }
+        var notes: [StudioMIDIFrameEvent] = []
+        notes.reserveCapacity(70000)
+        for index in 0..<35000 {
+            let frame = Int64(index) * 2
+            notes.append(event(frame))
+            notes.append(event(frame + 1, 0x80))
+        }
         scheduler.install(notes, generation: 2)
         var count = 0
         var offs = 0
