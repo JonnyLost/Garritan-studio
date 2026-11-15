@@ -17,6 +17,18 @@ Do not merge until Mac compilation, runtime synchronization and save/relink test
 
 Keyboard shortcuts: **Option-Command-P** opens Picture; **Option-Command-H** adds an immediate hit point while a movie is loaded.
 
+## Scoring workflow milestone 2
+
+- The cue list supports **Edit Cue…**: name, type (cut/impact/action/dialogue/custom), a validated frame-accurate SMPTE position, and director/composer notes.
+- Previous/next hit point controls sit beside the frame-step controls. They jump the DAW playhead directly to adjacent video cues.
+- **Export Cue Sheet…** writes a portable CSV including ordered cues, cue type, SMPTE frame labels, picture-relative frame numbers, project seconds and notes. Spreadsheet formula-prefix escaping is applied to user-authored fields.
+- The video session detects audio playhead jumps and loop wraps and corrects the movie immediately; during ordinary playback it avoids costly seeks until drift meaningfully exceeds a frame budget.
+- Changing picture offset or source frame-rate mode resynchronizes the viewer immediately. Replacing media via Relink refreshes the decoder even when the file path is unchanged.
+- Releasing a project/viewer now closes the decoder and its security-scoped access. The existing audio and MIDI engines remain untouched.
+- New scoring regression tests cover transport jumps, drift, timeline offsets, frame stepping, end-of-movie behavior, overnight SMPTE, CSV safety and older media-reference documents.
+
+**Validation status**: Swift build and tests are run by the Picture macOS CI workflow. Manual video-frame presentation, multiple-monitor floating windows, and live orchestral playback remain a separate Mac acceptance step.
+
 ## Persistence and media safety
 
 - Only a video **reference** (path plus security-scoped bookmark when available), project offset, frame-rate mode, source timecode, audio/overlay preferences and hit-point data are encoded in the DAW project.
