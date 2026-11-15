@@ -252,7 +252,27 @@ public enum StudioSoundDescriptionInterpreter {
         let lower = max(0, index - 4)
         for i in stride(from: index - 1, through: lower, by: -1) {
             let word = tokens[i]
-            if ["and", "but", "or", "then", "however", "except", "clausebreak"].contains(word) {
+            if word == "and" {
+                // Carry "avoid X and Y" across a list of acoustic families
+                // or synthesis engines, but not across unrelated clauses
+                // such as "less metallic and more movement".
+                let previousIsCategory = i > 0 && (
+                    familyRules.contains { $0.words.last == tokens[i - 1] } ||
+                    engineRules.contains { $0.words.last == tokens[i - 1] })
+                let nextIsCategory = i + 1 < tokens.count && (
+                    familyRules.contains { $0.words.first == tokens[i + 1] } ||
+                    engineRules.contains { $0.words.first == tokens[i + 1] })
+                let preceding = tokens[max(0, i - 4)..<i]
+                let listIsNegated = preceding.contains {
+                    ["not", "no", "without", "avoid", "never", "dont",
+                     "doesnt", "isnt", "non"].contains($0)
+                }
+                if previousIsCategory && nextIsCategory && listIsNegated {
+                    continue
+                }
+                break
+            }
+            if ["but", "or", "then", "however", "except", "clausebreak"].contains(word) {
                 break
             }
             switch word {
