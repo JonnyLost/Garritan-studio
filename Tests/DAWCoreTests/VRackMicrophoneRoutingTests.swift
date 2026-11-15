@@ -115,8 +115,12 @@ final class VRackMicrophoneRoutingTests: XCTestCase {
                         for: micChannel, outputBus: 0
                     )
                     let monitorOutput = channelOutputs.first?.node
+                    let nodeNames = channelOutputs.map { $0.node.name }
+                    let masterOut = engine.outputConnectionPoints(
+                        for: engine.mainMixerNode, outputBus: 0
+                    ).map { $0.node.name }
                     XCTAssertTrue(monitorOutput === engine.mainMixerNode,
-                        "Mic channel must reach the main mixer directly")
+                        "Mic channel destination: \(nodeNames), expected main mixer \(engine.mainMixerNode.name), main mixer destinations: \(masterOut)")
                 }
             }
             XCTAssertGreaterThan(rackSum.outputVolume, 0.9,
@@ -264,6 +268,10 @@ final class VRackMicrophoneRoutingTests: XCTestCase {
             } else {
                 engine.connect(player, to: micChannel, format: format)
             }
+            let channelEdges = engine.outputConnectionPoints(
+                for: micChannel, outputBus: 0
+            ).map { $0.node.name }
+            print("[STUDIO-MIC-GRAPH] capture=\(feedCapture) micChannelEdges=\(channelEdges) mainOut=\(engine.outputConnectionPoints(for: engine.mainMixerNode, outputBus: 0).map { $0.node.name })")
             engine.stop()
             try engine.enableManualRenderingMode(
                 .offline, format: format, maximumFrameCount: 512
