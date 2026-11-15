@@ -72,6 +72,21 @@ final class StudioSoundDescriptionInterpreterTests: XCTestCase {
         XCTAssertFalse(intent.families.contains(.percussion))
     }
 
+    func testCoordinatedExclusionsApplyToBothNamedEngines() throws {
+        let intent = try interpret(
+            "A moving texture, avoid granular and physical modeling.")
+        XCTAssertEqual(intent.excludedEngines, [.granular, .physical])
+        XCTAssertTrue(intent.engineHints.isEmpty)
+        XCTAssertEqual(intent.role, .texture)
+
+        // The exclusion should not spread to a different sentence or
+        // unrelated role: this still requests a pad.
+        let next = try interpret("No bells and a warm pad.")
+        XCTAssertTrue(next.excludedFamilies.contains(.bells))
+        XCTAssertEqual(next.role, .pad)
+        XCTAssertGreaterThan(try require(next, .warmth, .set).amount, 0.5)
+    }
+
     func testExplicitEngineHintsAreTypedAndDoNotGuessEngines() throws {
         let intent = try interpret(
             "An analog and FM pad, with wavetable shimmer; avoid granular grains.")
