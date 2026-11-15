@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - integration/studio-sampler-portable-packages-2026-11-14
+      - integration/studio-alpha1-consolidated-2026-11-14
   pull_request:
     branches:
       - integration/studio-safe-consolidation-2026-11-14
+      - integration/studio-alpha1-consolidated-2026-11-14
   workflow_dispatch:
 
 permissions:
