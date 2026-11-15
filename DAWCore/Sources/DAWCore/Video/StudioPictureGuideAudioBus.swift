@@ -110,7 +110,9 @@ public final class StudioPictureGuideAudioBus {
         // the mixer handles conversion to the current Mac output sample rate.
         let frame = AVAudioFramePosition((offset * file.processingFormat.sampleRate).rounded(.down))
         guard frame >= 0, frame < file.length else { return }
-        if scheduled && !discontinuity && player.isPlaying { return }
+        // Scheduling is authoritative even before the first render callback:
+        // AVAudioPlayerNode.isPlaying can lag behind a just-submitted segment.
+        if scheduled && !discontinuity { return }
 
         player.stop()
         let remaining = file.length - frame
