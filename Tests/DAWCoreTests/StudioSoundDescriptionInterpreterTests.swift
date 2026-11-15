@@ -134,7 +134,7 @@ final class StudioSoundDescriptionInterpreterTests: XCTestCase {
     func testInterpretingTextDoesNotMutateExistingSynthPatches() throws {
         var sound = StudioSynthPatch.individual(.analog)
         let original = sound
-        let _ = try interpret("A bright wavetable pad with slow attack.")
+        _ = try interpret("A bright wavetable pad with slow attack.")
         XCTAssertEqual(sound, original)
         XCTAssertTrue(sound.validate())
         sound.layers[0].gain = 0.35
