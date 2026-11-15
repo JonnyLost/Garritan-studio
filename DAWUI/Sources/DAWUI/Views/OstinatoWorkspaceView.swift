@@ -30,6 +30,10 @@ public struct OstinatoWorkspaceView: View {
         return track
     }
 
+    private var orchestralTracks: [Track] {
+        viewModel.project.tracks.filter { $0.type == .instrument || $0.type == .midi }
+    }
+
     public var body: some View {
         VStack(spacing: 0) {
             StudioWorkspaceHeader(
@@ -164,9 +168,9 @@ public struct OstinatoWorkspaceView: View {
             ScrollView([.horizontal, .vertical]) {
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 3) {
-                        Text("LANE / PITCH")
+                        Text("LANE / PITCH / ROUTING")
                             .font(.system(size: 10, weight: .semibold))
-                            .frame(width: 170, alignment: .leading)
+                            .frame(width: 365, alignment: .leading)
                         ForEach(0..<pattern.stepCount, id: \.self) { step in
                             Text(step % pattern.stepsPerBeat == 0 ?
                                  "\(step / pattern.stepsPerBeat + 1)" : "·")
@@ -198,8 +202,34 @@ public struct OstinatoWorkspaceView: View {
                                 }
                                 .controlSize(.small)
                                 .fixedSize()
+
+                                Toggle("M", isOn: Binding(
+                                    get: { selectedPattern?.lanes.first(where: { $0.id == lane.id })?.isMuted == true },
+                                    set: { value in editLane(lane.id) { $0.isMuted = value } }
+                                ))
+                                .toggleStyle(.checkbox)
+                                .help("Mute lane")
+
+                                Toggle("S", isOn: Binding(
+                                    get: { selectedPattern?.lanes.first(where: { $0.id == lane.id })?.isSolo == true },
+                                    set: { value in editLane(lane.id) { $0.isSolo = value } }
+                                ))
+                                .toggleStyle(.checkbox)
+                                .help("Solo lane")
+
+                                Picker("Track", selection: Binding(
+                                    get: { lane.targetTrackID },
+                                    set: { value in editLane(lane.id) { $0.targetTrackID = value } }
+                                )) {
+                                    Text("Selected track").tag(Optional<TrackID>.none)
+                                    ForEach(orchestralTracks) { track in
+                                        Text(track.name).tag(Optional(track.id))
+                                    }
+                                }
+                                .labelsHidden()
+                                .frame(width: 115)
                             }
-                            .frame(width: 170, alignment: .leading)
+                            .frame(width: 365, alignment: .leading)
 
                             ForEach(0..<pattern.stepCount, id: \.self) { index in
                                 let note = lane.steps.first(where: { $0.index == index })
@@ -264,6 +294,7 @@ public struct OstinatoWorkspaceView: View {
                 } else if let track = selectedMIDITarget,
                           !viewModel.transportState.isPlaying {
                     auditioner.start(pattern: pattern, track: track.id,
+                        validTracks: Set(orchestralTracks.map(\.id)),
                         tempo: viewModel.transportState.tempo.bpm,
                         engine: viewModel.playbackEngine)
                 }
@@ -281,11 +312,11 @@ public struct OstinatoWorkspaceView: View {
             Button {
                 guard let track = selectedMIDITarget else { return }
                 let beat = max(0, viewModel.transportState.playheadBeats)
-                let success = viewModel.applyOstinatoPattern(pattern, to: track.id, atBeat: beat)
-                statusMessage = success ? "MIDI clip created at beat \(beat.formatted())." :
+                let count = viewModel.applyRoutedOstinatoPattern(pattern, fallbackTrackID: track.id, atBeat: beat)
+                statusMessage = count > 0 ? "Created \(count) MIDI clips at beat \(beat.formatted())." :
                                           "No notes could be placed."
             } label: {
-                Label("Apply MIDI at Playhead", systemImage: "square.and.arrow.down")
+                Label("Apply to Tracks", systemImage: "square.and.arrow.down")
             }
             .buttonStyle(.borderedProminent)
             .disabled(selectedMIDITarget == nil || pattern.midiEvents().isEmpty)
