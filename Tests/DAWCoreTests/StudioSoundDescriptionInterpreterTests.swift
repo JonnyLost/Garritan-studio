@@ -118,13 +118,24 @@ final class StudioSoundDescriptionInterpreterTests: XCTestCase {
         XCTAssertFalse(unknown.hasRecognizedIntent)
     }
 
+    func testPunctuationSeparatesModificationScopes() throws {
+        let intent = try interpret("A slightly warm pad, with a slow attack.")
+        XCTAssertEqual(try require(intent, .warmth, .set).amount, 0.62)
+        XCTAssertEqual(try require(intent, .attackTime, .set).amount, 0.78)
+
+        let excluded = try interpret("No bells, a bright pad.")
+        XCTAssertEqual(excluded.role, .pad)
+        XCTAssertEqual(excluded.excludedFamilies, [.bells])
+        XCTAssertGreaterThan(try require(excluded, .brightness, .set).amount, 0.5)
+    }
+
     func testPortableIntentCanBeEncodedWithoutThirdPartyModels() throws {
         let original = try interpret(
             "A warm physical modeling pluck, without noisy bells.",
             mode: .create)
         XCTAssertEqual(original.engineHints, [.physical])
         XCTAssertEqual(original.role, .pluck)
-        XCTAssertEqual(original.excludedFamilies, [.bells])
+        XCTAssertEqual(Set(original.excludedFamilies), Set([.noise, .bells]))
         let data = try JSONEncoder().encode(original)
         let restored = try JSONDecoder().decode(StudioSoundDescriptionIntent.self,
                                                 from: data)
