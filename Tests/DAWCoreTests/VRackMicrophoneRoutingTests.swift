@@ -298,6 +298,30 @@ final class VRackMicrophoneRoutingTests: XCTestCase {
         }
     }
 
+    /// Baseline: an AudioEngine initialized against a hardware device must
+    /// still render a simple player->main mixer path in offline mode.
+    func testPreparedStudioMainMixerCanRenderOffline() throws {
+        let studio = AudioEngine()
+        let engine = studio.engine
+        let format = try XCTUnwrap(AVAudioFormat(
+            standardFormatWithSampleRate: studio.sampleRate, channels: 2
+        ))
+        let player = AVAudioPlayerNode()
+        engine.attach(player)
+        engine.connect(player, to: engine.mainMixerNode, format: format)
+        engine.stop()
+        try engine.enableManualRenderingMode(
+            .offline, format: format, maximumFrameCount: 512
+        )
+        try engine.start()
+        defer { engine.stop() }
+        let input = try makeInput(format)
+        player.scheduleBuffer(input, at: nil, options: [.loops])
+        player.play()
+        XCTAssertGreaterThan(try renderPeak(engine), 0.05,
+                             "Prepared Studio main mixer must render offline")
+    }
+
     func testRackOnlyMIDITracksAreCountedThroughRackAggregate() {
         let rackID = UUID()
         var tracks: [Track] = []
