@@ -31,6 +31,14 @@ jobs:
           sw_vers
           swift --version
           git rev-parse HEAD
+      - name: Validate frozen Mac launcher without launching GUI
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n Tools/alpha1_mac_launch.sh
+          grep -Fq 'checkpoint/studio-alpha1-ci-green-2026-11-14' Tools/alpha1_mac_launch.sh
+          grep -Fq '47f6d887be3a5f781d33fb83e98472f2c343e3a1' Tools/alpha1_mac_launch.sh
+          test -f docs/STUDIO_ALPHA1_MAC_RESULTS_TEMPLATE.md
       - name: Resolve dependencies
         run: swift package resolve
       - name: Build complete Studio package
