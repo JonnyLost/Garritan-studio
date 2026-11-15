@@ -112,8 +112,15 @@ public final class StudioPictureMovieExporter: ObservableObject {
             let sourceAudio = try await movie.loadTracks(withMediaType: .audio)
             if let source = sourceAudio.first {
                 let production = try XCTlessTrack(composition, mediaType: .audio)
+                // The picture's guide audio may be shorter than its video.
+                // Never request source frames beyond the audio track's range.
+                let sourceRange = try await source.load(.timeRange)
+                let guideDuration = CMTimeMinimum(movieDuration, sourceRange.duration)
+                guard guideDuration.isValid && guideDuration.seconds > 0 else {
+                    throw StudioPictureMovieExportError.invalidReferenceAudio
+                }
                 try production.insertTimeRange(
-                    CMTimeRange(start: .zero, duration: movieDuration),
+                    CMTimeRange(start: sourceRange.start, duration: guideDuration),
                     of: source, at: .zero)
                 let guideParams = AVMutableAudioMixInputParameters(track: production)
                 let safeGain: Float = referenceGain.isFinite
@@ -194,7 +201,7 @@ public final class StudioPictureMovieExporter: ObservableObject {
 
 public enum StudioPictureMovieExportError: LocalizedError {
     case busy, invalidAlignment, destinationConflictsWithSource
-    case missingVideo, missingScoreAudio, scoreDoesNotOverlapMovie
+    case missingVideo, missingScoreAudio, scoreDoesNotOverlapMovie, invalidReferenceAudio
     case cannotCreateSession, unsupportedOutput, exportFailed, destinationExists
 
     public var errorDescription: String? {
@@ -205,6 +212,7 @@ public enum StudioPictureMovieExportError: LocalizedError {
             return "Choose a new destination; a source movie or WAV cannot be overwritten."
         case .missingVideo: return "The reference movie does not contain a video track."
         case .missingScoreAudio: return "Choose a rendered Studio WAV containing audio."
+        case .invalidReferenceAudio: return "The original picture audio track has no usable duration."
         case .scoreDoesNotOverlapMovie:
             return "The Studio mix ends before the movie starts at its saved picture offset."
         case .cannotCreateSession: return "macOS could not create a movie export session."
