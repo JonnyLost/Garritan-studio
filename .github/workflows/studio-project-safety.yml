@@ -1,0 +1,19 @@
+name: Studio project safety
+on:
+  push:
+    branches: [codex/studio-project-safety]
+  pull_request:
+    branches: [integration/studio-alpha1-consolidated-2026-11-14]
+permissions:
+  contents: read
+jobs:
+  mac-safety:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift --version
+      - run: swift package resolve
+      - run: swift build
+      - run: swift test --parallel
+      - run: swift build -c release --product DAWApp
