@@ -7,20 +7,25 @@ import XCTest
 final class StudioFMPresetLibraryTests: XCTestCase {
     func testAllFactoryPatchesAreDistinctValidAndApplyToDSP() throws {
         let presets = StudioFMFactoryLibrary.presets
-        XCTAssertEqual(presets.count, 32)
-        XCTAssertEqual(Set(presets.map(\.id)).count, 32)
-        XCTAssertEqual(Set(presets.map(\.name)).count, 32)
+        XCTAssertEqual(presets.count, 42)
+        XCTAssertEqual(Set(presets.map(\.id)).count, 42)
+        XCTAssertEqual(Set(presets.map(\.name)).count, 42)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let signatures = try presets.map { preset in
             String(decoding: try encoder.encode(preset.patch), as: UTF8.self)
         }
-        XCTAssertEqual(Set(signatures).count, 32)
+        XCTAssertEqual(Set(signatures).count, 42)
         XCTAssertEqual(Set(presets.map(\.category)),
                        Set(StudioFMPresetCategory.allCases))
+        let categoryCounts: [StudioFMPresetCategory: Int] = [
+            .keys: 6, .bells: 5, .mallets: 5, .bass: 6,
+            .lead: 5, .pad: 5, .percussion: 5, .texture: 5
+        ]
         for category in StudioFMPresetCategory.allCases {
-            XCTAssertEqual(presets.filter { $0.category == category }.count, 4,
-                           "Expected four original sounds in \(category.title)")
+            XCTAssertEqual(presets.filter { $0.category == category }.count,
+                           categoryCounts[category],
+                           "Unexpected expanded inventory in \(category.title)")
         }
         let algorithmNumbers = Set(presets.map { Int($0.patch.value(for: .algorithm)) })
         XCTAssertEqual(algorithmNumbers, Set(StudioFMAlgorithm.allCases.map(\.rawValue)))

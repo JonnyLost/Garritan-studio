@@ -164,6 +164,80 @@ public enum StudioSynthHybridFactoryLibrary {
                       wavetable("Wave Motion", gain: 0.2,
                                 position: 1.3),
                       additive("Spectral Air", sound: "Silver Flute",
-                               gain: 0.22)], motion: true)
+                               gain: 0.22)], motion: true),
+        // Cinematic multi-engine factory instruments built entirely from
+        // native Studio synthesis, with modest per-layer headroom.
+        make("Eclipse Strings", "Cinematic",
+             "Warm bowed resonance under a moving harmonic ensemble.",
+             layers: [
+                physical("Soft Bow", sound: "Soft Bow", gain: 0.28, pan: -0.1),
+                additive("Amber Bed", sound: "Amber Ensemble", gain: 0.32, pan: 0.12)
+             ], motion: true),
+        make("Bronze Cathedral", "Cinematic",
+             "Bell-like modal strike over a slow glass wavetable tail.",
+             layers: [
+                physical("Gong Strike", sound: "Temple Gong", gain: 0.27, pan: -0.12),
+                wavetable("Glass Air", gain: 0.28, pan: 0.14, position: 4.5)
+             ], motion: true),
+        make("Frosted Orchestra", "Cinematic",
+             "Three-layer acoustic-inspired string and harmonic atmosphere.",
+             layers: [
+                analog("Analog Strings", gain: 0.23, cutoff: 1550, attack: 1.1),
+                additive("Silk Spectrum", sound: "Silk Harmonics", gain: 0.28, pan: 0.15),
+                physical("Bow Core", sound: "Bow Resonance", gain: 0.23, pan: -0.11)
+             ], motion: true),
+        make("Night Signal", "Textures",
+             "Hollow analog core with digital FM and spectral shimmer.",
+             layers: [
+                analog("Dark Pulse", gain: 0.26, cutoff: 760, attack: 0.25),
+                fm("FM Spark", gain: 0.2, pan: 0.13, feedback: 0.42),
+                additive("High Filaments", sound: "Solar Filaments",
+                         gain: 0.25, pan: -0.15)
+             ], motion: true),
+        make("Crystal Engine", "Textures",
+             "Metallic modal harmonics and a shifting wavetable layer.",
+             layers: [
+                physical("Bell Modes", sound: "Silver Bell", gain: 0.27),
+                wavetable("Wave Dust", gain: 0.28, pan: 0.15, position: 4.7),
+                fm("Upper FM", gain: 0.17, pan: -0.13, feedback: 0.15)
+             ], motion: true),
+        make("Oceanic Choir", "Pads",
+             "Soft analog foundation beneath slow-moving vocal-like harmonics.",
+             layers: [
+                analog("Warm Foundation", gain: 0.3, cutoff: 1700, attack: 1.8),
+                additive("Choir Body", sound: "Deep Choir Cloud", gain: 0.31, pan: 0.11),
+                wavetable("Floating Air", gain: 0.2, pan: -0.15, position: 0.8)
+             ], motion: true),
+        make("Voltage Horizon", "Leads",
+             "Singing analog solo with metallic FM articulation.",
+             layers: [
+                analog("Analog Solo", gain: 0.34, cutoff: 4400, attack: 0.016),
+                fm("FM Edge", gain: 0.2, pan: 0.07, feedback: 0.28)
+             ]),
+        make("Resonant Cedar", "Keys",
+             "Finger-plucked physical attack over soft synthetic harmonics.",
+             layers: [
+                physical("Cedar String", sound: "Fingerstyle Cedar", gain: 0.34),
+                additive("Tine Bloom", sound: "Soft Tine Choir",
+                         gain: 0.23, pan: 0.12)
+             ], motion: true),
+        make("Low Orbit", "Bass",
+             "Deep analog foundation with a focused FM harmonic layer.",
+             layers: [
+                analog("Sub Body", gain: 0.36, cutoff: 640, attack: 0.004),
+                fm("FM Bite", gain: 0.24, pan: 0.04, feedback: 0.3)
+             ]),
+        make("Starlight Resonator", "Cinematic",
+             "Four-engine bell, spectral, analog and wavetable soundscape.",
+             layers: [
+                physical("Metal Resonance", sound: "Bronze Chime",
+                         gain: 0.22, pan: -0.16),
+                additive("Upper Harmonics", sound: "Harmonic Rain",
+                         gain: 0.23, pan: 0.15),
+                wavetable("Evolving Spectrum", gain: 0.22, pan: 0.09,
+                          position: 3.9),
+                analog("Warm Underlay", gain: 0.22, pan: -0.08,
+                       cutoff: 1800, attack: 0.8)
+             ], motion: true)
     ]
 }
