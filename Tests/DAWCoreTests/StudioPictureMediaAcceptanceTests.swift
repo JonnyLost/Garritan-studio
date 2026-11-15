@@ -37,7 +37,7 @@ final class StudioPictureMediaAcceptanceTests: XCTestCase {
             var pixelBuffer: CVPixelBuffer?
             let status = CVPixelBufferCreate(
                 kCFAllocatorDefault, 64, 64, kCVPixelFormatType_32BGRA,
-                [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary,
+                [kCVPixelBufferIOSurfacePropertiesKey as String: [:]] as CFDictionary,
                 &pixelBuffer)
             XCTAssertEqual(status, kCVReturnSuccess)
             let buffer = try XCTUnwrap(pixelBuffer)
