@@ -140,6 +140,9 @@ public struct StudioPictureHitPoint: Identifiable, Codable, Equatable, Sendable 
 public struct StudioPictureProject: Codable, Equatable, Sendable {
     public var filename: String
     public var filePath: String
+    /// Unique import/relink token; replaces a movie even when the path did not change.
+    /// Optional for compatibility with earlier Studio Picture documents.
+    public var mediaRevisionID: UUID?
     public var securityBookmark: Data?
     public var durationSeconds: Double
     public var frameRate: StudioPictureFrameRate
@@ -152,12 +155,14 @@ public struct StudioPictureProject: Codable, Equatable, Sendable {
     public var hitPoints: [StudioPictureHitPoint]
 
     public init(url: URL, durationSeconds: Double, frameRate: StudioPictureFrameRate,
-                securityBookmark: Data? = nil, timelineStartSeconds: Double = 0,
+                securityBookmark: Data? = nil, mediaRevisionID: UUID? = UUID(),
+                timelineStartSeconds: Double = 0,
                 startTimecodeFrame: Int64? = nil, referenceAudioEnabled: Bool = false,
                 showTimecodeOverlay: Bool = true,
                 hitPoints: [StudioPictureHitPoint] = []) {
         self.filename = url.lastPathComponent
         self.filePath = url.path
+        self.mediaRevisionID = mediaRevisionID
         self.securityBookmark = securityBookmark
         self.durationSeconds = max(0, durationSeconds.isFinite ? durationSeconds : 0)
         self.frameRate = frameRate
