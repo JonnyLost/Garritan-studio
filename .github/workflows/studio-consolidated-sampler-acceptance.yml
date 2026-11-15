@@ -56,6 +56,29 @@ jobs:
             test -f "$path" || { echo "Required integration surface missing: $path"; exit 1; }
           done
 
+
+      - name: Verify unified MIDI, synthesis, Rooms, saving and export entry points
+        shell: bash
+        run: |
+          set -euo pipefail
+          for path in \
+            Tests/DAWCoreTests/StudioMIDISessionPlannerTests.swift \
+            Tests/DAWCoreTests/ProjectSaveRevisionTests.swift \
+            DAWCore/Sources/DAWCore/Persistence/ProjectSaveRevision.swift \
+            DAWCore/Sources/DAWCore/Persistence/StandardMIDIFileExporter.swift \
+            DAWCore/Sources/DAWCore/Audio/NativeMicrophoneSpillProcessor.swift \
+            DAWUI/Sources/DAWUI/Views/VRack/StudioRoomAcousticsWorkspaceView.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioSamplerInstrumentFactory.swift; do
+            test -f "$path" || { echo "Missing unified Studio subsystem: $path"; exit 1; }
+          done
+          grep -Fq 'Button("Add Instrument")' DAWUI/Sources/DAWUI/Views/MainWindowView.swift
+          grep -Fq 'Button("Add Sampler")' DAWUI/Sources/DAWUI/Views/MainWindowView.swift
+          grep -Fq 'Button("Add Synth")' DAWUI/Sources/DAWUI/Views/MainWindowView.swift
+          grep -Fq 'Button("Add Audio")' DAWUI/Sources/DAWUI/Views/MainWindowView.swift
+          grep -Fq 'workspaceButton("Rooms"' DAWUI/Sources/DAWUI/Views/MainWindowView.swift
+          grep -Fq 'workspaceButton("Ostinato"' DAWUI/Sources/DAWUI/Views/MainWindowView.swift
+          grep -Fq 'Button("Export Audio & Stems…")' DAWApp/Sources/DAWApp/DAWApp.swift
+
   sampler-native-dsp:
     name: Sampler C++ sanitizers and disk-stream stress
     runs-on: ubuntu-latest
