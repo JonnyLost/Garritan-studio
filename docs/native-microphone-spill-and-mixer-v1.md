@@ -252,13 +252,16 @@ audition could leave an unprocessed rack signal audible simultaneously.
 
 The V-Rack sum now feeds a separate **direct monitor mixer** managed by
 `AudioEngine`. The sum itself remains at unity and continues to support
-V-Rack recording and monitoring taps. In the original mix the direct monitor
-has unity gain; in microphone audition it is muted, while a separate capture
-fan-out from the same V-Rack sum feeds each active virtual microphone bus.
-The implementation supports either of Studio's microphone audition backends:
-legacy per-pair capture or experimental four-output shared-history capture.
-Returning to the original mix restores the V-Rack direct monitor without
-removing its recording/monitoring sum. A replaced/disconnected V-Rack sum or a
+V-Rack recording and monitoring taps. Critically, there is only **one output
+edge from the sum at a time**: in the original mix it connects to the direct
+monitor; in mic audition it connects exclusively to one four-output native
+microphone matrix Audio Unit. This avoids duplicating an unprocessed dry
+signal or relying on a muted AVAudioMixer fan-out, which did not render the
+capture branch reliably in initial macOS tests. The V-Rack aggregate uses
+the four-output shared-history capture even when independent audio tracks
+use the legacy per-pair capture backend. Returning to the original mix
+disconnects the temporary capture AU and restores the direct monitor
+without removing its recording/monitoring sum. A replaced/disconnected V-Rack sum or a
 change between no loaded rack instruments and some loaded instruments during
 audition restores the original mix to avoid missing or duplicated rack audio.
 
