@@ -225,6 +225,13 @@ public enum StudioSoundDescriptionInterpreter {
             .replacingOccurrences(of: "don't", with: "dont")
             .replacingOccurrences(of: "doesn't", with: "doesnt")
             .replacingOccurrences(of: "isn't", with: "isnt")
+            // Punctuation marks separate modifier scope: "slightly warm,
+            // with a slow attack" must not make the attack "slight".
+            .replacingOccurrences(of: ",", with: " clausebreak ")
+            .replacingOccurrences(of: ";", with: " clausebreak ")
+            .replacingOccurrences(of: ".", with: " clausebreak ")
+            .replacingOccurrences(of: ":", with: " clausebreak ")
+            .replacingOccurrences(of: "\n", with: " clausebreak ")
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }
     }
@@ -246,7 +253,7 @@ public enum StudioSoundDescriptionInterpreter {
         let lower = max(0, index - 4)
         for i in stride(from: index - 1, through: lower, by: -1) {
             let word = tokens[i]
-            if ["and", "but", "or", "then", "however", "except"].contains(word) {
+            if ["and", "but", "or", "then", "however", "except", "clausebreak"].contains(word) {
                 break
             }
             switch word {
