@@ -100,6 +100,8 @@ public final class AudioEngine: ObservableObject {
     }
     private let microphoneMasterMixer = AVAudioMixerNode()
     private var microphoneChannelMixers: [UUID: AVAudioMixerNode] = [:]
+    /// Four-output matrix AUs also connect unused busses to a silent sink.
+    private var microphoneUnusedOutputSink: AVAudioMixerNode?
 
     // V-Rack is a separate audio graph. Keep its recording sum at unity.
     // Switch its output exclusively between the direct monitor and a
@@ -908,6 +910,7 @@ public final class AudioEngine: ObservableObject {
                     capture: capture, microphoneBus: index
                 ))
             }
+            connectUnusedMicrophoneOutputs(capture, format: format)
         } else {
             // Original proven per-pair backend remains available.
             for mic in routedMicrophones {
@@ -1015,6 +1018,12 @@ public final class AudioEngine: ObservableObject {
         }
         microphoneRoutes.removeAll()
         removeVRackMicrophoneCaptures(format: format)
+        if let sink = microphoneUnusedOutputSink {
+            engine.disconnectNodeOutput(sink)
+            engine.disconnectNodeInput(sink)
+            engine.detach(sink)
+            microphoneUnusedOutputSink = nil
+        }
         for node in trackNodes.values {
             let original: AVAudioNode = node.stereoPositionNode ?? node.pannerNode
             engine.connect(node.gainNode, to: original, format: format)
@@ -1037,6 +1046,34 @@ public final class AudioEngine: ObservableObject {
     /// former muted fan-out looked connected on macOS but rendered silence
     /// through its microphone branch. Switching the edge while stopped
     /// prevents silent captures and accidental doubled direct audio.
+    /// Matrix AUs expose four busses even when fewer microphones are
+    /// selected. Keep every output connected to a rendered host graph,
+    /// routing unused capsules to a zero-volume mixer. This sink never
+    /// contributes audible audio, and is detached when audition stops.
+    private func connectUnusedMicrophoneOutputs(
+        _ capture: AVAudioUnitEffect, format: AVAudioFormat
+    ) {
+        let activeCount = routedMicrophones.count
+        guard activeCount < NativeMicrophoneMatrixAudioUnit.microphoneCount else { return }
+        let sink: AVAudioMixerNode
+        if let existing = microphoneUnusedOutputSink {
+            sink = existing
+        } else {
+            let created = AVAudioMixerNode()
+            engine.attach(created)
+            engine.connect(created, to: microphoneMasterMixer, format: format)
+            created.outputVolume = 0
+            microphoneUnusedOutputSink = created
+            sink = created
+        }
+        for busIndex in activeCount..<NativeMicrophoneMatrixAudioUnit.microphoneCount {
+            engine.connect(
+                capture, to: sink, fromBus: AVAudioNodeBus(busIndex),
+                toBus: sink.nextAvailableInputBus, format: format
+            )
+        }
+    }
+
     private func attachVRackMicrophoneCaptures(format: AVAudioFormat) {
         guard vRackSourceMixer != nil, hasVRackCaptureSource else { return }
         NativeMicrophoneMatrixAudioUnit.registerIfNeeded()
@@ -1053,6 +1090,7 @@ public final class AudioEngine: ObservableObject {
                 microphoneID: mic.id, capture: capture, microphoneBus: index
             ))
         }
+        connectUnusedMicrophoneOutputs(capture, format: format)
         connectVRackMicrophoneFanout(format: format)
     }
 
