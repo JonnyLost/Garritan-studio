@@ -8,6 +8,7 @@ public struct StudioSoundRefinementChange: Equatable, Sendable {
     public let layerID: UUID
     public let layerName: String
     public let control: String
+    public let destination: StudioSynthModDestination?
     public let before: Float
     public let after: Float
 }
@@ -93,12 +94,11 @@ public enum StudioSoundPatchRefiner {
         var refined = original
         var changes: [StudioSoundRefinementChange] = []
         var limitations: [String] = []
-        let stereoLayers = eligible.count > 1
+        let stereoLayers = original.layers.filter(\.enabled).count > 1
 
         for index in eligible {
             for instruction in intent.instructions {
-                let engine = refined.layers[index].engine
-                let controls = controls(for: instruction.quality, engine: engine)
+                let controls = controls(for: instruction.quality, layer: refined.layers[index])
                 for control in controls {
                     let old = read(control.destination, from: refined.layers[index])
                     let position = control.destination.position(for: old)
@@ -123,6 +123,7 @@ public enum StudioSoundPatchRefiner {
                         layerID: refined.layers[index].id,
                         layerName: refined.layers[index].name,
                         control: control.destination.title,
+                        destination: control.destination,
                         before: old, after: value))
                 }
 
@@ -145,7 +146,8 @@ public enum StudioSoundPatchRefiner {
                         changes.append(StudioSoundRefinementChange(
                             layerID: refined.layers[index].id,
                             layerName: refined.layers[index].name,
-                            control: "Layer Pan", before: old, after: value))
+                            control: "Layer Pan", destination: nil,
+                            before: old, after: value))
                     }
                 }
             }
@@ -165,8 +167,8 @@ public enum StudioSoundPatchRefiner {
                 eligible.contains(where: { index in
                     let layer = original.layers[index]
                     return layer.id == change.layerID &&
-                        (controls(for: instruction.quality, engine: layer.engine)
-                            .contains(where: { $0.destination.title == change.control }) ||
+                        (controls(for: instruction.quality, layer: layer)
+                            .contains(where: { $0.destination == change.destination }) ||
                          (instruction.quality == .spaciousness && change.control == "Layer Pan"))
                 })
             }) {
@@ -186,8 +188,9 @@ public enum StudioSoundPatchRefiner {
     }
 
     private static func controls(
-        for quality: StudioSoundQuality, engine: StudioSynthEngine
+        for quality: StudioSoundQuality, layer: StudioSynthLayer
     ) -> [Control] {
+        let engine = layer.engine
         switch quality {
         case .brightness:
             switch engine {
@@ -214,7 +217,17 @@ public enum StudioSoundPatchRefiner {
             case .wavetable: return [Control(.wavetable(.attack))]
             case .additive: return [Control(.additive(.attack))]
             case .granular: return [Control(.granular(.attack))]
-            case .physical: return [Control(.physical(.pickHardness), inverted: true)]
+            case .physical:
+                switch layer.physicalPatch?.model ?? .plucked {
+                case .plucked, .struck:
+                    return [Control(.physical(.pickHardness), inverted: true)]
+                case .bowed:
+                    return [Control(.physical(.bowPressure), inverted: true)]
+                case .reed, .brass:
+                    return [Control(.physical(.breath), inverted: true)]
+                case .mallet, .bell, .membrane:
+                    return [Control(.physical(.percussionHardness), inverted: true)]
+                }
             }
         case .releaseTime:
             switch engine {
