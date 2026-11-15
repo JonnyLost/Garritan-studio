@@ -69,7 +69,8 @@ final class StudioPictureMediaAcceptanceTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
 
         let asset = AVURLAsset(url: url)
-        XCTAssertTrue(try await asset.load(.isPlayable))
+        let playable = try await asset.load(.isPlayable)
+        XCTAssertTrue(playable)
         let tracks = try await asset.loadTracks(withMediaType: .video)
         let track = try XCTUnwrap(tracks.first)
         let fps = try await track.load(.nominalFrameRate)
