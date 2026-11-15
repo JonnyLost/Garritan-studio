@@ -310,12 +310,8 @@ public final class RenderGraph {
             // The render graph uses the session sample position for its AU
             // render timestamp. Submit MIDI in that SAME coordinate, before
             // rendering this buffer. Never substitute a buffer-relative offset.
-            var packet = (status, data1, data2)
-            withUnsafeBytes(of: &packet) { bytes in
-                scheduleMIDIEventBlock(sampleTime, 0,
-                    StudioMIDIClockMath.packetLength(status: status),
-                    bytes.baseAddress!.assumingMemoryBound(to: UInt8.self))
-            }
+            StudioAUMIDIScheduling.send(status: status, data1: data1, data2: data2,
+                                       sampleTime: sampleTime, using: scheduleMIDIEventBlock)
         } else if let unit = track.instrumentUnit {
             _ = MusicDeviceMIDIEvent(
                 unit, UInt32(status), UInt32(data1), UInt32(data2), sampleOffset

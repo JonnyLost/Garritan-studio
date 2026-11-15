@@ -29,6 +29,24 @@ final class StudioMIDITimingTests: XCTestCase {
         }
     }
 
+    func testAUAdapterPreservesTimestampCableAndBytes() {
+        let messages: [(UInt8, [UInt8])] = [
+            (0x91, [0x91, 60, 100]), (0xC1, [0xC1, 60]),
+            (0xD1, [0xD1, 60]), (0xE1, [0xE1, 60, 100])
+        ]
+        for (status, expected) in messages {
+            var delivered = false
+            StudioAUMIDIScheduling.send(status: status, data1: 60, data2: 100,
+                                       sampleTime: 1_000_037) { time, cable, length, bytes in
+                XCTAssertEqual(time, 1_000_037)
+                XCTAssertEqual(cable, 0)
+                XCTAssertEqual(Array(UnsafeBufferPointer(start: bytes, count: length)), expected)
+                delivered = true
+            }
+            XCTAssertTrue(delivered)
+        }
+    }
+
     // Timestamp harness: compares expected project frames with the scheduler's
     // actual delivery frames. This does not measure acoustic/audio-output timing.
     func testDenseDeliveryFramesOrderingAndNotePairing() {
