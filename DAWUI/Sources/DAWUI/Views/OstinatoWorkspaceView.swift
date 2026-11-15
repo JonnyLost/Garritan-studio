@@ -10,6 +10,7 @@ public struct OstinatoWorkspaceView: View {
     @StateObject private var auditioner = OstinatoAuditioner()
     @State private var selectedPatternID: UUID?
     @State private var statusMessage: String?
+    @State private var evolutionRepetitions = 8
 
     public init(viewModel: ProjectViewModel) {
         self.viewModel = viewModel
@@ -110,6 +111,17 @@ public struct OstinatoWorkspaceView: View {
                 Label("Variation", systemImage: "shuffle")
             }
             .help("Create a new editable pattern without changing the original")
+
+            Menu {
+                Stepper("Repetitions: \(evolutionRepetitions)", value: $evolutionRepetitions, in: 2...32)
+                Divider()
+                ForEach(OstinatoEvolutionShape.allCases, id: \.self) { shape in
+                    Button(shape.rawValue) { createEvolution(pattern, shape: shape) }
+                }
+            } label: {
+                Label("Evolve", systemImage: "waveform.path")
+            }
+            .help("Generate an editable sequence of evolving MIDI clips on assigned tracks")
 
             Text(pattern.mode == .rhythmic ? "Rhythmic lanes" : "Pitched lanes")
                 .font(.caption)
@@ -332,6 +344,24 @@ public struct OstinatoWorkspaceView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+    }
+
+    private func createEvolution(_ pattern: OstinatoPattern, shape: OstinatoEvolutionShape) {
+        auditioner.stop()
+        guard let track = selectedMIDITarget else {
+            statusMessage = "Select an instrument or MIDI track first."
+            return
+        }
+        let sequence = OstinatoEvolutionEngine.sequence(
+            from: pattern, repetitions: evolutionRepetitions, shape: shape)
+        let startBeat = max(0, viewModel.transportState.playheadBeats)
+        var clips = 0
+        for (index, evolved) in sequence.enumerated() {
+            let beat = startBeat + Double(index) * pattern.durationInBeats
+            clips += viewModel.applyRoutedOstinatoPattern(
+                evolved, fallbackTrackID: track.id, atBeat: beat)
+        }
+        statusMessage = "Created \(clips) evolving MIDI clips across \(sequence.count) repetitions."
     }
 
     private func createVariation(_ pattern: OstinatoPattern, kind: OstinatoVariation) {
