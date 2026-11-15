@@ -125,18 +125,18 @@ jobs:
             git reset --hard "$frozen" >/dev/null
             if git merge --no-ff --no-commit "$remote" > /tmp/studio-alpha1-merge.log 2>&1; then
               echo "CLEAN $source"
-              echo "| `$source` | $counts | clean |" >> "$GITHUB_STEP_SUMMARY"
+              echo "| $source | $counts | clean |" >> "$GITHUB_STEP_SUMMARY"
             else
               conflicts="$(git diff --name-only --diff-filter=U)"
               if [ -n "$conflicts" ]; then
                 echo "CONFLICT $source"
                 printf '%s\n' "$conflicts"
                 count="$(printf '%s\n' "$conflicts" | wc -l | tr -d ' ')"
-                echo "| `$source` | $counts | $count conflict paths; manual reconciliation needed |" >> "$GITHUB_STEP_SUMMARY"
+                echo "| $source | $counts | $count conflict paths; manual reconciliation needed |" >> "$GITHUB_STEP_SUMMARY"
               else
                 echo "MERGE_ERROR $source"
                 tail -40 /tmp/studio-alpha1-merge.log
-                echo "| `$source` | $counts | merge error; inspect logs |" >> "$GITHUB_STEP_SUMMARY"
+                echo "| $source | $counts | merge error; inspect logs |" >> "$GITHUB_STEP_SUMMARY"
               fi
             fi
             if [ -f "$(git rev-parse --git-path MERGE_HEAD)" ]; then
