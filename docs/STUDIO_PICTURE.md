@@ -57,6 +57,17 @@ Keyboard shortcuts: **Option-Command-P** opens Picture; **Option-Command-H** add
 
 **Current boundaries:** This milestone uses the existing Studio stereo mix bounce rather than an all-in-one render. Original embedded movie audio is included only when selected, and burn-in timecode, custom codecs, and frame-level quality assurance are planned separately. Mac playback and end-to-end listening remain required.
 
+## Milestones 6–7 — Frame-budget synchronization and visual scoring cues
+
+- The periodic AVPlayer drift tolerance is now tied to the actual picture frame rate (approximately two video frames, rather than a fixed 100 ms). To protect MacBook efficiency, automatic video-seek correction remains throttled at 650 ms; deliberate transport jumps and loop wraps still seek immediately.
+- Native **streamers** now sweep across the film to an upcoming hit point. A **single-frame punch** flashes at the marked hit; they are visual scoring aids and do not alter video files or rendered music.
+- Hit-point cue math is based on movie frames and the saved picture offset, never beats or wall-clock guesses. The earliest upcoming hit wins and works with 23.976/29.97/59.94 numbering modes.
+- Composers can toggle streamers and punches independently and select 1, 2, 3 or 5 seconds of visual lead time. Settings persist with the Studio project and older files continue decoding correctly.
+- The overlays use SwiftUI drawing above the existing one-player surface in docked or floating mode. No additional video decoder, timer, plugins or realtime audio callbacks are added.
+- Regression tests cover the exact punch frame, picture offsets, 29.97 drop-frame, cue selection, legacy save migration, invalid lead settings and frame-rate-adjusted drift tolerances.
+
+**Still required:** audio-device latency calibration, fully tempo-map-aware locator/navigation, host-clock/video presentation verification, and a consolidated MacBook video listening/viewing check. The visual punch is selected from the current published transport frame; actual display latency must be measured on the Mac, not assumed from passing unit tests.
+
 ## Persistence and media safety
 
 - Only a video **reference** (path plus security-scoped bookmark when available), project offset, frame-rate mode, source timecode, audio/overlay preferences and hit-point data are encoded in the DAW project.
