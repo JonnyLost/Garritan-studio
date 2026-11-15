@@ -136,7 +136,7 @@ public struct OstinatoPattern: Identifiable, Codable, Sendable {
     /// Pure, deterministic conversion. Empty/out-of-range steps emit no notes.
     /// Duplicate step indices within a lane are ignored to prevent stacked note-ons.
     public func midiEvents() -> [MIDIEvent] {
-        routedMIDIEvents().flatMap(\.events).sorted {
+        routedMIDIEvents().flatMap { $0.events }.sorted {
             if $0.beatPosition != $1.beatPosition { return $0.beatPosition < $1.beatPosition }
             return $0.channel < $1.channel
         }
