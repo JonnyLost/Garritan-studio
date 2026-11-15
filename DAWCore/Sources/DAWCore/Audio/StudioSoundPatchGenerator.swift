@@ -351,6 +351,12 @@ public enum StudioSoundPatchGenerator {
             // All generation uses built-in procedural sources; imported audio
             // is never silently required to play a generated instrument.
             sound.importedAudioPath = nil
+            if intent.excludedFamilies.contains(.bells) && sound.source == .bells {
+                sound.source = .cloud
+            }
+            if intent.excludedFamilies.contains(.noise) && sound.source == .noise {
+                sound.source = .cloud
+            }
             if let warmth = target(.warmth, from: intent) {
                 sound.set(0.04 + 0.4 * warmth, for: .grainSize)
             }
