@@ -97,20 +97,19 @@ public final class StudioPictureSession: ObservableObject {
         let changedAlignment = document?.timelineStartSeconds != currentDocument?.timelineStartSeconds ||
             document?.durationSeconds != currentDocument?.durationSeconds ||
             document?.frameRate != currentDocument?.frameRate
-        let changedGuide = document?.referenceAudioEnabled != currentDocument?.referenceAudioEnabled ||
-            document?.referenceAudioVolume != currentDocument?.referenceAudioVolume
+        let changedGuideEnabled = document?.referenceAudioEnabled != currentDocument?.referenceAudioEnabled
         currentDocument = document
         // AVPlayer always presents *silent video*. Guide audio is owned by
         // the dedicated AudioEngine mixer, never played twice.
         player.isMuted = true
         updateGuideMix()
         if !changedSource {
-            if changedGuide && document?.referenceAudioEnabled == true {
+            if changedGuideEnabled && document?.referenceAudioEnabled == true {
                 requestGuideAudioIfNeeded()
-            } else if changedGuide && document?.referenceAudioEnabled != true {
+            } else if changedGuideEnabled && document?.referenceAudioEnabled != true {
                 cancelGuidePreparation()
             }
-            if changedAlignment || changedGuide, let transport {
+            if changedAlignment || changedGuideEnabled, let transport {
                 synchronize(at: Double(transport.playheadPosition.samples) /
                             max(1, transport.sampleRate),
                             playing: transport.isPlaying, force: true)
