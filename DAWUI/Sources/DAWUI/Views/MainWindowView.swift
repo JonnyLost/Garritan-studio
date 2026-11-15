@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import CoreAudio
 import DAWCore
 import UniformTypeIdentifiers
@@ -8,6 +9,7 @@ import UniformTypeIdentifiers
 public struct MainWindowView: View {
     @Environment(\.studioPalette) private var palette
     @StateObject private var viewModel: ProjectViewModel
+    @StateObject private var pictureSession = StudioPictureSession()
     
     // Global key monitor for keyboard shortcuts
     @State private var keyMonitor = GlobalKeyMonitor()
@@ -22,6 +24,8 @@ public struct MainWindowView: View {
     @State private var showChannelWorkspace = false
     @State private var showArticulationsWorkspace = false
     @State private var showOstinatoWorkspace = false
+    @State private var showPictureWorkspace = false
+    @State private var floatingPictureWindow: StudioPictureFloatingWindowController?
     @State private var showInstrumentWorkspace = false
     @State private var compactLowerWorkspace = false
     @State private var showDockedKeyboard = false
@@ -136,7 +140,7 @@ public struct MainWindowView: View {
                         .background(Color(nsColor: .controlBackgroundColor))
                     }
 
-                    if showInstrumentWorkspace || showChannelWorkspace || showStageWorkspace || showRoomAcousticsWorkspace || showArticulationsWorkspace || showOstinatoWorkspace || viewModel.showMixer || viewModel.showPianoRoll {
+                    if showInstrumentWorkspace || showChannelWorkspace || showStageWorkspace || showRoomAcousticsWorkspace || showArticulationsWorkspace || showOstinatoWorkspace || showPictureWorkspace || viewModel.showMixer || viewModel.showPianoRoll {
                         ResizeHandle(height: $pianoRollHeight)
                             .onTapGesture(count: 2) {
                                 if lowerWorkspaceMaximized {
@@ -263,12 +267,21 @@ public struct MainWindowView: View {
                 barJumpOverlay
             }
         }
-        .onAppear { 
-            setupInitialState() 
+        .onAppear {
+            setupInitialState()
+            pictureSession.bind(to: viewModel.transportState)
+            pictureSession.update(document: viewModel.project.studioPicture)
         }
         .onDisappear {
-            // Stop keyboard monitor when view disappears (e.g., project reload)
+            // Project window was replaced; release decoder and bookmark access.
             keyMonitor.stop()
+            floatingPictureWindow?.close()
+            floatingPictureWindow = nil
+            pictureSession.unbind()
+        }
+        .onReceive(viewModel.$project) { updatedProject in
+            // Ordinary edits to tracks and clips must never reload the movie.
+            pictureSession.update(document: updatedProject.studioPicture)
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("toggleStudioKeyboard"))) { _ in
             showDockedKeyboard.toggle()
@@ -522,6 +535,7 @@ public struct MainWindowView: View {
         showRoomAcousticsWorkspace = workspace == "Rooms"
         showArticulationsWorkspace = workspace == "Articulations"
         showOstinatoWorkspace = workspace == "Ostinato"
+        showPictureWorkspace = workspace == "Picture"
         viewModel.showPianoRoll = workspace == "Piano Roll"
         viewModel.showMixer = workspace == "Mixer"
     }
@@ -546,6 +560,9 @@ public struct MainWindowView: View {
             }
             workspaceButton("Ostinato", symbol: "square.grid.3x3.fill", active: showOstinatoWorkspace) {
                 selectWorkspace("Ostinato")
+            }
+            workspaceButton("Picture", symbol: "film", active: showPictureWorkspace) {
+                selectWorkspace("Picture")
             }
             workspaceButton("Piano Roll", symbol: "pianokeys", active: viewModel.showPianoRoll && !showInstrumentWorkspace && !showChannelWorkspace && !showStageWorkspace && !showRoomAcousticsWorkspace && !showArticulationsWorkspace && !showOstinatoWorkspace && !viewModel.showMixer) {
                 selectWorkspace("Piano Roll")
@@ -583,7 +600,15 @@ public struct MainWindowView: View {
 
     private var compactWorkspaceStrip: some View {
         HStack(spacing: 16) {
-            if showRoomAcousticsWorkspace {
+            if showPictureWorkspace {
+                Image(systemName: "film")
+                Text(viewModel.project.studioPicture?.filename ?? "No reference picture")
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Spacer()
+                Button("Expand") { compactLowerWorkspace = false }
+                    .buttonStyle(.borderless)
+            } else if showRoomAcousticsWorkspace {
                 Image(systemName: "waveform.path")
                 Text("Room Acoustics").font(.subheadline.weight(.semibold))
                 Text(viewModel.project.dawState.acousticRoomProfileID ?? "Apple Medium Hall")
@@ -620,7 +645,20 @@ public struct MainWindowView: View {
 
     @ViewBuilder
     private var bottomPanel: some View {
-        if showInstrumentWorkspace {
+        if showPictureWorkspace {
+            if floatingPictureWindow != nil {
+                VStack(spacing: 14) {
+                    Label("Studio Picture is open in a floating window", systemImage: "film")
+                        .foregroundStyle(.secondary)
+                    Button("Dock Picture Here") { togglePictureFloating() }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                StudioPictureWorkspaceView(
+                    viewModel: viewModel, session: pictureSession, floating: false,
+                    toggleFloating: { togglePictureFloating() })
+            }
+        } else if showInstrumentWorkspace {
             if let track = viewModel.selectedTrack, track.studioSynthEnabled == true {
                 StudioSynthPanelView(viewModel: viewModel, trackID: track.id)
             } else if let track = viewModel.selectedTrack, track.studioFMEnabled == true {
@@ -696,6 +734,24 @@ public struct MainWindowView: View {
         }
     }
     
+    /// One AVPlayer and one decoder; moving the surface never starts a second
+    /// transport. The floating window is a native resizable macOS window.
+    private func togglePictureFloating() {
+        if let window = floatingPictureWindow {
+            window.close()
+            floatingPictureWindow = nil
+        } else {
+            let window = StudioPictureFloatingWindowController(
+                content: StudioPictureWorkspaceView(
+                    viewModel: viewModel, session: pictureSession, floating: true,
+                    toggleFloating: { togglePictureFloating() }))
+            window.onClose = { floatingPictureWindow = nil }
+            floatingPictureWindow = window
+            window.showWindow(nil)
+            window.window?.makeKeyAndOrderFront(nil)
+        }
+    }
+
     private var loadingOverlay: some View {
         VStack {
             ProgressView()
