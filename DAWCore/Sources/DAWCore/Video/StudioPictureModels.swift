@@ -151,7 +151,9 @@ public struct StudioPictureProject: Codable, Equatable, Sendable {
     /// SMPTE label assigned to the first movie frame (e.g. 01:00:00:00).
     public var startTimecodeFrame: Int64
     public var referenceAudioEnabled: Bool
-    public var showTimecodeOverlay: Bool
+    /// Optional so first-generation Studio Picture projects remain readable.
+    /// Nil means the normal visible overlay default.
+    public var showTimecodeOverlay: Bool?
     public var hitPoints: [StudioPictureHitPoint]
 
     public init(url: URL, durationSeconds: Double, frameRate: StudioPictureFrameRate,
