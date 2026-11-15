@@ -62,6 +62,7 @@ public struct StudioPictureWorkspaceView: View {
 
     @State private var newHitName = ""
     @State private var showingNewHit = false
+    @State private var editingHit: StudioPictureHitPoint?
     @State private var startCodeDraft = ""
     @State private var tempoSpanBeats = 8.0
 
@@ -111,6 +112,16 @@ public struct StudioPictureWorkspaceView: View {
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("The cue is stored at the exact movie frame under the playhead.")
+        }
+        .sheet(item: $editingHit) { hit in
+            if let picture = viewModel.project.studioPicture {
+                StudioPictureHitEditor(hit: hit, picture: picture) { edited in
+                    updatePicture { document in
+                        guard let index = document.hitPoints.firstIndex(where: { $0.id == edited.id }) else { return }
+                        document.hitPoints[index] = edited
+                    }
+                }
+            }
         }
         .onAppear {
             session.requestThumbnails()
@@ -163,6 +174,12 @@ public struct StudioPictureWorkspaceView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 7))
 
                 HStack(spacing: 8) {
+                    Button {
+                        goToAdjacentHit(direction: -1, picture: picture)
+                    } label: {
+                        Image(systemName: "backward.end.fill")
+                    }
+                    .help("Previous hit point")
                     Button { stepFrame(-1, picture: picture) } label: {
                         Image(systemName: "backward.frame.fill")
                     }
@@ -177,6 +194,12 @@ public struct StudioPictureWorkspaceView: View {
                         Image(systemName: "forward.frame.fill")
                     }
                     .help("Next picture frame")
+                    Button {
+                        goToAdjacentHit(direction: 1, picture: picture)
+                    } label: {
+                        Image(systemName: "forward.end.fill")
+                    }
+                    .help("Next hit point")
 
                     Text(picture.timecode(atMovieFrame: currentFrame(picture)))
                         .font(.system(.body, design: .monospaced).weight(.semibold))
@@ -294,14 +317,25 @@ public struct StudioPictureWorkspaceView: View {
                             } label: {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(hit.name).font(.caption.weight(.medium))
-                                    Text(picture.timecode(atMovieFrame: hit.frame))
-                                        .font(.system(.caption2, design: .monospaced))
-                                        .foregroundStyle(.secondary)
+                                    HStack(spacing: 5) {
+                                        Text(hit.kind.label)
+                                        Text(picture.timecode(atMovieFrame: hit.frame))
+                                    }
+                                    .font(.system(.caption2, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    if !hit.notes.isEmpty {
+                                        Text(hit.notes)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             .buttonStyle(.plain)
                             Menu {
+                                Button("Edit Cue…") { editingHit = hit }
+                                Divider()
                                 ForEach(StudioPictureHitKind.allCases) { kind in
                                     Button(kind.label) {
                                         updatePicture { p in
@@ -324,6 +358,14 @@ public struct StudioPictureWorkspaceView: View {
                     if picture.hitPoints.isEmpty {
                         Text("Add a hit at any key frame, cut or dramatic moment.")
                             .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Button {
+                            exportCueSheet(picture)
+                        } label: {
+                            Label("Export Cue Sheet…", systemImage: "square.and.arrow.up")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Create a CSV cue sheet with SMPTE, picture frames, and notes")
                     }
                     if picture.hitPoints.count >= 2 {
                         Divider()
@@ -370,6 +412,30 @@ public struct StudioPictureWorkspaceView: View {
         let bpm = transport.tempo.bpm
         // Matches the current transport's TimePosition(beats:tempo:) mapping.
         viewModel.seekTo(beat: seconds * bpm / 60)
+    }
+
+    private func goToAdjacentHit(direction: Int, picture: StudioPictureProject) {
+        let frame = currentFrame(picture)
+        let ordered = picture.hitPoints.sorted(by: { $0.frame < $1.frame })
+        guard let hit = direction < 0
+                ? ordered.last(where: { $0.frame < frame })
+                : ordered.first(where: { $0.frame > frame }) else { return }
+        seek(toMovieFrame: hit.frame, picture: picture)
+    }
+
+    private func exportCueSheet(_ picture: StudioPictureProject) {
+        let panel = NSSavePanel()
+        panel.title = "Export Studio Picture Cue Sheet"
+        panel.allowedContentTypes = [.commaSeparatedText]
+        let base = (picture.filename as NSString).deletingPathExtension
+        panel.nameFieldStringValue = base + "-cue-sheet.csv"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try StudioPictureCueSheet.csv(for: picture).write(
+                to: url, atomically: true, encoding: .utf8)
+        } catch {
+            session.reportError(error)
+        }
     }
 
     private func stepFrame(_ delta: Int64, picture: StudioPictureProject) {
@@ -435,6 +501,7 @@ public struct StudioPictureWorkspaceView: View {
                     current.filename = url.lastPathComponent
                     current.filePath = url.path
                     current.securityBookmark = bookmark
+                    current.mediaRevisionID = UUID()
                     // Preserve picture's cue mapping and SMPTE configuration.
                     current.durationSeconds = duration
                     viewModel.project.studioPicture = current
@@ -520,5 +587,86 @@ private struct StudioPictureScrubber: View {
                 seek(Int64((fraction * CGFloat(denominator)).rounded()))
             })
         }
+    }
+}
+
+private struct StudioPictureHitEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    private let original: StudioPictureHitPoint
+    private let picture: StudioPictureProject
+    private let onSave: (StudioPictureHitPoint) -> Void
+
+    @State private var name: String
+    @State private var kind: StudioPictureHitKind
+    @State private var timecode: String
+    @State private var notes: String
+    @State private var validationMessage: String?
+
+    init(hit: StudioPictureHitPoint, picture: StudioPictureProject,
+         onSave: @escaping (StudioPictureHitPoint) -> Void) {
+        self.original = hit
+        self.picture = picture
+        self.onSave = onSave
+        _name = State(initialValue: hit.name)
+        _kind = State(initialValue: hit.kind)
+        _timecode = State(initialValue: picture.timecode(atMovieFrame: hit.frame))
+        _notes = State(initialValue: hit.notes)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("Edit Picture Hit Point", systemImage: "mappin.and.ellipse")
+                .font(.headline)
+            Form {
+                TextField("Cue name", text: $name)
+                Picker("Type", selection: $kind) {
+                    ForEach(StudioPictureHitKind.allCases) { kind in
+                        Text(kind.label).tag(kind)
+                    }
+                }
+                TextField("SMPTE frame", text: $timecode)
+                    .font(.system(.body, design: .monospaced))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Director or composer notes").font(.caption)
+                    TextEditor(text: $notes)
+                        .frame(minHeight: 80)
+                        .border(.secondary.opacity(0.2))
+                }
+            }
+            .formStyle(.grouped)
+            if let validationMessage {
+                Text(validationMessage)
+                    .foregroundStyle(.red)
+                    .font(.caption)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                Button("Save Cue") { save() }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.return, modifiers: .command)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 420, minHeight: 310)
+    }
+
+    private func save() {
+        guard let movieFrame = picture.movieFrame(forTimecode: timecode) else {
+            validationMessage = "Enter a valid timecode within the imported movie."
+            return
+        }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            validationMessage = "Please name this cue."
+            return
+        }
+        var edited = original
+        edited.name = trimmed
+        edited.kind = kind
+        edited.frame = movieFrame
+        edited.notes = notes
+        onSave(edited)
+        dismiss()
     }
 }
