@@ -151,6 +151,8 @@ public struct StudioPictureProject: Codable, Equatable, Sendable {
     /// SMPTE label assigned to the first movie frame (e.g. 01:00:00:00).
     public var startTimecodeFrame: Int64
     public var referenceAudioEnabled: Bool
+    /// Linear monitor gain, not part of the score or stem mix. Nil means 65%.
+    public var referenceAudioVolume: Float?
     /// Optional so first-generation Studio Picture projects remain readable.
     /// Nil means the normal visible overlay default.
     public var showTimecodeOverlay: Bool?
@@ -160,6 +162,7 @@ public struct StudioPictureProject: Codable, Equatable, Sendable {
                 securityBookmark: Data? = nil, mediaRevisionID: UUID? = UUID(),
                 timelineStartSeconds: Double = 0,
                 startTimecodeFrame: Int64? = nil, referenceAudioEnabled: Bool = false,
+                referenceAudioVolume: Float? = nil,
                 showTimecodeOverlay: Bool = true,
                 hitPoints: [StudioPictureHitPoint] = []) {
         self.filename = url.lastPathComponent
@@ -172,6 +175,7 @@ public struct StudioPictureProject: Codable, Equatable, Sendable {
         self.startTimecodeFrame = startTimecodeFrame ??
             (StudioPictureTimecode.frameNumber("01:00:00:00", rate: frameRate) ?? 0)
         self.referenceAudioEnabled = referenceAudioEnabled
+        self.referenceAudioVolume = referenceAudioVolume
         self.showTimecodeOverlay = showTimecodeOverlay
         self.hitPoints = hitPoints
     }
