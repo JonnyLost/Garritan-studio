@@ -1,0 +1,43 @@
+name: Studio Sound Designer — Offline Interpreter
+
+on:
+  push:
+    branches:
+      - feature/studio-sound-designer-m1-interpreter
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-sound-designer-m1
+  cancel-in-progress: true
+
+jobs:
+  syntax:
+    name: Native description interpreter syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse offline interpreter and regression tests
+        run: |
+          swiftc -frontend -parse \
+            DAWCore/Sources/DAWCore/Audio/StudioSoundDescriptionInterpreter.swift \
+            Tests/DAWCoreTests/StudioSoundDescriptionInterpreterTests.swift
+
+  macos:
+    name: macOS full build, tests and release
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve Swift dependencies
+        run: swift package resolve
+      - name: Build complete Studio
+        run: swift build
+      - name: Run Sound Designer interpreter tests
+        run: swift test --filter StudioSoundDescriptionInterpreterTests
+      - name: Run full DAW and native instrument regression suite
+        run: swift test --parallel
+      - name: Build optimized Studio
+        run: swift build -c release --product DAWApp
