@@ -212,4 +212,35 @@ final class OstinatoPatternTests: XCTestCase {
                        source.stepCount - 1 - (source.lanes[0].steps.last?.index ?? 0))
     }
 
+    func testEvolutionProducesBoundedEditableRepetitions() {
+        let source = OstinatoPattern.starter(mode: .melodic)
+        for shape in OstinatoEvolutionShape.allCases {
+            let result = OstinatoEvolutionEngine.sequence(
+                from: source, repetitions: 8, shape: shape, seed: 25)
+            XCTAssertEqual(result.count, 8)
+            XCTAssertEqual(Set(result.map(\.id)).count, 8)
+            XCTAssertTrue(result.allSatisfy { $0.stepCount == source.stepCount })
+            XCTAssertTrue(result.allSatisfy { pattern in
+                pattern.lanes.allSatisfy { lane in
+                    lane.steps.allSatisfy { $0.index >= 0 && $0.index < pattern.stepCount }
+                }
+            })
+        }
+    }
+
+    func testEvolutionIsDeterministicAndPreservesSourceRouting() {
+        var source = OstinatoPattern.starter(mode: .rhythmic)
+        let destination = TrackID()
+        source.lanes[0].targetTrackID = destination
+        let first = OstinatoEvolutionEngine.sequence(
+            from: source, repetitions: 6, shape: .wave, seed: 99)
+        let second = OstinatoEvolutionEngine.sequence(
+            from: source, repetitions: 6, shape: .wave, seed: 99)
+        XCTAssertEqual(first.map { $0.lanes.map(\.steps) },
+                       second.map { $0.lanes.map(\.steps) })
+        XCTAssertTrue(first.allSatisfy { $0.lanes[0].targetTrackID == destination })
+        XCTAssertEqual(source.lanes[0].targetTrackID, destination)
+        XCTAssertEqual(source.name, "New Rhythm")
+    }
+
 }
