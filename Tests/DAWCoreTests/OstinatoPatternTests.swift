@@ -148,4 +148,30 @@ final class OstinatoPatternTests: XCTestCase {
         XCTAssertEqual(try JSONEncoder().encode(original), before)
     }
 
+    func testSoloAndMuteDetermineRoutedOrchestralLanes() {
+        let strings = TrackID()
+        let brass = TrackID()
+        var pattern = OstinatoPattern.starter(mode: .melodic)
+        pattern.lanes[0].targetTrackID = strings
+        pattern.lanes[1].targetTrackID = brass
+        pattern.lanes[0].isSolo = true
+        XCTAssertEqual(pattern.routedMIDIEvents().count, 1)
+        XCTAssertEqual(pattern.routedMIDIEvents().first?.lane.targetTrackID, strings)
+        pattern.lanes[0].isMuted = true
+        XCTAssertTrue(pattern.midiEvents().isEmpty)
+    }
+
+    func testOrchestralRoutingSurvivesProjectPatternSerialization() throws {
+        var pattern = OstinatoPattern.starter(mode: .rhythmic)
+        let destination = TrackID()
+        pattern.lanes[0].targetTrackID = destination
+        pattern.lanes[0].isMuted = true
+        pattern.lanes[1].isSolo = true
+        let decoded = try JSONDecoder().decode(OstinatoPattern.self,
+            from: JSONEncoder().encode(pattern))
+        XCTAssertEqual(decoded.lanes[0].targetTrackID, destination)
+        XCTAssertEqual(decoded.lanes[0].isMuted, true)
+        XCTAssertEqual(decoded.lanes[1].isSolo, true)
+    }
+
 }
