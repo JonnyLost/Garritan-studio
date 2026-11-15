@@ -146,7 +146,7 @@ public struct StudioPictureWorkspaceView: View {
                 ZStack {
                     Color.black
                     StudioPicturePlayerSurface(player: session.player)
-                    if picture.showTimecodeOverlay {
+                    if picture.showTimecodeOverlay ?? true {
                         VStack {
                             Spacer()
                             HStack {
@@ -292,7 +292,7 @@ public struct StudioPictureWorkspaceView: View {
                     ))
                     .font(.caption)
                     Toggle("Timecode overlay", isOn: Binding(
-                        get: { picture.showTimecodeOverlay },
+                        get: { picture.showTimecodeOverlay ?? true },
                         set: { enabled in updatePicture { $0.showTimecodeOverlay = enabled } }
                     ))
                     .font(.caption)
