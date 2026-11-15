@@ -429,25 +429,14 @@ public final class CoreAudioBackend: AudioBackend {
         renderCallCount += 1
         
         let startSample = _currentSamplePosition
-        let endSample = startSample + Int64(frameCount)
-        
-        // Debug logging (throttled to once per second)
-        let now = mach_absolute_time()
-        if now - lastLogTime > 1_000_000_000 {  // ~1 second
-            print("[CoreAudioBackend:Render] Sample range: \(startSample)-\(endSample), Events pending: \(midiScheduler.eventCount)")
-            lastLogTime = now
-        }
+        let endSample = StudioMIDIClockMath.bufferEnd(startSample: startSample, frameCount: frameCount)
         
         // 1. Process MIDI events for this buffer
-        let eventsProcessed = midiScheduler.processEvents(
+        midiScheduler.processEvents(
             startSample: startSample,
             endSample: endSample,
             renderGraph: renderGraph
         )
-        
-        if eventsProcessed > 0 {
-            print("[CoreAudioBackend:Render] Processed \(eventsProcessed) MIDI events at sample \(startSample)")
-        }
         
         // 2. Render all tracks through the graph
         renderGraph.render(

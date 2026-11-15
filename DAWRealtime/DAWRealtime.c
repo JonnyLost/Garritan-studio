@@ -240,3 +240,147 @@ void daw_sample_position_publish(DAWAtomicSamplePosition *position, int64_t fram
 int64_t daw_sample_position_load(const DAWAtomicSamplePosition *position) {
     return position ? atomic_load_explicit(&position->frames, memory_order_acquire) : 0;
 }
+
+struct DAWSPSCCursor {
+    uint32_t capacity;
+    uint32_t mask;
+    _Atomic(uint64_t) head;
+    _Atomic(uint64_t) tail;
+};
+
+DAWSPSCCursor *daw_spsc_cursor_create(uint32_t requestedCapacity) {
+    uint32_t capacity = nextPowerOfTwo(requestedCapacity);
+    if (!capacity) return NULL;
+    DAWSPSCCursor *cursor = calloc(1, sizeof(*cursor));
+    if (!cursor) return NULL;
+    cursor->capacity = capacity;
+    cursor->mask = capacity - 1u;
+    atomic_init(&cursor->head, 0);
+    atomic_init(&cursor->tail, 0);
+    return cursor;
+}
+
+void daw_spsc_cursor_destroy(DAWSPSCCursor *cursor) { free(cursor); }
+
+uint32_t daw_spsc_write_index(const DAWSPSCCursor *cursor) {
+    if (!cursor) return UINT32_MAX;
+    uint64_t head = atomic_load_explicit(&cursor->head, memory_order_relaxed);
+    uint64_t tail = atomic_load_explicit(&cursor->tail, memory_order_acquire);
+    // Preserve one free slot so a full queue is unambiguous.
+    if (head - tail >= cursor->capacity - 1u) return UINT32_MAX;
+    return (uint32_t)head & cursor->mask;
+}
+
+void daw_spsc_commit_write(DAWSPSCCursor *cursor) {
+    if (!cursor) return;
+    uint64_t head = atomic_load_explicit(&cursor->head, memory_order_relaxed);
+    atomic_store_explicit(&cursor->head, head + 1, memory_order_release);
+}
+
+uint32_t daw_spsc_read_index(const DAWSPSCCursor *cursor) {
+    if (!cursor) return UINT32_MAX;
+    uint64_t tail = atomic_load_explicit(&cursor->tail, memory_order_relaxed);
+    uint64_t head = atomic_load_explicit(&cursor->head, memory_order_acquire);
+    if (head == tail) return UINT32_MAX;
+    return (uint32_t)tail & cursor->mask;
+}
+
+void daw_spsc_commit_read(DAWSPSCCursor *cursor) {
+    if (!cursor) return;
+    uint64_t tail = atomic_load_explicit(&cursor->tail, memory_order_relaxed);
+    atomic_store_explicit(&cursor->tail, tail + 1, memory_order_release);
+}
+
+uint32_t daw_spsc_count(const DAWSPSCCursor *cursor) {
+    if (!cursor) return 0;
+    uint64_t head = atomic_load_explicit(&cursor->head, memory_order_acquire);
+    uint64_t tail = atomic_load_explicit(&cursor->tail, memory_order_acquire);
+    uint64_t count = head >= tail ? head - tail : 0;
+    return count > cursor->capacity - 1u ? cursor->capacity - 1u : (uint32_t)count;
+}
+
+void daw_spsc_clear_quiescent(DAWSPSCCursor *cursor) {
+    if (!cursor) return;
+    uint64_t head = atomic_load_explicit(&cursor->head, memory_order_acquire);
+    atomic_store_explicit(&cursor->tail, head, memory_order_release);
+}
+
+void daw_spsc_reset_quiescent(DAWSPSCCursor *cursor) {
+    if (!cursor) return;
+    atomic_store_explicit(&cursor->tail, 0, memory_order_relaxed);
+    atomic_store_explicit(&cursor->head, 0, memory_order_release);
+}
+
+struct DAWMIDIClock {
+    _Atomic(uint64_t) generation;
+    _Atomic(int64_t) startFrame;
+    _Atomic(int64_t) endFrame;
+    _Atomic(uint64_t) positionGeneration;
+    // Accessed only by the single audio/tap producer.
+    uint64_t renderGeneration;
+    int64_t engineOrigin;
+    int64_t lastEngineFrame;
+};
+DAWMIDIClock *daw_midi_clock_create(void) {
+    DAWMIDIClock *clock = calloc(1, sizeof(*clock));
+    if (!clock) return NULL;
+    atomic_init(&clock->generation, 1);
+    atomic_init(&clock->startFrame, 0);
+    atomic_init(&clock->endFrame, 0);
+    atomic_init(&clock->positionGeneration, 0);
+    return clock;
+}
+void daw_midi_clock_destroy(DAWMIDIClock *clock) { free(clock); }
+void daw_midi_clock_cancel(DAWMIDIClock *clock) {
+    uint64_t g = atomic_load_explicit(&clock->generation, memory_order_relaxed);
+    atomic_store_explicit(&clock->generation, (g & 1u) ? g + 2 : g + 1, memory_order_release);
+}
+uint64_t daw_midi_clock_begin(DAWMIDIClock *clock, int64_t startFrame) {
+    daw_midi_clock_cancel(clock);
+    atomic_store_explicit(&clock->startFrame, startFrame, memory_order_relaxed);
+    return atomic_fetch_add_explicit(&clock->generation, 1, memory_order_release) + 1;
+}
+bool daw_midi_clock_is_current(const DAWMIDIClock *clock, uint64_t generation) {
+    return !(generation & 1u) && generation == atomic_load_explicit(&clock->generation, memory_order_acquire);
+}
+bool daw_midi_clock_observe(DAWMIDIClock *clock, int64_t engineFrame, uint32_t frames) {
+    uint64_t g = atomic_load_explicit(&clock->generation, memory_order_acquire);
+    if (g & 1u) return false;
+    int64_t base = atomic_load_explicit(&clock->startFrame, memory_order_relaxed);
+    if (!daw_midi_clock_is_current(clock, g)) return false;
+    if (clock->renderGeneration != g) {
+        clock->engineOrigin = engineFrame;
+        clock->lastEngineFrame = engineFrame;
+        clock->renderGeneration = g;
+    }
+    if (engineFrame < clock->lastEngineFrame) {
+        // One nonblocking CAS invalidates this generation without overwriting
+        // a control-side replacement. The worker will release old voices.
+        uint64_t expected = g;
+        atomic_compare_exchange_strong_explicit(&clock->generation, &expected, g + 1,
+                                               memory_order_acq_rel, memory_order_acquire);
+        return false;
+    }
+    clock->lastEngineFrame = engineFrame;
+    // A backwards device timestamp is a discontinuity, not a huge unsigned delta.
+    // Control-side reconfiguration cancels the session; ignore invalid windows.
+    if (engineFrame < clock->engineOrigin) return false;
+    uint64_t delta = (uint64_t)engineFrame - (uint64_t)clock->engineOrigin;
+    if (delta > INT64_MAX || base > INT64_MAX - (int64_t)delta) return false;
+    int64_t start = base + (int64_t)delta;
+    int64_t end = start > INT64_MAX - frames ? INT64_MAX : start + frames;
+    atomic_store_explicit(&clock->endFrame, end, memory_order_relaxed);
+    atomic_store_explicit(&clock->positionGeneration, g, memory_order_release);
+    return daw_midi_clock_is_current(clock, g);
+}
+bool daw_midi_clock_snapshot(const DAWMIDIClock *clock, uint64_t *generation, int64_t *endFrame) {
+    uint64_t g = atomic_load_explicit(&clock->generation, memory_order_acquire);
+    if (g & 1u) return false;
+    uint64_t pg = atomic_load_explicit(&clock->positionGeneration, memory_order_acquire);
+    int64_t frame = pg == g ? atomic_load_explicit(&clock->endFrame, memory_order_relaxed)
+                            : atomic_load_explicit(&clock->startFrame, memory_order_relaxed);
+    if (!daw_midi_clock_is_current(clock, g)) return false;
+    *generation = g;
+    *endFrame = frame;
+    return true;
+}

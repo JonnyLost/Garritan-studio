@@ -3,6 +3,7 @@ name: Studio consolidated Sampler acceptance
 on:
   push:
     branches:
+      - codex/studio-midi-audio-timing-m3
       - integration/studio-sampler-portable-packages-2026-11-14
       - integration/studio-alpha1-consolidated-2026-11-14
   pull_request:
@@ -105,6 +106,13 @@ jobs:
             Tests/StudioSamplerDSPStandalone/main.cpp \
             -o /tmp/studio-sampler-integrated-dsp
           ASAN_OPTIONS=detect_leaks=1 /tmp/studio-sampler-integrated-dsp
+      - name: Verify MIDI atomic handoff under sanitizers
+        run: |
+          cc -std=c11 -O1 -g -Wall -Wextra -Werror -pthread \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I DAWRealtime/include DAWRealtime/DAWRealtime.c \
+            Tests/DAWRealtimeStandalone/midi_spsc.c -lm -o /tmp/studio-midi-spsc
+          ASAN_OPTIONS=detect_leaks=1 /tmp/studio-midi-spsc
       - name: Stress 72 streamed zones and delayed disk reads
         run: |
           set -euo pipefail
