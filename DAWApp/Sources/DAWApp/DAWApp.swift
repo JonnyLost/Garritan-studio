@@ -137,16 +137,36 @@ struct DAWApp: App {
             
             // Track commands
             CommandMenu("Track") {
-                Button("New Audio Track") {
-                    NotificationCenter.default.post(name: .newAudioTrack, object: nil)
-                }
-                .keyboardShortcut("t", modifiers: [.command, .option])
-                
-                Button("New MIDI Track") {
-                    NotificationCenter.default.post(name: .newMIDITrack, object: nil)
+                Button("Add Instrument") {
+                    NotificationCenter.default.post(
+                        name: .newStudioTrack,
+                        object: ProjectViewModel.StudioTrackKind.instrument
+                    )
                 }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
-                
+
+                Button("Add Sampler") {
+                    NotificationCenter.default.post(
+                        name: .newStudioTrack,
+                        object: ProjectViewModel.StudioTrackKind.sampler
+                    )
+                }
+
+                Button("Add Synth") {
+                    NotificationCenter.default.post(
+                        name: .newStudioTrack,
+                        object: ProjectViewModel.StudioTrackKind.synth
+                    )
+                }
+
+                Button("Add Audio") {
+                    NotificationCenter.default.post(
+                        name: .newStudioTrack,
+                        object: ProjectViewModel.StudioTrackKind.audio
+                    )
+                }
+                .keyboardShortcut("t", modifiers: [.command, .option])
+
                 Divider()
                 
                 Button("Delete Selected Track") {

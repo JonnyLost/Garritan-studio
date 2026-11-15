@@ -350,6 +350,83 @@ public final class ProjectViewModel: ObservableObject {
     }
     
     // MARK: - Track Operations
+    /// Composer-facing track types. MIDI remains the underlying sequencing
+    /// format for Instrument, Synth and Sampler, but is not a separate
+    /// default add-track workflow.
+    public enum StudioTrackKind: String, CaseIterable, Sendable {
+        case instrument
+        case sampler
+        case synth
+        case audio
+
+        public var label: String {
+            switch self {
+            case .instrument: return "Instrument"
+            case .sampler: return "Sampler"
+            case .synth: return "Synth"
+            case .audio: return "Audio"
+            }
+        }
+    }
+
+    /// Create the model only after its mixer graph (and native Synth, if any)
+    /// has initialized. Failed creation cannot leave a silent/half-connected
+    /// track in the project or register a misleading Undo action.
+    @discardableResult
+    public func createStudioTrack(_ kind: StudioTrackKind) throws -> TrackID {
+        let type: TrackType = kind == .audio ? .audio : .instrument
+        let count = project.tracks.filter { track in
+            switch kind {
+            case .audio:
+                return track.type == .audio
+            case .sampler:
+                return track.studioSamplerPatch != nil
+            case .synth:
+                return track.studioSynthEnabled == true
+            case .instrument:
+                return track.type == .instrument &&
+                    track.studioSamplerPatch == nil &&
+                    track.studioSynthEnabled != true
+            }
+        }.count
+        var track = Track(name: "\(kind.label) \(count + 1)", type: type)
+        let colors = TrackColor.allCases
+        track.color = colors[project.tracks.count % colors.count]
+        // New channels share Studio's Concert Hall send, with independent
+        // trim and stage position. Existing saved tracks remain untouched.
+        track.stageReverbZone = 2
+        track.stageWetTrim = 1
+
+        switch kind {
+        case .sampler:
+            // The Sampler's supported blank patch is intentionally silent
+            // until user samples are mapped; it needs no temporary audio file.
+            track.studioSamplerPatch = StudioSamplerPatch(zones: [])
+        case .synth:
+            // An independent native voice graph for every new Synth track.
+            track.studioSynthEnabled = true
+            track.studioSynthPatch = StudioSynthPatch()
+        case .instrument, .audio:
+            break
+        }
+
+        try audioEngine.createTrackNode(for: track)
+        do {
+            if kind == .synth, let patch = track.studioSynthPatch {
+                try playbackEngine.loadStudioSynth(for: track.id, patch: patch)
+            }
+        } catch {
+            playbackEngine.removeInstrument(for: track.id)
+            audioEngine.removeTrackNode(for: track.id)
+            throw error
+        }
+
+        undoManager.registerAction(AddTrackAction(track: track), project: &project)
+        audioEngine.updateSoloState(tracks: project.tracks)
+        selectedTrackID = track.id
+        return track.id
+    }
+
     
     public func addTrack(type: TrackType, name: String? = nil) {
         // Count existing tracks of the same type to determine the number
