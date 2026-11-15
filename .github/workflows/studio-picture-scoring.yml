@@ -30,5 +30,5 @@ jobs:
         run: swift package resolve
       - name: Build the DAW and Studio Picture
         run: swift build
-      - name: Verify SMPTE, hit-point mapping and save migration
-        run: swift test --filter StudioPictureTimecodeTests
+      - name: Verify SMPTE, synchronization, cue sheets and save migration
+        run: swift test --filter StudioPicture
