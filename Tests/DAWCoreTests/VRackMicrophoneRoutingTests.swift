@@ -219,6 +219,72 @@ final class VRackMicrophoneRoutingTests: XCTestCase {
                              "Four-output capture must accept mixer input")
     }
 
+    /// Isolate which edge of Studio's prepared master graph is failing.
+    /// The normal independent matrix/mixer test above already passes.
+    func testPreparedStudioGraphAcceptsDirectMicrophoneAndCaptureInputs() throws {
+        for feedCapture in [false, true] {
+            let studio = AudioEngine()
+            let engine = studio.engine
+            let format = try XCTUnwrap(AVAudioFormat(
+                standardFormatWithSampleRate: studio.sampleRate, channels: 2
+            ))
+            let source = AVAudioMixerNode()
+            let player = AVAudioPlayerNode()
+            engine.attach(source)
+            engine.attach(player)
+            engine.connect(player, to: source, format: format)
+            studio.registerVRackSumMixer(source)
+            studio.setVRackCaptureSourcePresent(true)
+            studio.setSharedMicrophoneMatrixEnabled(true)
+
+            let room = StudioAcousticRoomDesign()
+            let stage = StudioMicrophoneGeometry.approximateTrackPosition(
+                pan: 0, zone: 2, room: room
+            )
+            let mic = StudioVirtualMicrophone(
+                position: StudioRoomPosition3D(
+                    xMeters: stage.xMeters, yMeters: stage.yMeters,
+                    zMeters: stage.zMeters
+                ),
+                pattern: .omnidirectional,
+                mixerSettings: StudioMicrophoneChannelSettings(level: 1)
+            )
+            try studio.setMicrophoneAuditionEnabled(
+                true, tracks: [], microphones: [mic], room: room
+            )
+            let capture = try XCTUnwrap(
+                engine.outputConnectionPoints(for: source, outputBus: 0)
+                    .first?.node as? AVAudioUnitEffect
+            )
+            let micChannel = try XCTUnwrap(
+                engine.outputConnectionPoints(for: capture, outputBus: 0)
+                    .first?.node as? AVAudioMixerNode
+            )
+            if feedCapture {
+                engine.connect(player, to: capture, format: format)
+            } else {
+                engine.connect(player, to: micChannel, format: format)
+            }
+            engine.stop()
+            try engine.enableManualRenderingMode(
+                .offline, format: format, maximumFrameCount: 512
+            )
+            try engine.start()
+            let input = try makeInput(format)
+            player.scheduleBuffer(input, at: nil, options: [.loops])
+            player.play()
+            let peak = try renderPeak(engine)
+            XCTAssertGreaterThan(
+                peak, 0.01,
+                feedCapture
+                    ? "Studio matrix capture/mic master path should render"
+                    : "Studio microphone return mixer should render"
+            )
+            engine.stop()
+            player.stop()
+        }
+    }
+
     func testRackOnlyMIDITracksAreCountedThroughRackAggregate() {
         let rackID = UUID()
         var tracks: [Track] = []
