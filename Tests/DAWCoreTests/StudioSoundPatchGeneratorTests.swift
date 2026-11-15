@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+import AVFoundation
 @testable import DAWCore
 
 @MainActor
@@ -171,8 +172,29 @@ final class StudioSoundPatchGeneratorTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: folder) }
         let preset = try StudioSynthUserPresetLibrary.save(
             name: result.suggestedName, patch: patch, in: folder)
-        let loaded = try StudioSynthUserPresetLibrary.load(preset, in: folder)
+        let loaded = try StudioSynthUserPresetLibrary.load(from:
+            StudioSynthUserPresetLibrary.fileURL(for: preset, in: folder))
         XCTAssertEqual(loaded.patch, patch)
+    }
+
+    func testGeneratedSoundsInstantiateNativeAudioInstruments() throws {
+        let prompts = [
+            "A bright analog lead with fast attack",
+            "A metallic FM key with fast attack",
+            "A sharp wavetable lead with fast attack",
+            "An additive bell with fast attack",
+            "A granular key with fast attack",
+            "A bright physical modeling string pluck",
+            "A warm evolving analog and additive pad"
+        ]
+        for prompt in prompts {
+            let generated = try generate(prompt)
+            let instrument = try StudioSynthInstrument(
+                sampleRate: 44_100, patch: generated.patch)
+            XCTAssertTrue(instrument.noteOn(60, velocity: 100), prompt)
+            XCTAssertTrue(instrument.noteOff(60), prompt)
+            XCTAssertTrue(instrument.allNotesOff(), prompt)
+        }
     }
 
     func testSameDescriptionProducesExactlyTheSamePatchIncludingRoutingIDs() throws {
