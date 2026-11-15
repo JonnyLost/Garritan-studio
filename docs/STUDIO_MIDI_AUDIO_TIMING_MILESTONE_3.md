@@ -125,3 +125,176 @@ future picture interfaces should consume the existing session clock.
 Primary regression risks: AU implementations interpreting absolute scheduling
 differently, one-frame Analog quantization differences, and previously dropped
 late releases affecting a newer voice after an unguarded seek. Keep the PR draft pending macOS and hardware review.
+
+## Milestone 3B — render-clock worker scheduling and generation cancellation
+
+### Baseline and paths inspected
+
+Continued the existing branch at `b4d5cf4a82cb9ab0d23de72549730b7dc0a36b7e`;
+remote branch and draft PR #29 matched before editing. No prior commit was
+replaced. The M3 timestamp adapter, late-release policy, atomic ring, 20,480
+message harness and million-event SPSC test remain intact. The earlier sections
+record M3's historical scope; this section describes what 3B supersedes.
+
+Inspected both PlaybackEngine preparation paths, AudioEngine timing/mixdown,
+TransportState play/stop/loop events, ProjectViewModel seek/loop/project cleanup,
+track/rack removal, Analog's render-local sequence, other native wrappers,
+Sampler producers and TrackInstrument AU/ARIA delivery. No DSP/preset/project
+format or unrelated integration branch was imported or changed.
+
+### Shared clock and V-Rack changes implemented
+
+A silent AVAudioSourceNode now publishes its AudioTimeStamp sample position to
+`StudioMIDITransportClock`. It ensures the engine can advance before the first
+rack note or future audio region sounds. Its first render sample maps to the
+session's captured absolute project start frame; subsequent positions use the
+engine sample delta, not callback arrival time or mach wall time. The source is
+the mailbox's sole render writer. Normal and export mixer taps only consume
+progress/capture PCM and no longer dispatch MIDI work per buffer.
+
+V-Rack, generic AUs/ARIA, Apple sampler, FM, Hybrid (Wavetable, Additive,
+Granular, Physical), native Sampler and Analog's worker fallback now use one
+precompiled sample-frame score and monotonic cursor. Complete note pairs,
+controllers, bend, program, channel/poly pressure are encoded once; MIDI 1.0
+status bytes and destination channel overrides are preserved. Unsupported
+native controls remain unsupported. SysEx remains outside this channel-message
+scheduler. Precompiled Analog retains its existing DSP score path.
+
+A 1 ms high-priority serial worker poll wakes delivery. **Timer time does not
+advance the score**: only published render-frame deadlines do. The old 5 ms
+V-Rack MIDI event scan and active-note beat deadline scan were removed.
+The remaining 5 ms timer serves auxiliary audio region starts and metronome on
+the control thread, using the same published sample position. It is not a MIDI
+clock. Automation and ostinato remain their existing control/live systems; this
+milestone does not move them into the compiled score.
+
+Worker frames use AVAudioEngine's sample rate, including hybrid V-Rack. The
+optional Core Audio backend retains its own correctly rate-converted start.
+Transport's runtime sample rate is updated at Play; persisted project rate and
+file formats are unchanged.
+
+### Timing guarantees and limits
+
+Musical beats, scheduled project sample frames, actual instrument render time
+and device output latency remain distinct. Shared clock math truncates beat
+conversion and uses half-open render deadlines. At equal frames: note-off,
+controller/program/bend/pressure, note-on, stable original order within classes.
+Zero-duration sounding notes receive a minimum one-frame release interval.
+
+The worker has deterministic sample-frame deadlines and preserves their order.
+It still calls immediate native/AU/ARIA compatibility APIs. Poll latency,
+thread scheduling and instrument queue consumption can delay actual audio.
+The source's clock observation does not constitute an AU pre-render delivery
+contract, and cannot safely be passed as a future absolute AU timestamp or
+native next-buffer offset. M3's direct Core Audio AU timestamp adapter remains
+unchanged. Universal sample accuracy is NOT established.
+
+### Generation and cleanup design
+
+The C11 mailbox has monotonically changing generations: even = active,
+odd = cancelled. Control operations are serialized; the sole render writer
+owns its engine sample anchor. The callback performs bounded atomic loads and
+stores, never waits for a coherent snapshot, and allocates nothing. Worker
+snapshots are accepted only for the installed generation. Each packet also
+checks the current generation before delivery, so invalidation interrupts a
+budget of simultaneous events. No old callback dispatch closures survive a
+restart because per-buffer dispatch was removed entirely.
+
+Stop/pause, preparation (seek, loop lap, export pass, project replacement), and
+engine invalidation cancel before a serial worker barrier. Cleanup executes
+against OLD instrument snapshots before new routing/score publication. It
+releases tracked keys and CC64/66/123 on used channels even after cancellation;
+cleanup deliberately bypasses stale ordinary-event filtering. Removal cleans
+only the affected destination, disables its future events and preserves other
+rack destinations. Native render-local sequences keep existing stop/all-notes-
+off APIs. Ordinary uninterrupted worker playback sends no blanket cleanup.
+Once Stop returns, the old serial worker cannot deliver ordinary MIDI into the
+next generation. An instrument may retain its own release tail or reject an
+underlying API call; those acoustic/receiver behaviors are not proven here.
+
+### Loop, seek, tempo and reconfiguration policy
+
+Loop end excludes new onsets and clamps worker/Analog note ends to the boundary.
+A region note already sounding across a seek/loop start is not retriggered;
+existing planner restoration supplies latest CC/program/bend/pressure and
+articulation state ahead of future notes. Notes are cut/released at a lap
+transition; they are not tied seamlessly across laps. The existing UI/control
+loop-wrap rebuild remains and may create a gap; sample-accurate seamless loops
+are still future work. Cleanup handles pedal-held voices before restoration.
+No MIDI editing or saved region durations are modified.
+
+ProjectViewModel tempo edits now pause/clean and rebuild at the captured
+musical beat. Direct external tempo publications during playback safely pause
+rather than apply a changed BPM to an old score. There is still no persisted
+tempo-map implementation. Engine/device or buffer-size reconfiguration cancels
+MIDI and pauses transport; Play rebuilds a new generation. A changed source
+sample rate recreates the silent clock source off the render thread. Automatic
+seamless device switching/resumption is not implemented.
+
+### Capacity, performance and real-time assessment
+
+The clock is a fixed-size coalescing mailbox, not a queue of MIDI packets.
+100,000/unbounded position observations can coalesce while the worker is busy
+without losing any compiled release. The score retains all packets in memory;
+there is no old 32,768-packet worker preparation ceiling. Each worker poll
+examines at most 2,048 packets. Remaining packets, including releases, are
+retained for later polls, even if no new clock observation arrives. A cancelled
+session uses independent cleanup instead of draining obsolete ordinary events.
+Memory scales with project score size; controller/note tracking allocates ONLY
+on the non-render worker. Dense scores can therefore increase memory and
+worker lateness; this is bounded delivery work, not a throughput guarantee.
+
+Render work is limited to zeroing the silent stereo source and C atomic clock
+publication. No locks, logging, file access, dispatch or UI state reads were
+added there. Worker registry/state is a separate nonactor object confined to
+the serial queue; control mutations use barriers outside rendering. Main-thread
+auxiliary audio/metronome and existing audio latency compensation remain
+limitations. The optional Core Audio graph's older quiescence/reset and fixed
+MIDI ring capacity limitations from M3 remain; worker guarantees do not fix them.
+
+The standalone sanitizer harness measures a million clock publications and
+prints elapsed host time, separately from its million-event SPSC test and
+10,000 concurrent generation transitions. A local instrumented Linux run took
+0.011730 s for a million clock observations; this is a synthetic atomic-call
+throughput observation, NOT MacBook CPU use, event-to-audio latency or jitter.
+No hardware performance figures are claimed.
+
+### Tests and CI evidence
+
+Added 20 deterministic worker/compiler/clock tests covering simultaneous V-Rack
+order, explicit note pairs, zero velocity/duration, loop clipping/exclusion,
+controller/pressure/program bytes, channel overrides, stale generations,
+cancellation within a chord, pedal cleanup, stop/restart/project replacement,
+1,000 simulated seeks/laps, 70,000 packets through 17-packet budgets, boundary
+releases, destination removal, clock coalescing, frame-based progression,
+seek-state restoration, rate/tempo recompilation and no normal blanket cleanup.
+These test the production compiler, mailbox and worker; they do not simulate
+macOS UI event timing or prove instrument audio output. Prior timing, MIDI
+import/export, project/preset, native DSP and sampler regressions are retained.
+The C sanitizer test also races one render writer with 10,000 control transitions.
+
+Local C ASan/UBSan tests passed (leak detection unavailable under local ptrace).
+Required macOS dependency resolution, full debug build/test, optimized DAWApp,
+sampler ASan/UBSan, disk stress and read-only reconciliation run through the
+existing consolidated acceptance workflow. Results for the exact 3B head are
+linked in draft PR #29 and the branch's GitHub Actions runs; a green M3 run is
+not evidence for 3B. Final completion requires those 3B checks to pass.
+
+### MacBook acceptance and recommended 3C
+
+Repeat the earlier acceptance matrix with multiple ARIA instances/channels,
+first-note silence and future audio regions, high-density native/Hybrid/Sampler
+scores, sustained notes across rapid seeks and 100+ loop laps, stop immediately
+after seek, restart immediately after stop, project replacement, tempo edits,
+instrument removal and device/buffer/rate changes. Confirm reconfiguration
+pauses safely and Play restores controller/articulation state. Record CPU,
+buffer/rate/device, dropped/stuck notes and receiver failures. Compare recorded
+loopback transients with score frames and audible metronome/audio alignment.
+Inspect audio export/stems and save/reopen against the same baseline projects.
+
+3C should establish a real pre-render per-instrument handoff with explicit
+engine-frame/AU-frame translation and bounded receiver backpressure, extend
+native Sampler/control support, replace control-thread loop rebuilds with
+render-owned boundary transitions, schedule metronome/audio on that contract,
+and measure MacBook output timing before claiming synchronized acoustic output.
+Do not integrate Picture or a competing time authority to solve these gaps.
