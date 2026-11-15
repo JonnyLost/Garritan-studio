@@ -22,7 +22,9 @@ public final class StudioPictureSession: ObservableObject {
     private var loadGeneration = UUID()
     private var accessedURL: URL?
     private var isAccessingResource = false
-    private var lastCorrection = Date.distantPast
+    private var lastCorrectionUptime: TimeInterval = -.infinity
+    private var lastProjectSeconds: Double?
+    private var lastObservedUptime: TimeInterval?
     private var thumbnailTask: Task<Void, Never>?
     private var thumbnailGenerator: AVAssetImageGenerator?
 
@@ -61,6 +63,11 @@ public final class StudioPictureSession: ObservableObject {
         player.pause()
         mediaTask?.cancel()
         cancelThumbnails()
+        player.replaceCurrentItem(with: nil)
+        currentDocument = nil
+        isReady = false
+        lastProjectSeconds = nil
+        lastObservedUptime = nil
         releaseSecurityScopedURL()
     }
 
@@ -71,10 +78,21 @@ public final class StudioPictureSession: ObservableObject {
     /// Frequent unrelated Project changes must not reload or restart the movie.
     public func update(document: StudioPictureProject?) {
         let changedSource = document?.filePath != currentDocument?.filePath ||
-            document?.securityBookmark != currentDocument?.securityBookmark
+            document?.securityBookmark != currentDocument?.securityBookmark ||
+            document?.mediaRevisionID != currentDocument?.mediaRevisionID
+        let changedAlignment = document?.timelineStartSeconds != currentDocument?.timelineStartSeconds ||
+            document?.durationSeconds != currentDocument?.durationSeconds ||
+            document?.frameRate != currentDocument?.frameRate
         currentDocument = document
         player.isMuted = !(document?.referenceAudioEnabled ?? false)
-        guard changedSource else { return }
+        if !changedSource {
+            if changedAlignment, let transport {
+                synchronize(at: Double(transport.playheadPosition.samples) /
+                            max(1, transport.sampleRate),
+                            playing: transport.isPlaying, force: true)
+            }
+            return
+        }
 
         mediaTask?.cancel()
         cancelThumbnails()
@@ -82,6 +100,9 @@ public final class StudioPictureSession: ObservableObject {
         let generation = loadGeneration
         player.pause()
         player.replaceCurrentItem(with: nil)
+        lastProjectSeconds = nil
+        lastObservedUptime = nil
+        lastCorrectionUptime = -.infinity
         releaseSecurityScopedURL()
         isReady = false
         errorMessage = nil
@@ -192,30 +213,38 @@ public final class StudioPictureSession: ObservableObject {
         thumbnails.removeAll()
     }
 
-    /// Synchronize from the DAW sample clock. A coarse seek is used only for
-    /// material video drift; repeated frame seeks would hurt decode performance.
+    /// The audio sample clock is the source of truth. Explicit locator jumps
+    /// and loop wraps resynchronize immediately, while small normal playback
+    /// jitter is absorbed without decoding/reseeking whole video frames.
     private func synchronize(at projectSeconds: Double, playing: Bool, force: Bool = false) {
         guard let document = currentDocument,
-              player.currentItem != nil,
+              let item = player.currentItem,
               projectSeconds.isFinite else { return }
 
-        let relative = projectSeconds - document.timelineStartSeconds
-        let duration = document.durationSeconds
-        let inRange = relative >= 0 && relative < duration
-        let wanted = max(0, min(max(0, duration - 1 / document.frameRate.framesPerSecond),
-                                relative))
-        let tolerance = 1 / document.frameRate.framesPerSecond
-        let actual = player.currentTime().seconds
-        let deviation = actual.isFinite ? abs(actual - wanted) : Double.infinity
-        let canCorrect = force || Date().timeIntervalSince(lastCorrection) > 0.75
-        let threshold = playing ? max(0.06, 1.5 * tolerance) : tolerance
+        let now = ProcessInfo.processInfo.systemUptime
+        let jumped = StudioPictureSyncPlanner.isDiscontinuity(
+            previousProjectSeconds: lastProjectSeconds,
+            previousUptime: lastObservedUptime,
+            currentProjectSeconds: projectSeconds, uptime: now)
+        lastProjectSeconds = projectSeconds
+        lastObservedUptime = now
 
-        if canCorrect && (force || deviation > threshold) {
-            lastCorrection = Date()
-            let position = CMTime(seconds: wanted, preferredTimescale: 60_000)
+        let actual = player.currentTime().seconds
+        let decision = StudioPictureSyncPlanner.plan(
+            picture: document,
+            projectSeconds: projectSeconds,
+            movieSeconds: actual.isFinite ? actual : nil,
+            isPlaying: playing,
+            secondsSinceCorrection: now - lastCorrectionUptime,
+            discontinuity: force || jumped)
+
+        if decision.shouldSeek {
+            lastCorrectionUptime = now
+            let position = CMTime(seconds: decision.targetSeconds, preferredTimescale: 60_000)
+            item.cancelPendingSeeks()
             player.seek(to: position, toleranceBefore: .zero, toleranceAfter: .zero)
         }
-        if playing && inRange {
+        if decision.shouldPlay {
             if player.rate == 0 { player.play() }
         } else if player.rate != 0 {
             player.pause()
