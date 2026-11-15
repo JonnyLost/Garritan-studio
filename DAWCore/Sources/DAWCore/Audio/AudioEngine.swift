@@ -98,7 +98,6 @@ public final class AudioEngine: ObservableObject {
         }
         return true
     }
-    private let microphoneMasterMixer = AVAudioMixerNode()
     private var microphoneChannelMixers: [UUID: AVAudioMixerNode] = [:]
     /// Four-output matrix AUs also connect unused busses to a silent sink.
     private var microphoneUnusedOutputSink: AVAudioMixerNode?
@@ -247,8 +246,6 @@ public final class AudioEngine: ObservableObject {
 
         // Dedicated Concert Hall return; existing dry routes stay untouched.
         engine.attach(concertHallReturnMixer)
-        engine.attach(microphoneMasterMixer)
-        microphoneMasterMixer.outputVolume = 0
 
         let hallFormat = AVAudioFormat(
             standardFormatWithSampleRate: engine.outputNode.outputFormat(forBus: 0).sampleRate,
@@ -258,7 +255,6 @@ public final class AudioEngine: ObservableObject {
         engine.connect(concertHallSendMixer, to: concertHallReverb, format: hallFormat)
         engine.connect(concertHallReverb, to: concertHallReturnMixer, format: hallFormat)
         engine.connect(concertHallReturnMixer, to: masterMixer, format: hallFormat)
-        engine.connect(microphoneMasterMixer, to: masterMixer, format: hallFormat)
 
         print("[ConcertHall] Dedicated reverb return connected")
         
@@ -450,8 +446,7 @@ public final class AudioEngine: ObservableObject {
                     // microphone audition graph reaches its safety cap.
                     dismantleMicrophoneCaptures(format: format)
                     isMicrophoneAuditionActive = false
-                    microphoneMasterMixer.outputVolume = 0
-                    concertHallReturnMixer.outputVolume = concertHallOverallReverb
+                        concertHallReturnMixer.outputVolume = concertHallOverallReverb
                     for node in trackNodes.values {
                         node.setMicrophoneAuditionActive(false)
                     }
@@ -815,7 +810,7 @@ public final class AudioEngine: ObservableObject {
                 for microphone in routedMicrophones {
                     let bus = AVAudioMixerNode()
                     engine.attach(bus)
-                    engine.connect(bus, to: microphoneMasterMixer, format: format)
+                    engine.connect(bus, to: masterMixer, format: format)
                     microphoneChannelMixers[microphone.id] = bus
                 }
                 for source in sources {
@@ -835,7 +830,6 @@ public final class AudioEngine: ObservableObject {
             for node in trackNodes.values {
                 node.setMicrophoneAuditionActive(enabled)
             }
-            microphoneMasterMixer.outputVolume = enabled ? 1 : 0
             vRackDirectMonitorMixer.outputVolume = enabled ? 0 : 1
             concertHallReturnMixer.outputVolume = enabled
                 ? concertHallOverallReverb * microphoneRoomWetLevel
@@ -847,7 +841,6 @@ public final class AudioEngine: ObservableObject {
             engine.stop()
             dismantleMicrophoneCaptures(format: format)
             isMicrophoneAuditionActive = false
-            microphoneMasterMixer.outputVolume = 0
             vRackDirectMonitorMixer.outputVolume = 1
             concertHallReturnMixer.outputVolume = concertHallOverallReverb
             for node in trackNodes.values {
@@ -1061,7 +1054,7 @@ public final class AudioEngine: ObservableObject {
         } else {
             let created = AVAudioMixerNode()
             engine.attach(created)
-            engine.connect(created, to: microphoneMasterMixer, format: format)
+            engine.connect(created, to: masterMixer, format: format)
             created.outputVolume = 0
             microphoneUnusedOutputSink = created
             sink = created
