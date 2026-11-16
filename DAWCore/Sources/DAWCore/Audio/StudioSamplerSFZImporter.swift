@@ -38,7 +38,8 @@ public enum StudioSamplerSFZImporter {
 
     /// Read and validate mappings without copying or changing source recordings.
     /// The caller can present warnings before importing into the managed library.
-    public static func preview(_ url: URL) throws -> Result {
+    public static func preview(_ url: URL,
+                               samplesRoot: URL? = nil) throws -> Result {
         guard let data = try? Data(contentsOf: url), data.count <= 4_000_000 else {
             throw ImportError.unreadable
         }
@@ -53,6 +54,9 @@ public enum StudioSamplerSFZImporter {
         var zones: [StudioSamplerZone] = []
         var warnings = Set<String>()
         let directory = url.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL
+        let roots = [directory] + (samplesRoot.map {
+            [$0.resolvingSymlinksInPath().standardizedFileURL]
+        } ?? [])
         for region in parsed {
             let p = region.values
             guard let sample = p["sample"], !sample.isEmpty else {
@@ -63,13 +67,21 @@ public enum StudioSamplerSFZImporter {
                   !normalized.split(separator: "/").contains("..") else {
                 throw ImportError.unsafeSamplePath(sample)
             }
-            let file = directory.appendingPathComponent(normalized).standardizedFileURL
-            // No traversal through symlinks to files outside the instrument folder.
-            let realFile = file.resolvingSymlinksInPath().standardizedFileURL
-            guard realFile.path.hasPrefix(directory.path + "/") else {
-                throw ImportError.unsafeSamplePath(sample)
+            // Each path must remain inside the instrument's folder or an
+            // explicitly user-selected sample root, including after
+            // resolving symbolic links. Never search the entire filesystem.
+            var resolved: URL?
+            for root in roots {
+                let candidate = root.appendingPathComponent(normalized)
+                    .resolvingSymlinksInPath().standardizedFileURL
+                guard candidate.path.hasPrefix(root.path + "/") else { continue }
+                if (try? candidate.resourceValues(
+                    forKeys: [.isRegularFileKey]))?.isRegularFile == true {
+                    resolved = candidate
+                    break
+                }
             }
-            guard (try? realFile.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else {
+            guard let realFile = resolved else {
                 throw ImportError.missingSample(sample)
             }
             func note(_ key: String, fallback: Int) throws -> Int {
@@ -123,15 +135,30 @@ public enum StudioSamplerSFZImporter {
     /// Imports a validated SFZ mapping's samples into Studio-managed storage.
     /// Original SFZ and sample files remain untouched.
     public static func importInstrument(_ url: URL,
-                                        into sampleDirectory: URL? = nil) throws -> Result {
-        let previewed = try preview(url)
+                                        into sampleDirectory: URL? = nil,
+                                        samplesRoot: URL? = nil) throws -> Result {
+        let previewed = try preview(url, samplesRoot: samplesRoot)
+        // A single sample may be referenced by many SFZ regions.
+        // Copy it once and reuse the managed URL in each mapped zone.
+        var sources: [URL] = []
+        var positions: [String: Int] = [:]
+        for zone in previewed.patch.zones {
+            if positions[zone.filePath] == nil {
+                positions[zone.filePath] = sources.count
+                sources.append(zone.sampleURL)
+            }
+        }
         let copies = try StudioSamplerSampleLibrary.importFiles(
-            previewed.patch.zones.map(\.sampleURL), into: sampleDirectory)
+            sources, into: sampleDirectory)
         var patch = previewed.patch
-        for index in copies.indices {
-            patch.zones[index].filePath = copies[index].path
-            patch.zones[index].managedFileName =
-                StudioSamplerSampleLibrary.managedName(for: copies[index], in: sampleDirectory)
+        for index in patch.zones.indices {
+            guard let position = positions[patch.zones[index].filePath] else {
+                throw ImportError.unreadable
+            }
+            patch.zones[index].filePath = copies[position].path
+            patch.zones[index].managedFileName = sampleDirectory == nil
+                ? StudioSamplerSampleLibrary.managedName(for: copies[position])
+                : nil
         }
         return Result(patch: patch, warnings: previewed.warnings)
     }
