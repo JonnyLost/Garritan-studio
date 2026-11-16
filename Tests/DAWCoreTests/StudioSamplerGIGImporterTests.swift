@@ -238,7 +238,7 @@ final class StudioSamplerGIGImporterTests: XCTestCase {
     func testKeyswitchAndLayerDimensionsAreNotFlattenedIntoWrongInstruments() throws {
         let root = try folder()
         defer { try? FileManager.default.removeItem(at: root) }
-        for dimensionType: UInt8 in [0x81, 0x85, 0x87] {
+        for dimensionType in [UInt8(0x81), 0x85, 0x87] {
             let gig = try fixture(in: root, dimensions: 2,
                                   definitions: [(dimensionType, 1)])
             let destination = root.appendingPathComponent("managed")
