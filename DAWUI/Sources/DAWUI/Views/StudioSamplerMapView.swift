@@ -318,7 +318,7 @@ public struct StudioSamplerMapView: View {
                     }
                 }
                 .frame(maxWidth: .infinity)
-                Text("Supports 16-bit PCM, regular velocity splits, round-robin takes, and release-trigger cases. Complex keyswitch, controller, crossfade, and compressed dimensions are not yet supported.")
+                Text("Supports 16-bit PCM, velocity splits, round-robin, release samples, explicit GIG keyswitch notes and stepped CC1/CC2 sample selection. Other controller and complex GIG dimensions remain unsupported.")
                     .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Button("Cancel") {
