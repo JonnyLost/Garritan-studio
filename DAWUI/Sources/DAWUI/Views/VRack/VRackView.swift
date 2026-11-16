@@ -713,7 +713,7 @@ public struct VRackView: View {
     // Full-width browser shares the same catalog, filters and ARIA loader
     // as the compact picker. Browsing never loads a patch until requested.
     private var previewInstrument: DrawerInstrument? {
-        (catalog.isEmpty ? (Self.cachedCatalog ?? []) : catalog).first { $0.id == previewInstrumentID }
+        expandedFilteredCatalog.first { $0.id == previewInstrumentID }
     }
 
     var expandedInstrumentBrowser: some View {
@@ -945,9 +945,15 @@ public struct VRackView: View {
                             }
                         }
                         if expandedFilteredCatalog.isEmpty {
-                            Text("No instruments match these filters.")
-                                .foregroundStyle(.secondary)
-                                .padding()
+                            ContentUnavailableView(
+                                showingFavoritesOnly ? "No Favorite Instruments" : "No Matching Instruments",
+                                systemImage: showingFavoritesOnly ? "star" : "magnifyingglass",
+                                description: Text(showingFavoritesOnly ?
+                                                  "Star instruments to keep them here." :
+                                                  "Try another family, library or search term.")
+                            )
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 40)
                         }
                     }
                     .padding(12)
@@ -959,20 +965,34 @@ public struct VRackView: View {
                 VStack(spacing: 0) {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 12) {
-                            Text("INSTRUMENT DETAILS")
-                                .font(.system(size: 10, weight: .semibold))
-                                .tracking(1.1)
-                                .foregroundStyle(palette.secondaryText)
+                            HStack {
+                                Text("PATCH PREVIEW")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .tracking(1)
+                                    .foregroundStyle(palette.secondaryText)
+                                Spacer()
+                                if let instrument = previewInstrument {
+                                    Button {
+                                        toggleFavorite(instrument)
+                                    } label: {
+                                        Image(systemName: favoriteInstrumentIDs.contains(instrument.id) ? "star.fill" : "star")
+                                            .foregroundStyle(favoriteInstrumentIDs.contains(instrument.id) ? palette.accent : palette.secondaryText)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Toggle favorite")
+                                    .accessibilityLabel("Toggle favorite for \(instrument.name)")
+                                }
+                            }
 
                             if let instrument = previewInstrument {
                                 ZStack {
                                     RoundedRectangle(cornerRadius: 12)
-                                        .fill(palette.surface)
+                                        .fill(palette.raisedSurface.opacity(0.6))
                                     StudioInstrumentIcon(
                                         name: instrument.name,
                                         path: instrument.path,
                                         category: instrument.category,
-                                        size: 88
+                                        size: 78
                                     )
                                     .padding(.vertical, 10)
                                 }
@@ -1002,15 +1022,16 @@ public struct VRackView: View {
                                     .foregroundStyle(palette.primaryText)
                                     .fixedSize(horizontal: false, vertical: true)
 
-                                Text("PATCH LOCATION")
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .tracking(1.0)
-                                    .foregroundStyle(palette.secondaryText)
-                                Text(instrument.path)
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(palette.secondaryText)
-                                    .lineLimit(4)
-                                    .textSelection(.enabled)
+                                DisclosureGroup("Patch Location") {
+                                    Text(instrument.path)
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(palette.secondaryText)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .textSelection(.enabled)
+                                        .padding(.top, 5)
+                                }
+                                .font(.system(size: 11))
+                                .foregroundStyle(palette.secondaryText)
                             } else {
                                 Text("Choose an instrument to see its details and load it.")
                                     .font(.subheadline)
