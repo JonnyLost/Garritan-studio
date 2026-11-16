@@ -122,9 +122,14 @@ committed; validation pending):**
 - Only one selection dimension (keyswitch OR CC1 OR CC2) is permitted
   per instrument, consistently across all regions. It can be combined
   with supported velocity, round-robin, and release dimensions.
-- Studio's existing CC1 dynamics and CC2 breath responses still apply
-  during playback. Advanced GIG continuous crossfades are NOT
-  reproduced by switching discrete samples.
+- For controller-switched instruments, CC1/CC2 choose discrete
+  articulation bands. CC2 breath-volume attenuation is disabled for
+  CC2-switched patches to avoid silencing the lowest controller band.
+  Normal sampler instruments retain their previous CC2 expression.
+  Advanced GIG continuous crossfades are NOT reproduced.
+- In the absence of explicit saved CC1/CC2 state, Studio restores the
+  controller band matching the saved selected articulation instead of
+  unexpectedly selecting the highest band on initialization.
 - Includes deterministic synthetic fixtures for keyboard/CC1/CC2
   combinations and native standalone CC switching tests.
 
@@ -162,6 +167,9 @@ MIDI notes, validates every used group before copying audio, and rejects
 missing or duplicate round-robin positions and overlapping keyswitch
 notes. Studio's native round-robin counter is per-note rather than
 EXS's global group rotation, and its CC switching is discrete at note-on.
+Controller-switched instruments initialize in their saved articulation
+band. CC2-selected patches do not also apply breath-volume attenuation;
+ordinary patches retain normal CC2 expression.
 Warnings disclose these differences.
 
 **Not yet reproduced:** irregular controller thresholds, arbitrary CCs,
