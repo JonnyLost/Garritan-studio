@@ -208,13 +208,28 @@ public final class StudioSamplerInstrument {
         // Prepare the controller state and crossfade mode before the
         // AVAudioSourceNode is attached or can start rendering.
         let env = patch.envelope ?? StudioSamplerEnvelope()
+        // The controller selector's initial band should agree with the
+        // saved articulation when no explicit CC state was provided. Without
+        // this, CC1/CC2=127 would silently select the last band on startup.
+        let initialControllerBand: UInt8? = patch.controllerSwitch.map { selector in
+            let index = selector.articulationIDs.firstIndex(
+                of: patch.selectedArticulationID ?? 0) ?? 0
+            return UInt8(min(127,
+                (index * 128 + 64) / selector.articulationIDs.count))
+        }
+        let initialCC1: UInt8 = patch.dynamicsCC1 ??
+            (patch.controllerSwitch?.controller == 1
+             ? initialControllerBand ?? 0 : 127)
+        let initialCC2: UInt8 = patch.breathCC2 ??
+            (patch.controllerSwitch?.controller == 2
+             ? initialControllerBand ?? 0 : 127)
         guard ss_select_articulation(sampler, patch.selectedArticulationID ?? 0, 0) == 1,
               ss_set_adsr(sampler, env.attackSeconds, env.decaySeconds,
                           env.sustainLevel, env.releaseSeconds) == 1,
               ss_set_cc1_crossfade(sampler, patch.cc1Crossfade == true ? 1 : 0) == 1,
-              ss_control_change(sampler, 1, patch.dynamicsCC1 ?? 127, 0) == 1,
+              ss_control_change(sampler, 1, initialCC1, 0) == 1,
               ss_control_change(sampler, 11, patch.expressionCC11 ?? 127, 0) == 1,
-              ss_control_change(sampler, 2, patch.breathCC2 ?? 127, 0) == 1,
+              ss_control_change(sampler, 2, initialCC2, 0) == 1,
               ss_control_change(sampler, 21, patch.vibratoCC21 ?? 0, 0) == 1,
               ss_set_legato_mode(sampler, patch.legatoEnabled == true ? 1 : 0,
                                  patch.legatoCrossfadeMilliseconds ?? 40) == 1 else {
