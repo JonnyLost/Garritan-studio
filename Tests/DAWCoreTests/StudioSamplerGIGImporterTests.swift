@@ -173,6 +173,102 @@ final class StudioSamplerGIGImporterTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
     }
 
+    func testVelocityDimensionCreatesDistinctNativeVelocityLayers() throws {
+        let root = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let gig = try fixture(in: root, dimensions: 2,
+                              definitions: [(0x82, 1)])
+        let catalog = try StudioSamplerGIGReader.inspect(gig)
+        let region = catalog.instruments[0].regions[0]
+        XCTAssertEqual(region.dimensions.map(\.type), [0x82])
+        XCTAssertEqual(region.cases.count, 2)
+        XCTAssertEqual(region.cases.compactMap(\.sampleTableIndex), [0, 1])
+        let imported = try StudioSamplerGIGImporter.importInstrument(
+            gig, instrumentIndex: 0, into: root.appendingPathComponent("managed"))
+        XCTAssertEqual(imported.patch.zones.map(\.lowestVelocity), [1, 64])
+        XCTAssertEqual(imported.patch.zones.map(\.highestVelocity), [63, 127])
+        XCTAssertTrue(imported.patch.zones.allSatisfy { $0.roundRobinIndex == nil })
+        XCTAssertEqual(Set(imported.patch.zones.map(\.filePath)).count, 2)
+        XCTAssertTrue(imported.patch.isValid)
+    }
+
+    func testRoundRobinDimensionCreatesNativeAlternateTakes() throws {
+        let root = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let gig = try fixture(in: root, dimensions: 2,
+                              definitions: [(0x86, 1)])
+        let imported = try StudioSamplerGIGImporter.importInstrument(
+            gig, instrumentIndex: 0, into: root.appendingPathComponent("managed"))
+        XCTAssertEqual(imported.patch.zones.map(\.roundRobinIndex), [0, 1])
+        XCTAssertEqual(imported.patch.zones.map(\.lowestVelocity), [1, 1])
+        XCTAssertEqual(imported.patch.zones.map(\.highestVelocity), [127, 127])
+        XCTAssertTrue(imported.patch.isValid)
+    }
+
+    func testCombinedVelocityAndRoundRobinDimensionsKeepCaseOrdering() throws {
+        let root = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let gig = try fixture(in: root, dimensions: 4,
+                              definitions: [(0x82, 1), (0x86, 1)])
+        let imported = try StudioSamplerGIGImporter.importInstrument(
+            gig, instrumentIndex: 0, into: root.appendingPathComponent("managed"))
+        XCTAssertEqual(imported.patch.zones.map(\.lowestVelocity), [1, 64, 1, 64])
+        XCTAssertEqual(imported.patch.zones.map(\.highestVelocity), [63, 127, 63, 127])
+        XCTAssertEqual(imported.patch.zones.map(\.roundRobinIndex), [0, 0, 1, 1])
+        XCTAssertEqual(Set(imported.patch.zones.map(\.filePath)).count, 4)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(
+            at: root.appendingPathComponent("managed"), includingPropertiesForKeys: nil).count, 4)
+    }
+
+    func testReleaseDimensionCreatesNoteOffZoneWithoutSustainLoop() throws {
+        let root = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let gig = try fixture(in: root, dimensions: 2,
+                              definitions: [(0x84, 1)])
+        let imported = try StudioSamplerGIGImporter.importInstrument(
+            gig, instrumentIndex: 0, into: root.appendingPathComponent("managed"))
+        XCTAssertEqual(imported.patch.zones.count, 2)
+        XCTAssertNil(imported.patch.zones[0].isReleaseTrigger)
+        XCTAssertEqual(imported.patch.zones[0].loopStartFrame, 2)
+        XCTAssertEqual(imported.patch.zones[1].isReleaseTrigger, true)
+        XCTAssertNil(imported.patch.zones[1].loopStartFrame)
+        XCTAssertTrue(imported.patch.isValid)
+    }
+
+    func testKeyswitchAndLayerDimensionsAreNotFlattenedIntoWrongInstruments() throws {
+        let root = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        for dimensionType: UInt8 in [0x81, 0x85, 0x87] {
+            let gig = try fixture(in: root, dimensions: 2,
+                                  definitions: [(dimensionType, 1)])
+            let destination = root.appendingPathComponent("managed")
+            XCTAssertThrowsError(try StudioSamplerGIGImporter.importInstrument(
+                gig, instrumentIndex: 0, into: destination)) { error in
+                guard case StudioSamplerGIGImporter.ImportError.unsupportedDimensions = error else {
+                    return XCTFail("Expected explicit unsupported-dimensions error")
+                }
+            }
+            XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+        }
+    }
+
+    func testMalformedDimensionDefinitionsRejectedBeforeSampleIO() throws {
+        let root = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let gig = try fixture(in: root, dimensions: 2,
+                              definitions: [(0x82, 1)])
+        var data = try Data(contentsOf: gig)
+        let chunkID = Data("3lnk".utf8)
+        guard let location = data.range(of: chunkID)?.lowerBound else {
+            return XCTFail("Fixture has no 3lnk chunk")
+        }
+        // Two cases require exactly one defined bit; invalidate the case
+        // count without changing chunk sizes.
+        data[location + 8] = 4
+        try data.write(to: gig, options: .atomic)
+        XCTAssertThrowsError(try StudioSamplerGIGReader.inspect(gig))
+    }
+
     func testRejectsNonPCMWithoutInstallingSamples() throws {
         let root = try folder()
         defer { try? FileManager.default.removeItem(at: root) }
