@@ -3,6 +3,7 @@ name: Studio consolidated Sampler acceptance
 on:
   push:
     branches:
+      - integration/studio-alpha1-mac-candidate-2026-11-15
       - codex/studio-midi-audio-timing-m3
       - integration/studio-sampler-portable-packages-2026-11-14
       - integration/studio-alpha1-consolidated-2026-11-14
@@ -37,6 +38,9 @@ jobs:
         run: |
           set -euo pipefail
           bash -n Tools/alpha1_mac_launch.sh
+          if [ -f Tools/alpha1_candidate_mac_launch.sh ]; then
+            bash -n Tools/alpha1_candidate_mac_launch.sh
+          fi
           grep -Fq 'checkpoint/studio-alpha1-ci-green-2026-11-14' Tools/alpha1_mac_launch.sh
           grep -Fq '47f6d887be3a5f781d33fb83e98472f2c343e3a1' Tools/alpha1_mac_launch.sh
           test -f docs/STUDIO_ALPHA1_MAC_RESULTS_TEMPLATE.md
@@ -113,6 +117,24 @@ jobs:
             -I DAWRealtime/include DAWRealtime/DAWRealtime.c \
             Tests/DAWRealtimeStandalone/midi_spsc.c -lm -o /tmp/studio-midi-spsc
           ASAN_OPTIONS=detect_leaks=1 /tmp/studio-midi-spsc
+      - name: Verify Granular and shared PCM integration under sanitizers
+        run: |
+          set -euo pipefail
+          clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I StudioGranularDSP/include -I StudioSharedPCM/include \
+            StudioSharedPCM/src/StudioSharedPCM.cpp \
+            StudioGranularDSP/src/StudioGranularDSP.cpp \
+            Tests/StudioGranularDSPStandalone/main.cpp -o /tmp/studio-granular-test
+          ASAN_OPTIONS=detect_leaks=1 /tmp/studio-granular-test
+          clang++ -std=c++17 -O1 -g -Wall -Wextra -Werror \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -I StudioSharedPCM/include -I StudioSamplerDSP/include -I StudioGranularDSP/include \
+            StudioSharedPCM/src/StudioSharedPCM.cpp \
+            StudioSamplerDSP/src/StudioSamplerDSP.cpp \
+            StudioGranularDSP/src/StudioGranularDSP.cpp \
+            Tests/StudioSharedPCMStandalone/main.cpp -o /tmp/studio-shared-pcm-test
+          ASAN_OPTIONS=detect_leaks=1 /tmp/studio-shared-pcm-test
       - name: Stress 72 streamed zones and delayed disk reads
         run: |
           set -euo pipefail
