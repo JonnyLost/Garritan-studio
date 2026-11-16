@@ -76,6 +76,13 @@ public final class StudioSamplerInstrument {
             keys.insert(defaultKey, at: 0)
             identifiers.insert(0, at: 0)
         }
+        // Controller-switched GIG patches have descriptive articulation
+        // labels but no playable keyswitch notes. Do not register the dummy
+        // display notes as switches; CC events select the groups instead.
+        if patch.controllerSwitch != nil {
+            keys.removeAll()
+            identifiers.removeAll()
+        }
         let configurationSucceeded = keys.withUnsafeBufferPointer { keysBuffer in
             identifiers.withUnsafeBufferPointer { idsBuffer in
                 ss_configure_keyswitches(
@@ -85,6 +92,14 @@ public final class StudioSamplerInstrument {
             }
         }
         guard configurationSucceeded else { throw StudioSamplerError.invalidPatch }
+        if let selector = patch.controllerSwitch {
+            let configured = selector.articulationIDs.withUnsafeBufferPointer { ids in
+                ss_configure_controller_articulations(
+                    sampler, selector.controller, ids.baseAddress,
+                    Int32(ids.count)) == 1
+            }
+            guard configured else { throw StudioSamplerError.invalidPatch }
+        }
         var cumulativeResidentFrames: Int64 = 0
         var streamSources: [URL?] = []
         streamSources.reserveCapacity(patch.zones.count)
