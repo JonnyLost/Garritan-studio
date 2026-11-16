@@ -35,6 +35,11 @@ public struct StudioSamplerMapView: View {
     @State private var sf2Source: URL?
     @State private var sf2Presets: [StudioSamplerSF2Reader.Preset] = []
     @State private var selectedSF2PresetIndex = 0
+    @State private var showGIGImporter = false
+    @State private var showGIGPicker = false
+    @State private var gigSource: URL?
+    @State private var gigInstruments: [StudioSamplerGIGReader.Instrument] = []
+    @State private var selectedGIGIndex = 0
     @State private var compatibilityWarnings: [String] = []
     @State private var showSaveSheet = false
     @State private var exportInsteadOfSave = false
@@ -76,6 +81,7 @@ public struct StudioSamplerMapView: View {
                     Button("Import .studioinstrument…") { showPackageImporter = true }
                     Button("Import SFZ Instrument…") { showSFZImporter = true }
                     Button("Import SoundFont 2 (.sf2)…") { showSF2Importer = true }
+                    Button("Import GigaStudio (.gig)…") { showGIGImporter = true }
                     Divider()
                     Button("Save to Studio Library…") { beginSaving(export: false) }
                         .disabled(draft?.isValid != true)
@@ -288,6 +294,51 @@ public struct StudioSamplerMapView: View {
             case .failure(let error): errorMessage = error.localizedDescription
             }
         }
+        .fileImporter(
+            isPresented: $showGIGImporter,
+            allowedContentTypes: [UTType(filenameExtension: "gig") ?? .data],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                if let url = urls.first { inspectGIG(url) }
+            case .failure(let error): errorMessage = error.localizedDescription
+            }
+        }
+        .sheet(isPresented: $showGIGPicker) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Import GigaStudio Instrument").font(.title3.weight(.semibold))
+                Text("Select one instrument to convert into Studio's native sampler.")
+                    .font(.callout).foregroundStyle(.secondary)
+                Picker("Instrument", selection: $selectedGIGIndex) {
+                    ForEach(gigInstruments.indices, id: \.self) { index in
+                        let item = gigInstruments[index]
+                        Text("\(item.name) · Bank \(item.bank), Program \(item.program) · \(item.regions.count) regions")
+                            .tag(index)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                Text("The first GIG importer supports uncompressed 16-bit PCM and single-dimension regions. Complex GigaStudio dimensions are detected and rejected rather than played incorrectly.")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Button("Cancel") {
+                        showGIGPicker = false
+                        gigSource = nil
+                    }
+                    Spacer()
+                    Button("Import Selected Instrument") {
+                        guard let source = gigSource else { return }
+                        showGIGPicker = false
+                        gigSource = nil
+                        importGIG(source, instrumentIndex: selectedGIGIndex)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!gigInstruments.indices.contains(selectedGIGIndex))
+                }
+            }
+            .padding(20)
+            .frame(width: 520)
+        }
         .sheet(isPresented: $showSF2Picker) {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Import SoundFont Preset").font(.title3.weight(.semibold))
@@ -426,6 +477,59 @@ public struct StudioSamplerMapView: View {
                 } catch {
                     errorMessage = error.localizedDescription
                 }
+            }
+        }
+    }
+
+    private func inspectGIG(_ url: URL) {
+        guard !isImporting else { return }
+        isImporting = true
+        errorMessage = nil
+        saveNotice = nil
+        Task { @MainActor in
+            defer { isImporting = false }
+            do {
+                let catalog = try await Task.detached(priority: .userInitiated) {
+                    let access = url.startAccessingSecurityScopedResource()
+                    defer { if access { url.stopAccessingSecurityScopedResource() } }
+                    return try StudioSamplerGIGReader.inspect(url)
+                }.value
+                guard !catalog.instruments.isEmpty else {
+                    errorMessage = "The selected GigaStudio file contains no instruments."
+                    return
+                }
+                gigSource = url
+                gigInstruments = catalog.instruments
+                selectedGIGIndex = 0
+                showGIGPicker = true
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func importGIG(_ url: URL, instrumentIndex: Int) {
+        guard !isImporting else { return }
+        isImporting = true
+        errorMessage = nil
+        saveNotice = nil
+        compatibilityWarnings = []
+        Task { @MainActor in
+            defer { isImporting = false }
+            do {
+                let imported = try await Task.detached(priority: .userInitiated) {
+                    let access = url.startAccessingSecurityScopedResource()
+                    defer { if access { url.stopAccessingSecurityScopedResource() } }
+                    return try StudioSamplerGIGImporter.importInstrument(
+                        url, instrumentIndex: instrumentIndex)
+                }.value
+                draft = imported.patch
+                selectedIndex = 0
+                instrumentName = imported.instrument.name
+                compatibilityWarnings = imported.warnings
+                saveNotice = "Imported GigaStudio instrument \(imported.instrument.name). Choose Apply Mapping to activate it."
+            } catch {
+                errorMessage = error.localizedDescription
             }
         }
     }
