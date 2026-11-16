@@ -121,8 +121,8 @@ final class StudioSamplerSF2ImporterTests: XCTestCase {
         XCTAssertEqual(zone.rootNote, 60)
         XCTAssertEqual(zone.loopStartFrame, 2)
         XCTAssertEqual(zone.loopEndFrame, 10)
-        XCTAssertNotNil(zone.managedFileName)
-        let wav = try Data(contentsOf: zone.sampleURL)
+        XCTAssertNil(zone.managedFileName) // Custom test directory, not app-owned.
+        let wav = try Data(contentsOf: URL(fileURLWithPath: zone.filePath))
         XCTAssertEqual(wav.count, 44 + 12 * 2)
         XCTAssertEqual(Array(wav.prefix(4)), Array(Data("RIFF".utf8)))
         XCTAssertEqual(Array(wav[44..<48]), [0, 0, 0xE8, 0x03])
