@@ -880,40 +880,69 @@ public struct VRackView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 5) {
                         ForEach(expandedFilteredCatalog) { instrument in
-                            Button {
-                                audition.stop()
-                                previewInstrumentID = instrument.id
-                            } label: {
-                                HStack(spacing: 12) {
-                                    StudioInstrumentIcon(
-                                        name: instrument.name,
-                                        path: instrument.path,
-                                        category: instrument.category,
-                                        size: 31
-                                    )
-                                    .frame(width: 35)
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(instrument.name)
-                                            .font(.subheadline.weight(.medium))
-                                        Text(instrument.category + " · " +
-                                             (instrument.library == "Garritan Personal Orchestra 5" ? "GPO5" :
-                                              instrument.library == StudioSynthFactoryCatalog.libraryName ? instrument.instrumentType : "Instant Orchestra"))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                            HStack(spacing: 8) {
+                                Button {
+                                    audition.stop()
+                                    previewInstrumentID = instrument.id
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        StudioInstrumentIcon(
+                                            name: instrument.name,
+                                            path: instrument.path,
+                                            category: instrument.category,
+                                            size: 27
+                                        )
+                                        .frame(width: 32, height: 32)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(instrument.name)
+                                                .font(.system(size: 12, weight: .medium))
+                                                .lineLimit(1)
+                                            Text(instrument.category + " · " +
+                                                 (instrument.library == "Garritan Personal Orchestra 5" ? "GPO5" :
+                                                  instrument.library == StudioSynthFactoryCatalog.libraryName ? instrument.instrumentType : "Instant Orchestra"))
+                                                .font(.system(size: 10))
+                                                .foregroundStyle(palette.secondaryText)
+                                                .lineLimit(1)
+                                        }
+                                        Spacer(minLength: 2)
+                                        if previewInstrumentID == instrument.id {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .foregroundStyle(palette.accent)
+                                                .font(.system(size: 13))
+                                        }
                                     }
-                                    Spacer()
-                                    if previewInstrumentID == instrument.id {
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .foregroundStyle(palette.accent)
-                                    }
+                                    .frame(maxWidth: .infinity, minHeight: 42)
+                                    .contentShape(Rectangle())
                                 }
-                                .padding(10)
-                                .background(previewInstrumentID == instrument.id ?
-                                            palette.selectedBackground :
-                                            palette.surface)
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(instrument.name)
+                                .accessibilityAddTraits(previewInstrumentID == instrument.id ? .isSelected : [])
+
+                                Button {
+                                    toggleFavorite(instrument)
+                                } label: {
+                                    Image(systemName: favoriteInstrumentIDs.contains(instrument.id) ? "star.fill" : "star")
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(favoriteInstrumentIDs.contains(instrument.id) ? palette.accent : palette.secondaryText)
+                                        .frame(width: 26, height: 34)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .help(favoriteInstrumentIDs.contains(instrument.id) ? "Remove favorite" : "Add favorite")
+                                .accessibilityLabel(favoriteInstrumentIDs.contains(instrument.id) ?
+                                                    "Remove \(instrument.name) from favorites" :
+                                                    "Add \(instrument.name) to favorites")
                             }
-                            .buttonStyle(.plain)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 3)
+                            .background(previewInstrumentID == instrument.id ?
+                                        palette.selectedBackground : palette.surface,
+                                        in: RoundedRectangle(cornerRadius: 7))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 7)
+                                    .strokeBorder(previewInstrumentID == instrument.id ?
+                                                  palette.accent.opacity(0.55) : Color.clear, lineWidth: 1)
+                            }
                         }
                         if expandedFilteredCatalog.isEmpty {
                             Text("No instruments match these filters.")
