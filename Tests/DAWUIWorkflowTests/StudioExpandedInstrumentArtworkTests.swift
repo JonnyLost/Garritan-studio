@@ -90,7 +90,7 @@ final class StudioExpandedInstrumentArtworkTests: XCTestCase {
         XCTAssertNil(StudioInstrumentGroupArtwork.resolve(name: "Electric Guitar Solo"))
         XCTAssertNil(StudioInstrumentGroupArtwork.resolve(name: "Marching Bass Drum"))
         XCTAssertNil(StudioInstrumentGroupArtwork.resolve(name: "Tabla Solo"))
-        XCTAssertEqual(StudioInstrumentGroupArtwork.allCases.count, 34)
+        XCTAssertEqual(StudioInstrumentGroupArtwork.allCases.count, 50)
     }
 
     func testExpandedIdentitiesHaveAccessibleLabelsAndDrawings() {
