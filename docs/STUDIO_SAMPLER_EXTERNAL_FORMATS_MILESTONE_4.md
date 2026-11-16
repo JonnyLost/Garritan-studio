@@ -40,8 +40,19 @@ Import existing sample-based instruments into editable Studio mappings and porta
    and damaged containers. Pending: real-world GIG file compatibility,
    GIG 3+ extended containers, 24-bit/compressed wave decoding,
    expanded dimension types, envelopes/filters/LFO, and Mac audition.
-5. EXS: pending investigation and implementation for accessible legacy EXS24
-   instrument definitions and referenced samples.
+5. EXS24: **first native import subset implemented (Milestone 4.8)**.
+   A bounded, dependency-free Swift reader handles legacy little-endian
+   TBOS/JBOS .exs blocks, instrument names, sample references, zone key/velocity
+   bounds, trims, forward loops and basic groups. The importer resolves WAV,
+   AIFF or CAF audio from the instrument folder/Samples folder or an existing
+   stored path, validates the audio, deduplicates and copies recordings into
+   Studio's managed library, and stages a native editable mapping.
+   Studio's Instruments menu now offers **Import Logic EXS24 (.exs)…**.
+   Unsupported behaviors are explicitly rejected rather than silently
+   changing playback. Synthetic EXS + WAV fixtures exercise decoding,
+   velocity ranges, loops, groups, missing audio, malformed blocks and
+   non-destructive imports. Real EXS library testing and Mac build
+   verification remain pending.
 6. Round-trip validation and consolidated Mac testing.
 
 ## SoundFont 2 subset and limitations
@@ -124,6 +135,33 @@ only the DLS base sample link fully represents a GigaStudio instrument.
 RIFF/DLS layout and format observations, but the implementation is original
 Swift/Foundation code, with no libgig dependency. libgig is GPL-licensed;
 integrating it would require separate licensing and architecture review.
+
+## EXS24 support boundary
+
+**Supported now:**
+- Legacy, little-endian TBOS/JBOS block files, up to 16 MB instrument metadata.
+- A single instrument per .exs, 1–128 sample zones; absolute or sibling
+  sample references only when they resolve to actual WAV, AIFF or CAF audio.
+- Key/velocity zones, root note and semitone tuning, per-zone trim frames,
+  basic groups with optional velocity intersection, forward sustain loop and
+  bounded loop crossfade. EXS volume/pan/fine tuning differences are warned.
+- Basic release-trigger groups (without active sample looping).
+- Source files remain unchanged. Duplicate references share one managed copy.
+  No Logic or commercial sampler runtime is required.
+
+**Not yet reproduced:** group condition switching, complex keyswitches,
+round robin, tempo/channel/articulation conditions, reverse and one-shot
+playback, pitch-tracking disable, sophisticated synth/filter/envelope
+parameters, reverse or ping-pong loops, and EXS24/Logic modern extended
+format variants. Such import attempts fail clearly rather than silently
+dropping expressive musical behavior. Wider audio-file resolution,
+sandboxed folder grants, big-endian EXS, and real-world file auditing
+remain future milestones.
+
+**Source references:** Apple's EXS24 user documentation and archived
+Audio Unit sampler technical note; public format-analysis resources
+support the binary block metadata offsets. This implementation is
+original Swift, not a dependency on third-party EXS parser code.
 
 ## Compatibility limits
 Studio's current native sampler supports at most 128 zones, 4 microphone groups,
