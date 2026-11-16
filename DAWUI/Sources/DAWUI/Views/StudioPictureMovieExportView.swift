@@ -11,6 +11,8 @@ struct StudioPictureMovieExportView: View {
     @State private var scoreURL: URL?
     @State private var includeDialogue = true
     @State private var dialogueGain: Double
+    @State private var deliveryFormat: StudioPictureDeliveryFormat = .quickTime
+    @State private var burnInTimecode = false
     @State private var errorMessage: String?
     @State private var exportedURL: URL?
     @State private var exportTask: Task<Void, Never>?
@@ -83,8 +85,19 @@ struct StudioPictureMovieExportView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 7) {
-                Text("3. Export QuickTime MOV")
+                Text("3. Choose delivery format")
                     .font(.subheadline.weight(.semibold))
+                Picker("Video format", selection: $deliveryFormat) {
+                    ForEach(StudioPictureDeliveryFormat.allCases) { option in
+                        Text(option.title).tag(option)
+                    }
+                }
+                .pickerStyle(.menu)
+                Toggle("Burn SMPTE timecode into exported video",
+                       isOn: $burnInTimecode)
+                Text("Burn-in is permanent on the delivered movie only. The saved source picture is unchanged. Turning it on adds offline video processing time.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
                 Text("Studio aligns the music to the movie using the saved picture offset (\(String(format: "%.2f", picture.timelineStartSeconds)) seconds). The export is limited to the movie duration.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -145,9 +158,11 @@ struct StudioPictureMovieExportView: View {
         guard let scoreURL else { return }
         let panel = NSSavePanel()
         panel.title = "Save Scored Movie"
-        panel.allowedContentTypes = [.quickTimeMovie]
+        panel.allowedContentTypes = deliveryFormat == .mp4
+            ? [.mpeg4Movie] : [.quickTimeMovie]
         panel.nameFieldStringValue =
-            ((picture.filename as NSString).deletingPathExtension) + "-Scored.mov"
+            ((picture.filename as NSString).deletingPathExtension) +
+            "-Scored." + deliveryFormat.fileExtension
         guard panel.runModal() == .OK, let destination = panel.url else { return }
         errorMessage = nil
         exportedURL = nil
@@ -160,7 +175,9 @@ struct StudioPictureMovieExportView: View {
                     scoreURL: scoreURL,
                     destination: destination,
                     includeReferenceAudio: includeDialogue,
-                    referenceGain: Float(dialogueGain))
+                    referenceGain: Float(dialogueGain),
+                    format: deliveryFormat,
+                    burnInTimecode: burnInTimecode)
                 exportedURL = destination
             } catch is CancellationError {
                 errorMessage = "Movie export canceled. No source movie or audio was modified."
