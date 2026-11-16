@@ -171,7 +171,8 @@ public enum StudioSamplerEXSImporter {
 
     /// Preview resolves the exact referenced recordings and inspects their
     /// durations, without modifying the original instrument or any samples.
-    public static func preview(_ instrumentURL: URL) throws -> Result {
+    public static func preview(_ instrumentURL: URL,
+                               samplesRoot: URL? = nil) throws -> Result {
         let catalog = try StudioSamplerEXSReader.inspect(instrumentURL)
         guard catalog.zones.count <= 128 else { throw ImportError.tooManyZones }
         let selection = try groupSelection(catalog)
@@ -182,7 +183,8 @@ public enum StudioSamplerEXSImporter {
             guard let sample = catalog.samples[sampleIndex] else {
                 throw ImportError.missingAudio("sample index \(sampleIndex)")
             }
-            let url = try resolveSample(sample, relativeTo: instrumentURL)
+            let url = try resolveSample(sample, relativeTo: instrumentURL,
+                                        samplesRoot: samplesRoot)
             let file = try AVAudioFile(forReading: url)
             guard (1...2).contains(Int(file.processingFormat.channelCount)),
                   file.processingFormat.sampleRate > 0,
@@ -319,8 +321,9 @@ public enum StudioSamplerEXSImporter {
     /// storage. The existing library's transaction rolls back failed copies.
     /// Original .exs and source audio files remain untouched.
     public static func importInstrument(_ instrumentURL: URL,
-                                        into directory: URL? = nil) throws -> Result {
-        let result = try preview(instrumentURL)
+                                        into directory: URL? = nil,
+                                        samplesRoot: URL? = nil) throws -> Result {
+        let result = try preview(instrumentURL, samplesRoot: samplesRoot)
         var originalURLs: [URL] = []
         var lookup: [String: Int] = [:]
         for zone in result.patch.zones {
@@ -345,10 +348,18 @@ public enum StudioSamplerEXSImporter {
                       warnings: result.warnings)
     }
 
+    /// Search only the selected instrument's own folder and any additional
+    /// explicitly user-selected sample folder. EXS's embedded absolute paths
+    /// are historical hints, not authorization to read arbitrary local files.
+    /// Symlinks are resolved before validating the candidate's containment.
     private static func resolveSample(_ sample: StudioSamplerEXSReader.Sample,
-                                      relativeTo instrument: URL) throws -> URL {
+                                      relativeTo instrument: URL,
+                                      samplesRoot: URL?) throws -> URL {
         let folder = instrument.deletingLastPathComponent()
             .resolvingSymlinksInPath().standardizedFileURL
+        let roots = ([folder] + (samplesRoot.map {
+            [$0.resolvingSymlinksInPath().standardizedFileURL]
+        } ?? []))
         let stored = sample.directoryOrPath.replacingOccurrences(
             of: "\\", with: "/")
         let providedName = sample.fileName
@@ -365,45 +376,45 @@ public enum StudioSamplerEXSImporter {
             .pathExtension.lowercased()) else {
             throw ImportError.invalidSample(filename)
         }
-        var candidates: [URL] = [
-            folder.appendingPathComponent(filename),
-            folder.appendingPathComponent("Samples").appendingPathComponent(filename)
-        ]
+        var candidates: [URL] = []
+        for root in roots {
+            candidates.append(root.appendingPathComponent(filename))
+            candidates.append(root.appendingPathComponent("Samples")
+                                  .appendingPathComponent(filename))
+        }
         if !stored.isEmpty {
             if stored.hasPrefix("/") {
                 let absolute = URL(fileURLWithPath: stored)
-                if absolute.lastPathComponent == filename {
-                    candidates.append(absolute)
-                } else {
-                    candidates.append(absolute.appendingPathComponent(filename))
-                }
+                candidates.append(absolute.lastPathComponent == filename
+                    ? absolute : absolute.appendingPathComponent(filename))
             } else {
                 let pieces = stored.split(separator: "/", omittingEmptySubsequences: false)
                 guard !pieces.contains(".."), !stored.hasPrefix("~"),
                       !stored.contains(":") else {
                     throw ImportError.unsafeReference(sample.name)
                 }
-                let relative = folder.appendingPathComponent(stored)
-                candidates.append(relative.lastPathComponent == filename
-                    ? relative : relative.appendingPathComponent(filename))
+                for root in roots {
+                    let relative = root.appendingPathComponent(stored)
+                    candidates.append(relative.lastPathComponent == filename
+                        ? relative : relative.appendingPathComponent(filename))
+                }
             }
         }
         for candidate in candidates {
             let actual = candidate.resolvingSymlinksInPath().standardizedFileURL
+            // All paths, even historical absolute EXS references, must be
+            // inside an explicitly authorized folder (never at its parent).
+            guard roots.contains(where: { root in
+                actual.path.hasPrefix(root.path + "/")
+            }) else { continue }
             let attr = try? actual.resourceValues(forKeys: [.isRegularFileKey])
-            if attr?.isRegularFile != true { continue }
-            // Relative references cannot traverse outside the user-selected
-            // instrument directory, including through symlinks.
-            if !stored.hasPrefix("/") &&
-                !actual.path.hasPrefix(folder.path + "/") {
-                continue
-            }
-            if actual.pathExtension.lowercased() !=
-                URL(fileURLWithPath: filename).pathExtension.lowercased() {
-                continue
-            }
+            guard attr?.isRegularFile == true,
+                  actual.pathExtension.lowercased() ==
+                    URL(fileURLWithPath: filename).pathExtension.lowercased()
+            else { continue }
             return actual
         }
         throw ImportError.missingAudio(filename)
     }
+
 }
