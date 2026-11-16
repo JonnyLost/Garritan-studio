@@ -248,13 +248,14 @@ public enum StudioSamplerEXSImporter {
                     ? relative : relative.appendingPathComponent(filename))
             }
         }
-        for (index, candidate) in candidates.enumerated() {
+        for candidate in candidates {
             let actual = candidate.resolvingSymlinksInPath().standardizedFileURL
             let attr = try? actual.resourceValues(forKeys: [.isRegularFileKey])
             if attr?.isRegularFile != true { continue }
             // Relative references cannot traverse outside the user-selected
             // instrument directory, including through symlinks.
-            if index != 2 && !actual.path.hasPrefix(folder.path + "/") {
+            if !stored.hasPrefix("/") &&
+                !actual.path.hasPrefix(folder.path + "/") {
                 continue
             }
             if actual.pathExtension.lowercased() !=
