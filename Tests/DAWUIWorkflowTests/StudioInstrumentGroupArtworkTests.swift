@@ -19,7 +19,7 @@ final class StudioInstrumentGroupArtworkTests: XCTestCase {
         assertGroup("Full Strings Short Bows KS", .strings)
         assertGroup("SAM French Horn Section KS", .horns)
         assertGroup("Full Choir KS", .choir)
-        assertGroup("Percussion Accessories KS", .percussion)
+        assertGroup("Percussion Accessories KS", .auxiliaryPercussion)
         XCTAssertNil(StudioInstrumentGroupArtwork.resolve(name: "Violin 1 Solo KS"))
         XCTAssertNil(StudioInstrumentGroupArtwork.resolve(name: "French Horn 1 Plr1 KS"))
         XCTAssertNil(StudioInstrumentGroupArtwork.resolve(name: "SAM Trumpet Solo KS"))
@@ -32,6 +32,14 @@ final class StudioInstrumentGroupArtworkTests: XCTestCase {
             ("High Strings Ensemble", .highStrings),
             ("Low Strings", .lowStrings),
             ("String Orchestra", .strings),
+            ("Oboe Section", .oboes),
+            ("English Horn Section", .englishHorns),
+            ("Bassoon Section", .bassoons),
+            ("High Winds", .highWoodwinds),
+            ("Low Winds", .lowWoodwinds),
+            ("Tuned Percussion", .tunedPercussion),
+            ("Marching Percussion", .drumline),
+            ("Auxiliary Percussion", .auxiliaryPercussion),
             ("Clarinet Section", .clarinets),
             ("Saxophone Section", .saxophones),
             ("Woodwind Ensemble", .woodwinds),
@@ -56,7 +64,7 @@ final class StudioInstrumentGroupArtworkTests: XCTestCase {
 
     func testAmbiguousInstrumentNamesDoNotInventSections() {
         for solo in [
-            "Baritone Sax Solo", "Alto Flute Solo", "French Horn 1 Solo KS",
+            "Baritone Sax Solo", "English Horn Solo", "Alto Flute Solo", "French Horn 1 Solo KS",
             "Trombone Plr1 KS", "High Strings Solo", "Bass Drum Solo",
             "Violin 1 KS", "SAM Trumpet Plr3 KS", "Mysterious Orchestra Pad",
             "Big and Bold", "Layers in Motion"
@@ -71,7 +79,7 @@ final class StudioInstrumentGroupArtworkTests: XCTestCase {
     }
 
     func testAllGroupIdentitiesHaveAccessibleLabels() {
-        XCTAssertEqual(StudioInstrumentGroupArtwork.allCases.count, 21)
+        XCTAssertEqual(StudioInstrumentGroupArtwork.allCases.count, 29)
         for group in StudioInstrumentGroupArtwork.allCases {
             XCTAssertFalse(group.accessibilityLabel.isEmpty)
         }
