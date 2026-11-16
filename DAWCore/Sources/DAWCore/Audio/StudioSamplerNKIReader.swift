@@ -199,19 +199,19 @@ public enum StudioSamplerNKIReader {
                 throw NKIError.invalidZone("missing sampleFile")
             }
             let keyLow = max(try number(map, "lowKey", fallback: 0, range: 0...127),
-                             number(program, "lowKey", fallback: 0, range: 0...127),
-                             number(group, "lowKey", fallback: 0, range: 0...127))
+                             try number(program, "lowKey", fallback: 0, range: 0...127),
+                             try number(group, "lowKey", fallback: 0, range: 0...127))
             let keyHigh = min(try number(map, "highKey", fallback: 127, range: 0...127),
-                              number(program, "highKey", fallback: 127, range: 0...127),
-                              number(group, "highKey", fallback: 127, range: 0...127))
+                              try number(program, "highKey", fallback: 127, range: 0...127),
+                              try number(group, "highKey", fallback: 127, range: 0...127))
             let velocityLow = max(1,
                 try number(map, "lowVelo", fallback: 0, range: 0...127),
-                number(program, "lowVelocity", fallback: 0, range: 0...127),
-                number(group, "lowVelocity", fallback: 0, range: 0...127))
+                try number(program, "lowVelocity", fallback: 0, range: 0...127),
+                try number(group, "lowVelocity", fallback: 0, range: 0...127))
             let velocityHigh = min(
                 try number(map, "highVelo", fallback: 127, range: 0...127),
-                number(program, "highVelocity", fallback: 127, range: 0...127),
-                number(group, "highVelocity", fallback: 127, range: 0...127))
+                try number(program, "highVelocity", fallback: 127, range: 0...127),
+                try number(group, "highVelocity", fallback: 127, range: 0...127))
             if keyLow > keyHigh || velocityLow > velocityHigh { continue }
             let root = try number(map, "rootKey", fallback: 60, range: 0...127)
             let trimStart = try number(map, "sampleStart",
@@ -221,7 +221,7 @@ public enum StudioSamplerNKIReader {
             let loopMode = try number(map, "loopMode", fallback: 0, range: 0...2)
             let release = try bool(group, "releaseTrigger", fallback: false)
             guard try bool(group, "keyTracking", fallback: true),
-                  !bool(group, "reverse", fallback: false) else {
+                  !(try bool(group, "reverse", fallback: false)) else {
                 throw NKIError.unsupportedMapping(
                     "reverse playback or disabled key tracking")
             }
