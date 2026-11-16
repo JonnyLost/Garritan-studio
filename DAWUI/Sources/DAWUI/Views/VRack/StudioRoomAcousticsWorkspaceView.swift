@@ -236,6 +236,9 @@ struct StudioRoomAcousticsWorkspaceView: View {
                     .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
 
+            microphoneArrayPreview
+                .accessibilityIdentifier("microphone-array-preview")
+
             if microphoneObjects.isEmpty {
                 ContentUnavailableView("No Microphones", systemImage: "mic",
                                        description: Text("Choose a setup above to place microphones on Stage."))
@@ -330,6 +333,58 @@ struct StudioRoomAcousticsWorkspaceView: View {
                 }
             }
         }
+    }
+
+    /// Lightweight local illustration of the chosen microphone setup. The real
+    /// capsule coordinates and pickup patterns are edited below and on Stage.
+    private var microphoneArrayPreview: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label(arrayToAdd.displayName, systemImage: "mic.fill")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text("SETUP PREVIEW")
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(0.7)
+                    .foregroundStyle(palette.secondaryText)
+            }
+            GeometryReader { proxy in
+                let count = arrayToAdd.microphoneCount
+                let width = proxy.size.width
+                let center = width / 2
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(palette.raisedSurface)
+                    // A deliberately schematic arrangement, not a measurement.
+                    Ellipse()
+                        .stroke(palette.separator.opacity(0.6), lineWidth: 1)
+                        .frame(width: min(width * 0.82, 360), height: 48)
+                        .offset(y: 32)
+                    ForEach(0..<count, id: \.self) { index in
+                        let spread = count > 1 ? Double(index) / Double(count - 1) - 0.5 : 0
+                        let x = center + CGFloat(spread) * min(width * 0.62, 230)
+                        let y: CGFloat = count == 3 && index == 1 ? -18 : 0
+                        VStack(spacing: 3) {
+                            Image(systemName: "mic.fill")
+                                .font(.system(size: 30, weight: .light))
+                                .foregroundStyle(palette.accent)
+                                .rotationEffect(.degrees(count == 2 ? (index == 0 ? -20 : 20) : 0))
+                            Capsule()
+                                .fill(palette.secondaryText.opacity(0.6))
+                                .frame(width: 2, height: 22)
+                        }
+                        .position(x: x, y: proxy.size.height / 2 + y)
+                    }
+                }
+            }
+            .frame(height: 112)
+            .accessibilityLabel("\(arrayToAdd.displayName) schematic showing \(arrayToAdd.microphoneCount) microphones")
+            Text("Illustration only · Set exact capsule positions on Stage")
+                .font(.caption2)
+                .foregroundStyle(palette.secondaryText)
+        }
+        .padding(12)
+        .background(palette.panel, in: RoundedRectangle(cornerRadius: 12))
     }
 
     private func microphoneCoordinate(
