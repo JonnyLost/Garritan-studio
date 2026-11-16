@@ -80,7 +80,7 @@ final class StudioInstrumentGroupArtworkTests: XCTestCase {
     }
 
     func testAllGroupIdentitiesHaveAccessibleLabels() {
-        XCTAssertEqual(StudioInstrumentGroupArtwork.allCases.count, 29)
+        XCTAssertEqual(StudioInstrumentGroupArtwork.allCases.count, 34)
         for group in StudioInstrumentGroupArtwork.allCases {
             XCTAssertFalse(group.accessibilityLabel.isEmpty)
         }
