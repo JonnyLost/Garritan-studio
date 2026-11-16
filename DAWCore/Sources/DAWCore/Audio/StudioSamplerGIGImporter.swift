@@ -1,8 +1,9 @@
 import Foundation
 
-/// Converts GigaStudio's single-dimension, uncompressed PCM instrument regions
-/// into editable native Studio zones. More complex GIG dimensions are detected,
-/// not silently flattened. Processing and file I/O remain off the audio thread.
+/// Converts supported GigaStudio dimension cases into native Studio zones:
+/// velocity splits, round-robin alternates and note-release triggers.
+/// Unsupported dimensions are rejected without flattening other sample layers.
+/// File I/O and conversion always happen off the audio thread.
 public enum StudioSamplerGIGImporter {
     public struct Preview: Sendable {
         public let instrument: StudioSamplerGIGReader.Instrument
@@ -33,7 +34,7 @@ public enum StudioSamplerGIGImporter {
             case .noPlayableRegions: return "This GigaStudio instrument has no playable regions."
             case .tooManyZones: return "Studio currently supports up to 128 sampler zones."
             case .unsupportedDimensions(let instrument):
-                return "\(instrument) uses multiple GigaStudio dimensions. These are not yet supported by the native importer."
+                return "\(instrument) uses a GigaStudio dimension Studio cannot reproduce yet (for example keyswitches, controller layers, or multi-sample layering)."
             case .missingSample(let instrument):
                 return "A sample-pool reference is missing in \(instrument)."
             case .unsupportedAudio(let sample):
@@ -52,6 +53,8 @@ public enum StudioSamplerGIGImporter {
         let keyHigh: UInt8
         let velocityLow: UInt8
         let velocityHigh: UInt8
+        let roundRobinIndex: UInt8?
+        let isReleaseTrigger: Bool
     }
 
     private struct Plan {
@@ -106,7 +109,10 @@ public enum StudioSamplerGIGImporter {
                     highestVelocity: item.velocityHigh)
                 zone.managedFileName = directory == nil
                     ? StudioSamplerSampleLibrary.managedName(for: output) : nil
-                if let begin = params?.loopStart, let end = params?.loopEnd {
+                zone.roundRobinIndex = item.roundRobinIndex
+                zone.isReleaseTrigger = item.isReleaseTrigger ? true : nil
+                if !item.isReleaseTrigger,
+                   let begin = params?.loopStart, let end = params?.loopEnd {
                     zone.loopStartFrame = begin
                     zone.loopEndFrame = end
                 }
@@ -142,45 +148,102 @@ public enum StudioSamplerGIGImporter {
         var plans: [ZonePlan] = []
         var warnings = Set(catalog.warnings)
         for region in instrument.regions {
-            guard region.dimensionCount == 1 else {
-                throw ImportError.unsupportedDimensions(instrument.name)
-            }
-            guard let tableIndex = region.sampleTableIndex,
-                  Int(tableIndex) < catalog.sampleIndexToWave.count,
-                  let waveIndex = catalog.sampleIndexToWave[Int(tableIndex)] else {
-                throw ImportError.missingSample(instrument.name)
-            }
-            let wave = catalog.waves[waveIndex]
-            guard wave.format == 1, (1...2).contains(wave.channels),
-                  wave.bitsPerSample == 16,
-                  wave.blockAlign == wave.channels * 2,
-                  (8_000...384_000).contains(wave.sampleRate),
-                  wave.dataSize >= UInt64(wave.blockAlign) * 2,
-                  wave.dataSize % UInt64(wave.blockAlign) == 0 else {
-                throw ImportError.unsupportedAudio(wave.name)
-            }
-            let frames = wave.dataSize / UInt64(wave.blockAlign)
-            guard frames <= 500_000_000,
-                  wave.dataSize <= UInt64(UInt32.max - 36) else {
-                throw ImportError.outputTooLarge
-            }
-            let sampleParameters = region.parameters ?? wave.parameters
-            if let begin = sampleParameters?.loopStart,
-               let end = sampleParameters?.loopEnd {
-                guard begin < end, end - begin >= 4, UInt64(end) <= frames else {
-                    throw ImportError.invalidLoop(wave.name)
+            for dimension in region.dimensions {
+                switch dimension.type {
+                case 0x82: // velocity split
+                    break
+                case 0x86: // note-on round robin, max eight Studio takes
+                    guard dimension.zoneCount <= 8 else {
+                        throw ImportError.unsupportedDimensions(instrument.name)
+                    }
+                case 0x84: // 0 = sustain, 1 = release trigger
+                    guard dimension.zoneCount == 2 else {
+                        throw ImportError.unsupportedDimensions(instrument.name)
+                    }
+                default:
+                    // Keyboard keyswitch mappings, simultaneous layers,
+                    // modwheel/controller dimensions, random selection and
+                    // sample channels need separate interpretation.
+                    throw ImportError.unsupportedDimensions(instrument.name)
                 }
             }
-            guard region.velocityHigh >= 1 else {
-                throw ImportError.noPlayableRegions
+            for (caseIndex, sampleCase) in region.cases.enumerated() {
+                // An unassigned GIG case is a legitimate silent selection.
+                guard let tableIndex = sampleCase.sampleTableIndex else { continue }
+                guard Int(tableIndex) < catalog.sampleIndexToWave.count,
+                      let waveIndex = catalog.sampleIndexToWave[Int(tableIndex)] else {
+                    throw ImportError.missingSample(instrument.name)
+                }
+                var lowVelocity = max(1, Int(region.velocityLow))
+                var highVelocity = Int(region.velocityHigh)
+                var roundRobinIndex: UInt8?
+                var isReleaseTrigger = false
+                var shift = 0
+                for dimension in region.dimensions {
+                    let mask = dimension.zoneCount - 1
+                    let caseValue = (caseIndex >> shift) & mask
+                    shift += Int(dimension.bits)
+                    switch dimension.type {
+                    case 0x82:
+                        // Regular GIG velocity splits partition MIDI 0...127.
+                        // Custom GIG3 velocity boundaries need separate
+                        // decoding; warn rather than claiming exact fidelity.
+                        let lower = caseValue * 128 / dimension.zoneCount
+                        let upper = (caseValue + 1) * 128 / dimension.zoneCount - 1
+                        lowVelocity = max(lowVelocity, lower)
+                        highVelocity = min(highVelocity, upper)
+                    case 0x86:
+                        roundRobinIndex = UInt8(caseValue)
+                    case 0x84:
+                        isReleaseTrigger = caseValue == 1
+                    default:
+                        // Checked above before any disk changes.
+                        throw ImportError.unsupportedDimensions(instrument.name)
+                    }
+                }
+                // Some GIG cases have zero-width or silent velocity ranges.
+                if lowVelocity > highVelocity { continue }
+                let wave = catalog.waves[waveIndex]
+                guard wave.format == 1, (1...2).contains(wave.channels),
+                      wave.bitsPerSample == 16,
+                      wave.blockAlign == wave.channels * 2,
+                      (8_000...384_000).contains(wave.sampleRate),
+                      wave.dataSize >= UInt64(wave.blockAlign) * 2,
+                      wave.dataSize % UInt64(wave.blockAlign) == 0 else {
+                    throw ImportError.unsupportedAudio(wave.name)
+                }
+                let frames = wave.dataSize / UInt64(wave.blockAlign)
+                guard frames <= 500_000_000,
+                      wave.dataSize <= UInt64(UInt32.max - 36) else {
+                    throw ImportError.outputTooLarge
+                }
+                let sampleParameters = sampleCase.parameters ??
+                    region.parameters ?? wave.parameters
+                if !isReleaseTrigger,
+                   let begin = sampleParameters?.loopStart,
+                   let end = sampleParameters?.loopEnd {
+                    guard begin < end, end - begin >= 4, UInt64(end) <= frames else {
+                        throw ImportError.invalidLoop(wave.name)
+                    }
+                }
+                plans.append(ZonePlan(
+                    waveIndex: waveIndex, parameters: sampleParameters,
+                    keyLow: region.keyLow, keyHigh: region.keyHigh,
+                    velocityLow: UInt8(lowVelocity),
+                    velocityHigh: UInt8(highVelocity),
+                    roundRobinIndex: roundRobinIndex,
+                    isReleaseTrigger: isReleaseTrigger))
+                guard plans.count <= 128 else { throw ImportError.tooManyZones }
             }
             for warning in region.warnings { warnings.insert(warning) }
-            plans.append(ZonePlan(
-                waveIndex: waveIndex, parameters: sampleParameters,
-                keyLow: region.keyLow, keyHigh: region.keyHigh,
-                velocityLow: region.velocityLow,
-                velocityHigh: region.velocityHigh))
+            if region.dimensions.contains(where: { $0.type == 0x82 }) {
+                warnings.insert("GigaStudio velocity splits use regular 128-step boundaries; custom split thresholds are not yet preserved.")
+            }
+            if region.dimensions.contains(where: { $0.type == 0x86 }) {
+                warnings.insert("GigaStudio round-robin cases use Studio's native per-note take selection; exact counter scope may differ.")
+            }
         }
+        guard !plans.isEmpty else { throw ImportError.noPlayableRegions }
         warnings.insert("GigaStudio filters, crossfades, envelopes, scripts and controllers are not yet fully translated.")
         return Plan(instrument: instrument, zones: plans, warnings: warnings.sorted())
     }
