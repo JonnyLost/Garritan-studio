@@ -108,6 +108,169 @@ final class StudioSamplerEXSImporterTests: XCTestCase {
         return url
     }
 
+    private struct GroupConfiguration {
+        let name: String
+        let type: UInt8
+        let roundRobin: Int32
+        let note: UInt8
+        let controller: UInt8
+        let ccLow: UInt8
+        let ccHigh: UInt8
+
+        init(_ name: String, type: UInt8,
+             roundRobin: Int32 = -1, note: UInt8 = 0,
+             controller: UInt8 = 0, ccLow: UInt8 = 0,
+             ccHigh: UInt8 = 127) {
+            self.name = name
+            self.type = type
+            self.roundRobin = roundRobin
+            self.note = note
+            self.controller = controller
+            self.ccLow = ccLow
+            self.ccHigh = ccHigh
+        }
+    }
+
+    private func groupedFixture(in root: URL,
+                                groups: [GroupConfiguration]) throws -> URL {
+        guard groups.count >= 2 else { throw NSError(domain: "fixture", code: 1) }
+        let instrument = block(0, name: "EXS Group Selection", index: 0,
+                               body: Data(repeating: 0, count: 88))
+        var zones = Data()
+        var groupData = Data()
+        var samples = Data()
+        for (index, group) in groups.enumerated() {
+            let name = "take-\(index).wav"
+            _ = try wav(name, in: root)
+            var zone = Data(repeating: 0, count: 148)
+            zone[0] = 8 // use velocity limits
+            zone[1] = 60
+            zone[6] = 48
+            zone[7] = 72
+            zone[9] = 1
+            zone[10] = 127
+            put(&zone, 16, u32(64))
+            put(&zone, 88, u32(UInt32(index)))
+            put(&zone, 92, u32(UInt32(index)))
+            zones.append(block(1, name: "EXS Zone \(index)", index: UInt32(index),
+                               body: zone))
+
+            var definition = Data(repeating: 0, count: 144)
+            definition[5] = 1
+            definition[6] = 127
+            definition[75] = group.note
+            definition[84] = group.type
+            definition[85] = group.controller
+            definition[86] = group.ccLow
+            definition[87] = group.ccHigh
+            put(&definition, 80, u32(UInt32(bitPattern: group.roundRobin)))
+            groupData.append(block(2, name: group.name, index: UInt32(index),
+                                   body: definition))
+
+            var sample = Data(repeating: 0, count: 592)
+            put(&sample, 4, u32(64))
+            put(&sample, 8, u32(44_100))
+            put(&sample, 336, named(name, 256))
+            samples.append(block(3, name: "EXS Sample \(index)",
+                                 index: UInt32(index), body: sample))
+        }
+        let url = root.appendingPathComponent("grouped.exs")
+        try (instrument + zones + groupData + samples).write(to: url, options: .atomic)
+        return url
+    }
+
+    func testRoundRobinGroupsBecomeNativeVariationTakes() throws {
+        let root = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try groupedFixture(in: root, groups: [
+            GroupConfiguration("Take One", type: 2, roundRobin: 0),
+            GroupConfiguration("Take Two", type: 2, roundRobin: 1)
+        ])
+        let preview = try StudioSamplerEXSImporter.preview(source)
+        XCTAssertTrue(preview.patch.isValid)
+        XCTAssertEqual(preview.patch.zones.map(\.roundRobinIndex), [0, 1])
+        XCTAssertEqual(Set(preview.patch.zones.map(\.filePath)).count, 2)
+        let output = try StudioSamplerEXSImporter.importInstrument(
+            source, into: root.appendingPathComponent("managed"))
+        XCTAssertEqual(output.patch.zones.map(\.roundRobinIndex), [0, 1])
+    }
+
+    func testKeySelectedGroupsPreserveActualKeyswitchNotes() throws {
+        let root = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try groupedFixture(in: root, groups: [
+            GroupConfiguration("Sustain", type: 1, note: 24),
+            GroupConfiguration("Staccato", type: 1, note: 25)
+        ])
+        let result = try StudioSamplerEXSImporter.preview(source)
+        XCTAssertTrue(result.patch.isValid)
+        XCTAssertEqual(result.patch.defaultKeyswitchNote, 24)
+        XCTAssertEqual(result.patch.articulations?.count, 1)
+        XCTAssertEqual(result.patch.articulations?[0].name, "Staccato")
+        XCTAssertEqual(result.patch.articulations?[0].keyswitchNote, 25)
+        XCTAssertEqual(result.patch.zones.map { $0.articulationID ?? 0 }, [0, 1])
+        XCTAssertNil(result.patch.controllerSwitch)
+    }
+
+    func testRegularCC1GroupsBecomeNativeArticulationSelector() throws {
+        let root = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try groupedFixture(in: root, groups: [
+            GroupConfiguration("Soft", type: 3, controller: 1, ccLow: 0, ccHigh: 63),
+            GroupConfiguration("Loud", type: 3, controller: 1, ccLow: 64, ccHigh: 127)
+        ])
+        let result = try StudioSamplerEXSImporter.preview(source)
+        XCTAssertTrue(result.patch.isValid)
+        XCTAssertEqual(result.patch.controllerSwitch?.controller, 1)
+        XCTAssertEqual(result.patch.controllerSwitch?.articulationIDs, [0, 1])
+        XCTAssertEqual(result.patch.zones.map { $0.articulationID ?? 0 }, [0, 1])
+        let encoded = try JSONEncoder().encode(result.patch)
+        let restored = try JSONDecoder().decode(StudioSamplerPatch.self, from: encoded)
+        XCTAssertEqual(restored.controllerSwitch, result.patch.controllerSwitch)
+    }
+
+    func testIrregularEXSCCThresholdsAreRejectedWithoutCopying() throws {
+        let root = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try groupedFixture(in: root, groups: [
+            GroupConfiguration("Soft", type: 3, controller: 1, ccLow: 0, ccHigh: 40),
+            GroupConfiguration("Loud", type: 3, controller: 1, ccLow: 41, ccHigh: 127)
+        ])
+        let managed = root.appendingPathComponent("managed")
+        XCTAssertThrowsError(try StudioSamplerEXSImporter.importInstrument(source, into: managed))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: managed.path))
+    }
+
+    func testUnsupportedLogicArticulationIDsAreNotInventedAsKeyswitches() throws {
+        let root = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try groupedFixture(in: root, groups: [
+            GroupConfiguration("Sustain", type: 6),
+            GroupConfiguration("Marcato", type: 6)
+        ])
+        XCTAssertThrowsError(try StudioSamplerEXSImporter.preview(source))
+    }
+
+    func testNonSequentialRoundRobinFailsSafely() throws {
+        let root = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try groupedFixture(in: root, groups: [
+            GroupConfiguration("Take One", type: 2, roundRobin: 0),
+            GroupConfiguration("Take Three", type: 2, roundRobin: 2)
+        ])
+        XCTAssertThrowsError(try StudioSamplerEXSImporter.preview(source))
+    }
+
+    func testKeyswitchCollisionWithPlayableKeysFailsSafely() throws {
+        let root = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try groupedFixture(in: root, groups: [
+            GroupConfiguration("Sustain", type: 1, note: 60),
+            GroupConfiguration("Staccato", type: 1, note: 61)
+        ])
+        XCTAssertThrowsError(try StudioSamplerEXSImporter.preview(source))
+    }
+
     func testInspectAndImportPreserveMappingAndSourceAudio() throws {
         let root = try folder()
         defer { try? FileManager.default.removeItem(at: root) }
