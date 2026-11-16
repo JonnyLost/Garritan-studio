@@ -41,9 +41,8 @@ final class StudioPictureOneStepExport: ObservableObject {
                 tailSeconds: Double = 3,
                 bitDepth: Int = 24) async throws {
         guard !isExporting else { throw WorkflowError.busy }
-        guard !FileManager.default.fileExists(atPath: destination.path) else {
-            throw WorkflowError.outputExists
-        }
+        try Self.validateDestination(
+            destination, sourceMoviePath: picture.filePath, format: format)
         let project = viewModel.project
         guard project.studioPicture == picture else { throw WorkflowError.pictureChanged }
         let renderDuration = try StudioExportPlan.renderSeconds(
@@ -108,9 +107,26 @@ final class StudioPictureOneStepExport: ObservableObject {
             referenceGain: referenceGain,
             format: format,
             burnInTimecode: burnInTimecode)
-        try Task.checkCancellation()
+        // MovieExporter commits only after successful encoding and its own
+        // cancellation check. Do not report a completed deliverable as canceled
+        // if the user presses Cancel after the final file has been committed.
         progress = 1
         status = "Scored movie ready"
+    }
+
+    static func validateDestination(
+        _ destination: URL,
+        sourceMoviePath: String,
+        format: StudioPictureDeliveryFormat
+    ) throws {
+        guard destination.pathExtension.lowercased() == format.fileExtension,
+              destination.standardizedFileURL !=
+                URL(fileURLWithPath: sourceMoviePath).standardizedFileURL else {
+            throw StudioPictureMovieExportError.destinationConflictsWithSource
+        }
+        guard !FileManager.default.fileExists(atPath: destination.path) else {
+            throw WorkflowError.outputExists
+        }
     }
 
     func cancel() {
