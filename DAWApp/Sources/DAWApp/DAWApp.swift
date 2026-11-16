@@ -16,6 +16,7 @@ extension UTType {
 
 @main
 struct DAWApp: App {
+    @NSApplicationDelegateAdaptor(StudioApplicationLifecycle.self) private var lifecycle
     @StateObject private var appState = AppState()
 
     init() {
@@ -31,7 +32,10 @@ struct DAWApp: App {
         WindowGroup("Garritan Studio") {
             StudioAppearanceHost {
                 MainWindowView(project: appState.currentProject)
+                .background(StudioWindowCloseGuard(appState: appState))
                 .onAppear {
+                    lifecycle.appState = appState
+                    appState.startRecoverySnapshots()
                     DispatchQueue.main.async {
                         NSApplication.shared.activate(ignoringOtherApps: true)
                     }
@@ -80,6 +84,9 @@ struct DAWApp: App {
                 
                 Divider()
                 
+                Button("Recover Unsaved Project…") { appState.recoverDraft() }
+                Button("Recover Previous Version…") { appState.recoverPreviousVersion() }
+                Divider()
                 Button("Save") {
                     appState.saveProject()
                 }
@@ -247,6 +254,76 @@ class AppState: ObservableObject {
     private var isSaveInProgress = false
     private var isSavePanelOpen = false
     private var isOpeningProject = false
+    private var isRecoveryInProgress = false
+    private var isExitNegotiating = false
+    private let exitGate = StudioDocumentExitGate()
+    private var recoveryTimer: Timer?
+    private let recoveryStore = StudioDraftRecoveryStore()
+
+    var needsExitNegotiation: Bool {
+        hasUnsavedChanges || isSaveInProgress || isSavePanelOpen || isOpeningProject || isRecoveryInProgress
+    }
+
+    func confirmApplicationTermination() async -> Bool {
+        guard !isExitNegotiating, !isOpeningProject, !isRecoveryInProgress else { return false }
+        isExitNegotiating = true
+        defer { isExitNegotiating = false }
+        return await exitGate.request(isBusy: isSaveInProgress || isSavePanelOpen) {
+            await self.confirmCanReplaceCurrentProject()
+        }
+    }
+
+    func startRecoverySnapshots() {
+        guard recoveryTimer == nil else { return }
+        recoveryTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in await self?.writeRecoverySnapshot() }
+        }
+    }
+
+    private func writeRecoverySnapshot() async {
+        guard hasUnsavedChanges, !isSaveInProgress, !isSavePanelOpen,
+              !isOpeningProject, !isRecoveryInProgress, !isExitNegotiating else { return }
+        isRecoveryInProgress = true
+        defer { isRecoveryInProgress = false }
+        do {
+            let snapshot = try captureProjectWithPluginStates()
+            try await recoveryStore.store(project: snapshot, sessionID: projectID)
+        } catch {
+            // Preserve the previous recovery package and show a visible failure.
+            presentError("Recovery Snapshot Failed — Save Your Project", error: error)
+        }
+    }
+
+    func recoverDraft() {
+        Task { @MainActor in
+        _ = await recoveryStore.availableDrafts()
+        let panel = NSOpenPanel()
+        panel.directoryURL = StudioDraftRecoveryStore.defaultDirectory()
+        panel.allowedContentTypes = [.dawProject]
+        panel.canChooseDirectories = true
+        panel.treatsFilePackagesAsDirectories = false
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            Task { await self?.openProject(at: url, asRecovery: true) }
+        }
+    }
+
+        }
+
+    func recoverPreviousVersion() {
+        guard let currentProjectURL else { return }
+        let panel = NSOpenPanel()
+        panel.directoryURL = currentProjectURL.deletingLastPathComponent()
+        panel.showsHiddenFiles = true
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.message = "Choose a hidden .backup- package. Recovery opens a copy; Save As preserves the current file."
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url,
+                  url.lastPathComponent.hasPrefix("." + currentProjectURL.lastPathComponent + ".backup-") else { return }
+            Task { await self?.openProject(at: url, asRecovery: true) }
+        }
+    }
 
     private enum DocumentError: LocalizedError {
         case snapshotUnavailable
@@ -306,8 +383,8 @@ class AppState: ObservableObject {
         }
     }
 
-    func openProject(at url: URL) async {
-        guard !isSaveInProgress, !isSavePanelOpen, !isOpeningProject else { return }
+    func openProject(at url: URL, asRecovery: Bool = false) async {
+        guard !isSaveInProgress, !isSavePanelOpen, !isOpeningProject, !isRecoveryInProgress else { return }
         isOpeningProject = true
         defer { isOpeningProject = false }
 
@@ -323,11 +400,14 @@ class AppState: ObservableObject {
             // Existing project UI and Audio Unit graph are rebuilt after swap.
             try? await Task.sleep(nanoseconds: 100_000_000)
             currentProject = loadedProject
-            currentProjectURL = url
+            currentProjectURL = asRecovery ? nil : url
             projectID = UUID()
             resetDocumentRevision()
-            recentProjectsManager.addRecentProject(url)
-            autosaveManager.startAutosave(for: url)
+            if asRecovery { markUnsavedChanges() }
+            else {
+                recentProjectsManager.addRecentProject(url)
+                autosaveManager.startAutosave(for: url)
+            }
             updateWindowTitle()
 
             try? await Task.sleep(nanoseconds: 500_000_000)
@@ -373,7 +453,7 @@ class AppState: ObservableObject {
     private func persistProject(
         to url: URL, asNewDocument: Bool, showErrors: Bool
     ) async -> Bool {
-        guard !isSaveInProgress else { return false }
+        guard !isSaveInProgress, !isRecoveryInProgress else { return false }
         isSaveInProgress = true
         defer { isSaveInProgress = false }
 
@@ -567,7 +647,7 @@ class AppState: ObservableObject {
     /// Saving must finish successfully before the old instrument graph is torn
     /// down. Cancel leaves the entire session unchanged.
     private func confirmCanReplaceCurrentProject() async -> Bool {
-        guard !isSaveInProgress, !isSavePanelOpen else { return false }
+        guard !isSaveInProgress, !isSavePanelOpen, !isRecoveryInProgress else { return false }
         guard hasUnsavedChanges else { return true }
 
         let alert = NSAlert()
