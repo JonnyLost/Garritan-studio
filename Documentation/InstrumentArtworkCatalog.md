@@ -29,3 +29,19 @@ Alto and E-flat clarinet; soprano, alto, tenor, baritone and bass saxophones; eu
 3. Review vector silhouettes at 20–32 px and refine anatomy.
 4. Produce individual approved Cinematic Atelier artwork files for larger previews; no generic substitution for specific instruments.
 5. Re-run the inventory for each future Garritan library when its metadata is available.
+
+
+## Milestone: installed-bank audit tooling (2026-11-16)
+The repository does **not** contain the actual `Personal Orchestra 5.bank.xml` or `Instant Orchestra.bank.xml` files. The GPO5 keyswitch JSON is a **manual-derived partial patch list**, not the full bank. Accordingly no complete program-by-program coverage claim is justified.
+
+Added `scripts/audit_instrument_artwork.py`: a standalone Python standard-library tool that inspects installed bank XML, emits a JSON list of program names and candidate instrument identities, and flags generic/unmapped/overlapping names for review. It defaults to the three GPO5 Standard/Notation and Instant Orchestra paths used by Studio's instrument browser. Run on the Mac after installation:
+
+```sh
+python3 scripts/audit_instrument_artwork.py --output instrument-artwork-audit.json
+```
+
+The report is a review artifact, **not** an authoritative instrument mapping: name heuristics can misidentify ensembles, nonstandard program naming and XML schemas. Review the report and cross-check the existing `GPO5BankReader` parser before changing production mappings. Avoid committing installed-library files or sample content.
+
+The existing `DAWUI/Sources/DAWUI/Resources/GPO5_keyswitch_catalog.json` contains 86 manual-derived keyswitch patch entries, including separate piccolo, piccolo trumpet, snare, timpani, crotales, glockenspiel, handbells, marimba, vibraphone, xylophone, and tubular bells entries. It cannot establish completeness for the 520 GPO5 or 259 Instant Orchestra programs previously observed at runtime.
+
+Next: run the installed-bank audit, review unresolved program names, and then refine instrument-specific percussion variants and their approved watercolor artwork.
