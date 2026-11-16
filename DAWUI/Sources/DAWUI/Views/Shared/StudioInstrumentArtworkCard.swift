@@ -2,8 +2,8 @@ import SwiftUI
 
 /// Reusable, offline artwork surface for Studio's Cinematic Atelier visual language.
 ///
-/// This is a procedural presentation surface, not a replacement for individually
-/// approved watercolor illustrations. The instrument silhouette comes from the
+/// Displays approved bundled PNG artwork when available and otherwise renders
+/// the same instrument-specific native vector silhouette used by track icons. The instrument silhouette comes from the
 /// shared identity resolver, so the browser and track icons remain consistent.
 public struct StudioInstrumentArtworkCard: View {
     @Environment(\.studioPalette) private var palette
@@ -51,14 +51,25 @@ public struct StudioInstrumentArtworkCard: View {
                     .frame(width: 124, height: 124)
                     .offset(x: geometry.size.width * 0.28, y: 28)
 
-                StudioInstrumentIcon(
-                    name: name,
-                    path: path,
-                    category: category,
-                    size: compact ? 76 : 106
-                )
-                .frame(width: compact ? 84 : 116, height: compact ? 84 : 116)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if let approvedImage = StudioInstrumentArtworkAssets.image(
+                    name: name, path: path, category: category
+                ) {
+                    Image(nsImage: approvedImage)
+                        .resizable()
+                        .scaledToFit()
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    StudioInstrumentIcon(
+                        name: name,
+                        path: path,
+                        category: category,
+                        size: compact ? 76 : 106
+                    )
+                    .frame(width: compact ? 84 : 116, height: compact ? 84 : 116)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay {
