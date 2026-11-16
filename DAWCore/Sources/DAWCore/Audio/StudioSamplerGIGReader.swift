@@ -205,6 +205,32 @@ public enum StudioSamplerGIGReader {
                                 loopStart: start, loopEnd: start + length)
     }
 
+    /// Legacy GigaStudio wave metadata (smpl) is distinct from the audio
+    /// "data" chunk and from DLS wsmp. The end marker is absolute.
+    private static func gigParameters(_ chunk: Chunk?,
+                                      scanner: Scanner) throws -> SampleParameters? {
+        guard let chunk else { return nil }
+        guard chunk.length == 60 else { throw GIGError.invalidChunk("smpl") }
+        let data = try scanner.read(chunk.offset, 60)
+        let root = u32(data, 12)
+        let count = u32(data, 28)
+        guard root <= 127, count <= 1 else {
+            throw GIGError.invalidChunk("smpl pitch/loop")
+        }
+        guard count == 1 else {
+            return SampleParameters(root: UInt8(root),
+                                    loopStart: nil, loopEnd: nil)
+        }
+        let type = u32(data, 40)
+        let start = u32(data, 44)
+        let end = u32(data, 48)
+        guard type == 0, start < end, end - start >= 4 else {
+            throw GIGError.invalidChunk("smpl loop")
+        }
+        return SampleParameters(root: UInt8(root),
+                                loopStart: start, loopEnd: end)
+    }
+
     /// Uses FileHandle's bounded reads to inspect huge sample pools without
     /// loading source audio into RAM. Only the RIFF32 layout is accepted here.
     public static func inspect(_ url: URL) throws -> Catalog {
@@ -272,7 +298,9 @@ public enum StudioSamplerGIGReader {
                               dataOffset: audio.offset, dataSize: audio.length,
                               poolOffset: offset,
                               parameters: try parameters(scanner.first("wsmp", in: records),
-                                                         scanner: scanner)))
+                                                         scanner: scanner) ??
+                                  gigParameters(scanner.first("smpl", in: records),
+                                                scanner: scanner)))
         }
         let mapping = cues.map { offsets[$0] }
         let instrumentsList = try scanner.children(of: lins)
