@@ -76,6 +76,17 @@ Keyboard shortcuts: **Option-Command-P** opens Picture; **Option-Command-H** add
 - Cue search/filter is display-only and does not rewrite project hit points, tempo, or audio routing.
 - Tests cover cue selection, empty matches, filtered traversal, SMPTE jumps, out-of-range labels and 29.97 DF invalid labels.
 
+## Milestone 9 — Movie delivery options and permanent timecode labels
+
+- **Export Scored Movie** now offers high-quality QuickTime MOV, high-quality MP4 and an HEVC QuickTime MOV preset. Codec availability is checked against AVFoundation at export time; a format unsupported by the installed macOS environment produces an error instead of a mislabeled movie.
+- **Burn SMPTE timecode** renders picture-relative start timecode plus movie frames directly into the delivered video. Burn-in is optional, offline-only, and independent of Studio's live video player and audio rendering.
+- The permanent timecode label respects the project's manually configured Start TC, exact fractional frame rate, DF/NDF numbering and 24-hour wrap. Burn-in refers to movie time zero, not the music's later picture offset.
+- The exported music remains an already-bounced Studio Stereo Mix WAV; source media, mixing state and the project document remain untouched. Original picture dialogue remains an independent optional delivery setting.
+- The staging filename matches the selected container extension. Every successful export requires a supported output type; existing destinations are never overwritten.
+- New acceptance tests cover SMPTE label arithmetic and H.264/MP4 export with overlay processing using native AVFoundation.
+
+**Remaining delivery work:** integrated one-step music bounce + movie delivery, configurable audio codec/bit depth, long-video performance checks, source-color preservation, external delivery standards, and MacBook visual/listening acceptance.
+
 ## Persistence and media safety
 
 - Only a video **reference** (path plus security-scoped bookmark when available), project offset, frame-rate mode, source timecode, audio/overlay preferences and hit-point data are encoded in the DAW project.
