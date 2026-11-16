@@ -139,6 +139,10 @@ enum InstrumentIconIdentity: Equatable {
     case banjo, mandolin, ukulele
     case uprightPiano, electricPiano, clavinet, accordion
     case sitar, oud, erhu, koto, shakuhachi, panFlute
+    case sopraninoSaxophone, mezzoSopranoSaxophone, curvedSopranoSaxophone, cMelodySaxophone
+    case contrabassSaxophone, subcontrabassSaxophone, mellophone, tenorHorn, sousaphone, helicon
+    case bansuri, duduk, didgeridoo, bagpipes, mbira, harmonica, timbales, rotoToms, flexatone
+    case recorder, sarrusophone
     case xylophone, vibraphone, marimba, glockenspiel, crotales, handbells
     case tambourine, maracas, castanets, woodblock, windMachine
     case cowbell, sleighBells, markTree, ratchet, gourd, claves, cabasa, vibraslap
@@ -233,6 +237,27 @@ enum InstrumentIconIdentity: Equatable {
         case .koto: return "Koto"
         case .shakuhachi: return "Shakuhachi"
         case .panFlute: return "Pan flute"
+        case .sopraninoSaxophone: return "Sopranino saxophone"
+        case .mezzoSopranoSaxophone: return "Mezzo-soprano saxophone"
+        case .curvedSopranoSaxophone: return "Curved soprano saxophone"
+        case .cMelodySaxophone: return "C-melody saxophone"
+        case .contrabassSaxophone: return "Contrabass saxophone"
+        case .subcontrabassSaxophone: return "Subcontrabass saxophone"
+        case .mellophone: return "Mellophone"
+        case .tenorHorn: return "Tenor horn"
+        case .sousaphone: return "Sousaphone"
+        case .helicon: return "Helicon"
+        case .bansuri: return "Bansuri flute"
+        case .duduk: return "Duduk"
+        case .didgeridoo: return "Didgeridoo"
+        case .bagpipes: return "Bagpipes"
+        case .mbira: return "Mbira"
+        case .harmonica: return "Harmonica"
+        case .timbales: return "Timbales"
+        case .rotoToms: return "Roto toms"
+        case .flexatone: return "Flexatone"
+        case .recorder: return "Recorder"
+        case .sarrusophone: return "Sarrusophone"
         case .triangle: return "Triangle"
         case .gong: return "Gong"
         case .xylophone: return "Xylophone"
@@ -282,6 +307,28 @@ enum InstrumentIconIdentity: Equatable {
         // Physical-instrument variants win before broad orchestral family
         // fallbacks. Library/folder names are intentionally not used as proof
         // of a specific instrument.
+        // Instrument types listed in Garritan's published catalogs.
+        if has(["subcontrabass sax","sub-contrabass sax","sub contra bass sax"]) { return .subcontrabassSaxophone }
+        if has(["contrabass sax","contra bass sax"]) { return .contrabassSaxophone }
+        if has(["sopranino sax"]) { return .sopraninoSaxophone }
+        if has(["mezzo soprano sax","mezzo-soprano sax"]) { return .mezzoSopranoSaxophone }
+        if has(["curved soprano sax"]) { return .curvedSopranoSaxophone }
+        if has(["c melody sax","c-melody sax"]) { return .cMelodySaxophone }
+        if has(["sarrusophone"]) { return .sarrusophone }
+        if has(["mellophone"]) { return .mellophone }
+        if has(["tenor horn"]) { return .tenorHorn }
+        if has(["sousaphone"]) { return .sousaphone }
+        if has(["helicon"]) { return .helicon }
+        if has(["bansuri"]) { return .bansuri }
+        if has(["duduk"]) { return .duduk }
+        if has(["didgeridoo"]) { return .didgeridoo }
+        if has(["bagpipes","bagpipe"]) { return .bagpipes }
+        if has(["mbira","thumb piano"]) { return .mbira }
+        if has(["harmonica","mouth harp"]) { return .harmonica }
+        if has(["timbales"]) { return .timbales }
+        if has(["roto tom","rototom"]) { return .rotoToms }
+        if has(["flexatone","flexitone"]) { return .flexatone }
+        if has(["recorder"]) { return .recorder }
         if has(["pan flute", "panflute", "pan pipes"]) { return .panFlute }
         if has(["shakuhachi"]) { return .shakuhachi }
         if has(["sitar"]) { return .sitar }
@@ -627,6 +674,9 @@ struct InstrumentIconDrawing {
     }
 
     private static func makeBase(_ kind: InstrumentIconIdentity) -> Self {
+        if let catalog = makeCatalogExpansion(kind) {
+            return catalog
+        }
         if let expanded = makeExpandedInstrument(kind) {
             return expanded
         }
@@ -1230,6 +1280,9 @@ struct InstrumentIconDrawing {
              .uprightPiano, .electricPiano, .clavinet, .accordion,
              .sitar, .oud, .erhu, .koto, .shakuhachi, .panFlute:
             return makeExpandedInstrument(kind) ??
+                Self(primary: [], details: [], engraving: [])
+        case .sopraninoSaxophone, .mezzoSopranoSaxophone, .curvedSopranoSaxophone, .cMelodySaxophone, .contrabassSaxophone, .subcontrabassSaxophone, .mellophone, .tenorHorn, .sousaphone, .helicon, .bansuri, .duduk, .didgeridoo, .bagpipes, .mbira, .harmonica, .timbales, .rotoToms, .flexatone, .recorder, .sarrusophone:
+            return makeCatalogExpansion(kind) ??
                 Self(primary: [], details: [], engraving: [])
         case .generic:
             return Self(primary: [O(18, 14, 64, 64), L([(62, 23), (62, 68)]),
