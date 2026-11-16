@@ -2,7 +2,7 @@
 
 **Status:** 2026-11-16, `feature/studio-gui-refinement`. This is the review inventory of **code identities**, not a verified complete list of all patches in any Garritan library and not a final collection of approved watercolor assets.
 
-The code currently has **94 base icon identities** (including sections, family fallbacks and generic symbols) and **29 distinct ensemble/section identities** composited from those native vector drawings. The same physical instrument or ensemble icon can be shared across different libraries and articulations.
+The code currently has **123 base icon identities** (including family fallbacks and generic symbols) and **34 distinct ensemble/section identities** composited from those native vector drawings. The same physical instrument or ensemble icon can be shared across different libraries and articulations.
 
 ## Solo instruments and base icons already available in Studio
 
@@ -16,15 +16,17 @@ The code currently has **94 base icon identities** (including sections, family f
 | Trombones | Trombone (general); Alto trombone; Bass trombone; Contrabass trombone |
 | Low brass | Euphonium; Baritone horn; Tuba; Contrabass tuba |
 | Orchestral bowed strings | Violin; Viola; Cello; Double bass |
-| Orchestral percussion | Timpani; Snare drum; Field/marching snare; Marching tenor drums; Concert bass drum; Drum-kit kick; Rack tom; Floor tom; Drum kit; Cymbals; Hi-hat; Ride cymbal; Crash cymbals; Suspended cymbal; Triangle; Gong |
+| Orchestral & marching percussion | Timpani; Snare drum; Field/marching snare; Marching tenor drums; Concert bass drum; Marching bass drum; Drum-kit kick; Rack tom; Floor tom; Drum kit; Cymbals; Hi-hat; Ride, crash, splash, China, and suspended cymbals; Triangle; Gong; Thunder sheet; Rainstick |
 | Tuned percussion | Xylophone; Vibraphone; Marimba; Glockenspiel; Crotales; Handbells; Mallet percussion (generic); Tubular bells/chimes; Bells (generic) |
-| Auxiliary percussion | Tambourine; Maracas; Castanets; Woodblock; Wind machine; Cowbell; Sleigh bells; Mark tree; Ratchet; Gourd percussion; Claves; Cabasa; Vibraslap; Anvil; Slapstick |
-| Other acoustic | Harp; Piano; Celesta; Harpsichord; Organ; Glass armonica |
+| Auxiliary & hand percussion | Tambourine; Maracas; Castanets; Woodblock; Wind machine; Cowbell; Sleigh bells; Mark tree; Ratchet; Gourd percussion; Claves; Cabasa; Vibraslap; Anvil; Slapstick; Bongos; Congas; Djembe; Tabla; Taiko |
+| Plucked strings & basses | Guitar (unspecified); Acoustic guitar; Classical guitar; Electric guitar; Electric bass; Upright bass; Banjo; Mandolin; Ukulele; Harp |
+| Keyboard variants | Piano; Upright piano; Electric piano; Clavinet; Accordion; Celesta; Harpsichord; Organ; Glass armonica |
+| World wind, strings & plucked | Sitar; Oud; Erhu; Koto; Shakuhachi; Pan flute |
 | Generic/special icons | Brass ensemble; Strings; Percussion; Choir; Synthesizer; Wind family; World family; Orchestra; Generic fallback |
 
 **Important:** All 18 newly separated variants now have independent identities and first-pass vector drawings; several remain visually schematic rather than anatomically approved. A and B-flat clarinets are physically very similar and require subtle scale-accurate artwork. Cornet, flugelhorn and baritone horn are no longer aliases of trumpet/euphonium. Final instrument watercolor illustrations are still pending.
 
-## Section and ensemble artwork implemented (29 code identities)
+## Section and ensemble artwork implemented (34 code identities)
 
 | Family | Implemented section / ensemble identity | Visual composition |
 | --- | --- | --- |
@@ -54,6 +56,11 @@ The code currently has **94 base icon identities** (including sections, family f
 | Percussion | Tuned percussion | Glockenspiel + marimba + vibraphone |
 | Percussion | Auxiliary percussion | Triangle + tambourine + cowbell |
 | Percussion | Marching percussion | Field snare + marching tenor drums + bass drum |
+| Plucked strings | Guitar ensemble | Acoustic + classical + electric guitars (representative grouping) |
+| Rhythm | Rhythm section | Electric bass + drum kit + electric piano (representative grouping) |
+| World | World percussion | Tabla + djembe + taiko (representative grouping) |
+| Band | Concert band | Clarinet + trumpet + timpani (representative grouping) |
+| Band | Marching band | Trumpet + tuba + field snare (representative grouping) |
 | Vocal | Choir section | Existing multi-singer drawing |
 | Orchestra | Full orchestra | Violin + horn + timpani |
 | Orchestra | Mixed orchestral ensemble | Flute + cello + horn; **representative**, not a statement of the real patch lineup |
@@ -91,9 +98,27 @@ No changes to audio routing, track creation, MIDI, plugin loading, or project da
 
 Implemented **18 new native identities** with accessible labels, name resolution and native vector shapes: **A clarinet, B-flat clarinet, cornet, flugelhorn, baritone horn, contrabass trombone, field/marching snare, marching tenor drums, kit kick drum, rack tom, floor tom, complete drum kit, hi-hat, ride cymbal, crash cymbals, suspended cymbal, anvil and slapstick**.
 
-- The `StudioInstrumentIcon` code now has **94 total base identities**; there are still **29 distinct section/composite identities** in `StudioInstrumentGroupArtwork`.
+- The `StudioInstrumentIcon` code now has **123 total base identities**; there are still **34 distinct section/composite identities** in `StudioInstrumentGroupArtwork`.
 - `Tests/DAWUIWorkflowTests/StudioInstrumentIconIdentityTests.swift` checks ambiguous clarinet/trumpet/low-brass names, the 18 new variants, and solo-versus-section protections.
 - The marching percussion section icon now uses field snare, marching tenor drums and bass drum—not three identical snares.
 - `scripts/audit_instrument_artwork.py` has new candidates for all 18 instrument variants, but the actual bank metadata is still missing from the repository. It is an offline classification aid and does not establish total coverage.
 - The watercolor concept plate is for **creative review**. Its pixels are not separately extracted, anatomically verified, or checked into Studio. The native renderer is a performant fallback, not the final approved illustration set.
 - Changes remain on `feature/studio-gui-refinement`, with no Alpha 1 integration or merge.
+
+
+## Milestone: percussion, guitars, keyboards and world-instrument foundation — 2026-11-16
+
+**29 additional native vector icon identities** now have deterministic name matching, VoiceOver labels and a distinct locally drawn silhouette:
+
+- Orchestral/band percussion: marching bass drum, splash cymbal, China cymbal, thunder sheet, rainstick, bongos, congas, djembe, tabla and taiko
+- Plucked and bass instruments: unspecified guitar, acoustic guitar, classical guitar, electric guitar, electric bass, upright bass, banjo, mandolin and ukulele
+- Keyboards: upright piano, electric piano, clavinet, accordion
+- World strings/winds: sitar, oud, erhu, koto, shakuhachi and pan flute
+
+**Five additional group identities:** guitar ensemble, rhythm section, world percussion, concert band, and marching band. These show representative combinations of their families, **not** verified instrument lineups for unnamed or poetic Instant Orchestra presets.
+
+The new drawings live in `DAWUI/Sources/DAWUI/Views/Shared/StudioInstrumentExpandedArtwork.swift` and use the existing renderer, design tokens and browser/track contexts. The full group system now has **34 ensemble identities**, and the base system has **123 identities** (including generic fallback icons).
+
+Verification is staged in `Tests/DAWUIWorkflowTests/StudioExpandedInstrumentArtworkTests.swift`; name-only offline bank candidates also expand in `scripts/audit_instrument_artwork.py`. The actual Garritan World Instruments, Jazz & Big Band, and Concert & Marching Band programs have **not** been inventoried; the added variants prepare Studio's artwork taxonomy without claiming complete installed-library coverage.
+
+**Not yet done:** Individual finalized watercolor resources, anatomical approval, exact name mapping against installed bank XML, and small-window visual testing. Existing Mac CI success before this milestone does not establish that the new changes build until their own workflow passes.
