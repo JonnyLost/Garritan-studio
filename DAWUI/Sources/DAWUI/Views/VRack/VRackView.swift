@@ -987,16 +987,35 @@ public struct VRackView: View {
                             if let instrument = previewInstrument {
                                 ZStack {
                                     RoundedRectangle(cornerRadius: 12)
-                                        .fill(palette.raisedSurface.opacity(0.6))
+                                        .fill(
+                                            LinearGradient(
+                                                colors: [palette.raisedSurface,
+                                                         palette.accent.opacity(0.18),
+                                                         palette.panel],
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+                                    Circle()
+                                        .strokeBorder(palette.accent.opacity(0.16), lineWidth: 1)
+                                        .frame(width: 168, height: 168)
+                                        .offset(x: 62, y: 35)
+                                    Circle()
+                                        .strokeBorder(palette.accent.opacity(0.12), lineWidth: 1)
+                                        .frame(width: 112, height: 112)
+                                        .offset(x: 62, y: 35)
                                     StudioInstrumentIcon(
                                         name: instrument.name,
                                         path: instrument.path,
                                         category: instrument.category,
-                                        size: 78
+                                        size: 100
                                     )
-                                    .padding(.vertical, 10)
+                                    .frame(maxWidth: .infinity, alignment: .center)
+                                    .padding(.vertical, 12)
                                 }
-                                .frame(height: 114)
+                                .frame(height: 166)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                                .accessibilityLabel("Illustrated instrument preview: \(instrument.name)")
 
                                 Text(instrument.name)
                                     .font(.system(size: 20, weight: .semibold,
