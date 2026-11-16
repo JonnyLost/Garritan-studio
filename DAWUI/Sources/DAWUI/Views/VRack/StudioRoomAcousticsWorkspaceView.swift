@@ -118,30 +118,35 @@ struct StudioRoomAcousticsWorkspaceView: View {
 
     private var libraryPanel: some View {
         VStack(alignment: .leading, spacing: 14) {
-            StudioSectionHeading("Available Acoustic Spaces", symbol: "waveform.path")
-            Text("Choose the room the orchestra performs in. Instrument positions remain in the Stage workspace.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+                StudioSectionHeading("Acoustic Spaces", symbol: "waveform.path")
+                Spacer()
+                if !canChangeRoom {
+                    Label("Stop transport to change rooms", systemImage: "lock.fill")
+                        .font(.caption2)
+                        .foregroundStyle(palette.secondaryText)
+                }
+            }
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 10)], spacing: 10) {
                 roomTile(
                     id: "apple-medium-hall",
                     name: "Apple Medium Hall",
-                    detail: "Original, tested fallback",
-                    symbol: "speaker.wave.2"
+                    detail: "Tested Hall",
+                    symbol: "building.columns.fill"
                 )
                 ForEach(StudioRoomAcousticProfile.starterProfiles) { profile in
                     roomTile(
                         id: profile.id,
                         name: profile.name,
-                        detail: "Experimental original algorithmic interpretation",
-                        symbol: "building.columns"
+                        detail: "Experimental",
+                        symbol: "waveform.path"
                     )
                 }
                 roomTile(
                     id: StudioAcousticRoomDesign.profileID,
                     name: viewModel.project.dawState.acousticRoomDesign?.name ?? "Custom Acoustic Room",
-                    detail: "Your six-band room design",
+                    detail: "Custom Design",
                     symbol: "slider.horizontal.3"
                 )
             }
@@ -149,9 +154,6 @@ struct StudioRoomAcousticsWorkspaceView: View {
             HStack(spacing: 12) {
                 Button("Edit Custom Room") { selectedTab = .designer }
                     .buttonStyle(.bordered)
-                Text("Room changes require stopped transport. Project saves the selected room.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
             }
             selectionError
         }
@@ -159,42 +161,51 @@ struct StudioRoomAcousticsWorkspaceView: View {
 
     private func roomTile(id: String, name: String, detail: String,
                           symbol: String) -> some View {
-        Button {
+        let isSelected = id == currentRoomID
+        return Button {
             viewModel.selectConcertHallRoom(id: id)
         } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 10) {
                     Image(systemName: symbol)
-                        .font(.system(size: 20))
+                        .font(.system(size: 22, weight: .light))
+                        .foregroundStyle(isSelected ? palette.accent : palette.secondaryText)
+                        .frame(width: 32, height: 32)
                     Spacer()
-                    if id == currentRoomID {
-                        Label("Selected", systemImage: "checkmark.circle.fill")
-                            .font(.caption2)
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(palette.accent)
+                            .accessibilityHidden(true)
                     }
                 }
+                Spacer(minLength: 2)
                 Text(name)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(2)
                     .multilineTextAlignment(.leading)
-                Text(detail)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
+                Text(detail.uppercased())
+                    .font(.system(size: 9, weight: .medium))
+                    .tracking(0.65)
+                    .foregroundStyle(palette.secondaryText)
             }
-            .foregroundStyle(id == currentRoomID ? palette.accent : palette.primaryText)
-            .frame(maxWidth: .infinity, minHeight: 86, alignment: .leading)
-            .padding(12)
-            .background(id == currentRoomID ? palette.accentMuted : palette.panel,
-                        in: RoundedRectangle(cornerRadius: 10))
+            .foregroundStyle(palette.primaryText)
+            .frame(maxWidth: .infinity, minHeight: 112, alignment: .leading)
+            .padding(14)
+            .background(isSelected ? palette.accentMuted : palette.panel,
+                        in: RoundedRectangle(cornerRadius: 12))
             .overlay {
-                RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(id == currentRoomID ? palette.accent : palette.separator,
-                                  lineWidth: 1)
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(isSelected ? palette.accent : palette.separator,
+                                  lineWidth: isSelected ? 1.5 : 0.75)
                     .allowsHitTesting(false)
             }
+            .contentShape(RoundedRectangle(cornerRadius: 12))
         }
         .buttonStyle(.plain)
         .disabled(!canChangeRoom)
+        .help(isSelected ? "Current acoustic room" : "Select \(name) when transport is stopped")
+        .accessibilityLabel("\(name), \(detail)")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityIdentifier("room-profile-" + id)
     }
 
