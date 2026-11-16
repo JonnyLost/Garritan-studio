@@ -128,6 +128,33 @@ final class StudioPictureMovieExportTests: XCTestCase {
         XCTAssertEqual(picture.timecode(atMovieFrame: 0), "01:00:00:00")
     }
 
+    func testOneStepDeliveryRejectsUnsafeOutputBeforeAnyAudioBounce() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("studio-picture-preflight-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root,
+                                                withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let original = root.appendingPathComponent("original.mov")
+        let existing = root.appendingPathComponent("existing.mov")
+        try Data("original-video".utf8).write(to: original)
+        try Data("existing-file".utf8).write(to: existing)
+
+        XCTAssertThrowsError(try StudioPictureOneStepExport.validateDestination(
+            original, sourceMoviePath: original.path, format: .quickTime))
+        XCTAssertThrowsError(try StudioPictureOneStepExport.validateDestination(
+            existing, sourceMoviePath: original.path, format: .quickTime))
+        XCTAssertThrowsError(try StudioPictureOneStepExport.validateDestination(
+            root.appendingPathComponent("mismatch.mp4"),
+            sourceMoviePath: original.path, format: .quickTime))
+        XCTAssertNoThrow(try StudioPictureOneStepExport.validateDestination(
+            root.appendingPathComponent("new-delivery.mp4"),
+            sourceMoviePath: original.path, format: .mp4))
+        XCTAssertEqual(try Data(contentsOf: original),
+                       Data("original-video".utf8))
+        XCTAssertEqual(try Data(contentsOf: existing),
+                       Data("existing-file".utf8))
+    }
+
     private func createStereoWAV(at url: URL) throws {
         let sampleRate: Double = 48_000
         let format = try XCTUnwrap(AVAudioFormat(
