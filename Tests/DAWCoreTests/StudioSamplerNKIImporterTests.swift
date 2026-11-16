@@ -326,9 +326,9 @@ final class StudioSamplerNKIImporterTests: XCTestCase {
             source, into: root.appendingPathComponent("managed"))
         XCTAssertEqual(Set(imported.patch.zones.map(\.filePath)).count, 2)
         XCTAssertEqual(try Data(contentsOf: imported.patch.zones[0].sampleURL),
-                       Data(contentsOf: stringsURL))
+                       try Data(contentsOf: stringsURL))
         XCTAssertEqual(try Data(contentsOf: imported.patch.zones[1].sampleURL),
-                       Data(contentsOf: brassURL))
+                       try Data(contentsOf: brassURL))
         try StudioSamplerExternalFormatRoundTrip.assertPreserved(
             imported.patch, in: root, name: "NKI-DuplicateNames")
     }
