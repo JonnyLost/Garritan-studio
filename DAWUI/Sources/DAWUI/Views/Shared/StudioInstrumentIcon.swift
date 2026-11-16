@@ -1216,6 +1216,16 @@ struct InstrumentIconDrawing {
             return Self(primary: [L([(13, 80), (13, 38), (25, 22), (75, 22), (87, 38), (87, 80)]),
                                   O(25, 45, 14, 14), O(44, 37, 14, 14), O(63, 45, 14, 14)],
                         details: [L([(23, 66), (76, 66)])], engraving: [])
+        // Swift still requires exhaustive cases even though the expanded
+        // renderer is checked at the beginning of this function.
+        case .marchingBassDrum, .splashCymbal, .chinaCymbal, .thunderSheet, .rainstick,
+             .bongos, .congas, .djembe, .tabla, .taiko,
+             .guitar, .acousticGuitar, .classicalGuitar, .electricGuitar, .electricBass,
+             .uprightBass, .banjo, .mandolin, .ukulele,
+             .uprightPiano, .electricPiano, .clavinet, .accordion,
+             .sitar, .oud, .erhu, .koto, .shakuhachi, .panFlute:
+            return makeExpandedInstrument(kind) ??
+                Self(primary: [], details: [], engraving: [])
         case .generic:
             return Self(primary: [O(18, 14, 64, 64), L([(62, 23), (62, 68)]),
                                   L([(62, 23), (79, 18)]), O(36, 65, 25, 16)],
