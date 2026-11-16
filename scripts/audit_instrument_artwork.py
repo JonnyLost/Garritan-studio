@@ -19,6 +19,27 @@ DEFAULT_BANKS = [
 ]
 # Specific-to-general ordering matters; don't collapse a bass clarinet into a bass.
 RULES = [
+    ("woodwind.sax.subcontrabass", r"sub[- ]?contrabass sax(?:ophone)?|sub contra bass sax"),
+    ("woodwind.sax.contrabass", r"contra ?bass sax(?:ophone)?"),
+    ("woodwind.sax.sopranino", r"sopranino sax(?:ophone)?"),
+    ("woodwind.sax.mezzo_soprano", r"mezzo[- ]?soprano sax(?:ophone)?"),
+    ("woodwind.sax.curved_soprano", r"curved soprano sax(?:ophone)?"),
+    ("woodwind.sax.c_melody", r"c[- ]melody sax(?:ophone)?"),
+    ("woodwind.sarrusophone", r"sarrusophone"),
+    ("brass.mellophone", r"mellophone"),
+    ("brass.tenor_horn", r"tenor horn"),
+    ("brass.sousaphone", r"sousaphone"),
+    ("brass.helicon", r"helicon"),
+    ("world.bansuri", r"bansuri"),
+    ("world.duduk", r"duduk"),
+    ("world.didgeridoo", r"didgeridoo"),
+    ("world.bagpipes", r"bagpipes?"),
+    ("world.mbira", r"mbira|thumb piano"),
+    ("world.harmonica", r"harmonica|mouth harp"),
+    ("percussion.timbales", r"timbales"),
+    ("percussion.roto_toms", r"roto ?toms?"),
+    ("percussion.flexatone", r"flexatone|flexitone"),
+    ("world.recorder", r"recorder"),
     # Additional named candidates. Keep narrow variants ahead of families.
     ("percussion.marching.bass_drum", r"marching bass drum|marching bass line"),
     ("percussion.cymbals.splash", r"splash cymbal|splash crash"),
