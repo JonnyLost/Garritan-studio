@@ -39,6 +39,12 @@ public enum StudioSamplerEXSReader {
         public let releaseTrigger: Bool
         public let roundRobinPosition: Int32
         public let enableByType: UInt8
+        /// EXS24 Select Group By: note, MIDI controller or Logic articulation.
+        public let enableByNoteValue: UInt8
+        public let enableByControlNumber: UInt8
+        public let enableByControlLow: UInt8
+        public let enableByControlHigh: UInt8
+        public let enableByArticulationValue: UInt8
         public let velocityCrossfade: Int8
         public let keyCrossfade: Int8
     }
@@ -136,11 +142,10 @@ public enum StudioSamplerEXSReader {
             guard signature == "TBOS" || signature == "JBOS" else {
                 throw EXSError.invalidContainer
             }
-            // EXS24 stores a 15-bit block length in header bytes 4–5.
-            // The flag on byte 5 is not part of the length, including for
-            // newer TBOS variants. Bytes 6–7 are reserved.
-            let length = Int(data[offset + 4]) +
-                (Int(data[offset + 5] & 0x7f) << 8)
+            // EXS24 block lengths are little-endian 32-bit values. Earlier
+            // code incorrectly limited them to 15 bits; reject damaged sizes
+            // using a subtraction guard before reading block content.
+            let length = Int(dword(data, offset + 4))
             guard length > 0, length <= data.count - offset - 84 else {
                 throw EXSError.damagedBlock
             }
@@ -199,6 +204,11 @@ public enum StudioSamplerEXSReader {
                     releaseTrigger: data[body + 73] != 0,
                     roundRobinPosition: Int32(bitPattern: dword(data, body + 80)),
                     enableByType: data[body + 84],
+                    enableByNoteValue: data[body + 75],
+                    enableByControlNumber: data[body + 85],
+                    enableByControlLow: data[body + 86],
+                    enableByControlHigh: data[body + 87],
+                    enableByArticulationValue: data[body + 91],
                     velocityCrossfade: signed(data[body + 32]),
                     keyCrossfade: signed(data[body + 35]))
                 if groups.count > 1_024 { throw EXSError.tooManyBlocks }
