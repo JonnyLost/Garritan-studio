@@ -58,12 +58,38 @@ Import existing sample-based instruments into editable Studio mappings and porta
 ## GigaStudio support boundary
 
 **Implemented:** browsing instrument names/programs and native import of
-single-dimension GIG regions with conventional PCM wave data. Interprets GIG
+GIG regions with supported velocity/round-robin/release dimensions and
+conventional PCM wave data. Interprets GIG
 `3lnk` sample-pool references (distinct from DLS `wlnk`), GIG
 `3ewl` sample parameters, key/velocity bounds, and sample loops.
 WAV extraction is offline, staged, transactional and leaves the source intact.
 
-**Not yet implemented:** multi-dimension GIG instruments (including layered
+**Milestone 4.6 — GIG dimension mapping (implemented, CI pending):**
+- `3lnk` entries now decode a case count, a typed list of dimension
+  definitions (each with its split-bit width), and case-specific wave-pool
+  links. `3prg/3ewl` parameters are assigned per case.
+- Supported dimensions: GigaStudio **velocity** (0x82, regular 128-step
+  splits), **note-on round robin** (0x86, up to eight alternatives),
+  and **release trigger** (0x84, one sustain and one note-off case).
+  Multiple supported dimensions can be composed together with bit-packed
+  case selection.
+- Converted zones preserve original note/velocity intersections, per-case
+  sample references and loop parameters (release samples have no sustain
+  loops). The import remains transactional, deduplicates extracted WAVs,
+  and runs offline.
+- Unknown or currently unrepresentable dimensions are explicitly rejected:
+  keyswitch selection, random, simultaneous layers, controller switches,
+  crossfades, sample channel, and Smart MIDI.
+- GIG3 *custom* velocity boundaries, per-case fine tuning, and round-robin
+  global counter semantics require further work. The importer warns when
+  regular split assumptions apply. Native application and audio testing
+  remain pending.
+- Synthetic tests cover single and combined dimensions, RR alternate
+  selection, release triggers, malformed bit counts, layer/keyswitch
+  rejection, and preserved source GIG bytes.
+
+**Still not implemented:** multi-dimension GIG instruments beyond the
+listed supported dimension kinds (or cases beyond native sampler limits) (including layered
 velocity/crossfade, round-robin, keyswitches, release samples, pedal and
 controller dimensions), compressed GIG wave decoding, GIG v3/v4 extended
 RIFF containers, finer per-dimension tuning, filters and modulation.
