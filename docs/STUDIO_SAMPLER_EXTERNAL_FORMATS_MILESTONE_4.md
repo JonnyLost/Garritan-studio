@@ -13,13 +13,35 @@ Import existing sample-based instruments into editable Studio mappings and porta
    Unknown opcodes are reported, not silently treated as working DSP behavior.
 2. SFZ user workflow: pending instrument-picker integration, preview of warnings,
    handling of complex opcode expressions, and expanded tests.
-3. SF2: pending RIFF SoundFont parser, PCM sample extraction, preset/instrument
-   generator mapping and stereo/loop handling.
+3. SF2: **implemented first playable subset**. Native bounded RIFF/pdta
+   inspection resolves preset/instrument bags and generators. A chosen preset
+   converts to Studio's key/velocity zones; 16-bit PCM mono samples and
+   reciprocal linked stereo pairs are extracted as interleaved WAV files.
+   Supported sample trim offsets, coarse tuning, sample loops and bank/program
+   labels are retained where compatible. The sampler's Instruments menu now
+   includes **Import SoundFont 2 (.sf2)…**, preset selection, and warnings.
+   Synthetic RIFF regression fixtures exercise preset mapping, mono/stereo
+   extraction, missing references and no source-file modifications.
+   Outstanding: broader real-library compatibility, modulator/effect/envelope
+   translation, larger-than-512-MB banks, and consolidated Mac audition testing.
 4. GIG: pending RIFF/DLS-derived container reader and dimension mapping, with
    attention to format variations and sample encoding.
 5. EXS: pending investigation and implementation for accessible legacy EXS24
    instrument definitions and referenced samples.
 6. Round-trip validation and consolidated Mac testing.
+
+## SoundFont 2 subset and limitations
+- One preset is converted at a time, into a draft that must be applied.
+- Supported: `smpl` 16-bit PCM, valid mono/linked stereo, instrument and
+  preset key/velocity intersections, sample root pitch, coarse tuning,
+  supported sample trim offsets and looping.
+- Not yet faithful: cents/fine tuning, per-zone gain/pan/filter/envelopes,
+  modulation routes, SoundFont effects, ROM/linked-but-not-stereo samples,
+  SF3-compressed sources. Import reports generator limitations.
+- Source `.sf2` remains untouched. Samples are streamed from the input
+  during offline conversion; new WAVs are staged and rolled back on error.
+- Current safety cap: **512 MB source files and 128 zones per preset**;
+  support for very large orchestral banks is planned after this milestone.
 
 ## Compatibility limits
 Studio's current native sampler supports at most 128 zones, 4 microphone groups,
