@@ -122,9 +122,10 @@ public struct StudioInstrumentIcon: View {
 
 private enum InstrumentIconIdentity: Equatable {
     case piccolo, flute, altoFlute, bassFlute, oboe, englishHorn, clarinet, bassClarinet
-    case contrabassClarinet, bassoon, contrabassoon
+    case contrabassClarinet, altoClarinet, ebClarinet, bassoon, contrabassoon
+    case sopranoSaxophone, altoSaxophone, tenorSaxophone, baritoneSaxophone, bassSaxophone
     case horn, trumpet, piccoloTrumpet, cTrumpet, bbTrumpet
-    case trombone, altoTrombone, bassTrombone, tuba, contrabassTuba, brassEnsemble
+    case trombone, altoTrombone, bassTrombone, tuba, contrabassTuba, euphonium, brassEnsemble
     case violin, viola, cello, doubleBass, strings
     case timpani, snare, bassDrum, cymbals, triangle, gong, mallets, chimes, bells
     case xylophone, vibraphone, marimba, glockenspiel, crotales, handbells
@@ -142,6 +143,13 @@ private enum InstrumentIconIdentity: Equatable {
         case .oboe: return "Oboe"
         case .englishHorn: return "English horn"
         case .clarinet: return "Clarinet"
+        case .altoClarinet: return "Alto clarinet"
+        case .ebClarinet: return "E-flat clarinet"
+        case .sopranoSaxophone: return "Soprano saxophone"
+        case .altoSaxophone: return "Alto saxophone"
+        case .tenorSaxophone: return "Tenor saxophone"
+        case .baritoneSaxophone: return "Baritone saxophone"
+        case .bassSaxophone: return "Bass saxophone"
         case .bassClarinet: return "Bass clarinet"
         case .contrabassClarinet: return "Contrabass clarinet"
         case .bassoon: return "Bassoon"
@@ -155,6 +163,7 @@ private enum InstrumentIconIdentity: Equatable {
         case .altoTrombone: return "Alto trombone"
         case .bassTrombone: return "Bass trombone"
         case .tuba: return "Tuba"
+        case .euphonium: return "Euphonium"
         case .contrabassTuba: return "Contrabass tuba"
         case .brassEnsemble: return "Brass section"
         case .violin: return "Violin"
@@ -214,6 +223,13 @@ private enum InstrumentIconIdentity: Equatable {
         }
         if has(["contrabass clarinet", "contrabassclarinet"]) { return .contrabassClarinet }
         if has(["bass clarinet"]) { return .bassClarinet }
+        if has(["alto clarinet"]) { return .altoClarinet }
+        if has(["e-flat clarinet", "e♭ clarinet", "eb clarinet", "e flat clarinet"]) { return .ebClarinet }
+        if has(["bass saxophone", "bass sax"]) && !has(["baritone", "bari"]) { return .bassSaxophone }
+        if has(["baritone saxophone", "baritone sax", "bari sax"]) { return .baritoneSaxophone }
+        if has(["tenor saxophone", "tenor sax"]) { return .tenorSaxophone }
+        if has(["alto saxophone", "alto sax"]) { return .altoSaxophone }
+        if has(["soprano saxophone", "soprano sax"]) { return .sopranoSaxophone }
         if has(["eb clarinet", "bb clarinet", "clarinet"]) { return .clarinet }
         if has(["english horn", "cor anglais"]) { return .englishHorn }
         if has(["contrabassoon", "contra bassoon"]) { return .contrabassoon }
@@ -232,7 +248,8 @@ private enum InstrumentIconIdentity: Equatable {
         if has(["c trumpet"]) { return .cTrumpet }
         if has(["trumpet", "cornet"]) { return .trumpet }
         if has(["contrabass tuba", "contra tuba"]) { return .contrabassTuba }
-        if has(["tuba", "euphonium"]) { return .tuba }
+        if has(["euphonium", "baritone horn"]) { return .euphonium }
+        if has(["tuba"]) { return .tuba }
         if has(["french horn", "sam horn", "horns", "horn 1", "horn 2", "horn section"]) {
             return .horn
         }
@@ -362,8 +379,10 @@ private struct InstrumentIconDrawing {
             return [line([(8, 75), (91, 25), (96, 31), (12, 81)], closed: true)]
         case .oboe, .englishHorn:
             return [line([(45, 22), (53, 20), (62, 82), (52, 83)], closed: true)]
-        case .clarinet, .bassClarinet, .contrabassClarinet:
+        case .clarinet, .altoClarinet, .ebClarinet, .bassClarinet, .contrabassClarinet:
             return [line([(37, 13), (45, 10), (65, 78), (54, 82)], closed: true)]
+        case .sopranoSaxophone, .altoSaxophone, .tenorSaxophone, .baritoneSaxophone, .bassSaxophone:
+            return [line([(35, 15), (47, 14), (64, 64), (74, 79), (88, 68), (90, 80), (76, 91), (57, 74)], closed: true)]
         case .bassoon, .contrabassoon:
             return [box(30, 24, 10, 59), box(61, 19, 12, 63)]
         case .horn:
@@ -373,7 +392,7 @@ private struct InstrumentIconDrawing {
             return [line([(69, 48), (93, 32), (93, 73), (69, 57)], closed: true)]
         case .trombone, .altoTrombone, .bassTrombone:
             return [line([(72, 40), (93, 24), (93, 58), (73, 47)], closed: true)]
-        case .tuba, .contrabassTuba:
+        case .euphonium, .tuba, .contrabassTuba:
             return [line([(70, 16), (88, 6), (88, 30), (73, 28)], closed: true)]
         case .violin, .viola, .cello, .doubleBass, .strings:
             return Array(base.primary.prefix(1))
@@ -456,14 +475,20 @@ private struct InstrumentIconDrawing {
                 detail.append(O(x, y, 4, 4))
             }
             return Self(primary: primary, details: detail, engraving: [L([(48, 25), (56, 76)])])
-        case .clarinet, .bassClarinet, .contrabassClarinet:
+        case .clarinet, .altoClarinet, .ebClarinet, .bassClarinet, .contrabassClarinet:
             var primary = [
                 L([(38, 12), (56, 77)]),
                 L([(44, 10), (63, 74)]),
                 L([(54, 77), (47, 92), (77, 92), (64, 75)])
             ]
-            if kind == .bassClarinet || kind == .contrabassClarinet {
+            if kind == .altoClarinet || kind == .bassClarinet || kind == .contrabassClarinet {
                 primary.append(L([(63, 75), (75, 80), (79, 88), (88, 86)]))
+            }
+            if kind == .ebClarinet {
+                primary.append(L([(36, 15), (30, 21), (38, 30)]))
+            }
+            if kind == .altoClarinet {
+                primary.append(L([(55, 82), (69, 87), (77, 83)]))
             }
             if kind == .contrabassClarinet {
                 primary.append(L([(36, 24), (22, 30), (22, 67), (32, 72)]))
@@ -476,6 +501,30 @@ private struct InstrumentIconDrawing {
                 detail.append(O(x, y, 5, 5))
             }
             return Self(primary: primary, details: detail, engraving: [L([(40, 22), (57, 70)])])
+        case .sopranoSaxophone, .altoSaxophone, .tenorSaxophone, .baritoneSaxophone, .bassSaxophone:
+            let straight = kind == .sopranoSaxophone
+            var primary = [
+                L([(33, 14), (44, 12), (60, 62), (68, 76)]),
+                L([(39, 13), (50, 20), (67, 68)]),
+                L([(33, 14), (26, 8), (20, 13)])
+            ]
+            if straight {
+                primary.append(L([(60, 62), (76, 85), (86, 82)]))
+            } else {
+                primary.append(L([(68, 76), (79, 85), (91, 70), (93, 84), (79, 95), (63, 82)]))
+            }
+            if kind == .baritoneSaxophone || kind == .bassSaxophone {
+                primary.append(L([(36, 18), (29, 30), (30, 42), (43, 47)]))
+            }
+            if kind == .bassSaxophone {
+                primary.append(L([(29, 30), (18, 33), (18, 52), (34, 57)]))
+            }
+            var details: [Path] = []
+            for index in 0..<5 {
+                let offset = CGFloat(index)
+                details.append(O(43 + offset * 4, 27 + offset * 9, 5, 5))
+            }
+            return Self(primary: primary, details: details, engraving: [L([(38, 22), (62, 66)])])
         case .bassoon, .contrabassoon:
             let primary = [
                 L([(27, 82), (33, 25), (40, 21), (47, 82), (57, 82), (62, 18), (71, 15), (75, 80)]),
@@ -528,7 +577,7 @@ private struct InstrumentIconDrawing {
             if kind == .altoTrombone { detail.append(L([(48, 47), (48, 62)])) }
             if kind == .bassTrombone { detail.append(L([(49, 48), (49, 65)])) }
             return Self(primary: primary, details: detail, engraving: [])
-        case .tuba, .contrabassTuba:
+        case .euphonium, .tuba, .contrabassTuba:
             let primary = [
                 L([(31, 18), (74, 18), (82, 8), (83, 27), (75, 27)]),
                 L([(31, 18), (31, 75), (39, 86), (66, 86), (73, 75), (73, 28)]),
@@ -537,6 +586,9 @@ private struct InstrumentIconDrawing {
             ]
             var details = [L([(46, 25), (46, 39)]), L([(55, 25), (55, 39)]),
                            L([(64, 25), (64, 39)])]
+            if kind == .euphonium {
+                details.append(L([(29, 30), (29, 65), (37, 75)]))
+            }
             if kind == .contrabassTuba {
                 details.append(L([(25, 29), (25, 74), (39, 88)]))
                 details.append(L([(37, 51), (37, 75)]))
