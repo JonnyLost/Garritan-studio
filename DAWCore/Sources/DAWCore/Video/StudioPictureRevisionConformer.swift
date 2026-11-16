@@ -81,7 +81,8 @@ public enum StudioPictureRevisionConformer {
                   $0.newFrame >= 0 && $0.newFrame < replacement.totalFrames
               }),
               zip(ordered, ordered.dropFirst()).allSatisfy({
-                  $0.oldFrame < $1.oldFrame && $0.newFrame < $1.newFrame
+                  $0.0.oldFrame < $0.1.oldFrame &&
+                  $0.0.newFrame < $0.1.newFrame
               }) else { throw ConformError.invalidAnchors }
 
         let oldFPS = old.frameRate.framesPerSecond
@@ -130,7 +131,8 @@ public enum StudioPictureRevisionConformer {
         let fresh = try self.preview(old: old, replacement: replacement,
                                      anchors: preview.anchors)
         guard zip(fresh.changes, preview.changes).allSatisfy({
-            $0.cueID == $1.cueID && $0.proposedFrame == $1.proposedFrame
+            $0.0.cueID == $0.1.cueID &&
+            $0.0.proposedFrame == $0.1.proposedFrame
         }) else { throw ConformError.pictureChanged }
 
         var result = replacement
