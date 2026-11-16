@@ -13,19 +13,46 @@ public struct StudioInstrumentIcon: View {
     private let path: String
     private let category: String
     private let dimension: CGFloat
+    private let reviewIdentity: InstrumentIconIdentity?
+    private let reviewGroup: StudioInstrumentGroupArtwork?
 
     public init(name: String, path: String = "", category: String = "", size: CGFloat = 24) {
         self.name = name
         self.path = path
         self.category = category
         self.dimension = size
+        self.reviewIdentity = nil
+        self.reviewGroup = nil
+    }
+
+    /// Used only by the development artwork gallery to display all identities
+    /// directly, including those whose user-visible names share aliases.
+    init(reviewIdentity: InstrumentIconIdentity, size: CGFloat = 76) {
+        self.name = reviewIdentity.accessibilityLabel
+        self.path = ""
+        self.category = ""
+        self.dimension = size
+        self.reviewIdentity = reviewIdentity
+        self.reviewGroup = nil
+    }
+
+    init(reviewGroup: StudioInstrumentGroupArtwork, size: CGFloat = 76) {
+        self.name = reviewGroup.accessibilityLabel
+        self.path = ""
+        self.category = ""
+        self.dimension = size
+        self.reviewIdentity = nil
+        self.reviewGroup = reviewGroup
     }
 
     public var body: some View {
-        let identity = InstrumentIconIdentity.resolve(name: name, path: path, category: category)
-        let group = StudioInstrumentGroupArtwork.resolve(
-            name: name, path: path, category: category
-        )
+        let identity = reviewIdentity ??
+            InstrumentIconIdentity.resolve(name: name, path: path, category: category)
+        let group = reviewGroup ?? (reviewIdentity == nil
+            ? StudioInstrumentGroupArtwork.resolve(
+                name: name, path: path, category: category
+              )
+            : nil)
         let art = group.map { InstrumentIconDrawing.makeGroup($0) }
             ?? InstrumentIconDrawing.make(identity)
         let isCompact = dimension < 38
@@ -124,7 +151,7 @@ public struct StudioInstrumentIcon: View {
     }
 }
 
-enum InstrumentIconIdentity: Equatable {
+enum InstrumentIconIdentity: Hashable, CaseIterable {
     case piccolo, flute, altoFlute, bassFlute, oboe, englishHorn, clarinet, bassClarinet
     case contrabassClarinet, altoClarinet, ebClarinet, aClarinet, bbClarinet, bassoon, contrabassoon
     case sopranoSaxophone, altoSaxophone, tenorSaxophone, baritoneSaxophone, bassSaxophone
