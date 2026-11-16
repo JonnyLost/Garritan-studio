@@ -584,6 +584,32 @@ int main() {
     assert(ccL[1000] < -.01f);
     ss_destroy(ccSwitch);
 
+    // CC2 as an articulation selector must NOT also apply breath gain.
+    // Its lowest band must remain audible, unlike ordinary CC2 expression.
+    SSSampler *cc2Switch = ss_create(44100, 4);
+    assert(cc2Switch);
+    assert(ss_configure_controller_articulations(
+        cc2Switch, 2, ccArticulations, 2));
+    assert(ss_add_zone_with_variation(
+        cc2Switch, 60, 60, 60, 1, 127, 44100,
+        ccPositive.data(), nullptr, 8000, 0, 8000,
+        0, 0, 0, 0, 0, 0, 0, 0));
+    assert(ss_add_zone_with_variation(
+        cc2Switch, 60, 60, 60, 1, 127, 44100,
+        ccNegative.data(), nullptr, 8000, 0, 8000,
+        0, 0, 0, 0, 0, 1, 0, 0));
+    assert(ss_control_change(cc2Switch, 2, 0, 0));
+    assert(ss_note_on(cc2Switch, 60, 127, 0));
+    ss_render(cc2Switch, ccL.data(), ccR.data(), 2048);
+    assert(ccL[1000] > .01f);
+    assert(ss_all_notes_off(cc2Switch));
+    ss_render(cc2Switch, ccL.data(), ccR.data(), 2048);
+    assert(ss_control_change(cc2Switch, 2, 127, 0));
+    assert(ss_note_on(cc2Switch, 60, 127, 0));
+    ss_render(cc2Switch, ccL.data(), ccR.data(), 2048);
+    assert(ccL[1000] < -.01f);
+    ss_destroy(cc2Switch);
+
     ss_destroy(sampler);
     std::printf("Studio Sampler DSP smoke test passed (%.1f Hz)\n", frequency);
     return 0;
