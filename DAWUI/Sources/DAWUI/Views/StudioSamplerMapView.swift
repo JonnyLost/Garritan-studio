@@ -35,6 +35,7 @@ public struct StudioSamplerMapView: View {
     @State private var sf2Source: URL?
     @State private var sf2Presets: [StudioSamplerSF2Reader.Preset] = []
     @State private var selectedSF2PresetIndex = 0
+    @State private var showEXSImporter = false
     @State private var showGIGImporter = false
     @State private var showGIGPicker = false
     @State private var gigSource: URL?
@@ -82,6 +83,7 @@ public struct StudioSamplerMapView: View {
                     Button("Import SFZ Instrument…") { showSFZImporter = true }
                     Button("Import SoundFont 2 (.sf2)…") { showSF2Importer = true }
                     Button("Import GigaStudio (.gig)…") { showGIGImporter = true }
+                    Button("Import Logic EXS24 (.exs)…") { showEXSImporter = true }
                     Divider()
                     Button("Save to Studio Library…") { beginSaving(export: false) }
                         .disabled(draft?.isValid != true)
@@ -295,6 +297,17 @@ public struct StudioSamplerMapView: View {
             }
         }
         .fileImporter(
+            isPresented: $showEXSImporter,
+            allowedContentTypes: [UTType(filenameExtension: "exs") ?? .data],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                if let url = urls.first { importEXS(url) }
+            case .failure(let error): errorMessage = error.localizedDescription
+            }
+        }
+        .fileImporter(
             isPresented: $showGIGImporter,
             allowedContentTypes: [UTType(filenameExtension: "gig") ?? .data],
             allowsMultipleSelection: false
@@ -477,6 +490,31 @@ public struct StudioSamplerMapView: View {
                 } catch {
                     errorMessage = error.localizedDescription
                 }
+            }
+        }
+    }
+
+    private func importEXS(_ url: URL) {
+        guard !isImporting else { return }
+        isImporting = true
+        errorMessage = nil
+        saveNotice = nil
+        compatibilityWarnings = []
+        Task { @MainActor in
+            defer { isImporting = false }
+            do {
+                let imported = try await Task.detached(priority: .userInitiated) {
+                    let access = url.startAccessingSecurityScopedResource()
+                    defer { if access { url.stopAccessingSecurityScopedResource() } }
+                    return try StudioSamplerEXSImporter.importInstrument(url)
+                }.value
+                draft = imported.patch
+                selectedIndex = 0
+                instrumentName = imported.instrumentName
+                compatibilityWarnings = imported.warnings
+                saveNotice = "Imported EXS24 instrument \(imported.instrumentName). Choose Apply Mapping to activate it."
+            } catch {
+                errorMessage = error.localizedDescription
             }
         }
     }
