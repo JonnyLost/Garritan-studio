@@ -446,7 +446,7 @@ private struct InstrumentIconDrawing {
         case .percussion: members = [.timpani, .snare, .cymbals]
         case .tunedPercussion: members = [.glockenspiel, .marimba, .vibraphone]
         case .auxiliaryPercussion: members = [.triangle, .tambourine, .cowbell]
-        case .drumline: members = [.snare, .bassDrum, .snare]
+        case .drumline: members = [.fieldSnare, .marchingTenors, .bassDrum]
         case .choir: return make(.choir) // Existing choir illustration already shows several singers.
         case .orchestra: members = [.violin, .horn, .timpani]
         case .mixedEnsemble: members = [.flute, .cello, .horn]
