@@ -63,6 +63,13 @@ public struct MixerView: View {
 
                         }
                         
+                        // Production reference remains on a dedicated
+                        // dry bus, outside all orchestral inserts/stems.
+                        if let picture = viewModel.project.studioPicture {
+                            StudioPictureGuideChannelStripView(
+                                picture: picture, viewModel: viewModel)
+                        }
+
                         // Master channel
                         if showMaster {
                             MasterChannelStripView(
@@ -293,6 +300,89 @@ struct ChannelStripView: View {
         return String(format: "%.1f", db)
     }
     
+}
+
+
+//// MARK: - Picture Guide Audio Return
+
+private struct StudioPictureGuideChannelStripView: View {
+    @Environment(\.studioPalette) private var palette
+    let picture: StudioPictureProject
+    @ObservedObject var viewModel: ProjectViewModel
+
+    var body: some View {
+        VStack(spacing: 6) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(.orange)
+                .frame(height: 4)
+            Image(systemName: "film")
+                .font(.system(size: 17))
+                .foregroundStyle(.orange)
+                .padding(.top, 4)
+            Text("PICTURE")
+                .font(.system(size: 10, weight: .bold))
+            Text("Guide Audio")
+                .font(.system(size: 8))
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: 5) {
+                Image(systemName: "waveform")
+                    .foregroundStyle(.secondary)
+                Text("DRY")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text("No hall send")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 36)
+
+            Spacer(minLength: 8)
+
+            FaderView(value: Binding(
+                get: { Double(picture.referenceAudioVolume ?? 0.65) },
+                set: { level in
+                    var current = viewModel.project.studioPicture
+                    current?.referenceAudioVolume = Float(level)
+                    viewModel.project.studioPicture = current
+                }
+            ), range: 0...1)
+            .frame(width: 26, height: 145)
+            .disabled(!picture.referenceAudioEnabled)
+
+            Text(String(format: "%.0f%%", (picture.referenceAudioVolume ?? 0.65) * 100))
+                .font(.system(size: 8, design: .monospaced))
+                .foregroundStyle(.secondary)
+
+            Button {
+                var current = viewModel.project.studioPicture
+                current?.referenceAudioEnabled.toggle()
+                viewModel.project.studioPicture = current
+            } label: {
+                Text("M")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(picture.referenceAudioEnabled ? .secondary : .black)
+                    .frame(width: 22, height: 18)
+                    .background(picture.referenceAudioEnabled
+                        ? Color.gray.opacity(0.3) : Color.orange)
+                    .cornerRadius(3)
+            }
+            .buttonStyle(.plain)
+            .help(picture.referenceAudioEnabled ? "Mute picture guide" : "Unmute picture guide")
+            .padding(.bottom, 6)
+        }
+        .padding(.horizontal, 7)
+        .frame(width: 110, height: 455)
+        .background(palette.panel)
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(.orange.opacity(0.65), lineWidth: 1)
+                .allowsHitTesting(false)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Picture guide audio channel")
+    }
 }
 
 // MARK: - Master Channel Strip View

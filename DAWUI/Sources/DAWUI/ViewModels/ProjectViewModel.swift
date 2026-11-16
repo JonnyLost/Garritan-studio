@@ -73,6 +73,8 @@ public final class ProjectViewModel: ObservableObject {
     public let transportState: TransportState
     public let audioEngine: AudioEngine
     public let playbackEngine: PlaybackEngine
+    /// Dedicated production guide-audio return, independent of musical tracks.
+    public let pictureGuideAudioBus: StudioPictureGuideAudioBus
     public let midiManager: MIDIManager
     public let midiSequencer: MIDISequencer
     public let pluginHost: PluginHost
@@ -94,6 +96,7 @@ public final class ProjectViewModel: ObservableObject {
         self.transportState = TransportState()
         self.audioEngine = AudioEngine()
         self.playbackEngine = PlaybackEngine(audioEngine: audioEngine)
+        self.pictureGuideAudioBus = StudioPictureGuideAudioBus(audioEngine: audioEngine)
         self.midiManager = MIDIManager()
         self.midiSequencer = MIDISequencer(audioEngine: audioEngine)
         self.pluginHost = PluginHost()
@@ -398,6 +401,8 @@ public final class ProjectViewModel: ObservableObject {
     private var studioExportPlaybackProject: Project?
 
     public func beginStudioExport() {
+        // The picture guide must not print into score/stem exports.
+        pictureGuideAudioBus.setExportSuppressed(true)
         isStudioExporting = true
     }
 
@@ -413,6 +418,7 @@ public final class ProjectViewModel: ObservableObject {
     public func endStudioExport() {
         studioExportPlaybackProject = nil
         isStudioExporting = false
+        pictureGuideAudioBus.setExportSuppressed(false)
     }
 
     // MARK: - Playback Preparation

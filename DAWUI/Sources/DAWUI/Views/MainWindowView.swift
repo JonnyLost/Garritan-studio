@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import CoreAudio
 import DAWCore
 import UniformTypeIdentifiers
@@ -8,6 +9,7 @@ import UniformTypeIdentifiers
 public struct MainWindowView: View {
     @Environment(\.studioPalette) private var palette
     @StateObject private var viewModel: ProjectViewModel
+    @StateObject private var pictureSession = StudioPictureSession()
     
     // Global key monitor for keyboard shortcuts
     @State private var keyMonitor = GlobalKeyMonitor()
@@ -22,6 +24,8 @@ public struct MainWindowView: View {
     @State private var showChannelWorkspace = false
     @State private var showArticulationsWorkspace = false
     @State private var showOstinatoWorkspace = false
+    @State private var showPictureWorkspace = false
+    @State private var floatingPictureWindow: StudioPictureFloatingWindowController?
     @State private var showInstrumentWorkspace = false
     @State private var compactLowerWorkspace = false
     @State private var showDockedKeyboard = false
@@ -136,7 +140,7 @@ public struct MainWindowView: View {
                         .background(Color(nsColor: .controlBackgroundColor))
                     }
 
-                    if showInstrumentWorkspace || showChannelWorkspace || showStageWorkspace || showRoomAcousticsWorkspace || showArticulationsWorkspace || showOstinatoWorkspace || viewModel.showMixer || viewModel.showPianoRoll {
+                    if showInstrumentWorkspace || showChannelWorkspace || showStageWorkspace || showRoomAcousticsWorkspace || showArticulationsWorkspace || showOstinatoWorkspace || showPictureWorkspace || viewModel.showMixer || viewModel.showPianoRoll {
                         ResizeHandle(height: $pianoRollHeight)
                             .onTapGesture(count: 2) {
                                 if lowerWorkspaceMaximized {
@@ -263,15 +267,41 @@ public struct MainWindowView: View {
                 barJumpOverlay
             }
         }
-        .onAppear { 
-            setupInitialState() 
+        .onAppear {
+            setupInitialState()
+            pictureSession.bind(to: viewModel.transportState,
+                                guideAudioBus: viewModel.pictureGuideAudioBus)
+            pictureSession.update(document: viewModel.project.studioPicture)
         }
         .onDisappear {
-            // Stop keyboard monitor when view disappears (e.g., project reload)
+            // Project window was replaced; release decoder and bookmark access.
             keyMonitor.stop()
+            floatingPictureWindow?.close()
+            floatingPictureWindow = nil
+            pictureSession.unbind()
+        }
+        .onReceive(viewModel.$project) { updatedProject in
+            // Ordinary edits to tracks and clips must never reload the movie.
+            pictureSession.update(document: updatedProject.studioPicture)
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("toggleStudioKeyboard"))) { _ in
             showDockedKeyboard.toggle()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("openStudioPicture"))) { _ in
+            selectWorkspace("Picture")
+            compactLowerWorkspace = false
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("markStudioPictureHit"))) { _ in
+            guard var picture = viewModel.project.studioPicture else {
+                selectWorkspace("Picture")
+                return
+            }
+            let positionSeconds = Double(viewModel.transportState.playheadPosition.samples) /
+                                  max(1, viewModel.transportState.sampleRate)
+            picture.hitPoints.append(StudioPictureHitPoint(
+                name: "Hit \(picture.hitPoints.count + 1)",
+                frame: picture.movieFrame(atProjectSeconds: positionSeconds)))
+            viewModel.project.studioPicture = picture
         }
         .onReceive(NotificationCenter.default.publisher(for: .performUndo)) { _ in
             viewModel.undo()
@@ -522,6 +552,7 @@ public struct MainWindowView: View {
         showRoomAcousticsWorkspace = workspace == "Rooms"
         showArticulationsWorkspace = workspace == "Articulations"
         showOstinatoWorkspace = workspace == "Ostinato"
+        showPictureWorkspace = workspace == "Picture"
         viewModel.showPianoRoll = workspace == "Piano Roll"
         viewModel.showMixer = workspace == "Mixer"
     }
@@ -546,6 +577,9 @@ public struct MainWindowView: View {
             }
             workspaceButton("Ostinato", symbol: "square.grid.3x3.fill", active: showOstinatoWorkspace) {
                 selectWorkspace("Ostinato")
+            }
+            workspaceButton("Picture", symbol: "film", active: showPictureWorkspace) {
+                selectWorkspace("Picture")
             }
             workspaceButton("Piano Roll", symbol: "pianokeys", active: viewModel.showPianoRoll && !showInstrumentWorkspace && !showChannelWorkspace && !showStageWorkspace && !showRoomAcousticsWorkspace && !showArticulationsWorkspace && !showOstinatoWorkspace && !viewModel.showMixer) {
                 selectWorkspace("Piano Roll")
@@ -583,7 +617,15 @@ public struct MainWindowView: View {
 
     private var compactWorkspaceStrip: some View {
         HStack(spacing: 16) {
-            if showRoomAcousticsWorkspace {
+            if showPictureWorkspace {
+                Image(systemName: "film")
+                Text(viewModel.project.studioPicture?.filename ?? "No reference picture")
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Spacer()
+                Button("Expand") { compactLowerWorkspace = false }
+                    .buttonStyle(.borderless)
+            } else if showRoomAcousticsWorkspace {
                 Image(systemName: "waveform.path")
                 Text("Room Acoustics").font(.subheadline.weight(.semibold))
                 Text(viewModel.project.dawState.acousticRoomProfileID ?? "Apple Medium Hall")
@@ -620,7 +662,20 @@ public struct MainWindowView: View {
 
     @ViewBuilder
     private var bottomPanel: some View {
-        if showInstrumentWorkspace {
+        if showPictureWorkspace {
+            if floatingPictureWindow != nil {
+                VStack(spacing: 14) {
+                    Label("Studio Picture is open in a floating window", systemImage: "film")
+                        .foregroundStyle(.secondary)
+                    Button("Dock Picture Here") { togglePictureFloating() }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                StudioPictureWorkspaceView(
+                    viewModel: viewModel, session: pictureSession, floating: false,
+                    toggleFloating: { togglePictureFloating() })
+            }
+        } else if showInstrumentWorkspace {
             if let track = viewModel.selectedTrack, track.studioSynthEnabled == true {
                 StudioSynthPanelView(viewModel: viewModel, trackID: track.id)
             } else if let track = viewModel.selectedTrack, track.studioFMEnabled == true {
@@ -696,6 +751,24 @@ public struct MainWindowView: View {
         }
     }
     
+    /// One AVPlayer and one decoder; moving the surface never starts a second
+    /// transport. The floating window is a native resizable macOS window.
+    private func togglePictureFloating() {
+        if let window = floatingPictureWindow {
+            window.close()
+            floatingPictureWindow = nil
+        } else {
+            let window = StudioPictureFloatingWindowController(
+                content: StudioPictureWorkspaceView(
+                    viewModel: viewModel, session: pictureSession, floating: true,
+                    toggleFloating: { togglePictureFloating() }))
+            window.onClose = { floatingPictureWindow = nil }
+            floatingPictureWindow = window
+            window.showWindow(nil)
+            window.window?.makeKeyAndOrderFront(nil)
+        }
+    }
+
     private var loadingOverlay: some View {
         VStack {
             ProgressView()
@@ -1959,6 +2032,25 @@ struct TimelineRulerContent: View {
                 context.stroke(path, with: .color(.primary), lineWidth: 1)
                 context.draw(Text("\(bar + 1)").font(.system(size: 10, weight: .medium)),
                              at: CGPoint(x: x + 4, y: 8))
+            }
+
+            // Show picture hit points directly on the musical ruler, without
+            // changing MIDI clip positions or the existing grid behaviour.
+            if let picture = viewModel.project.studioPicture {
+                let bpm = viewModel.transportState.tempo.bpm
+                for hit in picture.hitPoints {
+                    let seconds = picture.projectSeconds(atMovieFrame: hit.frame)
+                    let x = CGFloat(seconds * bpm / 60) * pixelsPerBeat
+                    guard x >= 0 && x <= size.width else { continue }
+                    let stem = Path { path in
+                        path.move(to: CGPoint(x: x, y: size.height - 14))
+                        path.addLine(to: CGPoint(x: x, y: size.height))
+                    }
+                    context.stroke(stem, with: .color(.orange), lineWidth: 2)
+                    context.fill(Path(ellipseIn: CGRect(
+                        x: x - 3, y: size.height - 20, width: 6, height: 6)),
+                        with: .color(.orange))
+                }
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))

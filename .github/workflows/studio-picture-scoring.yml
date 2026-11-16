@@ -1,0 +1,34 @@
+name: Studio Picture scoring build and SMPTE regression
+
+on:
+  push:
+    branches:
+      - feature/studio-picture-scoring
+  pull_request:
+    branches:
+      - integration/studio-alpha1-consolidated-2026-11-14
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  picture-build:
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Confirm macOS toolchain
+        run: |
+          sw_vers
+          swift --version
+      - name: Resolve native package dependencies
+        run: swift package resolve
+      - name: Build the DAW and Studio Picture
+        run: swift build
+      - name: Verify SMPTE, synchronization, cue sheets and save migration
+        run: swift test --filter StudioPicture
