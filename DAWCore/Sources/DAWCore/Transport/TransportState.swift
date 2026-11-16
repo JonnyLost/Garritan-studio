@@ -124,7 +124,8 @@ public final class TransportState: ObservableObject {
         
         // Subscribe to sample position updates from audio engine
         samplePositionCancellable = engine.samplePositionSubject
-            .receive(on: DispatchQueue.main)
+            // AudioEngine publishes only on MainActor. A queued old position
+            // must not wrap or seek a newly installed MIDI generation.
             .sink { [weak self] samplePosition in
                 self?.updatePlayheadFromSamplePosition(samplePosition)
             }
@@ -483,12 +484,19 @@ public final class TransportState: ObservableObject {
     }
     
     public func returnToZero() {
+        // This toolbar action is a real seek, not only a UI playhead edit.
+        let resume = isPlaying
+        if resume { pause() }
         setPlayheadPosition(TimePosition(sampleRate: sampleRate))
         transportEventSubject.send(.returnToZero)
+        if resume { play() }
     }
     
     public func goToEnd(projectDuration: TimePosition) {
+        let resume = isPlaying
+        if resume { pause() }
         setPlayheadPosition(projectDuration)
+        if resume { play() }
     }
     
     // MARK: - Playhead Control

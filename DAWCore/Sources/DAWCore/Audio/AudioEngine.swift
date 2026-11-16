@@ -220,13 +220,15 @@ public final class AudioEngine: ObservableObject {
     
     // MIDI event callback - called from audio thread with sample-accurate timing
     // Parameters: (bufferStartSample, bufferFrameCount, tempo)
-    public var midiEventCallback: ((Int64, AVAudioFrameCount, Double) -> Void)?
+    let midiClock = StudioMIDITransportClock()
+    public let midiSchedulingInvalidated = PassthroughSubject<Void, Never>()
     
     // Current tempo for timing calculations (set by transport)
     public var currentTempo: Double = 120.0
     
     // Timing tap installed flag
     private var timingTapInstalled = false
+    private var transportClockSource: AVAudioSourceNode?
     private var exportCapture: BufferedAudioCapture?
 
     private let realtimeSamplePosition = RealtimeSamplePosition()
@@ -261,6 +263,8 @@ public final class AudioEngine: ObservableObject {
         engine.connect(concertHallReturnMixer, to: masterMixer, format: hallFormat)
         engine.connect(microphoneMasterMixer, to: masterMixer, format: hallFormat)
 
+        installMIDIClockSource(format: hallFormat)
+
         print("[ConcertHall] Dedicated reverb return connected")
         
         // Get sample rate from output
@@ -272,6 +276,29 @@ public final class AudioEngine: ObservableObject {
         prepareEngine()
     }
     
+    private func installMIDIClockSource(format: AVAudioFormat) {
+        // A silent source keeps rendering alive before the first note/future
+        // region. Source render timestamps, not aggregated mixer-tap callbacks
+        // or callback arrival wall time, advance the shared MIDI clock.
+        let clock = midiClock
+        let source = AVAudioSourceNode(format: format) { _, timestamp, frames, list in
+            for buffer in UnsafeMutableAudioBufferListPointer(list) {
+                if let data = buffer.mData {
+                    memset(data, 0, min(Int(buffer.mDataByteSize), Int(frames) * MemoryLayout<Float>.size))
+                }
+            }
+            let time = timestamp.pointee
+            if time.mFlags.contains(.sampleTimeValid), time.mSampleTime.isFinite,
+               time.mSampleTime >= Double(Int64.min), time.mSampleTime < Double(Int64.max) {
+                clock.observe(engineFrame: Int64(time.mSampleTime), frames: frames)
+            }
+            return noErr
+        }
+        transportClockSource = source
+        engine.attach(source)
+        engine.connect(source, to: masterMixer, format: format)
+    }
+
     private func prepareEngine() {
         // Access input node to ensure it's initialized
         let inputNode = engine.inputNode
@@ -317,12 +344,16 @@ public final class AudioEngine: ObservableObject {
     }
     
     public func stop() {
+        midiClock.cancel()
+        midiSchedulingInvalidated.send()
         engine.stop()
         isRunning = false
         isPlaying = false
     }
     
     public func pause() {
+        midiClock.cancel()
+        midiSchedulingInvalidated.send()
         engine.pause()
         isPlaying = false
     }
@@ -1415,6 +1446,7 @@ public final class AudioEngine: ObservableObject {
     
     /// Start playback from a specific sample position
     public func startPlayback(from samplePosition: Int64) {
+        if midiClock.snapshot() == nil { midiClock.begin(at: samplePosition) }
         playbackStartSamplePosition = samplePosition
         currentSamplePosition = samplePosition
         realtimeSamplePosition.publish(samplePosition)
@@ -1436,6 +1468,7 @@ public final class AudioEngine: ObservableObject {
     
     /// Stop playback
     public func stopPlayback() {
+        midiClock.cancel()
         isPlaying = false
         
         // Stop all player nodes
@@ -1451,6 +1484,8 @@ public final class AudioEngine: ObservableObject {
     
     /// Set the current sample position (for seeking)
     public func setSamplePosition(_ position: Int64) {
+        midiClock.cancel()
+        midiSchedulingInvalidated.send()
         currentSamplePosition = position
         realtimeSamplePosition.publish(position)
         playbackStartSamplePosition = position
@@ -1508,16 +1543,10 @@ public final class AudioEngine: ObservableObject {
         removeTimingTap()
 
         let publishedPosition = realtimeSamplePosition
-        masterMixer.installTap(onBus: 0, bufferSize: bufferSize, format: format) {
-            [weak self] buffer, _ in
-            guard let self, self.isPlaying else { return }
-            let host = mach_absolute_time()
-            let elapsed = self.hostTimeToSamples(
-                from: self.playbackStartHostTime, to: host
-            )
-            let firstSample = self.playbackStartSamplePosition + elapsed
-            self.midiEventCallback?(firstSample, buffer.frameLength, self.currentTempo)
-            publishedPosition.publish(firstSample + Int64(buffer.frameLength))
+        let clock = midiClock
+        masterMixer.installTap(onBus: 0, bufferSize: bufferSize, format: format) { buffer, _ in
+            guard let position = clock.snapshot() else { return }
+            publishedPosition.publish(position.endFrame)
             capture.append(buffer)
         }
         exportCapture = capture
@@ -1583,34 +1612,24 @@ public final class AudioEngine: ObservableObject {
         // Update our sample rate
         sampleRate = format.sampleRate
         
-        // Keep the MIDI clock calculation unchanged. UI receives only a
-        // lock-free position snapshot, not a new Task for every buffer.
+        // The silent source owns clock publication. This tap only publishes
+        // meter/UI progress; no per-buffer MIDI dispatch or MainActor reads.
+        let clock = midiClock
         let publishedPosition = realtimeSamplePosition
-        masterMixer.installTap(onBus: 0, bufferSize: bufferSize, format: format) { [weak self] buffer, _ in
-            guard let self = self, self.isPlaying else { return }
-            
-            // Calculate current sample position based on elapsed time
-            let currentHostTime = mach_absolute_time()
-            let elapsedSamples = self.hostTimeToSamples(from: self.playbackStartHostTime, to: currentHostTime)
-            let bufferStartSample = self.playbackStartSamplePosition + elapsedSamples
-            
-            // Call MIDI event callback with sample-accurate timing
-            // This processes MIDI events that fall within this buffer window
-            self.midiEventCallback?(bufferStartSample, buffer.frameLength, self.currentTempo)
-            
-            // Constant-time render callback publication, no actor hop.
-            publishedPosition.publish(bufferStartSample + Int64(buffer.frameLength))
+        masterMixer.installTap(onBus: 0, bufferSize: bufferSize, format: format) { _, _ in
+            guard let position = clock.snapshot() else { return }
+            publishedPosition.publish(position.endFrame)
         }
-        
+
         timingPositionUITimer?.invalidate()
         timingPositionUITimer = Timer.scheduledTimer(
             withTimeInterval: 1.0 / 30.0, repeats: true
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, self.isPlaying else { return }
-                let position = self.realtimeSamplePosition.load()
-                self.currentSamplePosition = position
-                self.samplePositionSubject.send(position)
+                guard let position = self.midiClock.snapshot() else { return }
+                self.currentSamplePosition = position.endFrame
+                self.samplePositionSubject.send(position.endFrame)
             }
         }
         timingTapInstalled = true
@@ -1628,7 +1647,10 @@ public final class AudioEngine: ObservableObject {
         let wasPlaying = isPlaying
         
         // Stop everything
-        if wasPlaying { stopPlayback() }
+        if wasPlaying {
+            stopPlayback()
+            midiSchedulingInvalidated.send()
+        }
         if wasRunning { stop() }
         
         // Remove existing tap
@@ -1641,9 +1663,8 @@ public final class AudioEngine: ObservableObject {
         if wasRunning {
             try? start()
         }
-        if wasPlaying {
-            startPlayback(from: currentSamplePosition)
-        }
+        // Reconfiguration pauses the transport; Play rebuilds a new generation.
+        // Never resume an old score against a different render format.
         
         print("[AudioEngine] Buffer size changed to \(newSize) samples (~\(String(format: "%.1f", Double(newSize) / sampleRate * 1000))ms latency)")
     }
@@ -1719,11 +1740,22 @@ public final class AudioEngine: ObservableObject {
     @objc private func handleConfigurationChange(_ notification: Notification) {
         // Handle audio configuration changes (e.g., sample rate change)
         Task { @MainActor in
+            stopPlayback()
+            midiSchedulingInvalidated.send()
             sampleRate = engine.outputNode.outputFormat(forBus: 0).sampleRate
-            
-            if isRunning {
-                try? start()
+            // Recreate the source off the audio thread if its frame rate no
+            // longer matches the session's frame unit. Leave transport paused.
+            if sampleRate > 0, transportClockSource?.outputFormat(forBus: 0).sampleRate != sampleRate {
+                engine.stop()
+                if let source = transportClockSource {
+                    engine.disconnectNodeOutput(source)
+                    engine.detach(source)
+                }
+                if let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2) {
+                    installMIDIClockSource(format: format)
+                }
             }
+            if isRunning { try? start() }
         }
     }
     

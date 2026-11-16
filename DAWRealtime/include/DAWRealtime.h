@@ -63,6 +63,37 @@ void daw_sample_position_destroy(DAWAtomicSamplePosition *position);
 void daw_sample_position_publish(DAWAtomicSamplePosition *position, int64_t frames);
 int64_t daw_sample_position_load(const DAWAtomicSamplePosition *position);
 
+// C11 atomic ownership cursor for a preallocated Swift SPSC ring.
+// Exactly one producer calls write_index/commit_write and exactly one consumer
+// calls read_index/commit_read. The producer writes the Swift slot BEFORE
+// publishing, and the consumer reads it BEFORE releasing the slot.
+// An empty/full query returns UINT32_MAX. Never reset while either side runs.
+typedef struct DAWSPSCCursor DAWSPSCCursor;
+DAWSPSCCursor *daw_spsc_cursor_create(uint32_t capacity);
+void daw_spsc_cursor_destroy(DAWSPSCCursor *cursor);
+uint32_t daw_spsc_write_index(const DAWSPSCCursor *cursor);
+void daw_spsc_commit_write(DAWSPSCCursor *cursor);
+uint32_t daw_spsc_read_index(const DAWSPSCCursor *cursor);
+void daw_spsc_commit_read(DAWSPSCCursor *cursor);
+uint32_t daw_spsc_count(const DAWSPSCCursor *cursor);
+void daw_spsc_clear_quiescent(DAWSPSCCursor *cursor);
+void daw_spsc_reset_quiescent(DAWSPSCCursor *cursor);
+
+
+
+// Single-render-writer, coalescing MIDI clock mailbox. Control calls are
+// serialized. No reset of render-owned anchor state is needed on discontinuity.
+// Even generations are active; odd generations are cancelled. No MIDI packets
+// are stored here, so coalescing cannot drop a note-off under queue pressure.
+typedef struct DAWMIDIClock DAWMIDIClock;
+DAWMIDIClock *daw_midi_clock_create(void);
+void daw_midi_clock_destroy(DAWMIDIClock *clock);
+uint64_t daw_midi_clock_begin(DAWMIDIClock *clock, int64_t startFrame);
+void daw_midi_clock_cancel(DAWMIDIClock *clock);
+bool daw_midi_clock_observe(DAWMIDIClock *clock, int64_t engineFrame, uint32_t frames);
+bool daw_midi_clock_snapshot(const DAWMIDIClock *clock, uint64_t *generation, int64_t *endFrame);
+bool daw_midi_clock_is_current(const DAWMIDIClock *clock, uint64_t generation);
+
 #ifdef __cplusplus
 }
 #endif

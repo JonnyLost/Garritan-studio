@@ -155,7 +155,8 @@ public final class ProjectViewModel: ObservableObject {
         
         // Listen for transport record start
         transportState.transportEventSubject
-            .receive(on: DispatchQueue.main)
+            // TransportState is MainActor-owned. Keep control transitions
+            // synchronous so queued Play cannot outlive a later Stop/seek.
             .sink { [weak self] event in
                 self?.handleTransportEvent(event)
             }
@@ -2333,11 +2334,22 @@ public final class ProjectViewModel: ObservableObject {
     }
     
     public func setTempo(_ bpm: Double) {
+        guard bpm.isFinite, bpm > 0 else { return }
+        let wasPlaying = transportState.isPlaying
+        let beat = transportState.playheadBeats
+        if wasPlaying {
+            playbackEngine.stopPlayback()
+            transportState.pause()
+        }
         let action = ChangeTempoAction(from: project.tempo, to: Tempo(bpm: bpm))
         undoManager.registerAction(action, project: &project)
         transportState.tempo = project.tempo
+        if wasPlaying {
+            transportState.setPlayheadBeats(beat)
+            transportState.play()
+        }
     }
-    
+
     public func setTimeSignature(numerator: Int, denominator: Int) {
         let newTimeSignature = TimeSignature(numerator: numerator, denominator: denominator)
         project.timeSignature = newTimeSignature
