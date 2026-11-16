@@ -64,7 +64,8 @@ final class StudioSamplerEXSImporterTests: XCTestCase {
                          releaseTrigger: Bool = false,
                          groupEnable: UInt8 = 0,
                          loopOn: Bool = true,
-                         zoneCount: Int = 1) throws -> URL {
+                         zoneCount: Int = 1,
+                         storedSamplePath: String = "") throws -> URL {
         let instrument = block(0, name: "EXS Test Instrument", index: 0,
                                body: Data(repeating: 0, count: 88))
         var zoneBytes = Data()
@@ -99,7 +100,7 @@ final class StudioSamplerEXSImporterTests: XCTestCase {
         var sample = Data(repeating: 0, count: 592)
         put(&sample, 4, u32(64))
         put(&sample, 8, u32(44_100))
-        put(&sample, 80, named("", 256))
+        put(&sample, 80, named(storedSamplePath, 256))
         put(&sample, 336, named(sampleName, 256))
         let sampleBytes = block(3, name: "Recorded Tone", index: 0, body: sample)
         let data = instrument + zoneBytes + groupBytes + sampleBytes
@@ -345,6 +346,69 @@ final class StudioSamplerEXSImporterTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
         let reverse = try fixture(in: root, zoneFlags: 8 | 4)
         XCTAssertThrowsError(try StudioSamplerEXSImporter.preview(reverse))
+    }
+
+    func testEXSAbsolutePathCannotReadOutsideSelectedFolderWithoutExplicitGrant() throws {
+        let instrumentFolder = try folder()
+        let externalFolder = try folder()
+        defer {
+            try? FileManager.default.removeItem(at: instrumentFolder)
+            try? FileManager.default.removeItem(at: externalFolder)
+        }
+        let original = try wav("remote.wav", in: externalFolder)
+        let instrument = try fixture(in: instrumentFolder, sampleName: "remote.wav",
+                                     storedSamplePath: externalFolder.path)
+        XCTAssertThrowsError(try StudioSamplerEXSImporter.preview(instrument)) { error in
+            guard case StudioSamplerEXSImporter.ImportError.missingAudio = error else {
+                return XCTFail("Expected an explicit sample-folder grant requirement")
+            }
+        }
+        let preview = try StudioSamplerEXSImporter.preview(
+            instrument, samplesRoot: externalFolder)
+        XCTAssertEqual(preview.patch.zones[0].sampleURL, original)
+        let managed = instrumentFolder.appendingPathComponent("managed")
+        let result = try StudioSamplerEXSImporter.importInstrument(
+            instrument, into: managed, samplesRoot: externalFolder)
+        XCTAssertEqual(result.patch.zones.count, 1)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(
+            at: managed, includingPropertiesForKeys: nil).count, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: original.path))
+    }
+
+    func testEXSSymlinkOutsideInstrumentFolderCannotBypassGrant() throws {
+        let instrumentFolder = try folder()
+        let externalFolder = try folder()
+        defer {
+            try? FileManager.default.removeItem(at: instrumentFolder)
+            try? FileManager.default.removeItem(at: externalFolder)
+        }
+        let external = try wav("tone.wav", in: externalFolder)
+        let symlink = instrumentFolder.appendingPathComponent("tone.wav")
+        try FileManager.default.createSymbolicLink(at: symlink,
+                                                    withDestinationURL: external)
+        let instrument = try fixture(in: instrumentFolder)
+        XCTAssertThrowsError(try StudioSamplerEXSImporter.preview(instrument))
+        let restored = try StudioSamplerEXSImporter.preview(
+            instrument, samplesRoot: externalFolder)
+        XCTAssertEqual(restored.patch.zones[0].sampleURL, external)
+    }
+
+    func testEXSExplicitSampleFolderCanContainSamplesSubfolder() throws {
+        let instrumentFolder = try folder()
+        let externalFolder = try folder()
+        defer {
+            try? FileManager.default.removeItem(at: instrumentFolder)
+            try? FileManager.default.removeItem(at: externalFolder)
+        }
+        let sampleFolder = externalFolder.appendingPathComponent("Samples")
+        try FileManager.default.createDirectory(at: sampleFolder,
+                                                 withIntermediateDirectories: true)
+        let original = try wav("tone.wav", in: sampleFolder)
+        let instrument = try fixture(in: instrumentFolder)
+        XCTAssertThrowsError(try StudioSamplerEXSImporter.preview(instrument))
+        let preview = try StudioSamplerEXSImporter.preview(
+            instrument, samplesRoot: externalFolder)
+        XCTAssertEqual(preview.patch.zones[0].sampleURL, original)
     }
 
     func testMissingAudioAndPathTraversalRejectBeforeImport() throws {
