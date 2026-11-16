@@ -99,6 +99,18 @@ Keyboard shortcuts: **Option-Command-P** opens Picture; **Option-Command-H** add
 
 **Pending:** build and CI validation of the integrated workflow, a genuine full-length real-time Studio mix + scored-movie round trip on the MacBook, and frame/audio sync/latency review.
 
+## Milestone 11 — Reviewed picture revisions
+
+- **Relink Movie** remains available when the original footage was moved without changing its edit. It retains existing cue frames unchanged.
+- A separate **Conform Revised Picture…** command loads a director's new MOV/MP4, validates its duration/frame rate and creates a fresh media reference and security-scoped bookmark.
+- Enter one or more **match points**: the old picture frame and the new picture frame showing the **same event**. Additional anchors after inserted/removed footage produce piecewise offsets. This does not guess cut boundaries from thumbnails and does not time-stretch music.
+- **Preview Cue Changes** displays every named hit point's old/new SMPTE labels, including cues that would be outside the revised footage. Applying is prohibited if a cue cannot be mapped safely, or if the original picture changed since preview.
+- **Apply Revised Picture** is explicit: it updates the media reference, remaps only hit-point frames, preserves original cue IDs/types/notes, start-timecode labeling, picture timeline offset, and guide/overlay preferences. The old source movie is never edited.
+- Project audio, MIDI, score regions, tempo changes and automation remain unchanged. Composer-approved musical conforming of full regions is **not** part of this first revision milestone; avoid presenting this as an automatic music-edit conform.
+- Pure unit tests cover inserted/deleted footage, changing 24 to 29.97 DF picture rates, invalid/nonmonotonic matches, out-of-range cues, stale previews and preservation of settings.
+
+**Pending:** MacBook UI/runtime acceptance with actual director cuts, multi-anchor edit decisions and the separate larger workflow for conforming musical regions after creative review.
+
 ## Persistence and media safety
 
 - Only a video **reference** (path plus security-scoped bookmark when available), project offset, frame-rate mode, source timecode, audio/overlay preferences and hit-point data are encoded in the DAW project.
