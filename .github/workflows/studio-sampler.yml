@@ -61,6 +61,8 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+      - name: Test local artwork validator
+        run: python3 -m unittest discover -s scripts/tests -p 'test_validate_studio_artwork.py'
       - name: Validate local artwork resource contract
         run: python3 scripts/validate_studio_artwork.py --report "$RUNNER_TEMP/studio-artwork-inventory.json"
       - name: Upload complete artwork identity inventory
