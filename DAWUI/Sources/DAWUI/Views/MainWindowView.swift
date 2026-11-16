@@ -368,7 +368,11 @@ public struct MainWindowView: View {
                     Text("TRACKS")
                         .font(.system(size: 10, weight: .semibold))
                         .tracking(0.9)
-                        .foregroundColor(palette.secondaryText)
+                        .foregroundStyle(palette.secondaryText)
+                    Text("\(viewModel.project.tracks.count)")
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(palette.secondaryText)
                     Spacer()
                     Menu {
                         Button("Add Instrument") { addStudioTrack(.instrument) }
@@ -376,10 +380,17 @@ public struct MainWindowView: View {
                         Button("Add Synth") { addStudioTrack(.synth) }
                         Button("Add Audio") { addStudioTrack(.audio) }
                     } label: {
-                        Image(systemName: "plus").font(.caption)
+                        Image(systemName: "plus")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(palette.primaryText)
+                            .frame(width: 23, height: 23)
+                            .background(palette.raisedSurface,
+                                        in: RoundedRectangle(cornerRadius: 6))
                     }
                     .menuStyle(.borderlessButton)
-                    .frame(width: 20)
+                    .help("Add instrument, sampler, synth or audio track")
+                    .accessibilityLabel("Add track")
+                    .frame(width: 25)
                     // File > Track uses the same creation path as this menu.
                     .onReceive(NotificationCenter.default.publisher(for: .newStudioTrack)) { event in
                         guard let kind = event.object as? ProjectViewModel.StudioTrackKind else { return }
