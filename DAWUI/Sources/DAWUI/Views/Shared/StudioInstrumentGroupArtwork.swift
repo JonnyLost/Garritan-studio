@@ -119,7 +119,7 @@ enum StudioInstrumentGroupArtwork: String, CaseIterable, Equatable {
                  "bass drum", "bassoon", "bass brass"]) { return .basses }
 
         if has(["flutes", "flute section", "flute ensemble"]) { return .flutes }
-        if has(["english horn section", "english horn ensemble",
+        if has(["english horns", "english horn section", "english horn ensemble",
                 "cor anglais section"]) { return .englishHorns }
         if has(["oboes", "oboe section", "oboe ensemble"]) { return .oboes }
         if has(["bassoons", "bassoon section", "bassoon ensemble"]) { return .bassoons }
