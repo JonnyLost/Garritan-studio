@@ -470,50 +470,60 @@ struct MasterChannelStripView: View {
 // MARK: - Plugin Slot View
 
 struct PluginSlotView: View {
+    @Environment(\.studioPalette) private var palette
     let slot: PluginSlot?
     let onClick: () -> Void
     let onOpenEditor: (() -> Void)?
-    
+
     init(slot: PluginSlot?, onClick: @escaping () -> Void, onOpenEditor: (() -> Void)? = nil) {
         self.slot = slot
         self.onClick = onClick
         self.onOpenEditor = onOpenEditor
     }
-    
+
+    private var isOccupied: Bool { slot?.pluginID != nil }
+
     var body: some View {
-        Button(action: {
-            if slot?.pluginID != nil, let openEditor = onOpenEditor {
-                openEditor()
+        Button {
+            if isOccupied, let onOpenEditor {
+                onOpenEditor()
             } else {
                 onClick()
             }
-        }) {
-            HStack {
-                if let slot = slot, slot.pluginID != nil {
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: isOccupied ? "slider.horizontal.3" : "plus")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(isOccupied ? palette.accent : palette.secondaryText)
+
+                Text(slot?.pluginID?.name ?? "Add Effect")
+                    .font(.system(size: 10, weight: isOccupied ? .medium : .regular))
+                    .foregroundStyle(isOccupied ? palette.primaryText : palette.secondaryText)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Spacer(minLength: 0)
+
+                if isOccupied {
                     Circle()
-                        .fill(slot.isEnabled ? Color.green : Color.orange)
+                        .fill(slot?.isEnabled == true ? StudioGUI.activity : palette.secondaryText)
                         .frame(width: 6, height: 6)
-                    
-                    Text(slot.pluginID?.name ?? "Plugin")
-                        .font(.system(size: 8))
-                        .lineLimit(1)
-                } else {
-                    Text("—")
-                        .font(.system(size: 8))
-                        .foregroundColor(.secondary)
                 }
-                
-                Spacer()
             }
-            .padding(.horizontal, 4)
-            .padding(.vertical, 2)
-            .frame(width: 80, height: 22)
-            .background(Color.gray.opacity(0.2))
-            .cornerRadius(2)
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, minHeight: 24)
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: 5))
+            .overlay {
+                RoundedRectangle(cornerRadius: 5)
+                    .strokeBorder(palette.separator.opacity(0.65), lineWidth: 0.7)
+            }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help(isOccupied ? "Open effect editor" : "Add an effect to this insert")
+        .accessibilityLabel(isOccupied ? "Effect: \(slot?.pluginID?.name ?? "Plugin")" : "Add effect")
         .contextMenu {
-            if slot?.pluginID != nil {
+            if isOccupied {
                 Button("Open Editor") { onOpenEditor?() }
             }
         }
