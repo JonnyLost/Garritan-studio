@@ -124,14 +124,16 @@ public struct StudioInstrumentIcon: View {
     }
 }
 
-private enum InstrumentIconIdentity: Equatable {
+enum InstrumentIconIdentity: Equatable {
     case piccolo, flute, altoFlute, bassFlute, oboe, englishHorn, clarinet, bassClarinet
-    case contrabassClarinet, altoClarinet, ebClarinet, bassoon, contrabassoon
+    case contrabassClarinet, altoClarinet, ebClarinet, aClarinet, bbClarinet, bassoon, contrabassoon
     case sopranoSaxophone, altoSaxophone, tenorSaxophone, baritoneSaxophone, bassSaxophone
-    case horn, trumpet, piccoloTrumpet, cTrumpet, bbTrumpet
-    case trombone, altoTrombone, bassTrombone, tuba, contrabassTuba, euphonium, brassEnsemble
+    case horn, trumpet, piccoloTrumpet, cTrumpet, bbTrumpet, cornet, flugelhorn
+    case trombone, altoTrombone, bassTrombone, contrabassTrombone, tuba, contrabassTuba, euphonium, baritoneHorn, brassEnsemble
     case violin, viola, cello, doubleBass, strings
-    case timpani, snare, bassDrum, cymbals, triangle, gong, mallets, chimes, bells
+    case timpani, snare, fieldSnare, marchingTenors, bassDrum, kickDrum, rackTom, floorTom, drumKit
+    case cymbals, hiHat, rideCymbal, crashCymbals, suspendedCymbal, triangle, gong, mallets, chimes, bells
+    case anvil, slapstick
     case xylophone, vibraphone, marimba, glockenspiel, crotales, handbells
     case tambourine, maracas, castanets, woodblock, windMachine
     case cowbell, sleighBells, markTree, ratchet, gourd, claves, cabasa, vibraslap
@@ -149,6 +151,8 @@ private enum InstrumentIconIdentity: Equatable {
         case .clarinet: return "Clarinet"
         case .altoClarinet: return "Alto clarinet"
         case .ebClarinet: return "E-flat clarinet"
+        case .aClarinet: return "A clarinet"
+        case .bbClarinet: return "B-flat clarinet"
         case .sopranoSaxophone: return "Soprano saxophone"
         case .altoSaxophone: return "Alto saxophone"
         case .tenorSaxophone: return "Tenor saxophone"
@@ -163,11 +167,15 @@ private enum InstrumentIconIdentity: Equatable {
         case .piccoloTrumpet: return "Piccolo trumpet"
         case .cTrumpet: return "C trumpet"
         case .bbTrumpet: return "B flat trumpet"
+        case .cornet: return "Cornet"
+        case .flugelhorn: return "Flugelhorn"
         case .trombone: return "Trombone"
         case .altoTrombone: return "Alto trombone"
         case .bassTrombone: return "Bass trombone"
+        case .contrabassTrombone: return "Contrabass trombone"
         case .tuba: return "Tuba"
         case .euphonium: return "Euphonium"
+        case .baritoneHorn: return "Baritone horn"
         case .contrabassTuba: return "Contrabass tuba"
         case .brassEnsemble: return "Brass section"
         case .violin: return "Violin"
@@ -177,8 +185,20 @@ private enum InstrumentIconIdentity: Equatable {
         case .strings: return "String section"
         case .timpani: return "Timpani"
         case .snare: return "Snare drum"
+        case .fieldSnare: return "Field or marching snare drum"
+        case .marchingTenors: return "Marching tenor drums"
         case .bassDrum: return "Bass drum"
+        case .kickDrum: return "Drum kit bass drum"
+        case .rackTom: return "Rack tom"
+        case .floorTom: return "Floor tom"
+        case .drumKit: return "Drum kit"
         case .cymbals: return "Cymbals"
+        case .hiHat: return "Hi-hat cymbals"
+        case .rideCymbal: return "Ride cymbal"
+        case .crashCymbals: return "Crash cymbals"
+        case .suspendedCymbal: return "Suspended cymbal"
+        case .anvil: return "Anvil"
+        case .slapstick: return "Slapstick percussion"
         case .triangle: return "Triangle"
         case .gong: return "Gong"
         case .xylophone: return "Xylophone"
@@ -234,7 +254,10 @@ private enum InstrumentIconIdentity: Equatable {
         if has(["tenor saxophone", "tenor sax"]) { return .tenorSaxophone }
         if has(["alto saxophone", "alto sax"]) { return .altoSaxophone }
         if has(["soprano saxophone", "soprano sax"]) { return .sopranoSaxophone }
-        if has(["eb clarinet", "bb clarinet", "clarinet"]) { return .clarinet }
+        if has(["b-flat clarinet", "b♭ clarinet", "bb clarinet",
+                "b flat clarinet", "clarinet in bb", "clarinet in b-flat"]) { return .bbClarinet }
+        if has(["a clarinet", "clarinet in a"]) { return .aClarinet }
+        if has(["clarinet"]) { return .clarinet }
         if has(["english horn", "cor anglais"]) { return .englishHorn }
         if has(["contrabassoon", "contra bassoon"]) { return .contrabassoon }
         if has(["bassoon"]) { return .bassoon }
@@ -244,15 +267,19 @@ private enum InstrumentIconIdentity: Equatable {
         if has(["bass flute"]) { return .bassFlute }
         if has(["flute"]) { return .flute }
 
-        if has(["bass trombone", "contrabass trombone"]) { return .bassTrombone }
+        if has(["contrabass trombone", "contra bass trombone", "contrabass trom"]) { return .contrabassTrombone }
+        if has(["bass trombone"]) { return .bassTrombone }
         if has(["alto trombone"]) { return .altoTrombone }
         if has(["trombone"]) { return .trombone }
         if has(["piccolo trumpet"]) { return .piccoloTrumpet }
         if has(["bb trumpet", "b-flat trumpet", "b♭ trumpet"]) { return .bbTrumpet }
         if has(["c trumpet"]) { return .cTrumpet }
-        if has(["trumpet", "cornet"]) { return .trumpet }
+        if has(["flugelhorn", "flugel horn", "flügelhorn"]) { return .flugelhorn }
+        if has(["cornet"]) { return .cornet }
+        if has(["trumpet"]) { return .trumpet }
         if has(["contrabass tuba", "contra tuba"]) { return .contrabassTuba }
-        if has(["euphonium", "baritone horn"]) { return .euphonium }
+        if has(["baritone horn"]) { return .baritoneHorn }
+        if has(["euphonium"]) { return .euphonium }
         if has(["tuba"]) { return .tuba }
         if has(["french horn", "sam horn", "horns", "horn 1", "horn 2", "horn section"]) {
             return .horn
@@ -270,9 +297,21 @@ private enum InstrumentIconIdentity: Equatable {
         }
 
         if has(["timpani", "kettle drum"]) { return .timpani }
+        if has(["marching snare", "field snare", "field drum", "parade snare"]) { return .fieldSnare }
+        if has(["marching tenors", "tenor drums", "tenor quads", "marching quads", "quad toms"]) { return .marchingTenors }
+        if has(["drum kit", "drumset", "drum set", "trap set"]) { return .drumKit }
+        if has(["kick drum", "kick pedal", "kick 808"]) { return .kickDrum }
+        if has(["rack tom", "high tom", "mid tom", "mounted tom"]) { return .rackTom }
+        if has(["floor tom", "low tom"]) { return .floorTom }
         if has(["snare", "side drum"]) { return .snare }
         if has(["bass drum", "gran cassa"]) { return .bassDrum }
-        if has(["cymbal", "hi-hat"]) { return .cymbals }
+        if has(["hi-hat", "hi hat", "hihat"]) { return .hiHat }
+        if has(["ride cymbal", "ride bell"]) { return .rideCymbal }
+        if has(["crash cymbal", "crash pair", "hand cymbal", "clash cymbal"]) { return .crashCymbals }
+        if has(["suspended cymbal", "suspended crash"]) { return .suspendedCymbal }
+        if has(["cymbal"]) { return .cymbals }
+        if has(["anvil"]) { return .anvil }
+        if has(["slapstick", "slap stick", "whip percussion"]) { return .slapstick }
         if has(["triangle"]) { return .triangle }
         if has(["gong", "tam tam", "tam-tam"]) { return .gong }
         if has(["mark tree"]) { return .markTree }
