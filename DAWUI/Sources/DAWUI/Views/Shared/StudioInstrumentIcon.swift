@@ -513,6 +513,11 @@ struct InstrumentIconDrawing {
         case .tunedPercussion: members = [.glockenspiel, .marimba, .vibraphone]
         case .auxiliaryPercussion: members = [.triangle, .tambourine, .cowbell]
         case .drumline: members = [.fieldSnare, .marchingTenors, .marchingBassDrum]
+        case .guitarSection: members = [.acousticGuitar, .classicalGuitar, .electricGuitar]
+        case .rhythmSection: members = [.electricBass, .drumKit, .electricPiano]
+        case .worldPercussion: members = [.tabla, .djembe, .taiko]
+        case .concertBand: members = [.clarinet, .trumpet, .timpani]
+        case .marchingBand: members = [.trumpet, .tuba, .fieldSnare]
         case .choir: return make(.choir) // Existing choir illustration already shows several singers.
         case .orchestra: members = [.violin, .horn, .timpani]
         case .mixedEnsemble: members = [.flute, .cello, .horn]
