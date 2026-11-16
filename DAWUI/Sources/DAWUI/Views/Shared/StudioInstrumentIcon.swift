@@ -133,7 +133,12 @@ enum InstrumentIconIdentity: Equatable {
     case violin, viola, cello, doubleBass, strings
     case timpani, snare, fieldSnare, marchingTenors, bassDrum, kickDrum, rackTom, floorTom, drumKit
     case cymbals, hiHat, rideCymbal, crashCymbals, suspendedCymbal, triangle, gong, mallets, chimes, bells
-    case anvil, slapstick
+    case anvil, slapstick, marchingBassDrum, splashCymbal, chinaCymbal, thunderSheet, rainstick
+    case bongos, congas, djembe, tabla, taiko
+    case guitar, acousticGuitar, classicalGuitar, electricGuitar, electricBass, uprightBass
+    case banjo, mandolin, ukulele
+    case uprightPiano, electricPiano, clavinet, accordion
+    case sitar, oud, erhu, koto, shakuhachi, panFlute
     case xylophone, vibraphone, marimba, glockenspiel, crotales, handbells
     case tambourine, maracas, castanets, woodblock, windMachine
     case cowbell, sleighBells, markTree, ratchet, gourd, claves, cabasa, vibraslap
@@ -199,6 +204,35 @@ enum InstrumentIconIdentity: Equatable {
         case .suspendedCymbal: return "Suspended cymbal"
         case .anvil: return "Anvil"
         case .slapstick: return "Slapstick percussion"
+        case .marchingBassDrum: return "Marching bass drum"
+        case .splashCymbal: return "Splash cymbal"
+        case .chinaCymbal: return "China cymbal"
+        case .thunderSheet: return "Thunder sheet"
+        case .rainstick: return "Rainstick"
+        case .bongos: return "Bongos"
+        case .congas: return "Congas"
+        case .djembe: return "Djembe"
+        case .tabla: return "Tabla"
+        case .taiko: return "Taiko drum"
+        case .guitar: return "Guitar"
+        case .acousticGuitar: return "Acoustic guitar"
+        case .classicalGuitar: return "Classical guitar"
+        case .electricGuitar: return "Electric guitar"
+        case .electricBass: return "Electric bass"
+        case .uprightBass: return "Upright bass"
+        case .banjo: return "Banjo"
+        case .mandolin: return "Mandolin"
+        case .ukulele: return "Ukulele"
+        case .uprightPiano: return "Upright piano"
+        case .electricPiano: return "Electric piano"
+        case .clavinet: return "Clavinet"
+        case .accordion: return "Accordion"
+        case .sitar: return "Sitar"
+        case .oud: return "Oud"
+        case .erhu: return "Erhu"
+        case .koto: return "Koto"
+        case .shakuhachi: return "Shakuhachi"
+        case .panFlute: return "Pan flute"
         case .triangle: return "Triangle"
         case .gong: return "Gong"
         case .xylophone: return "Xylophone"
@@ -245,6 +279,38 @@ enum InstrumentIconIdentity: Equatable {
         func has(_ fragments: [String]) -> Bool {
             fragments.contains(where: { n.contains($0) })
         }
+        // Physical-instrument variants win before broad orchestral family
+        // fallbacks. Library/folder names are intentionally not used as proof
+        // of a specific instrument.
+        if has(["pan flute", "panflute", "pan pipes"]) { return .panFlute }
+        if has(["shakuhachi"]) { return .shakuhachi }
+        if has(["sitar"]) { return .sitar }
+        if has(["oud"]) { return .oud }
+        if has(["erhu"]) { return .erhu }
+        if has(["koto"]) { return .koto }
+        if has(["tabla"]) { return .tabla }
+        if has(["taiko"]) { return .taiko }
+        if has(["djembe"]) { return .djembe }
+        if has(["bongos", "bongo drum", "bongo set"]) { return .bongos }
+        if has(["congas", "conga drum", "conga set"]) { return .congas }
+        if has(["marching bass drum", "marching basses", "marching bass line"]) { return .marchingBassDrum }
+        if has(["splash cymbal", "splash crash"]) { return .splashCymbal }
+        if has(["china cymbal", "china crash"]) { return .chinaCymbal }
+        if has(["thunder sheet", "thundersheet"]) { return .thunderSheet }
+        if has(["rainstick", "rain stick"]) { return .rainstick }
+        if has(["electric bass", "bass guitar", "fretless bass guitar"]) { return .electricBass }
+        if has(["upright bass", "acoustic bass", "jazz double bass"]) { return .uprightBass }
+        if has(["classical guitar", "nylon guitar", "nylon-string guitar"]) { return .classicalGuitar }
+        if has(["electric guitar", "jazz guitar", "rock guitar"]) { return .electricGuitar }
+        if has(["acoustic guitar", "steel-string guitar"]) { return .acousticGuitar }
+        if has(["banjo"]) { return .banjo }
+        if has(["mandolin"]) { return .mandolin }
+        if has(["ukulele", "ukelele"]) { return .ukulele }
+        if has(["guitar"]) { return .guitar }
+        if has(["electric piano", "rhodes piano", "wurlitzer piano"]) { return .electricPiano }
+        if has(["upright piano", "vertical piano"]) { return .uprightPiano }
+        if has(["clavinet", "clavichord"]) { return .clavinet }
+        if has(["accordion"]) { return .accordion }
         if has(["contrabass clarinet", "contrabassclarinet"]) { return .contrabassClarinet }
         if has(["bass clarinet"]) { return .bassClarinet }
         if has(["alto clarinet"]) { return .altoClarinet }
@@ -369,7 +435,7 @@ enum InstrumentIconIdentity: Equatable {
     }
 }
 
-private struct InstrumentIconDrawing {
+struct InstrumentIconDrawing {
     let primary: [Path]
     let details: [Path]
     let engraving: [Path]
@@ -408,7 +474,7 @@ private struct InstrumentIconDrawing {
             primary: base.primary,
             details: base.details,
             engraving: base.engraving,
-            silhouettes: fillShapes(for: kind, base: base),
+            silhouettes: base.silhouettes + fillShapes(for: kind, base: base),
             compactDetails: Array(base.details.prefix(4))
         )
     }
@@ -446,7 +512,7 @@ private struct InstrumentIconDrawing {
         case .percussion: members = [.timpani, .snare, .cymbals]
         case .tunedPercussion: members = [.glockenspiel, .marimba, .vibraphone]
         case .auxiliaryPercussion: members = [.triangle, .tambourine, .cowbell]
-        case .drumline: members = [.fieldSnare, .marchingTenors, .bassDrum]
+        case .drumline: members = [.fieldSnare, .marchingTenors, .marchingBassDrum]
         case .choir: return make(.choir) // Existing choir illustration already shows several singers.
         case .orchestra: members = [.violin, .horn, .timpani]
         case .mixedEnsemble: members = [.flute, .cello, .horn]
@@ -556,6 +622,9 @@ private struct InstrumentIconDrawing {
     }
 
     private static func makeBase(_ kind: InstrumentIconIdentity) -> Self {
+        if let expanded = makeExpandedInstrument(kind) {
+            return expanded
+        }
         let L: ([(CGFloat, CGFloat)]) -> Path = { points in line(points) }
         let O = oval
         let B = box
