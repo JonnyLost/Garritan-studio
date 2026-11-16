@@ -16,6 +16,7 @@ public enum StudioSamplerNKIImporter {
         case unsupportedSample(String)
         case missingSample(String)
         case unsafeSamplePath(String)
+        case ambiguousSample(String)
         case invalidZone(String)
         case tooManyZones
 
@@ -27,6 +28,8 @@ public enum StudioSamplerNKIImporter {
                 return "Kontakt sample not found in the instrument's authorized folders: \(path)"
             case .unsafeSamplePath(let path):
                 return "The Kontakt sample path is unsafe or escapes the selected folder: \(path)"
+            case .ambiguousSample(let name):
+                return "Multiple authorized recordings match \(name). Put the recording in the matching sample subfolder or select its exact parent folder; Studio will not guess."
             case .invalidZone(let reason):
                 return "Kontakt zone does not match the audio recording: \(reason)"
             case .tooManyZones:
@@ -136,6 +139,10 @@ public enum StudioSamplerNKIImporter {
                       warnings: previewed.warnings)
     }
 
+    /// Prefer the NKI's declared relative hierarchy. A basename is only
+    /// used as a last-resort relinking hint when exactly one authorized audio
+    /// file matches; otherwise two sections could silently play the wrong
+    /// recording (e.g. Strings/tone.wav vs Brass/tone.wav).
     private static func resolve(_ raw: String, relativeTo instrument: URL,
                                 samplesRoot: URL?) throws -> URL {
         let normalized = raw.replacingOccurrences(of: "\\", with: "/")
@@ -149,32 +156,70 @@ public enum StudioSamplerNKIImporter {
         guard Set(["wav", "wave", "aif", "aiff", "caf"]).contains(ext) else {
             throw ImportError.unsupportedSample(filename)
         }
-        let root = instrument.deletingLastPathComponent()
+        let instrumentFolder = instrument.deletingLastPathComponent()
             .resolvingSymlinksInPath().standardizedFileURL
-        let roots = [root] + (samplesRoot.map {
+        let roots = [instrumentFolder] + (samplesRoot.map {
             [$0.resolvingSymlinksInPath().standardizedFileURL]
         } ?? [])
-        // Kontakt absolute paths are historical hints, NOT permission to
-        // read arbitrary files outside user-authorized source folders.
-        let isAbsolute = normalized.hasPrefix("/") ||
-            normalized.contains(":") || normalized.hasPrefix("~")
-        var candidates: [URL] = []
-        for root in roots {
-            candidates.append(root.appendingPathComponent(filename))
-            candidates.append(root.appendingPathComponent("Samples")
-                                  .appendingPathComponent(filename))
-            if !isAbsolute {
-                candidates.append(root.appendingPathComponent(normalized))
-            }
-        }
-        for candidate in candidates {
+        // A source path, even an absolute Windows/macOS path, cannot grant
+        // permission to read outside these user-authorized folders.
+        func existingAuthorizedFile(_ candidate: URL) -> URL? {
             let resolved = candidate.resolvingSymlinksInPath().standardizedFileURL
             guard roots.contains(where: {
                 resolved.path.hasPrefix($0.path + "/")
-            }) else { continue }
+            }) else { return nil }
             let attributes = try? resolved.resourceValues(forKeys: [.isRegularFileKey])
-            if attributes?.isRegularFile == true { return resolved }
+            return attributes?.isRegularFile == true ? resolved : nil
         }
+        let isAbsolute = normalized.hasPrefix("/") ||
+            normalized.contains(":") || normalized.hasPrefix("~")
+        if !isAbsolute {
+            // The sample's original subdirectory is authoritative. This
+            // prevents a stray root/tone.wav from shadowing
+            // root/Samples/Strings/tone.wav.
+            for root in roots {
+                if let exact = existingAuthorizedFile(
+                    root.appendingPathComponent(normalized)) {
+                    return exact
+                }
+            }
+            let samplesPrefix = "Samples/"
+            let withinSamples = normalized.hasPrefix(samplesPrefix)
+                ? String(normalized.dropFirst(samplesPrefix.count))
+                : normalized
+            for root in roots {
+                if let conventional = existingAuthorizedFile(
+                    root.appendingPathComponent("Samples")
+                        .appendingPathComponent(withinSamples)) {
+                    return conventional
+                }
+                // The user may select the Samples folder itself instead of
+                // its parent when relinking "Samples/Strings/tone.wav".
+                if normalized.hasPrefix(samplesPrefix),
+                   let granted = existingAuthorizedFile(
+                    root.appendingPathComponent(withinSamples)) {
+                    return granted
+                }
+            }
+        }
+        // Basename recovery is useful for relocated legacy libraries, but
+        // only if the match is unambiguous among authorized candidates.
+        var matches: [String: URL] = [:]
+        for root in roots {
+            for candidate in [
+                root.appendingPathComponent(filename),
+                root.appendingPathComponent("Samples")
+                    .appendingPathComponent(filename)
+            ] {
+                if let found = existingAuthorizedFile(candidate) {
+                    matches[found.path] = found
+                }
+            }
+        }
+        if matches.count > 1 {
+            throw ImportError.ambiguousSample(filename)
+        }
+        if let found = matches.values.first { return found }
         throw ImportError.missingSample(filename)
     }
 }

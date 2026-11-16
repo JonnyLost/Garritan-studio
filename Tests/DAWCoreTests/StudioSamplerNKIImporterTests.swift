@@ -295,4 +295,86 @@ final class StudioSamplerNKIImporterTests: XCTestCase {
         ]), in: root)
         XCTAssertThrowsError(try StudioSamplerNKIImporter.preview(source))
     }
+
+    func testNKIKeepsSameNamedSamplesInSeparateInstrumentSections() throws {
+        let root = try temp()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let strings = root.appendingPathComponent("Samples/Strings", isDirectory: true)
+        let brass = root.appendingPathComponent("Samples/Brass", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: strings, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: brass, withIntermediateDirectories: true)
+        let stringsURL = try wav("tone.wav", in: strings)
+        let brassURL = try wav("tone.wav", in: brass)
+        // Keep the files valid WAVs but give them distinct PCM recordings.
+        var brassAudio = try Data(contentsOf: brassURL)
+        brassAudio[60] ^= 0x42
+        try brassAudio.write(to: brassURL, options: .atomic)
+        _ = try wav("tone.wav", in: root) // Wrong basename-only match.
+        let source = try nki(document(zones: [
+            zoneXML(sample: "Samples/Strings/tone.wav",
+                    low: 48, high: 59, loop: false),
+            zoneXML(sample: "Samples/Brass/tone.wav",
+                    low: 60, high: 72, loop: false)
+        ]), in: root)
+
+        let preview = try StudioSamplerNKIImporter.preview(source)
+        XCTAssertEqual(preview.patch.zones.map(\.sampleURL),
+                       [stringsURL, brassURL])
+        let imported = try StudioSamplerNKIImporter.importInstrument(
+            source, into: root.appendingPathComponent("managed"))
+        XCTAssertEqual(Set(imported.patch.zones.map(\.filePath)).count, 2)
+        XCTAssertEqual(try Data(contentsOf: imported.patch.zones[0].sampleURL),
+                       Data(contentsOf: stringsURL))
+        XCTAssertEqual(try Data(contentsOf: imported.patch.zones[1].sampleURL),
+                       Data(contentsOf: brassURL))
+        try StudioSamplerExternalFormatRoundTrip.assertPreserved(
+            imported.patch, in: root, name: "NKI-DuplicateNames")
+    }
+
+    func testNKIExplicitFolderRelinkingUsesOriginalRelativePath() throws {
+        let root = try temp()
+        let external = try temp()
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: external)
+        }
+        let localSamples = root.appendingPathComponent("Samples", isDirectory: true)
+        let strings = external.appendingPathComponent("Strings", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: localSamples, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: strings, withIntermediateDirectories: true)
+        _ = try wav("tone.wav", in: localSamples) // Wrong fallback.
+        let expected = try wav("tone.wav", in: strings)
+        let source = try nki(document(zones: [
+            zoneXML(sample: "Strings/tone.wav", loop: false)
+        ]), in: root)
+
+        let preview = try StudioSamplerNKIImporter.preview(
+            source, samplesRoot: external)
+        XCTAssertEqual(preview.patch.zones[0].sampleURL, expected)
+    }
+
+    func testNKIRefusesAmbiguousBasenameRecovery() throws {
+        let root = try temp()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let samples = root.appendingPathComponent("Samples", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: samples, withIntermediateDirectories: true)
+        _ = try wav("tone.wav", in: root)
+        _ = try wav("tone.wav", in: samples)
+        let source = try nki(document(zones: [
+            zoneXML(sample: "OldArchive/tone.wav", loop: false)
+        ]), in: root)
+        XCTAssertThrowsError(try StudioSamplerNKIImporter.preview(source)) { error in
+            guard case StudioSamplerNKIImporter.ImportError.ambiguousSample(let name)
+                = error else {
+                XCTFail("Expected an ambiguous-sample error, got \(error)")
+                return
+            }
+            XCTAssertEqual(name, "tone.wav")
+        }
+    }
 }
