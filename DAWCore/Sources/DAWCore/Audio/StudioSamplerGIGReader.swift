@@ -3,8 +3,8 @@ import Foundation
 /// Offline, bounded GigaSampler/GigaStudio RIFF/DLS catalog reader.
 ///
 /// GIG region 3lnk dimension links are NOT interchangeable with DLS wlnk.
-/// This first compatibility stage imports only single-dimension, uncompressed
-/// PCM regions, and explicitly rejects other dimensions or compressed waves.
+/// Dimension cases are decoded individually, including velocity, round-robin,
+/// and release triggers. Untranslatable GIG dimensions remain unsupported.
 /// No GPL-licensed libgig code is linked or copied into Studio.
 public enum StudioSamplerGIGReader {
     public struct SampleParameters: Sendable {
@@ -26,13 +26,29 @@ public enum StudioSamplerGIGReader {
         public let parameters: SampleParameters?
     }
 
+    public struct Dimension: Sendable {
+        /// GigaStudio dimension controller code, e.g. velocity 0x82.
+        public let type: UInt8
+        public let bits: UInt8
+        public var zoneCount: Int { 1 << Int(bits) }
+    }
+
+    public struct SampleCase: Sendable {
+        /// A case-specific sample reference; 0xFFFFFFFF is an empty case.
+        public let sampleTableIndex: UInt32?
+        public let parameters: SampleParameters?
+    }
+
     public struct Region: Sendable {
         public let keyLow: UInt8
         public let keyHigh: UInt8
         public let velocityLow: UInt8
         public let velocityHigh: UInt8
         public let sampleTableIndex: UInt32?
+        /// Number of dimension cases; 1 for an undimensioned region.
         public let dimensionCount: UInt32
+        public let dimensions: [Dimension]
+        public let cases: [SampleCase]
         public let parameters: SampleParameters?
         public let warnings: [String]
     }
@@ -339,61 +355,103 @@ public enum StudioSamplerGIGReader {
                     throw GIGError.invalidChunk("region key/velocity range")
                 }
                 var tableIndex: UInt32?
-                var dimensions: UInt32 = 1
+                var dimensionCases: UInt32 = 1
+                var definitions: [Dimension] = []
+                var samples: [UInt32?] = []
                 var regionWarnings: [String] = []
                 if let gigLink = scanner.first("3lnk", in: regionRecords) {
-                    guard gigLink.length >= 48 else { throw GIGError.invalidChunk("3lnk") }
-                    let count = try scanner.read(gigLink.offset, 4)
-                    dimensions = u32(count, 0)
-                    guard dimensions > 0, dimensions <= 32,
-                          dimensions & (dimensions - 1) == 0,
-                          gigLink.length >= 44 + UInt64(dimensions) * 4 else {
-                        throw GIGError.invalidChunk("3lnk dimension count")
+                    // GIG 3lnk has a case count, 5 or 8 eight-byte dimension
+                    // definitions, then a table of per-case sample indices.
+                    // Do not confuse the case count with the number of definitions.
+                    let slots: Int
+                    if gigLink.length == 172 { slots = 5 }
+                    else if gigLink.length >= 196 { slots = 8 }
+                    else { throw GIGError.invalidChunk("3lnk size") }
+                    let data = try scanner.read(gigLink.offset, 4 + slots * 8)
+                    dimensionCases = u32(data, 0)
+                    guard dimensionCases > 0, dimensionCases <= 32,
+                          gigLink.length >= UInt64(4 + slots * 8) +
+                                              UInt64(dimensionCases) * 4 else {
+                        throw GIGError.invalidChunk("3lnk case count")
                     }
-                    if dimensions == 1 {
-                        let cue = try scanner.read(gigLink.offset + 44, 4)
-                        tableIndex = u32(cue, 0)
-                    } else {
-                        regionWarnings.append(
-                            "This region has \(dimensions) GigaStudio dimension cases; conversion is not yet supported.")
+                    var totalBits = 0
+                    var seenTypes = Set<UInt8>()
+                    for i in 0..<slots {
+                        let type = data[4 + i * 8]
+                        let bits = data[5 + i * 8]
+                        if type == 0 {
+                            guard bits == 0 else {
+                                throw GIGError.invalidChunk("unused 3lnk dimension")
+                            }
+                            continue
+                        }
+                        guard bits > 0, bits <= 5, !seenTypes.contains(type),
+                              totalBits + Int(bits) <= 5 else {
+                            throw GIGError.invalidChunk("3lnk dimension definition")
+                        }
+                        totalBits += Int(bits)
+                        seenTypes.insert(type)
+                        definitions.append(Dimension(type: type, bits: bits))
                     }
+                    guard (1 << totalBits) == Int(dimensionCases) else {
+                        throw GIGError.invalidChunk("3lnk dimension mismatch")
+                    }
+                    let refs = try scanner.read(gigLink.offset + UInt64(4 + slots * 8),
+                                                Int(dimensionCases) * 4)
+                    for i in 0..<Int(dimensionCases) {
+                        let cue = u32(refs, i * 4)
+                        samples.append(cue == UInt32.max ? nil : cue)
+                    }
+                    tableIndex = samples.first ?? nil
                 } else if let waveLink = scanner.first("wlnk", in: regionRecords) {
                     guard waveLink.length >= 12 else { throw GIGError.invalidChunk("wlnk") }
                     tableIndex = u32(try scanner.read(waveLink.offset + 8, 4), 0)
+                    samples = [tableIndex]
                     regionWarnings.append("DLS-style sample link without GIG dimension metadata.")
                 } else {
+                    samples = [nil]
                     regionWarnings.append("Region has no GigaStudio sample link.")
                 }
-                var sampleParameters = try parameters(
+                let regionParameters = try parameters(
                     scanner.first("wsmp", in: regionRecords), scanner: scanner)
+                var caseParameters = Array(
+                    repeating: regionParameters, count: Int(dimensionCases))
                 if let programs = try scanner.firstList("3prg", in: regionRecords) {
                     let programRecords = try scanner.children(of: programs)
                     let dimensionChunks = try scanner.lists("3ewl", in: programRecords)
-                    if dimensions == 1, let regionProgram = dimensionChunks.first {
-                        let entries = try scanner.children(of: regionProgram)
-                        sampleParameters = try parameters(
-                            scanner.first("wsmp", in: entries),
-                            scanner: scanner) ?? sampleParameters
-                    } else if dimensions == 1 && dimensionChunks.isEmpty {
-                        regionWarnings.append("Region has no 3ewl articulation parameters.")
-                    }
-                    if !dimensionChunks.isEmpty && UInt32(dimensionChunks.count) != dimensions {
-                        regionWarnings.append("GigaStudio dimension/articulation counts differ.")
+                    if !dimensionChunks.isEmpty {
+                        guard dimensionChunks.count == Int(dimensionCases) else {
+                            throw GIGError.invalidChunk("3prg dimension case count")
+                        }
+                        for (index, dimensionChunk) in dimensionChunks.enumerated() {
+                            let entries = try scanner.children(of: dimensionChunk)
+                            caseParameters[index] = try parameters(
+                                scanner.first("wsmp", in: entries),
+                                scanner: scanner) ?? regionParameters
+                        }
+                    } else {
+                        regionWarnings.append("No 3ewl articulation parameters were found.")
                     }
                 }
-                if let sampleIndex = tableIndex,
-                   (Int(sampleIndex) >= mapping.count ||
-                    mapping[Int(sampleIndex)] == nil) {
-                    regionWarnings.append("Sample pool table reference is missing.")
+                for sampleIndex in samples.compactMap({ $0 }) {
+                    if Int(sampleIndex) >= mapping.count ||
+                        mapping[Int(sampleIndex)] == nil {
+                        regionWarnings.append("Sample pool table reference is missing.")
+                    }
                 }
                 if regionRecords.contains(where: { $0.id == "3lnk" }) {
-                    warnings.insert("GigaStudio articulation, filter and LFO parameters are not fully translated.")
+                    warnings.insert("GigaStudio filter, LFO and controller parameters are not fully translated.")
+                }
+                let cases = (0..<Int(dimensionCases)).map { index in
+                    SampleCase(sampleTableIndex: samples[index],
+                               parameters: caseParameters[index])
                 }
                 regions.append(Region(
                     keyLow: UInt8(lowKey), keyHigh: UInt8(highKey),
                     velocityLow: UInt8(lowVelocity), velocityHigh: UInt8(highVelocity),
-                    sampleTableIndex: tableIndex, dimensionCount: dimensions,
-                    parameters: sampleParameters, warnings: regionWarnings))
+                    sampleTableIndex: tableIndex, dimensionCount: dimensionCases,
+                    dimensions: definitions, cases: cases,
+                    parameters: regionParameters, warnings: regionWarnings))
                 guard regions.count <= 4_096 else { throw GIGError.tooManyEntries }
             }
             instruments.append(Instrument(name: name, bank: bank,
