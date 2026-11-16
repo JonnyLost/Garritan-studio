@@ -55,11 +55,15 @@ public enum StudioSamplerGIGImporter {
         let velocityHigh: UInt8
         let roundRobinIndex: UInt8?
         let isReleaseTrigger: Bool
+        let articulationID: UInt8
     }
 
     private struct Plan {
         let instrument: StudioSamplerGIGReader.Instrument
         let zones: [ZonePlan]
+        let articulations: [StudioSamplerArticulation]
+        let defaultKeyswitchNote: UInt8?
+        let controllerSwitch: StudioSamplerControllerSwitch?
         let warnings: [String]
     }
 
@@ -111,6 +115,8 @@ public enum StudioSamplerGIGImporter {
                     ? StudioSamplerSampleLibrary.managedName(for: output) : nil
                 zone.roundRobinIndex = item.roundRobinIndex
                 zone.isReleaseTrigger = item.isReleaseTrigger ? true : nil
+                zone.articulationID = item.articulationID == 0
+                    ? nil : item.articulationID
                 if !item.isReleaseTrigger,
                    let begin = params?.loopStart, let end = params?.loopEnd {
                     zone.loopStartFrame = begin
@@ -119,7 +125,12 @@ public enum StudioSamplerGIGImporter {
                 guard zone.isValid else { throw ImportError.invalidLoop(wave.name) }
                 zones.append(zone)
             }
-            let patch = StudioSamplerPatch(zones: zones)
+            var patch = StudioSamplerPatch(zones: zones)
+            if !plan.articulations.isEmpty {
+                patch.articulations = plan.articulations
+                patch.defaultKeyswitchNote = plan.defaultKeyswitchNote
+                patch.controllerSwitch = plan.controllerSwitch
+            }
             guard patch.isValid else { throw ImportError.noPlayableRegions }
             // No committed output exists until extraction and mapping succeed.
             for output in outputs.values {
@@ -147,7 +158,27 @@ public enum StudioSamplerGIGImporter {
 
         var plans: [ZonePlan] = []
         var warnings = Set(catalog.warnings)
-        for region in instrument.regions {
+        var selectorType: UInt8?
+        var selectorCount = 0
+        for (regionIndex, region) in instrument.regions.enumerated() {
+            let selectors = region.dimensions.filter {
+                $0.type == 0x85 || $0.type == 0x01 || $0.type == 0x02
+            }
+            guard selectors.count <= 1 else {
+                throw ImportError.unsupportedDimensions(instrument.name)
+            }
+            if regionIndex == 0 {
+                selectorType = selectors.first?.type
+                selectorCount = selectors.first?.zoneCount ?? 0
+            } else if selectors.first?.type != selectorType ||
+                        (selectors.first?.zoneCount ?? 0) != selectorCount {
+                // We cannot share one global articulation/CC state across
+                // regions with contradictory selector dimensions.
+                throw ImportError.unsupportedDimensions(instrument.name)
+            }
+            guard selectorCount <= 16 else {
+                throw ImportError.unsupportedDimensions(instrument.name)
+            }
             for dimension in region.dimensions {
                 switch dimension.type {
                 case 0x82: // velocity split
@@ -158,6 +189,11 @@ public enum StudioSamplerGIGImporter {
                     }
                 case 0x84: // 0 = sustain, 1 = release trigger
                     guard dimension.zoneCount == 2 else {
+                        throw ImportError.unsupportedDimensions(instrument.name)
+                    }
+                case 0x85, 0x01, 0x02: // keyboard, modwheel or breath switch
+                    guard dimension.zoneCount <= 16,
+                          dimension.zoneCount == (1 << Int(dimension.bits)) else {
                         throw ImportError.unsupportedDimensions(instrument.name)
                     }
                 default:
@@ -178,6 +214,7 @@ public enum StudioSamplerGIGImporter {
                 var highVelocity = Int(region.velocityHigh)
                 var roundRobinIndex: UInt8?
                 var isReleaseTrigger = false
+                var articulationID: UInt8 = 0
                 var shift = 0
                 for dimension in region.dimensions {
                     let mask = dimension.zoneCount - 1
@@ -196,6 +233,8 @@ public enum StudioSamplerGIGImporter {
                         roundRobinIndex = UInt8(caseValue)
                     case 0x84:
                         isReleaseTrigger = caseValue == 1
+                    case 0x85, 0x01, 0x02:
+                        articulationID = UInt8(caseValue)
                     default:
                         // Checked above before any disk changes.
                         throw ImportError.unsupportedDimensions(instrument.name)
@@ -232,7 +271,8 @@ public enum StudioSamplerGIGImporter {
                     velocityLow: UInt8(lowVelocity),
                     velocityHigh: UInt8(highVelocity),
                     roundRobinIndex: roundRobinIndex,
-                    isReleaseTrigger: isReleaseTrigger))
+                    isReleaseTrigger: isReleaseTrigger,
+                    articulationID: articulationID))
                 guard plans.count <= 128 else { throw ImportError.tooManyZones }
             }
             for warning in region.warnings { warnings.insert(warning) }
@@ -244,8 +284,53 @@ public enum StudioSamplerGIGImporter {
             }
         }
         guard !plans.isEmpty else { throw ImportError.noPlayableRegions }
-        warnings.insert("GigaStudio filters, crossfades, envelopes, scripts and controllers are not yet fully translated.")
-        return Plan(instrument: instrument, zones: plans, warnings: warnings.sorted())
+        var articulations: [StudioSamplerArticulation] = []
+        var defaultKey: UInt8?
+        var controllerSwitch: StudioSamplerControllerSwitch?
+        if let selectorType {
+            switch selectorType {
+            case 0x85:
+                guard let range = instrument.keyswitchRange,
+                      Int(range.upperBound) - Int(range.lowerBound) + 1 == selectorCount,
+                      !instrument.regions.contains(where: {
+                          $0.keyLow <= range.upperBound &&
+                              $0.keyHigh >= range.lowerBound
+                      }) else {
+                    // Do not guess which notes GIG intended for keyswitches,
+                    // or steal an actual playable key from the instrument.
+                    throw ImportError.unsupportedDimensions(instrument.name)
+                }
+                defaultKey = range.lowerBound
+                for index in 1..<selectorCount {
+                    let note = UInt8(Int(range.lowerBound) + index)
+                    articulations.append(StudioSamplerArticulation(
+                        id: UInt8(index), name: "GIG Keyswitch \(note)",
+                        keyswitchNote: note))
+                }
+            case 0x01, 0x02:
+                let controller: UInt8 = selectorType == 0x01 ? 1 : 2
+                controllerSwitch = StudioSamplerControllerSwitch(
+                    controller: controller,
+                    articulationIDs: (0..<selectorCount).map { UInt8($0) })
+                // The native controller switch consumes CC events, not note
+                // presses. Unique keys are serialization placeholders only.
+                for index in 1..<selectorCount {
+                    articulations.append(StudioSamplerArticulation(
+                        id: UInt8(index),
+                        name: "GIG CC\(controller) Band \(index + 1)",
+                        keyswitchNote: UInt8(127 - index)))
+                }
+                warnings.insert("GigaStudio CC\(controller) dimensions select samples at note-on; exact per-case custom thresholds and modulation are not yet supported.")
+            default:
+                throw ImportError.unsupportedDimensions(instrument.name)
+            }
+        }
+        warnings.insert("GigaStudio filters, crossfades, envelopes, scripts and unconverted controllers are not yet fully translated.")
+        return Plan(instrument: instrument, zones: plans,
+                    articulations: articulations,
+                    defaultKeyswitchNote: defaultKey,
+                    controllerSwitch: controllerSwitch,
+                    warnings: warnings.sorted())
     }
 
     private static func extract(_ wave: StudioSamplerGIGReader.Wave,
