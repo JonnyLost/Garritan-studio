@@ -62,5 +62,20 @@ enum StudioSamplerExternalFormatRoundTrip {
                 at: output, includingPropertiesForKeys: nil).count,
             Set(reopened.zones.map(\.filePath)).count,
             file: file, line: line)
+
+        // The final acceptance boundary is Studio's actual native playback
+        // object, not just a decodable manifest. Construct it without a Mac
+        // audio device and verify that MIDI dispatch can use the reopened
+        // sample mappings. A later full-app milestone will audition audio.
+        let instrument = try StudioSamplerInstrument(
+            sampleRate: 44_100, patch: reopened, voices: 8)
+        let playable = try XCTUnwrap(reopened.zones.first, file: file, line: line)
+        let midiNote = max(playable.lowestNote, min(playable.rootNote, playable.highestNote))
+        let velocity = max(playable.lowestVelocity, min(UInt8(64), playable.highestVelocity))
+        XCTAssertTrue(instrument.noteOn(midiNote, velocity: velocity, channel: 0),
+                      file: file, line: line)
+        XCTAssertTrue(instrument.noteOff(midiNote, channel: 0),
+                      file: file, line: line)
+        XCTAssertTrue(instrument.allNotesOff(), file: file, line: line)
     }
 }
