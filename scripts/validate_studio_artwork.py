@@ -15,6 +15,7 @@ import argparse
 import json
 import re
 import struct
+import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -49,26 +50,74 @@ def enum_cases(source: Path, declaration: str) -> set[str]:
 
 
 def read_png(path: Path) -> dict:
-    # PNG IHDR is at byte 16, following an 8-byte signature and 8-byte chunk
-    # prefix. This avoids PIL/image dependencies in GitHub Actions.
-    with path.open("rb") as fp:
-        header = fp.read(33)
-    if len(header) < 33 or not header.startswith(PNG_SIGNATURE):
-        raise ValueError("invalid or truncated PNG header")
-    if header[12:16] != b"IHDR" or struct.unpack(">I", header[8:12])[0] != 13:
-        raise ValueError("expected PNG IHDR")
-    width, height, depth, color_type, _, _, _ = struct.unpack(">IIBBBBB", header[16:29])
-    if width < MIN_DIMENSION or height < MIN_DIMENSION:
-        raise ValueError(f"too small ({width}x{height}); minimum {MIN_DIMENSION}px")
-    if width > MAX_DIMENSION or height > MAX_DIMENSION:
-        raise ValueError(f"too large ({width}x{height}); maximum {MAX_DIMENSION}px")
-    if width != height:
-        raise ValueError(f"expected square canvas, got {width}x{height}")
-    if color_type != 6 or depth != 8:
-        raise ValueError("expected 8-bit RGBA with transparent-capable pixels")
+    """Verify real PNG structure, CRCs, bounded decoding and artwork size."""
     size = path.stat().st_size
     if size > MAX_BYTES:
         raise ValueError(f"file exceeds {MAX_BYTES // (1024 * 1024)} MiB budget")
+    blob = path.read_bytes()
+    if not blob.startswith(PNG_SIGNATURE):
+        raise ValueError("invalid PNG signature")
+
+    pos = 8
+    seen_header = False
+    seen_end = False
+    idat_parts = []
+    width = height = None
+    while pos + 12 <= len(blob):
+        length = struct.unpack(">I", blob[pos:pos + 4])[0]
+        kind = blob[pos + 4:pos + 8]
+        payload_start = pos + 8
+        payload_end = payload_start + length
+        if payload_end + 4 > len(blob):
+            raise ValueError("truncated PNG chunk")
+        payload = blob[payload_start:payload_end]
+        crc = struct.unpack(">I", blob[payload_end:payload_end + 4])[0]
+        if zlib.crc32(kind + payload) & 0xFFFFFFFF != crc:
+            raise ValueError(f"bad CRC for {kind.decode('ascii', errors='replace')}")
+        if not seen_header and kind != b"IHDR":
+            raise ValueError("PNG must start with IHDR")
+        if kind == b"IHDR":
+            if seen_header or length != 13:
+                raise ValueError("duplicate or invalid PNG IHDR")
+            width, height, depth, color_type, compression, filtering, interlace = (
+                struct.unpack(">IIBBBBB", payload)
+            )
+            if width < MIN_DIMENSION or height < MIN_DIMENSION:
+                raise ValueError(
+                    f"too small ({width}x{height}); minimum {MIN_DIMENSION}px"
+                )
+            if width > MAX_DIMENSION or height > MAX_DIMENSION:
+                raise ValueError(
+                    f"too large ({width}x{height}); maximum {MAX_DIMENSION}px"
+                )
+            if width != height:
+                raise ValueError(f"expected square canvas, got {width}x{height}")
+            if (depth, color_type, compression, filtering, interlace) != (8, 6, 0, 0, 0):
+                raise ValueError("expected non-interlaced 8-bit RGBA PNG")
+            seen_header = True
+        elif kind == b"IDAT":
+            idat_parts.append(payload)
+        elif kind == b"IEND":
+            if length != 0:
+                raise ValueError("invalid PNG end marker")
+            seen_end = True
+            pos = payload_end + 4
+            break
+        pos = payload_end + 4
+
+    if not seen_header or not idat_parts or not seen_end or pos != len(blob):
+        raise ValueError("missing PNG image data, end marker or unexpected trailing data")
+
+    # Bound decompression so damaged or crafted images cannot consume arbitrary
+    # memory in CI. Non-interlaced RGBA has one filter byte per scanline.
+    stride = width * 4
+    expected = height * (stride + 1)
+    decoder = zlib.decompressobj()
+    pixels = decoder.decompress(b"".join(idat_parts), expected + 1)
+    if len(pixels) != expected or not decoder.eof or decoder.unconsumed_tail:
+        raise ValueError("invalid or unexpectedly large PNG pixel data")
+    if any(pixels[row * (stride + 1)] > 4 for row in range(height)):
+        raise ValueError("invalid PNG scanline filter type")
     return {"width": width, "height": height, "bytes": size}
 
 
