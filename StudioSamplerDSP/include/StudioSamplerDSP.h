@@ -159,6 +159,18 @@ int32_t ss_configure_keyswitches(SSSampler *sampler,
 int32_t ss_select_articulation(SSSampler *sampler,
                               uint8_t articulation_id, uint8_t channel);
 
+/* Optional per-instrument stepped articulation selection from MIDI CC1/CC2.
+ * Configured once before first render, no allocations or file I/O on RT.
+ * Controller values 0...127 map to equally sized split intervals.
+ * Calling this is optional and does not affect existing sampler patches.
+ * IDs must be unique 0...15, with first ID 0; two to sixteen bands.
+ * With this enabled the host must NOT install competing keyswitch bindings.
+ */
+int32_t ss_configure_controller_articulations(SSSampler *sampler,
+                                              uint8_t controller,
+                                              const uint8_t *articulation_ids,
+                                              int32_t count);
+
 /* CC1 drives continuous dynamic-layer crossfading when enabled; CC11 drives
  * expression on held notes. Both are smoothed by the audio renderer.
  * The mode is queued and applies to notes started after it is processed.
