@@ -81,6 +81,20 @@ final class StudioSamplerSFZImporterTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(
             at: managed, includingPropertiesForKeys: nil).count, 1)
         XCTAssertEqual(try Data(contentsOf: source), original)
+        // A multi-zone external instrument must remain portable once saved
+        // as Studio's native package, without copying the source twice.
+        let package = root.appendingPathComponent("RoundTrip.studioinstrument")
+        try StudioSamplerInstrumentPackage.export(
+            result.patch,
+            metadata: StudioSamplerInstrumentPackage.Metadata(name: "Imported SFZ"),
+            to: package)
+        let (reloaded, _) = try StudioSamplerInstrumentPackage.load(
+            package, into: root.appendingPathComponent("reloaded"))
+        XCTAssertTrue(reloaded.isValid)
+        XCTAssertEqual(reloaded.zones.map(\.lowestNote), [48, 61])
+        XCTAssertEqual(Set(reloaded.zones.map(\.filePath)).count, 1)
+        XCTAssertEqual(try Data(contentsOf: URL(
+            fileURLWithPath: reloaded.zones[0].filePath)), original)
     }
 
     func testExplicitSFZSamplesRootResolvesMissingRecordingWithoutTraversal() throws {
