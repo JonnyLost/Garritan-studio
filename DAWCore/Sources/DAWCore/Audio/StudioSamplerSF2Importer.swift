@@ -119,8 +119,10 @@ public enum StudioSamplerSF2Importer {
                 zone.trimEndFrame = planned.trimEnd
                 zone.loopStartFrame = planned.loopStart
                 zone.loopEndFrame = planned.loopEnd
-                zone.managedFileName = StudioSamplerSampleLibrary.managedName(
-                    for: output, in: directory)
+                // Portable test/custom destinations keep absolute paths; only the
+                // standard Studio library can use a managed filename.
+                zone.managedFileName = directory == nil
+                    ? StudioSamplerSampleLibrary.managedName(for: output) : nil
                 guard zone.isValid else { throw ImportError.invalidAudio }
                 zones.append(zone)
             }
