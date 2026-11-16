@@ -63,6 +63,7 @@ public struct StudioPictureWorkspaceView: View {
     @State private var newHitName = ""
     @State private var showingNewHit = false
     @State private var showingMovieExport = false
+    @State private var showingPictureRevision = false
     @State private var editingHit: StudioPictureHitPoint?
     @State private var startCodeDraft = ""
     @State private var locateCodeDraft = ""
@@ -120,6 +121,19 @@ public struct StudioPictureWorkspaceView: View {
         .sheet(isPresented: $showingMovieExport) {
             if let picture = viewModel.project.studioPicture {
                 StudioPictureMovieExportView(picture: picture, viewModel: viewModel)
+            }
+        }
+        .sheet(isPresented: $showingPictureRevision) {
+            if let original = viewModel.project.studioPicture {
+                StudioPictureRevisionView(original: original) { revised in
+                    // Do not apply a preview created for an obsolete source.
+                    guard viewModel.project.studioPicture == original else {
+                        session.reportError(
+                            StudioPictureRevisionConformer.ConformError.pictureChanged)
+                        return
+                    }
+                    viewModel.project.studioPicture = revised
+                }
             }
         }
         .sheet(item: $editingHit) { hit in
@@ -517,6 +531,11 @@ public struct StudioPictureWorkspaceView: View {
                         Label("Export Scored Movie…", systemImage: "film.stack")
                     }
                     .buttonStyle(.bordered)
+                    Button("Conform Revised Picture…") {
+                        showingPictureRevision = true
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Match known frames in a new director cut; preview cue shifts before applying")
                     Button("Relink Movie…") { chooseMovie(relink: true) }
                         .buttonStyle(.borderless)
                 }
