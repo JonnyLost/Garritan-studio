@@ -156,6 +156,8 @@ final class StudioSamplerGIGImporterTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: gig), original)
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(
             at: target, includingPropertiesForKeys: nil).count, 1)
+        try StudioSamplerExternalFormatRoundTrip.assertPreserved(
+            imported.patch, in: root, name: "GIG-PCM")
     }
 
     func testGIGSmplWaveMetadataReadsPitchAndLoops() throws {
@@ -233,6 +235,8 @@ final class StudioSamplerGIGImporterTests: XCTestCase {
         XCTAssertEqual(Set(imported.patch.zones.map(\.filePath)).count, 4)
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(
             at: root.appendingPathComponent("managed"), includingPropertiesForKeys: nil).count, 4)
+        try StudioSamplerExternalFormatRoundTrip.assertPreserved(
+            imported.patch, in: root, name: "GIG-Velocity-RR")
     }
 
     func testReleaseDimensionCreatesNoteOffZoneWithoutSustainLoop() throws {
