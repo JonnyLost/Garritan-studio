@@ -192,28 +192,21 @@ struct ChannelStripView: View {
                 .padding(.vertical, 4)
             }
 
-            // Independent Concert Hall send: 0% dry, 100% stage default,
-            // up to 200% for a deliberately wetter mix. No stage relocation.
-            VStack(spacing: 2) {
-                HStack(spacing: 2) {
-                    Text("HALL")
-                        .font(.system(size: 8, weight: .semibold))
-                    Spacer(minLength: 0)
-                    Text("\(Int(((track.stageWetTrim ?? 1) * 100).rounded()))%")
-                        .font(.system(size: 8, design: .monospaced))
-                }
-                Slider(
-                    value: Binding(
-                        get: { Double(track.stageWetTrim ?? 1) },
-                        set: { viewModel.setTrackStageWetTrim(id: track.id, trim: Float($0)) }
-                    ),
-                    in: 0...2
-                )
-                .controlSize(.mini)
-                .accessibilityLabel("Concert Hall send for \(track.name)")
-            }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 4)
+            // Compact Concert Hall send, preserving the existing wet-trim
+            // parameter and its 0...2 range independently of stage depth.
+            StudioParameterKnob(
+                "Hall",
+                value: Binding(
+                    get: { Double(track.stageWetTrim ?? 1) },
+                    set: { viewModel.setTrackStageWetTrim(id: track.id, trim: Float($0)) }
+                ),
+                in: 0...2,
+                tint: StudioGUI.accent,
+                formattedValue: { String(format: "%.0f%%", $0 * 100) }
+            )
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .accessibilityLabel("Concert Hall send for \(track.name)")
 
             // Pan knob
             KnobView(
