@@ -1100,6 +1100,14 @@ public struct VRackView: View {
             }
         }
         .onDisappear { audition.stop() }
+        // Reconcile preview with every filter, including favorites/search/library,
+        // rather than showing details for a patch hidden from the results.
+        .onChange(of: expandedFilteredCatalog.map(\.id)) { _, ids in
+            if !ids.contains(previewInstrumentID ?? "") {
+                audition.stop()
+                previewInstrumentID = ids.first
+            }
+        }
         .onChange(of: familyFilter) { _, _ in
             if !filteredCatalog.contains(where: { $0.id == previewInstrumentID }) {
                 previewInstrumentID = filteredCatalog.first?.id
