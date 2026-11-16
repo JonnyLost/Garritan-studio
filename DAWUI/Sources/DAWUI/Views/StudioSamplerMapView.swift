@@ -30,6 +30,8 @@ public struct StudioSamplerMapView: View {
     @State private var showFactory = false
     @State private var showPackageImporter = false
     @State private var showSFZImporter = false
+    @State private var showSFZSampleFolderImporter = false
+    @State private var pendingSFZURL: URL?
     @State private var showSF2Importer = false
     @State private var showSF2Picker = false
     @State private var sf2Source: URL?
@@ -274,6 +276,22 @@ public struct StudioSamplerMapView: View {
             case .success(let urls):
                 if let url = urls.first { loadPackage(url) }
             case .failure(let error): errorMessage = error.localizedDescription
+            }
+        }
+        .fileImporter(
+            isPresented: $showSFZSampleFolderImporter,
+            allowedContentTypes: [.folder],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                if let folder = urls.first, let source = pendingSFZURL {
+                    pendingSFZURL = nil
+                    importSFZ(source, samplesRoot: folder)
+                }
+            case .failure(let error):
+                pendingSFZURL = nil
+                errorMessage = error.localizedDescription
             }
         }
         .fileImporter(
@@ -658,7 +676,7 @@ public struct StudioSamplerMapView: View {
         }
     }
 
-    private func importSFZ(_ url: URL) {
+    private func importSFZ(_ url: URL, samplesRoot: URL? = nil) {
         guard !isImporting else { return }
         isImporting = true
         errorMessage = nil
@@ -669,14 +687,26 @@ public struct StudioSamplerMapView: View {
             do {
                 let imported = try await Task.detached(priority: .userInitiated) {
                     let access = url.startAccessingSecurityScopedResource()
-                    defer { if access { url.stopAccessingSecurityScopedResource() } }
-                    return try StudioSamplerSFZImporter.importInstrument(url)
+                    let folderAccess = samplesRoot?.startAccessingSecurityScopedResource() ?? false
+                    defer {
+                        if folderAccess { samplesRoot?.stopAccessingSecurityScopedResource() }
+                        if access { url.stopAccessingSecurityScopedResource() }
+                    }
+                    return try StudioSamplerSFZImporter.importInstrument(
+                        url, samplesRoot: samplesRoot)
                 }.value
                 // Keep changes staged: the active instrument changes only after Apply Mapping.
                 draft = imported.patch
                 selectedIndex = 0
                 compatibilityWarnings = imported.warnings
                 saveNotice = "SFZ instrument imported into the mapping draft. Choose Apply Mapping to activate it."
+            } catch StudioSamplerSFZImporter.ImportError.missingSample {
+                if samplesRoot == nil {
+                    pendingSFZURL = url
+                    showSFZSampleFolderImporter = true
+                } else {
+                    errorMessage = "The SFZ instrument still has missing recordings. Choose the folder containing its original samples."
+                }
             } catch {
                 errorMessage = error.localizedDescription
             }
