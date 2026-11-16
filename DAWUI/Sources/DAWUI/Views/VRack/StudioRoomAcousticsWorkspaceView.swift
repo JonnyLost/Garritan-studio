@@ -9,6 +9,9 @@ struct StudioRoomAcousticsWorkspaceView: View {
     @ObservedObject var viewModel: ProjectViewModel
     @State private var selectedTab: Tab = .library
     @State private var arrayToAdd: StudioMicrophoneArrayPreset = .spot
+    @State private var showMicPositionDetails = false
+    @State private var showMicPickupAnalysis = false
+    @State private var showMicMixerAdvanced = false
 
     private enum Tab: String, CaseIterable, Identifiable {
         case library = "Room Library"
@@ -213,11 +216,7 @@ struct StudioRoomAcousticsWorkspaceView: View {
     /// supports only four live microphone channels and sixteen sources.
     private var microphonePanel: some View {
         VStack(alignment: .leading, spacing: 14) {
-            StudioSectionHeading("Virtual Recording Microphones", symbol: "mic.fill")
-            Text("Add and move individual microphone capsules in Stage. Arrays have editable spacing, and the Mic Mixer lets you hear direct sound and simulated spill.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            StudioSectionHeading("Microphone Setup", symbol: "mic.fill")
 
             HStack(spacing: 10) {
                 Picker("Add setup", selection: $arrayToAdd) {
@@ -233,15 +232,14 @@ struct StudioRoomAcousticsWorkspaceView: View {
                           viewModel.audioEngine.isMicrophoneAuditionActive)
                 .accessibilityIdentifier("add-stage-microphones")
                 Spacer()
-                Text("\(microphoneObjects.count)/32 capsules")
-                    .font(.caption2).foregroundStyle(.secondary)
+                Text("\(microphoneObjects.count) / 32 mics")
+                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
 
             if microphoneObjects.isEmpty {
-                Text("No microphone objects yet. Add a spot mic, XY, ORTF, or Decca Tree. The original reverb remains unchanged.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .padding(16)
+                ContentUnavailableView("No Microphones", systemImage: "mic",
+                                       description: Text("Choose a setup above to place microphones on Stage."))
+                    .padding(12)
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 205), spacing: 8)],
                           spacing: 8) {
@@ -304,6 +302,8 @@ struct StudioRoomAcousticsWorkspaceView: View {
                 }
                 .frame(maxWidth: 380, alignment: .leading)
 
+                DisclosureGroup(isExpanded: $showMicPositionDetails) {
+                    VStack(alignment: .leading, spacing: 10) {
                 microphoneCoordinate("Left / Right", keyPath: \.position.xMeters,
                                      limits: (-roomDesign.safeWidth / 2)...(roomDesign.safeWidth / 2))
                 microphoneCoordinate("Front / Back", keyPath: \.position.yMeters,
@@ -315,16 +315,20 @@ struct StudioRoomAcousticsWorkspaceView: View {
                 microphoneCoordinate("Tilt", keyPath: \.elevationDegrees,
                                      limits: -90...90, suffix: "°")
 
-                Text("Positions use meters. Front is y=0; microphones face toward the back of the stage at 0° direction. Drag the mic symbol in Stage to move its horizontal location.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                sourcePickupPreview(microphone: mic)
+                    }
+                    .padding(.top, 8)
+                } label: {
+                    Label("Position and Aiming", systemImage: "scope")
+                        .font(.subheadline.weight(.semibold))
+                }
+                DisclosureGroup(isExpanded: $showMicPickupAnalysis) {
+                    sourcePickupPreview(microphone: mic)
+                        .padding(.top, 8)
+                } label: {
+                    Label("Estimated Pickup", systemImage: "waveform")
+                        .font(.subheadline.weight(.semibold))
+                }
             }
-            Divider()
-            Text("The Mic Mixer offers explicit direct/spill audition for up to four capsules and sixteen sources. Add/remove capsules with audition off; position and pickup changes are live while auditioning. The normal mix remains the default.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
