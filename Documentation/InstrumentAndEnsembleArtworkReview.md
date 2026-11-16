@@ -2,23 +2,23 @@
 
 **Status:** 2026-11-16, `feature/studio-gui-refinement`. This is the review inventory of **code identities**, not a verified complete list of all patches in any Garritan library and not a final collection of approved watercolor assets.
 
-The code currently has **123 base icon identities** (including family fallbacks and generic symbols) and **34 distinct ensemble/section identities** composited from those native vector drawings. The same physical instrument or ensemble icon can be shared across different libraries and articulations.
+The code currently has **144 base icon identities** (including family fallbacks and generic symbols) and **50 distinct ensemble/section identities** composited from those native vector drawings. The same physical instrument or ensemble icon can be shared across different libraries and articulations.
 
 ## Solo instruments and base icons already available in Studio
 
 | Family | Current named identities |
 | --- | --- |
-| Flutes | Piccolo; Concert flute; Alto flute; Bass flute |
-| Double reeds | Oboe; English horn; Bassoon; Contrabassoon |
+| Flutes / world winds | Piccolo; Concert flute; Alto flute; Bass flute; Bansuri; Recorder; Didgeridoo; Bagpipes; Harmonica |
+| Double reeds | Oboe; English horn; Bassoon; Contrabassoon; Duduk; Sarrusophone |
 | Clarinets | Clarinet (general); A clarinet; B-flat clarinet; E-flat clarinet; Alto clarinet; Bass clarinet; Contrabass clarinet |
-| Saxophones | Soprano saxophone; Alto saxophone; Tenor saxophone; Baritone saxophone; Bass saxophone |
+| Saxophones | Sopranino, mezzo-soprano, soprano (straight and curved), C-melody, alto, tenor, baritone, bass, contrabass, subcontrabass saxophones |
 | Horns and trumpets | French horn; Trumpet (general); Piccolo trumpet; C trumpet; B-flat trumpet; Cornet; Flugelhorn |
 | Trombones | Trombone (general); Alto trombone; Bass trombone; Contrabass trombone |
-| Low brass | Euphonium; Baritone horn; Tuba; Contrabass tuba |
+| Low brass and band brass | Euphonium; Baritone horn; Tuba; Contrabass tuba; Mellophone; Tenor horn; Sousaphone; Helicon |
 | Orchestral bowed strings | Violin; Viola; Cello; Double bass |
 | Orchestral & marching percussion | Timpani; Snare drum; Field/marching snare; Marching tenor drums; Concert bass drum; Marching bass drum; Drum-kit kick; Rack tom; Floor tom; Drum kit; Cymbals; Hi-hat; Ride, crash, splash, China, and suspended cymbals; Triangle; Gong; Thunder sheet; Rainstick |
 | Tuned percussion | Xylophone; Vibraphone; Marimba; Glockenspiel; Crotales; Handbells; Mallet percussion (generic); Tubular bells/chimes; Bells (generic) |
-| Auxiliary & hand percussion | Tambourine; Maracas; Castanets; Woodblock; Wind machine; Cowbell; Sleigh bells; Mark tree; Ratchet; Gourd percussion; Claves; Cabasa; Vibraslap; Anvil; Slapstick; Bongos; Congas; Djembe; Tabla; Taiko |
+| Auxiliary & hand percussion | Tambourine; Maracas; Castanets; Woodblock; Wind machine; Cowbell; Sleigh bells; Mark tree; Ratchet; Gourd percussion; Claves; Cabasa; Vibraslap; Anvil; Slapstick; Bongos; Congas; Djembe; Tabla; Taiko; Timbales; Roto toms; Flexatone; Mbira |
 | Plucked strings & basses | Guitar (unspecified); Acoustic guitar; Classical guitar; Electric guitar; Electric bass; Upright bass; Banjo; Mandolin; Ukulele; Harp |
 | Keyboard variants | Piano; Upright piano; Electric piano; Clavinet; Accordion; Celesta; Harpsichord; Organ; Glass armonica |
 | World wind, strings & plucked | Sitar; Oud; Erhu; Koto; Shakuhachi; Pan flute |
@@ -26,7 +26,7 @@ The code currently has **123 base icon identities** (including family fallbacks 
 
 **Important:** All 18 newly separated variants now have independent identities and first-pass vector drawings; several remain visually schematic rather than anatomically approved. A and B-flat clarinets are physically very similar and require subtle scale-accurate artwork. Cornet, flugelhorn and baritone horn are no longer aliases of trumpet/euphonium. Final instrument watercolor illustrations are still pending.
 
-## Section and ensemble artwork implemented (34 code identities)
+## Section and ensemble artwork implemented (50 code identities)
 
 | Family | Implemented section / ensemble identity | Visual composition |
 | --- | --- | --- |
@@ -122,3 +122,10 @@ The new drawings live in `DAWUI/Sources/DAWUI/Views/Shared/StudioInstrumentExpan
 Verification is staged in `Tests/DAWUIWorkflowTests/StudioExpandedInstrumentArtworkTests.swift`; name-only offline bank candidates also expand in `scripts/audit_instrument_artwork.py`. The actual Garritan World Instruments, Jazz & Big Band, and Concert & Marching Band programs have **not** been inventoried; the added variants prepare Studio's artwork taxonomy without claiming complete installed-library coverage.
 
 **Not yet done:** Individual finalized watercolor resources, anatomical approval, exact name mapping against installed bank XML, and small-window visual testing. Existing Mac CI success before this milestone does not establish that the new changes build until their own workflow passes.
+
+
+## Published library expansion — 144 base / 50 ensemble identities
+
+Added **21 physical instrument identities** and **16 additional section/ensemble categories** from official Garritan Jazz & Big Band, Concert & Marching Band, World Instruments and Instant Orchestra published names. The complete per-identity, per-section breakdown and evidence are in [GarritanPublishedLibraryArtworkMilestone.md](GarritanPublishedLibraryArtworkMilestone.md).
+
+Production-image integration is now available: approved PNGs in `Resources/InstrumentArtwork/` are loaded by stable solo/ensemble filenames and cached, with automatic vector fallback in the Instrument Browser. **No approved PNG artwork was bundled** in this milestone. Full installed-bank XML coverage, exact layered preset instrumentation, final anatomical approvals and new macOS CI remain separate gates.
