@@ -3,6 +3,37 @@ import XCTest
 @testable import DAWCore
 
 final class StudioSamplerSFZImporterTests: XCTestCase {
+    private func u16(_ value: UInt16) -> Data {
+        Data([UInt8(truncatingIfNeeded: value),
+              UInt8(truncatingIfNeeded: value >> 8)])
+    }
+    private func u32(_ value: UInt32) -> Data {
+        u16(UInt16(truncatingIfNeeded: value)) +
+        u16(UInt16(truncatingIfNeeded: value >> 16))
+    }
+
+    @discardableResult
+    private func wav(at url: URL) throws -> Data {
+        let frames = 128
+        var data = Data("RIFF".utf8)
+        data.append(u32(UInt32(36 + frames * 2)))
+        data.append(contentsOf: Data("WAVEfmt ".utf8))
+        data.append(u32(16))
+        data.append(u16(1))
+        data.append(u16(1))
+        data.append(u32(44_100))
+        data.append(u32(88_200))
+        data.append(u16(2))
+        data.append(u16(16))
+        data.append(contentsOf: Data("data".utf8))
+        data.append(u32(UInt32(frames * 2)))
+        for frame in 0..<frames {
+            data.append(u16(UInt16(truncatingIfNeeded: frame * 12)))
+        }
+        try data.write(to: url)
+        return data
+    }
+
     func testSFZInheritanceAndNonDestructivePreview() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("sfz-test-\(UUID().uuidString)", isDirectory: true)
@@ -10,7 +41,7 @@ final class StudioSamplerSFZImporterTests: XCTestCase {
         try FileManager.default.createDirectory(at: root.appendingPathComponent("Samples"),
                                                 withIntermediateDirectories: true)
         let sample = root.appendingPathComponent("Samples/tone.wav")
-        try Data([1, 2, 3, 4]).write(to: sample)
+        let originalAudio = try wav(at: sample)
         let sfz = root.appendingPathComponent("test.sfz")
         try """
         <control> default_path=Samples/
@@ -26,7 +57,7 @@ final class StudioSamplerSFZImporterTests: XCTestCase {
         XCTAssertEqual(zone.highestNote, 72)
         XCTAssertEqual(zone.lowestVelocity, 12)
         XCTAssertEqual(zone.highestVelocity, 99)
-        XCTAssertEqual(try Data(contentsOf: sample), Data([1, 2, 3, 4]))
+        XCTAssertEqual(try Data(contentsOf: sample), originalAudio)
     }
 
     func testRepeatedSFZRegionsImportOneManagedSample() throws {
@@ -35,8 +66,7 @@ final class StudioSamplerSFZImporterTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let source = root.appendingPathComponent("tone.wav")
-        let original = Data([0, 1, 2, 3, 4, 5])
-        try original.write(to: source)
+        let original = try wav(at: source)
         let sfz = root.appendingPathComponent("dedupe.sfz")
         try """
         <region> sample=tone.wav lokey=48 hikey=60
@@ -68,7 +98,7 @@ final class StudioSamplerSFZImporterTests: XCTestCase {
             at: audioRoot.appendingPathComponent("Samples"),
             withIntermediateDirectories: true)
         let sample = audioRoot.appendingPathComponent("Samples/tone.wav")
-        try Data([1, 2, 3, 4]).write(to: sample)
+        try wav(at: sample)
         let sfz = instrumentRoot.appendingPathComponent("external.sfz")
         try "<region> sample=Samples/tone.wav".write(
             to: sfz, atomically: true, encoding: .utf8)
@@ -106,6 +136,38 @@ final class StudioSamplerSFZImporterTests: XCTestCase {
         try "<region> sample=sample.wav".write(
             to: sfz, atomically: true, encoding: .utf8)
         XCTAssertThrowsError(try StudioSamplerSFZImporter.preview(sfz))
+    }
+
+    func testSFZRejectsCorruptAudioBeforeCopying() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sfz-bad-audio-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data([1, 2, 3, 4]).write(to: root.appendingPathComponent("bad.wav"))
+        let sfz = root.appendingPathComponent("bad.sfz")
+        try "<region> sample=bad.wav".write(to: sfz,
+                                              atomically: true, encoding: .utf8)
+        let managed = root.appendingPathComponent("managed")
+        XCTAssertThrowsError(try StudioSamplerSFZImporter.importInstrument(
+            sfz, into: managed))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: managed.path))
+    }
+
+    func testSFZLoopMustFitInsideActualRecording() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sfz-invalid-loop-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        _ = try wav(at: root.appendingPathComponent("tone.wav"))
+        let sfz = root.appendingPathComponent("test.sfz")
+        try "<region> sample=tone.wav loop_mode=loop_sustain loop_start=4 loop_end=999"
+            .write(to: sfz, atomically: true, encoding: .utf8)
+        XCTAssertThrowsError(try StudioSamplerSFZImporter.preview(sfz))
+        try "<region> sample=tone.wav loop_mode=loop_sustain loop_start=4 loop_end=50"
+            .write(to: sfz, atomically: true, encoding: .utf8)
+        let valid = try StudioSamplerSFZImporter.preview(sfz)
+        XCTAssertEqual(valid.patch.zones[0].loopStartFrame, 4)
+        XCTAssertEqual(valid.patch.zones[0].loopEndFrame, 51)
     }
 
     func testRejectsParentTraversal() throws {
