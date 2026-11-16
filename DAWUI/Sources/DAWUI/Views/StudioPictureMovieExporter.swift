@@ -1,7 +1,31 @@
 import AVFoundation
+import CoreImage
 import DAWCore
 import Combine
 import Foundation
+
+/// A compatible container/preset pair; the installed macOS codecs determine
+/// which choices are supported for the particular input movie.
+public enum StudioPictureDeliveryFormat: String, CaseIterable, Identifiable {
+    case quickTime
+    case mp4
+    case hevcQuickTime
+
+    public var id: String { rawValue }
+    public var title: String {
+        switch self {
+        case .quickTime: return "QuickTime MOV — High Quality"
+        case .mp4: return "MP4 — High Quality"
+        case .hevcQuickTime: return "QuickTime MOV — HEVC"
+        }
+    }
+    public var fileExtension: String { self == .mp4 ? "mp4" : "mov" }
+    public var fileType: AVFileType { self == .mp4 ? .mp4 : .mov }
+    public var preset: String {
+        self == .hevcQuickTime ? AVAssetExportPresetHEVCHighestQuality
+            : AVAssetExportPresetHighestQuality
+    }
+}
 
 /// Combines an already-rendered Studio WAV with the original picture without
 /// invoking or changing Studio's live audio/MIDI transport.
@@ -27,7 +51,9 @@ public final class StudioPictureMovieExporter: ObservableObject {
                        scoreURL: URL,
                        destination: URL,
                        includeReferenceAudio: Bool,
-                       referenceGain: Float = 0.65) async throws {
+                       referenceGain: Float = 0.65,
+                       format: StudioPictureDeliveryFormat = .quickTime,
+                       burnInTimecode: Bool = false) async throws {
         guard !isExporting else { throw StudioPictureMovieExportError.busy }
         guard picture.durationSeconds.isFinite, picture.durationSeconds > 0,
               picture.timelineStartSeconds.isFinite,
@@ -132,24 +158,41 @@ public final class StudioPictureMovieExporter: ObservableObject {
         }
         audioMix.inputParameters = parameters
 
+        // A selected container must match its filename to avoid delivering a
+        // valid movie under a misleading extension.
+        guard destination.pathExtension.lowercased() == format.fileExtension else {
+            throw StudioPictureMovieExportError.invalidDestinationExtension
+        }
         let stageURL = destination.deletingLastPathComponent()
             .appendingPathComponent(".studio-picture-\(UUID().uuidString)")
-            .appendingPathExtension("mov")
+            .appendingPathExtension(format.fileExtension)
         stagedOutput = stageURL
         defer {
             try? FileManager.default.removeItem(at: stageURL)
             stagedOutput = nil
         }
         guard let session = AVAssetExportSession(
-            asset: composition, presetName: AVAssetExportPresetHighestQuality) else {
+            asset: composition, presetName: format.preset) else {
             throw StudioPictureMovieExportError.cannotCreateSession
         }
-        guard session.supportedFileTypes.contains(.mov) else {
+        guard session.supportedFileTypes.contains(format.fileType) else {
             throw StudioPictureMovieExportError.unsupportedOutput
         }
         session.outputURL = stageURL
-        session.outputFileType = .mov
+        session.outputFileType = format.fileType
         session.audioMix = audioMix
+        if burnInTimecode {
+            // Core Image runs during offline movie export, not Studio's audio
+            // render callback. Burn-in always uses picture-relative SMPTE.
+            session.videoComposition = try await AVMutableVideoComposition.videoComposition(
+                with: composition, applyingCIFiltersWithHandler: { request in
+                    let output = StudioPictureTimecodeBurnIn.render(
+                        source: request.sourceImage,
+                        movieSeconds: request.compositionTime.seconds,
+                        picture: picture)
+                    request.finish(with: output, context: nil)
+                })
+        }
         session.shouldOptimizeForNetworkUse = false
         exporter = session
         status = "Writing scored movie…"
@@ -204,6 +247,7 @@ public enum StudioPictureMovieExportError: LocalizedError {
     case busy, invalidAlignment, destinationConflictsWithSource
     case missingVideo, missingScoreAudio, scoreDoesNotOverlapMovie, invalidReferenceAudio
     case cannotCreateSession, unsupportedOutput, exportFailed, destinationExists
+    case invalidDestinationExtension
 
     public var errorDescription: String? {
         switch self {
@@ -217,7 +261,8 @@ public enum StudioPictureMovieExportError: LocalizedError {
         case .scoreDoesNotOverlapMovie:
             return "The Studio mix ends before the movie starts at its saved picture offset."
         case .cannotCreateSession: return "macOS could not create a movie export session."
-        case .unsupportedOutput: return "This movie cannot be exported as a QuickTime MOV."
+        case .unsupportedOutput: return "This movie or macOS configuration does not support the selected delivery format."
+        case .invalidDestinationExtension: return "Choose a movie filename matching the selected export format."
         case .exportFailed: return "macOS did not complete the scored movie export."
         case .destinationExists: return "A movie already exists at the selected destination."
         }
