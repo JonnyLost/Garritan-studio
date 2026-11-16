@@ -10,9 +10,11 @@ import Foundation
 enum StudioInstrumentGroupArtwork: String, CaseIterable, Equatable {
     case violins, violas, cellos, basses
     case highStrings, lowStrings, strings
-    case flutes, clarinets, saxophones, woodwinds
+    case flutes, oboes, englishHorns, clarinets, bassoons, saxophones
+    case highWoodwinds, lowWoodwinds, woodwinds
     case horns, trumpets, trombones, highBrass, lowBrass, brass
-    case percussion, choir, orchestra, mixedEnsemble
+    case percussion, tunedPercussion, auxiliaryPercussion, drumline
+    case choir, orchestra, mixedEnsemble
 
     var accessibilityLabel: String {
         switch self {
@@ -24,6 +26,11 @@ enum StudioInstrumentGroupArtwork: String, CaseIterable, Equatable {
         case .lowStrings: return "Low strings section"
         case .strings: return "String orchestra"
         case .flutes: return "Flute section"
+        case .oboes: return "Oboe section"
+        case .englishHorns: return "English horn section"
+        case .bassoons: return "Bassoon section"
+        case .highWoodwinds: return "High woodwind ensemble"
+        case .lowWoodwinds: return "Low woodwind ensemble"
         case .clarinets: return "Clarinet section"
         case .saxophones: return "Saxophone section"
         case .woodwinds: return "Woodwind ensemble"
@@ -34,6 +41,9 @@ enum StudioInstrumentGroupArtwork: String, CaseIterable, Equatable {
         case .lowBrass: return "Low brass ensemble"
         case .brass: return "Brass ensemble"
         case .percussion: return "Percussion ensemble"
+        case .tunedPercussion: return "Tuned percussion ensemble"
+        case .auxiliaryPercussion: return "Auxiliary percussion ensemble"
+        case .drumline: return "Marching percussion section"
         case .choir: return "Choir section"
         case .orchestra: return "Full orchestra"
         case .mixedEnsemble: return "Mixed orchestral ensemble"
@@ -68,9 +78,17 @@ enum StudioInstrumentGroupArtwork: String, CaseIterable, Equatable {
         if has(["brass section", "brass ensemble", "full brass", "brass tutti",
                 "all brass", "brass choir"]) { return .brass }
 
+        if has(["high winds", "high woodwinds", "upper woodwinds"]) { return .highWoodwinds }
+        if has(["low winds", "low woodwinds", "lower woodwinds"]) { return .lowWoodwinds }
         if has(["woodwind section", "woodwind ensemble", "wind ensemble",
                 "full woodwinds", "all woodwinds", "winds tutti",
                 "high winds", "low winds", "mixed woodwinds"]) { return .woodwinds }
+        if has(["tuned percussion", "mallet section", "mallet ensemble",
+                "pit percussion section"]) { return .tunedPercussion }
+        if has(["auxiliary percussion", "percussion accessories",
+                "accessory percussion section"]) { return .auxiliaryPercussion }
+        if has(["drumline", "drum line", "marching battery",
+                "marching percussion", "tenor drum section"]) { return .drumline }
         if has(["percussion section", "percussion ensemble",
                 "percussion accessories", "full percussion",
                 "orchestral percussion", "marching percussion"]) { return .percussion }
@@ -101,6 +119,10 @@ enum StudioInstrumentGroupArtwork: String, CaseIterable, Equatable {
                  "bass drum", "bassoon", "bass brass"]) { return .basses }
 
         if has(["flutes", "flute section", "flute ensemble"]) { return .flutes }
+        if has(["english horn section", "english horn ensemble",
+                "cor anglais section"]) { return .englishHorns }
+        if has(["oboes", "oboe section", "oboe ensemble"]) { return .oboes }
+        if has(["bassoons", "bassoon section", "bassoon ensemble"]) { return .bassoons }
         if has(["clarinets", "clarinet section", "clarinet ensemble"]) { return .clarinets }
         if has(["saxophones", "saxes", "sax section", "saxophone section",
                 "sax ensemble"]) { return .saxophones }
@@ -117,6 +139,9 @@ enum StudioInstrumentGroupArtwork: String, CaseIterable, Equatable {
             if has(["cello", "violoncello"]) { return .cellos }
             if has(["double bass", "contrabass"]) { return .basses }
             if has(["flute"]) { return .flutes }
+            if has(["english horn", "cor anglais"]) { return .englishHorns }
+            if has(["oboe"]) { return .oboes }
+            if has(["bassoon"]) { return .bassoons }
             if has(["clarinet"]) { return .clarinets }
             if has(["sax"]) { return .saxophones }
             if has(["french horn", "horn"]) { return .horns }
