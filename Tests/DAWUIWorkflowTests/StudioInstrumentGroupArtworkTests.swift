@@ -34,6 +34,7 @@ final class StudioInstrumentGroupArtworkTests: XCTestCase {
             ("String Orchestra", .strings),
             ("Oboe Section", .oboes),
             ("English Horn Section", .englishHorns),
+            ("English Horns", .englishHorns),
             ("Bassoon Section", .bassoons),
             ("High Winds", .highWoodwinds),
             ("Low Winds", .lowWoodwinds),
