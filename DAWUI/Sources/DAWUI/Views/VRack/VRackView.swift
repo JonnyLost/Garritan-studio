@@ -151,6 +151,23 @@ public struct VRackView: View {
     @StateObject private var audition = BrowserAudition()
     @State private var previewInstrumentID: String?
     @State private var instrumentTypeFilter = "All"
+    @State private var showingFavoritesOnly = false
+    @AppStorage("studio.instrumentBrowser.favoriteIDs") private var favoriteIDsData = Data()
+
+    private var favoriteInstrumentIDs: Set<String> {
+        (try? JSONDecoder().decode(Set<String>.self, from: favoriteIDsData)) ?? []
+    }
+
+    private func toggleFavorite(_ instrument: DrawerInstrument) {
+        var favorites = favoriteInstrumentIDs
+        if !favorites.insert(instrument.id).inserted {
+            favorites.remove(instrument.id)
+        }
+        if let encoded = try? JSONEncoder().encode(favorites) {
+            favoriteIDsData = encoded
+        }
+    }
+
 
 
     public init(viewModel: ProjectViewModel, openStageWorkspace: (() -> Void)? = nil,
@@ -349,7 +366,8 @@ public struct VRackView: View {
 
     private var expandedFilteredCatalog: [DrawerInstrument] {
         filteredCatalog.filter {
-            instrumentTypeFilter == "All" || $0.instrumentType == instrumentTypeFilter
+            (instrumentTypeFilter == "All" || $0.instrumentType == instrumentTypeFilter) &&
+            (!showingFavoritesOnly || favoriteInstrumentIDs.contains($0.id))
         }
     }
 
