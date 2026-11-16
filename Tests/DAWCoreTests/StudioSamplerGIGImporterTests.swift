@@ -34,7 +34,8 @@ final class StudioSamplerGIGImporterTests: XCTestCase {
     private func fixture(in root: URL, dimensions: UInt32 = 1,
                          format: UInt16 = 1, gigSampleInfo: Bool = false,
                          definitions: [(UInt8, UInt8)] = [],
-                         keyswitchRange: ClosedRange<UInt8>? = nil) throws -> URL {
+                         keyswitchRange: ClosedRange<UInt8>? = nil,
+                         explicitFirstDimensionZones: UInt8 = 0) throws -> URL {
         let sampleFrames: [Int16] = [0, 1000, -1000, 250, -250,
                                      300, -300, 900, -900, 0, 0, 0]
         let fmt = u16(format) + u16(1) + u32(22_050) +
@@ -75,7 +76,8 @@ final class StudioSamplerGIGImporterTests: XCTestCase {
                 dimensionHeader.append(bits)
                 dimensionHeader.append(UInt8(dimensionBitPosition))
                 dimensionHeader.append(0) // dimension bit mask (unused by reader)
-                dimensionHeader.append(0) // 0 means exactly 2^bits zones
+                dimensionHeader.append(index == 0
+                    ? explicitFirstDimensionZones : 0) // 0 means 2^bits zones
                 dimensionHeader.append(Data(repeating: 0, count: 3))
                 dimensionBitPosition += Int(bits)
             } else {
@@ -320,6 +322,23 @@ final class StudioSamplerGIGImporterTests: XCTestCase {
             }
             XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
         }
+    }
+
+    func testNonPowerOfTwoDeclaredControllerSplitsFailSafely() throws {
+        let root = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try fixture(in: root, dimensions: 4,
+            definitions: [(0x01, 2)], explicitFirstDimensionZones: 3)
+        let catalog = try StudioSamplerGIGReader.inspect(source)
+        XCTAssertEqual(catalog.instruments[0].regions[0].dimensions[0].zoneCount, 3)
+        let destination = root.appendingPathComponent("managed")
+        XCTAssertThrowsError(try StudioSamplerGIGImporter.importInstrument(
+            source, instrumentIndex: 0, into: destination)) { error in
+            guard case StudioSamplerGIGImporter.ImportError.unsupportedDimensions = error else {
+                return XCTFail("Expected safe rejection of irregular controller bands")
+            }
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
     }
 
     func testMalformedDimensionDefinitionsRejectedBeforeSampleIO() throws {
