@@ -37,6 +37,9 @@ public struct StudioSamplerMapView: View {
     @State private var sf2Source: URL?
     @State private var sf2Presets: [StudioSamplerSF2Reader.Preset] = []
     @State private var selectedSF2PresetIndex = 0
+    @State private var showNKIImporter = false
+    @State private var showNKISampleFolderImporter = false
+    @State private var pendingNKIURL: URL?
     @State private var showEXSImporter = false
     @State private var showEXSSampleFolderImporter = false
     @State private var pendingEXSURL: URL?
@@ -88,6 +91,7 @@ public struct StudioSamplerMapView: View {
                     Button("Import SoundFont 2 (.sf2)…") { showSF2Importer = true }
                     Button("Import GigaStudio (.gig)…") { showGIGImporter = true }
                     Button("Import Logic EXS24 (.exs)…") { showEXSImporter = true }
+                    Button("Import Kontakt Instrument (.nki)…") { showNKIImporter = true }
                     Divider()
                     Button("Save to Studio Library…") { beginSaving(export: false) }
                         .disabled(draft?.isValid != true)
@@ -333,6 +337,33 @@ public struct StudioSamplerMapView: View {
             }
         }
         .fileImporter(
+            isPresented: $showNKISampleFolderImporter,
+            allowedContentTypes: [.folder],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                if let folder = urls.first, let source = pendingNKIURL {
+                    pendingNKIURL = nil
+                    importNKI(source, samplesRoot: folder)
+                }
+            case .failure(let error):
+                pendingNKIURL = nil
+                errorMessage = error.localizedDescription
+            }
+        }
+        .fileImporter(
+            isPresented: $showNKIImporter,
+            allowedContentTypes: [UTType(filenameExtension: "nki") ?? .data],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                if let url = urls.first { importNKI(url) }
+            case .failure(let error): errorMessage = error.localizedDescription
+            }
+        }
+        .fileImporter(
             isPresented: $showEXSImporter,
             allowedContentTypes: [UTType(filenameExtension: "exs") ?? .data],
             allowsMultipleSelection: false
@@ -526,6 +557,43 @@ public struct StudioSamplerMapView: View {
                 } catch {
                     errorMessage = error.localizedDescription
                 }
+            }
+        }
+    }
+
+    private func importNKI(_ url: URL, samplesRoot: URL? = nil) {
+        guard !isImporting else { return }
+        isImporting = true
+        errorMessage = nil
+        saveNotice = nil
+        compatibilityWarnings = []
+        Task { @MainActor in
+            defer { isImporting = false }
+            do {
+                let imported = try await Task.detached(priority: .userInitiated) {
+                    let access = url.startAccessingSecurityScopedResource()
+                    let folderAccess = samplesRoot?.startAccessingSecurityScopedResource() ?? false
+                    defer {
+                        if folderAccess { samplesRoot?.stopAccessingSecurityScopedResource() }
+                        if access { url.stopAccessingSecurityScopedResource() }
+                    }
+                    return try StudioSamplerNKIImporter.importInstrument(
+                        url, samplesRoot: samplesRoot)
+                }.value
+                draft = imported.patch
+                selectedIndex = 0
+                instrumentName = imported.name
+                compatibilityWarnings = imported.warnings
+                saveNotice = "Imported Kontakt instrument \(imported.name). Choose Apply Mapping to activate it."
+            } catch StudioSamplerNKIImporter.ImportError.missingSample {
+                if samplesRoot == nil {
+                    pendingNKIURL = url
+                    showNKISampleFolderImporter = true
+                } else {
+                    errorMessage = "A Kontakt sample is still missing. Choose the folder containing its original WAV/AIFF recordings."
+                }
+            } catch {
+                errorMessage = error.localizedDescription
             }
         }
     }
