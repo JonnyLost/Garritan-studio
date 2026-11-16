@@ -21,6 +21,9 @@ public struct StudioInstrumentArtworkCard: View {
     }
 
     public var body: some View {
+        let artworkLabel = StudioInstrumentGroupArtwork.resolve(
+            name: name, path: path, category: category
+        )?.accessibilityLabel ?? name
         GeometryReader { geometry in
             let compact = geometry.size.width < 190
             ZStack {
@@ -65,6 +68,6 @@ public struct StudioInstrumentArtworkCard: View {
         }
         .frame(height: height)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Instrument illustration: \(name)")
+        .accessibilityLabel("Instrument illustration: \(artworkLabel)")
     }
 }
