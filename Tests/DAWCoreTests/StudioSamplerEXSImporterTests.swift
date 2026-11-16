@@ -194,6 +194,8 @@ final class StudioSamplerEXSImporterTests: XCTestCase {
         let output = try StudioSamplerEXSImporter.importInstrument(
             source, into: root.appendingPathComponent("managed"))
         XCTAssertEqual(output.patch.zones.map(\.roundRobinIndex), [0, 1])
+        try StudioSamplerExternalFormatRoundTrip.assertPreserved(
+            output.patch, in: root, name: "EXS-RoundRobin")
     }
 
     func testKeySelectedGroupsPreserveActualKeyswitchNotes() throws {
@@ -228,6 +230,10 @@ final class StudioSamplerEXSImporterTests: XCTestCase {
         let encoded = try JSONEncoder().encode(result.patch)
         let restored = try JSONDecoder().decode(StudioSamplerPatch.self, from: encoded)
         XCTAssertEqual(restored.controllerSwitch, result.patch.controllerSwitch)
+        let imported = try StudioSamplerEXSImporter.importInstrument(
+            source, into: root.appendingPathComponent("managed"))
+        try StudioSamplerExternalFormatRoundTrip.assertPreserved(
+            imported.patch, in: root, name: "EXS-CC1")
     }
 
     func testIrregularEXSCCThresholdsAreRejectedWithoutCopying() throws {
