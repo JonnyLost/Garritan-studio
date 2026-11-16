@@ -119,7 +119,7 @@ public struct StudioPictureWorkspaceView: View {
         }
         .sheet(isPresented: $showingMovieExport) {
             if let picture = viewModel.project.studioPicture {
-                StudioPictureMovieExportView(picture: picture)
+                StudioPictureMovieExportView(picture: picture, viewModel: viewModel)
             }
         }
         .sheet(item: $editingHit) { hit in
