@@ -30,7 +30,12 @@ public struct StudioSamplerMapView: View {
     @State private var showFactory = false
     @State private var showPackageImporter = false
     @State private var showSFZImporter = false
-    @State private var sfzWarnings: [String] = []
+    @State private var showSF2Importer = false
+    @State private var showSF2Picker = false
+    @State private var sf2Source: URL?
+    @State private var sf2Presets: [StudioSamplerSF2Reader.Preset] = []
+    @State private var selectedSF2PresetIndex = 0
+    @State private var compatibilityWarnings: [String] = []
     @State private var showSaveSheet = false
     @State private var exportInsteadOfSave = false
     @State private var instrumentName = "New Instrument"
@@ -70,6 +75,7 @@ public struct StudioSamplerMapView: View {
                     Button("Browse Instrument Library…") { showLibrary = true }
                     Button("Import .studioinstrument…") { showPackageImporter = true }
                     Button("Import SFZ Instrument…") { showSFZImporter = true }
+                    Button("Import SoundFont 2 (.sf2)…") { showSF2Importer = true }
                     Divider()
                     Button("Save to Studio Library…") { beginSaving(export: false) }
                         .disabled(draft?.isValid != true)
@@ -188,9 +194,9 @@ public struct StudioSamplerMapView: View {
                 }
             }
 
-            if !sfzWarnings.isEmpty {
-                DisclosureGroup("SFZ compatibility notes (\(sfzWarnings.count))") {
-                    ForEach(sfzWarnings, id: \.self) { warning in
+            if !compatibilityWarnings.isEmpty {
+                DisclosureGroup("Instrument compatibility notes (\(compatibilityWarnings.count))") {
+                    ForEach(compatibilityWarnings, id: \.self) { warning in
                         Text(warning).font(.caption).foregroundStyle(.orange)
                     }
                 }
@@ -270,6 +276,51 @@ public struct StudioSamplerMapView: View {
                 if let url = urls.first { importSFZ(url) }
             case .failure(let error): errorMessage = error.localizedDescription
             }
+        }
+        .fileImporter(
+            isPresented: $showSF2Importer,
+            allowedContentTypes: [UTType(filenameExtension: "sf2") ?? .data],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                if let url = urls.first { inspectSF2(url) }
+            case .failure(let error): errorMessage = error.localizedDescription
+            }
+        }
+        .sheet(isPresented: $showSF2Picker) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Import SoundFont Preset").font(.title3.weight(.semibold))
+                Text("Choose one SoundFont preset to convert into a native, editable Studio instrument.")
+                    .font(.callout).foregroundStyle(.secondary)
+                Picker("Preset", selection: $selectedSF2PresetIndex) {
+                    ForEach(sf2Presets.indices, id: \.self) { index in
+                        let preset = sf2Presets[index]
+                        Text("\(preset.name) · Bank \(preset.bank), Program \(preset.program)")
+                            .tag(index)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                Text("Samples will be copied into Studio's library. Unsupported SoundFont modulation and effects will be reported.")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Button("Cancel") {
+                        showSF2Picker = false
+                        sf2Source = nil
+                    }
+                    Spacer()
+                    Button("Import Selected Preset") {
+                        guard let source = sf2Source else { return }
+                        showSF2Picker = false
+                        sf2Source = nil
+                        importSF2(source, presetIndex: selectedSF2PresetIndex)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!sf2Presets.indices.contains(selectedSF2PresetIndex))
+                }
+            }
+            .padding(20)
+            .frame(width: 500)
         }
         .sheet(isPresented: $showLibrary) {
             StudioSamplerLibraryBrowser(onChoose: { url in loadPackage(url) })
@@ -379,12 +430,65 @@ public struct StudioSamplerMapView: View {
         }
     }
 
+    private func inspectSF2(_ url: URL) {
+        guard !isImporting else { return }
+        isImporting = true
+        errorMessage = nil
+        saveNotice = nil
+        Task { @MainActor in
+            defer { isImporting = false }
+            do {
+                let catalog = try await Task.detached(priority: .userInitiated) {
+                    let access = url.startAccessingSecurityScopedResource()
+                    defer { if access { url.stopAccessingSecurityScopedResource() } }
+                    return try StudioSamplerSF2Reader.inspect(url)
+                }.value
+                guard !catalog.presets.isEmpty else {
+                    errorMessage = "The selected SoundFont contains no presets."
+                    return
+                }
+                sf2Source = url
+                sf2Presets = catalog.presets
+                selectedSF2PresetIndex = 0
+                showSF2Picker = true
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func importSF2(_ url: URL, presetIndex: Int) {
+        guard !isImporting else { return }
+        isImporting = true
+        errorMessage = nil
+        saveNotice = nil
+        compatibilityWarnings = []
+        Task { @MainActor in
+            defer { isImporting = false }
+            do {
+                let imported = try await Task.detached(priority: .userInitiated) {
+                    let access = url.startAccessingSecurityScopedResource()
+                    defer { if access { url.stopAccessingSecurityScopedResource() } }
+                    return try StudioSamplerSF2Importer.importInstrument(
+                        url, presetIndex: presetIndex)
+                }.value
+                draft = imported.patch
+                selectedIndex = 0
+                instrumentName = imported.preset.name
+                compatibilityWarnings = imported.warnings
+                saveNotice = "Imported SoundFont preset \(imported.preset.name). Choose Apply Mapping to activate it."
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
     private func importSFZ(_ url: URL) {
         guard !isImporting else { return }
         isImporting = true
         errorMessage = nil
         saveNotice = nil
-        sfzWarnings = []
+        compatibilityWarnings = []
         Task { @MainActor in
             defer { isImporting = false }
             do {
@@ -396,7 +500,7 @@ public struct StudioSamplerMapView: View {
                 // Keep changes staged: the active instrument changes only after Apply Mapping.
                 draft = imported.patch
                 selectedIndex = 0
-                sfzWarnings = imported.warnings
+                compatibilityWarnings = imported.warnings
                 saveNotice = "SFZ instrument imported into the mapping draft. Choose Apply Mapping to activate it."
             } catch {
                 errorMessage = error.localizedDescription
