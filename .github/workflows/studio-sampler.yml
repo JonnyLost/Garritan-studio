@@ -61,6 +61,8 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+      - name: Validate local artwork resource contract
+        run: python3 scripts/validate_studio_artwork.py
       - name: Resolve Swift packages
         run: swift package resolve
       - name: Build all Swift targets
