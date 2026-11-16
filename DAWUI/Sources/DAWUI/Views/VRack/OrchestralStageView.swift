@@ -9,6 +9,8 @@ struct OrchestralStageView: View {
     var expanded: Bool = false
     @State private var dragOrigins: [TrackID: CGPoint] = [:]
     @State private var microphoneDragOrigins: [UUID: CGPoint] = [:]
+    @State private var showZoneLegend = false
+    @State private var showAdvancedStageControls = false
 
     private var microphones: [StudioVirtualMicrophone] {
         viewModel.project.dawState.virtualMicrophones ?? []
@@ -64,8 +66,7 @@ struct OrchestralStageView: View {
                     .disabled(microphones.count >= 32)
                     .font(.caption)
                 }
-                Text("Drag instruments to set pan/depth, or microphones to set their 3D floor position.")
-                    .font(.caption).foregroundStyle(.secondary)
+                // The seating diagram is the primary interaction surface.
 
                 GeometryReader { proxy in
                     stageCanvas(width: proxy.size.width)
@@ -82,7 +83,7 @@ struct OrchestralStageView: View {
                 selectedTrackControls
                 selectedMicrophoneControls
 
-                Text("Instrument and microphone positions are saved with the project. Configure pickup patterns in Rooms → Microphones.")
+                Text("Drag to position · Select to edit")
                     .font(.caption2).foregroundStyle(.secondary)
             }
             .padding(12)
@@ -98,10 +99,9 @@ struct OrchestralStageView: View {
                     HStack {
                         StudioSectionHeading("Orchestra Seating", symbol: "music.note.list")
                         Spacer()
-                        Text("CONCERT HALL")
-                            .font(.system(size: 10, weight: .medium))
-                            .tracking(1.5)
-                            .foregroundStyle(.secondary)
+                        Label("Concert Hall", systemImage: "waveform.path")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(palette.secondaryText)
                         Picker("Stage Layout", selection: layoutBinding) {
                             ForEach(StageLayout.allCases) { layout in
                                 Text(layout.rawValue).tag(layout)
@@ -112,14 +112,20 @@ struct OrchestralStageView: View {
                     }
                     HStack {
                         Spacer()
-                        Button("Auto Arrange") { autoArrangeTracks() }
-                            .disabled(instrumentTracks.isEmpty)
-                            .help("Place recognized instruments in the selected seating template")
-                        Button("Add Spot Mic") {
+                        Button {
+                            autoArrangeTracks()
+                        } label: {
+                            Label("Arrange", systemImage: "square.grid.3x3")
+                        }
+                        .disabled(instrumentTracks.isEmpty)
+                        .help("Auto arrange recognized instruments in the selected seating layout")
+                        Button {
                             viewModel.addVirtualMicrophoneArray(.spot)
+                        } label: {
+                            Label("Spot Mic", systemImage: "mic.badge.plus")
                         }
                         .disabled(microphones.count >= 32)
-                        .help("Add a movable microphone. Use Rooms → Mic Mixer to audition its capture.")
+                        .help("Add a movable spot mic; configure capture in Rooms")
                     }
                     .font(.caption)
                     fittedCurvedStage(
@@ -144,28 +150,27 @@ struct OrchestralStageView: View {
                     selectedTrackControls
                     selectedMicrophoneControls
                     Divider()
-                    Text("REVERB ZONES")
-                        .font(.system(size: 10, weight: .semibold))
-                        .tracking(1.2)
-                        .foregroundStyle(.secondary)
-                    ForEach(1...5, id: \.self) { zone in
-                        HStack(spacing: 9) {
-                            Circle()
-                                .fill(zoneColor(zone))
-                                .frame(width: 9, height: 9)
-                            Text("L\(zone)")
-                                .font(.caption.weight(.semibold))
-                                .frame(width: 24, alignment: .leading)
-                            Text(zoneDescription(zone))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                    DisclosureGroup(isExpanded: $showZoneLegend) {
+                        VStack(alignment: .leading, spacing: 7) {
+                            ForEach(1...5, id: \.self) { zone in
+                                HStack(spacing: 9) {
+                                    Circle()
+                                        .fill(zoneColor(zone))
+                                        .frame(width: 9, height: 9)
+                                    Text("L\(zone)")
+                                        .font(.caption.weight(.semibold))
+                                        .frame(width: 24, alignment: .leading)
+                                    Text(zoneDescription(zone))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
                         }
+                        .padding(.top, 8)
+                    } label: {
+                        Label("Depth Zones", systemImage: "square.3.layers.3d")
+                            .font(.system(size: 12, weight: .semibold))
                     }
-                    Divider()
-                    Text("All instruments share one Concert Hall. Stage position controls stereo placement, distance and ambience.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
                   }
                   .padding(14)
                   .frame(maxWidth: .infinity, alignment: .leading)
@@ -759,10 +764,9 @@ struct OrchestralStageView: View {
             Text(String(format: "x: %.2f m   y: %.2f m   height: %.2f m",
                         mic.position.xMeters, mic.position.yMeters, mic.position.zMeters))
                 .font(.caption.monospacedDigit())
-            Text("Drag to move across the stage. Use Rooms → Microphones for height, aiming and pickup, then Rooms → Mic Mixer to audition direct sound and spill.")
+            Text("Pickup and audition controls are in Rooms.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -787,9 +791,7 @@ struct OrchestralStageView: View {
                     Text("L\(zone)").tag(zone)
                 }
             }
-            Text("Moving the instrument changes its direct level and hall send.")
-                .font(.caption2).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            // The direct and hall-send bindings remain unchanged.
             VStack(alignment: .leading, spacing: 5) {
                 HStack {
                     Text("Instrument Wet")
@@ -800,21 +802,22 @@ struct OrchestralStageView: View {
                 Slider(value: wetLevelBinding(for: id), in: 0...1)
                     .disabled(track.stageReverbZone == 0)
             }
-            Text("The wet level follows stage movement; adjust it to fine-tune the instrument.")
-                .font(.caption2).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            VStack(alignment: .leading, spacing: 5) {
-                HStack {
-                    Text("Overall Reverb")
-                    Spacer()
-                    Text("\(Int(viewModel.audioEngine.concertHallOverallReverb * 100))%")
-                        .monospacedDigit()
+            DisclosureGroup(isExpanded: $showAdvancedStageControls) {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack {
+                        Text("Overall Reverb")
+                        Spacer()
+                        Text("\(Int(viewModel.audioEngine.concertHallOverallReverb * 100))%")
+                            .monospacedDigit()
+                    }
+                    Slider(value: overallReverbBinding, in: 0...2)
+                        .accessibilityLabel("Overall Concert Hall reverb")
                 }
-                Slider(value: overallReverbBinding, in: 0...2)
+                .padding(.top, 8)
+            } label: {
+                Label("Hall Controls", systemImage: "slider.horizontal.3")
+                    .font(.system(size: 12, weight: .medium))
             }
-            Text("Overall Reverb affects the entire Concert Hall.")
-                .font(.caption2).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
         } else {
             Text("Select a MIDI or instrument track to edit its stage position.")
                 .font(.caption).foregroundStyle(.secondary)
