@@ -62,7 +62,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Validate local artwork resource contract
-        run: python3 scripts/validate_studio_artwork.py
+        run: python3 scripts/validate_studio_artwork.py --report "$RUNNER_TEMP/studio-artwork-inventory.json"
+      - name: Upload complete artwork identity inventory
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-artwork-inventory
+          path: ${{ runner.temp }}/studio-artwork-inventory.json
+          if-no-files-found: ignore
       - name: Resolve Swift packages
         run: swift package resolve
       - name: Build all Swift targets
