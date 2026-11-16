@@ -83,8 +83,7 @@ public enum StudioSamplerEXSImporter {
                     throw ImportError.invalidZone("missing group \(id)")
                 }
                 if stored.mute || stored.enableByType != 0 ||
-                    (stored.roundRobinPosition != -1 &&
-                     stored.roundRobinPosition != 0) ||
+                    stored.roundRobinPosition != -1 ||
                     stored.velocityCrossfade != 0 ||
                     stored.keyCrossfade != 0 {
                     throw ImportError.unsupportedBehavior(
