@@ -130,6 +130,8 @@ final class StudioSamplerSF2ImporterTests: XCTestCase {
         let imported = try FileManager.default.contentsOfDirectory(
             at: destination, includingPropertiesForKeys: nil)
         XCTAssertEqual(imported.count, 1)
+        try StudioSamplerExternalFormatRoundTrip.assertPreserved(
+            result.patch, in: root, name: "SF2-Mono")
     }
 
     func testLinkedStereoExtractsInterleavedTwoChannelWave() throws {
@@ -143,6 +145,8 @@ final class StudioSamplerSF2ImporterTests: XCTestCase {
         XCTAssertEqual(wav.count, 44 + 12 * 4)
         XCTAssertEqual(Array(wav[22..<24]), [2, 0])
         XCTAssertEqual(Array(wav[48..<52]), [0xE8, 0x03, 0x18, 0xFC])
+        try StudioSamplerExternalFormatRoundTrip.assertPreserved(
+            result.patch, in: root, name: "SF2-Stereo")
     }
 
     func testInvalidSampleReferenceDoesNotInstallAnything() throws {
