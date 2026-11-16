@@ -14,6 +14,7 @@ enum StudioInstrumentGroupArtwork: String, CaseIterable, Equatable {
     case highWoodwinds, lowWoodwinds, woodwinds
     case horns, trumpets, trombones, highBrass, lowBrass, brass
     case percussion, tunedPercussion, auxiliaryPercussion, drumline
+    case guitarSection, rhythmSection, worldPercussion, concertBand, marchingBand
     case choir, orchestra, mixedEnsemble
 
     var accessibilityLabel: String {
@@ -44,6 +45,11 @@ enum StudioInstrumentGroupArtwork: String, CaseIterable, Equatable {
         case .tunedPercussion: return "Tuned percussion ensemble"
         case .auxiliaryPercussion: return "Auxiliary percussion ensemble"
         case .drumline: return "Marching percussion section"
+        case .guitarSection: return "Guitar section"
+        case .rhythmSection: return "Rhythm section"
+        case .worldPercussion: return "World percussion ensemble"
+        case .concertBand: return "Concert band"
+        case .marchingBand: return "Marching band"
         case .choir: return "Choir section"
         case .orchestra: return "Full orchestra"
         case .mixedEnsemble: return "Mixed orchestral ensemble"
@@ -59,6 +65,16 @@ enum StudioInstrumentGroupArtwork: String, CaseIterable, Equatable {
         func has(_ terms: [String]) -> Bool {
             terms.contains { n.contains($0) }
         }
+
+        // Explicit band/ensemble identities. These are schematic group
+        // artwork, not claims about any patch's exact orchestration.
+        if has(["world percussion ensemble", "world percussion section",
+                "ethnic percussion ensemble"]) { return .worldPercussion }
+        if has(["guitar section", "guitar ensemble", "guitars ensemble",
+                "guitar choir"]) { return .guitarSection }
+        if has(["rhythm section", "jazz rhythm ensemble"]) { return .rhythmSection }
+        if has(["marching band", "parade band"]) { return .marchingBand }
+        if has(["concert band", "symphonic band", "wind symphony"]) { return .concertBand }
 
         // Broad cross-family groups must win before matching a single member.
         if has(["full orchestra", "orchestra tutti", "orchestral tutti",
