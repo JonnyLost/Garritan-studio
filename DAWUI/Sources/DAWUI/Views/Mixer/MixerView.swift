@@ -386,7 +386,7 @@ private struct StudioPictureGuideChannelStripView: View {
             .padding(.bottom, 6)
         }
         .padding(.horizontal, 7)
-        .frame(width: 110, height: 455)
+        .frame(width: 166, height: 455)
         .background(palette.panel)
         .overlay {
             RoundedRectangle(cornerRadius: 10)
@@ -421,11 +421,13 @@ struct MasterChannelStripView: View {
                     .frame(height: 4)
                 
                 Text("MASTER")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.system(size: 12, weight: .bold))
+                    .tracking(1)
+                    .foregroundStyle(palette.primaryText)
             }
-            .padding(.horizontal, 4)
-            .padding(.top, 4)
-            
+            .padding(.horizontal, 9)
+            .padding(.top, 8)
+
             Spacer(minLength: 8)
             
             // Meter and fader
@@ -446,11 +448,11 @@ struct MasterChannelStripView: View {
             }
             
             Text(masterVolumeText)
-                .font(.system(size: 9, design: .monospaced))
-                .foregroundColor(.secondary)
-                .padding(.bottom, 8)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(palette.primaryText)
+                .padding(.bottom, 10)
         }
-        .frame(width: 104, height: 335)
+        .frame(width: 166, height: 455)
         .background(palette.raisedSurface)
         .overlay {
             RoundedRectangle(cornerRadius: 10)
