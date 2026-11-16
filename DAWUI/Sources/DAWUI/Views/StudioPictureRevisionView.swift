@@ -102,7 +102,7 @@ struct StudioPictureRevisionView: View {
                 if let preview {
                     Text("\(preview.movedCount) moved • \(preview.unresolvedCount) unresolved")
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(preview.unresolvedCount == 0 ? .secondary : .orange)
+                        .foregroundStyle(preview.unresolvedCount == 0 ? Color.secondary : Color.orange)
                 }
             }
 
@@ -120,7 +120,7 @@ struct StudioPictureRevisionView: View {
                                     .foregroundStyle(.secondary)
                                 Text(change.proposedTimecode ?? "Outside movie")
                                     .font(.system(.caption, design: .monospaced))
-                                    .foregroundStyle(change.proposedFrame == nil ? .orange : .primary)
+                                    .foregroundStyle(change.proposedFrame == nil ? Color.orange : Color.primary)
                             }
                             .font(.caption)
                         }
@@ -159,7 +159,7 @@ struct StudioPictureRevisionView: View {
             }
         }
         .padding(20)
-        .frame(width: 680, minHeight: 530)
+        .frame(minWidth: 680, minHeight: 530)
     }
 
     private func chooseMovie() {
