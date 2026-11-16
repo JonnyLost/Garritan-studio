@@ -64,14 +64,14 @@ final class StudioSynthTests: XCTestCase {
 
     func testWavetableFactorySoundsAreOriginalValidAndDistinct() throws {
         let presets = StudioWavetableFactoryLibrary.presets
-        XCTAssertEqual(presets.count, 20)
-        XCTAssertEqual(Set(presets.map(\.id)).count, 20)
+        XCTAssertEqual(presets.count, 30)
+        XCTAssertEqual(Set(presets.map(\.id)).count, 30)
         XCTAssertEqual(Set(presets.map(\.family)),
                        Set(["Keys", "Lead", "Pad", "Bass", "Texture"]))
         let enc = JSONEncoder()
         enc.outputFormatting = [.sortedKeys]
         let signatures = try presets.map { try enc.encode($0.patch) }
-        XCTAssertEqual(Set(signatures).count, 20)
+        XCTAssertEqual(Set(signatures).count, 30)
         for preset in presets {
             XCTAssertTrue(preset.patch.validate(), preset.name)
         }

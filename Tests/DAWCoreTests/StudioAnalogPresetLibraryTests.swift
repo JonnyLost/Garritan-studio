@@ -3,11 +3,11 @@ import XCTest
 @testable import DAWCore
 
 final class StudioAnalogPresetLibraryTests: XCTestCase {
-    func testFactoryLibraryHasTwentyFourValidUniqueOriginalSounds() throws {
+    func testFactoryLibraryHasThirtyFourValidUniqueOriginalSounds() throws {
         let presets = StudioAnalogFactoryLibrary.presets
-        XCTAssertEqual(presets.count, 24)
-        XCTAssertEqual(Set(presets.map(\.id)).count, 24)
-        XCTAssertEqual(Set(presets.map(\.name)).count, 24)
+        XCTAssertEqual(presets.count, 34)
+        XCTAssertEqual(Set(presets.map(\.id)).count, 34)
+        XCTAssertEqual(Set(presets.map(\.name)).count, 34)
         XCTAssertEqual(Set(presets.map(\.category)), Set(StudioAnalogPresetCategory.allCases))
         for preset in presets {
             XCTAssertEqual(preset.origin, .factory)

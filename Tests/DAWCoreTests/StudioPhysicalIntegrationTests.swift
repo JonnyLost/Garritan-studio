@@ -6,7 +6,7 @@ import AVFoundation
 final class StudioPhysicalIntegrationTests: XCTestCase {
     func testPhysicalFactorySoundsHaveDistinctPortableValidPatches() throws {
         let presets = StudioPhysicalFactoryLibrary.presets
-        XCTAssertEqual(presets.count, 12)
+        XCTAssertEqual(presets.count, 25)
         XCTAssertEqual(Set(presets.map(\.id)).count, presets.count)
         XCTAssertEqual(Set(presets.map { $0.patch.model }),
                        Set(StudioPhysicalModel.allCases))

@@ -3,6 +3,7 @@ name: Studio Synth + Sampler Integration
 on:
   push:
     branches:
+      - codex/studio-synth-presets-validation
       - integration/studio-synth-sampler-bridge
       - feature/studio-track-workflow
       - feature/studio-export-engine
