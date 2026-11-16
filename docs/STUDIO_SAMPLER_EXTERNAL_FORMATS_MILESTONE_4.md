@@ -28,16 +28,18 @@ Import existing sample-based instruments into editable Studio mappings and porta
    RIFF/DLS reader inspects `lins` instruments, `lrgn` key/velocity regions,
    `ptbl` sample cues, `wvpl` waves, `wsmp` loops and GIG-specific
    `3lnk` dimension links and `3prg/3ewl` articulations. Supports
-   selecting one instrument and copying validated **single-dimension,
-   uncompressed 16-bit PCM** mono/stereo recordings as WAV files into
-   Studio's managed sample library. The mapping is staged for Apply.
-   More complex GIG dimensions or compressed/unknown samples are
-   intentionally rejected rather than silently losing layers.
+   selecting one instrument and copying validated **uncompressed 16-bit
+   PCM** mono/stereo recordings as WAV files into Studio's managed sample
+   library. Supported GIG dimensions include regular velocity bands,
+   round-robin, release triggers, explicit keyboard keyswitches and stepped
+   CC1/CC2 sample selection. The mapping is staged for Apply.
+   Other complex GIG dimensions and compressed/unknown samples are rejected
+   rather than silently losing layers.
    Synthetic regression tests cover a playable RIFF/DLS GIG fixture,
    source-file immutability, dimensions, compressed/unsupported audio,
    and damaged containers. Pending: real-world GIG file compatibility,
    GIG 3+ extended containers, 24-bit/compressed wave decoding,
-   velocity/articulation dimensions, envelopes/filters/LFO, and Mac audition.
+   expanded dimension types, envelopes/filters/LFO, and Mac audition.
 5. EXS: pending investigation and implementation for accessible legacy EXS24
    instrument definitions and referenced samples.
 6. Round-trip validation and consolidated Mac testing.
@@ -78,8 +80,8 @@ WAV extraction is offline, staged, transactional and leaves the source intact.
   loops). The import remains transactional, deduplicates extracted WAVs,
   and runs offline.
 - Unknown or currently unrepresentable dimensions are explicitly rejected:
-  keyswitch selection, random, simultaneous layers, controller switches,
-  crossfades, sample channel, and Smart MIDI.
+  random, simultaneous layers, most controller switches, crossfades, sample
+  channel, and Smart MIDI.
 - GIG3 *custom* velocity boundaries, per-case fine tuning, and round-robin
   global counter semantics require further work. The importer warns when
   regular split assumptions apply. Native application and audio testing
@@ -88,11 +90,32 @@ WAV extraction is offline, staged, transactional and leaves the source intact.
   selection, release triggers, malformed bit counts, layer/keyswitch
   rejection, and preserved source GIG bytes.
 
-**Still not implemented:** multi-dimension GIG instruments beyond the
-listed supported dimension kinds (or cases beyond native sampler limits) (including layered
-velocity/crossfade, round-robin, keyswitches, release samples, pedal and
-controller dimensions), compressed GIG wave decoding, GIG v3/v4 extended
-RIFF containers, finer per-dimension tuning, filters and modulation.
+**Milestone 4.7 — GIG keyswitch and controller selection (implementation
+committed; validation pending):**
+- Read explicit instrument `lart/3ewg` keyswitch boundaries. A GIG
+  keyboard dimension (0x85) maps each case to a native articulation
+  with actual switch notes; case zero is the default switch. Missing,
+  contradictory, or overlapping switch-key metadata aborts import.
+- GIG modulation wheel (0x01 / CC1) and breath (0x02 / CC2) cases
+  map to a version-1 compatible optional controller-switch descriptor
+  in `StudioSamplerPatch`. The native C++ sampler selects the correct
+  articulation from equally spaced controller bands on **note-on**;
+  held voices retain their original articulation. The setting is
+  configured once before rendering, is optional for old projects, and
+  performs no heap allocation or locks on the render thread.
+- Only one selection dimension (keyswitch OR CC1 OR CC2) is permitted
+  per instrument, consistently across all regions. It can be combined
+  with supported velocity, round-robin, and release dimensions.
+- Studio's existing CC1 dynamics and CC2 breath responses still apply
+  during playback. Advanced GIG continuous crossfades are NOT
+  reproduced by switching discrete samples.
+- Includes deterministic synthetic fixtures for keyboard/CC1/CC2
+  combinations and native standalone CC switching tests.
+
+**Still not implemented:** unrecognized or mixed selector dimensions,
+simultaneous layer/crossfade, pedal switches, aftertouch and Smart MIDI,
+custom split thresholds, GIG compression and v3/v4 extended RIFF
+containers, per-dimension fine tuning and filters/modulation.
 A failure in this subset is **not evidence that a library is corrupted**.
 The importer must refuse unsupported regions instead of pretending that
 only the DLS base sample link fully represents a GigaStudio instrument.
