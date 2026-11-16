@@ -32,49 +32,72 @@ final class StudioSamplerGIGImporterTests: XCTestCase {
         return root
     }
     private func fixture(in root: URL, dimensions: UInt32 = 1,
-                         format: UInt16 = 1, gigSampleInfo: Bool = false) throws -> URL {
-        let samples: [Int16] = [0, 1000, -1000, 250, -250,
-                                 300, -300, 900, -900, 0, 0, 0]
-        var pcm = Data()
-        for sample in samples { pcm.append(u16(UInt16(bitPattern: sample))) }
-        let info = list("INFO", [chunk("INAM", Data("GIG Test Instrument\0".utf8))])
+                         format: UInt16 = 1, gigSampleInfo: Bool = false,
+                         definitions: [(UInt8, UInt8)] = []) throws -> URL {
+        let sampleFrames: [Int16] = [0, 1000, -1000, 250, -250,
+                                     300, -300, 900, -900, 0, 0, 0]
         let fmt = u16(format) + u16(1) + u32(22_050) +
                   u32(44_100) + u16(2) + u16(16)
         let gigSmpl = u32(0) + u32(0) + u32(0) + u32(60) +
             u32(0) + u32(0) + u32(0) + u32(1) +
             u32(0) + u32(0) + u32(0) + u32(2) + u32(8) +
             Data(repeating: 0, count: 8)
-        let wave = list("wave", [
-            chunk("fmt ", fmt),
-            chunk("data", pcm),
-            gigSampleInfo ? chunk("smpl", gigSmpl) : chunk("wsmp", parameters()),
-            list("INFO", [chunk("INAM", Data("Test Sample\0".utf8))])
-        ])
-        // GIG's 3lnk: number of dimension cases at offset 0, sample-table
-        // indices at offset 44 (one per dimension).
-        let dimensionLinks = u32(dimensions) +
-            Data(repeating: 0, count: 40) +
-            (0..<dimensions).reduce(into: Data()) { bytes, _ in
-                bytes.append(u32(0))
+
+        // Every dimension case references a distinct uncompressed recording.
+        // Pool cues are byte offsets from the first wvpl subchunk.
+        var waveBytes = Data()
+        var poolOffsets: [UInt32] = []
+        for caseIndex in 0..<Int(dimensions) {
+            poolOffsets.append(UInt32(waveBytes.count))
+            var pcm = Data()
+            for sample in sampleFrames {
+                pcm.append(u16(UInt16(bitPattern: sample + Int16(caseIndex))))
             }
+            let wave = list("wave", [
+                chunk("fmt ", fmt), chunk("data", pcm),
+                gigSampleInfo ? chunk("smpl", gigSmpl) : chunk("wsmp", parameters()),
+                list("INFO", [chunk("INAM", Data("Test Sample \0".utf8))])
+            ])
+            waveBytes.append(wave)
+        }
+        let wvpl = chunk("LIST", fourCC("wvpl") + waveBytes)
+        let info = list("INFO", [chunk("INAM", Data("GIG Test Instrument\0".utf8))])
+
+        let declaredDefinitions = definitions.isEmpty && dimensions > 1
+            ? [(UInt8(0x81), UInt8(1))] : definitions
+        var dimensionHeader = u32(dimensions)
+        for index in 0..<5 {
+            if index < declaredDefinitions.count {
+                dimensionHeader.append(declaredDefinitions[index].0)
+                dimensionHeader.append(declaredDefinitions[index].1)
+            } else {
+                dimensionHeader.append(0)
+                dimensionHeader.append(0)
+            }
+            dimensionHeader.append(Data(repeating: 0, count: 6))
+        }
+        for caseIndex in 0..<32 {
+            dimensionHeader.append(caseIndex < Int(dimensions)
+                                   ? u32(UInt32(caseIndex)) : u32(UInt32.max))
+        }
+        XCTAssertEqual(dimensionHeader.count, 172)
         let dimensionLists = (0..<dimensions).map { _ in
             list("3ewl", [chunk("wsmp", parameters())])
         }
         let region = list("rgn ", [
             chunk("rgnh", u16(48) + u16(72) +
                               u16(1) + u16(127) + u16(0) + u16(0)),
-            chunk("3lnk", dimensionLinks),
+            chunk("3lnk", dimensionHeader),
             list("3prg", dimensionLists)
         ])
         let instrument = list("ins ", [
             chunk("insh", u32(1) + u32(2) + u32(4)),
-            info,
-            list("lrgn", [region])
+            info, list("lrgn", [region])
         ])
+        let cues = poolOffsets.reduce(into: Data()) { $0.append(u32($1)) }
         let payload = fourCC("DLS ") +
             list("lins", [instrument]) +
-            chunk("ptbl", u32(8) + u32(1) + u32(0)) +
-            list("wvpl", [wave])
+            chunk("ptbl", u32(8) + u32(dimensions) + cues) + wvpl
         let url = root.appendingPathComponent("StudioFixture.gig")
         try (fourCC("RIFF") + u32(UInt32(payload.count)) + payload)
             .write(to: url, options: .atomic)
