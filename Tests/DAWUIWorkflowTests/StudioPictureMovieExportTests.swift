@@ -68,6 +68,64 @@ final class StudioPictureMovieExportTests: XCTestCase {
         }
     }
 
+    func testTimecodeBurnInFrameLabelsAndBackwardOffset() {
+        let picture = StudioPictureProject(
+            url: URL(fileURLWithPath: "/tmp/scored.mov"),
+            durationSeconds: 10, frameRate: .fps2997Drop,
+            timelineStartSeconds: 120)
+        XCTAssertEqual(StudioPictureTimecodeBurnIn.label(
+            picture: picture, movieSeconds: 0), "01:00:00;00")
+        XCTAssertEqual(StudioPictureTimecodeBurnIn.label(
+            picture: picture, movieSeconds: 1), "01:00:00;29")
+        XCTAssertEqual(StudioPictureTimecodeBurnIn.label(
+            picture: picture, movieSeconds: 0.1), "01:00:00;02")
+        XCTAssertEqual(StudioPictureTimecodeBurnIn.label(
+            picture: picture, movieSeconds: .nan), "01:00:00;00")
+    }
+
+    func testMP4ScoredDeliveryAndTimecodeBurnIn() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("studio-picture-mp4-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root,
+                                                withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let movie = root.appendingPathComponent("reference.mov")
+        let wav = root.appendingPathComponent("score.wav")
+        let output = root.appendingPathComponent("delivery.mp4")
+        try await generateMovie(to: movie)
+        try createStereoWAV(at: wav)
+
+        let picture = StudioPictureProject(url: movie, durationSeconds: 1,
+                                           frameRate: .fps24)
+        let exporter = StudioPictureMovieExporter()
+        try await exporter.export(picture: picture,
+                                  scoreURL: wav, destination: output,
+                                  includeReferenceAudio: false,
+                                  format: .mp4,
+                                  burnInTimecode: true)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: output.path))
+        let delivered = AVURLAsset(url: output)
+        XCTAssertEqual(try await delivered.loadTracks(withMediaType: .video).count, 1)
+        XCTAssertEqual(try await delivered.loadTracks(withMediaType: .audio).count, 1)
+        let image = AVAssetImageGenerator(asset: delivered)
+        let frame = try await image.image(at: CMTime(value: 3, timescale: 24))
+        XCTAssertGreaterThan(frame.image.width, 0)
+        XCTAssertEqual(exporter.progress, 1, accuracy: 0.001)
+    }
+
+    func testDeliveryFormatFilenameMustMatchSelectedContainer() async throws {
+        let picture = StudioPictureProject(
+            url: URL(fileURLWithPath: "/tmp/invalid-test.mov"),
+            durationSeconds: 1, frameRate: .fps24)
+        // Preflight source files first. This checks the published format
+        // mapping independently from container compatibility on a given Mac.
+        XCTAssertEqual(StudioPictureDeliveryFormat.mp4.fileExtension, "mp4")
+        XCTAssertEqual(StudioPictureDeliveryFormat.mp4.fileType, .mp4)
+        XCTAssertEqual(StudioPictureDeliveryFormat.hevcQuickTime.fileExtension, "mov")
+        XCTAssertEqual(StudioPictureDeliveryFormat.quickTime.fileType, .mov)
+        XCTAssertEqual(picture.timecode(atMovieFrame: 0), "01:00:00:00")
+    }
+
     private func createStereoWAV(at url: URL) throws {
         let sampleRate: Double = 48_000
         let format = try XCTUnwrap(AVAudioFormat(
