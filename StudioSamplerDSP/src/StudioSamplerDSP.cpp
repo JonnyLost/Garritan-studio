@@ -190,6 +190,9 @@ struct SSSampler {
     uint64_t nextNoteSerial = 0;
     std::array<uint8_t, 128> keyswitchArticulations{};
     std::array<uint8_t, 16> selectedArticulations{};
+    uint8_t controllerArticulationCC = 0; // 0 disables selector
+    uint8_t controllerArticulationCount = 0;
+    std::array<uint8_t, 16> controllerArticulationIDs{};
     // Fixed-size, real-time-owned note state and variation counters.
     // No allocation, lock, or mutation on the Swift/MIDI producer thread.
     std::array<std::array<std::array<HeldNote, kHeldDepth>, 128>, 16> heldNotes{};
@@ -784,6 +787,14 @@ struct SSSampler {
                 for (auto& voice : voices) if (voice.active) startRelease(voice);
                 break;
             case CommandKind::controller:
+                if (controllerArticulationCount >= 2 &&
+                    command.note == controllerArticulationCC) {
+                    const uint32_t index = std::min(
+                        uint32_t(controllerArticulationCount - 1),
+                        (uint32_t(command.velocity) * controllerArticulationCount) / 128);
+                    selectedArticulations[command.channel] =
+                        controllerArticulationIDs[index];
+                }
                 if (command.note == 1) targetCC1[command.channel] = command.velocity;
                 if (command.note == 2) targetCC2[command.channel] = command.velocity;
                 if (command.note == 11) targetCC11[command.channel] = command.velocity;
@@ -1122,6 +1133,25 @@ int32_t ss_configure_keyswitches(SSSampler *sampler,
         prepared[note] = id;
     }
     sampler->keyswitchArticulations = prepared;
+    return 1;
+}
+
+int32_t ss_configure_controller_articulations(
+    SSSampler *sampler, uint8_t controller, const uint8_t *ids, int32_t count) {
+    if (!sampler || (controller != 1 && controller != 2) ||
+        !ids || count < 2 || count > 16 || ids[0] != 0) return 0;
+    std::array<bool, 16> visited{};
+    for (int32_t i = 0; i < count; ++i) {
+        if (ids[i] > 15 || visited[ids[i]]) return 0;
+        visited[ids[i]] = true;
+    }
+    // A one-time preparation API; call before any render or MIDI submission.
+    sampler->controllerArticulationIDs.fill(0);
+    for (int32_t i = 0; i < count; ++i) {
+        sampler->controllerArticulationIDs[i] = ids[i];
+    }
+    sampler->controllerArticulationCount = uint8_t(count);
+    sampler->controllerArticulationCC = controller;
     return 1;
 }
 
