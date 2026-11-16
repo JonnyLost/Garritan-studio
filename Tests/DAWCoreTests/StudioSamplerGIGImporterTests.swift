@@ -280,6 +280,10 @@ final class StudioSamplerGIGImporterTests: XCTestCase {
         XCTAssertEqual(result.patch.controllerSwitch?.articulationIDs, [0, 1])
         XCTAssertNil(result.patch.defaultKeyswitchNote)
         XCTAssertEqual(result.patch.zones.map { $0.articulationID ?? 0 }, [0, 1])
+        let encoded = try JSONEncoder().encode(result.patch)
+        let restored = try JSONDecoder().decode(StudioSamplerPatch.self, from: encoded)
+        XCTAssertEqual(restored, result.patch)
+        XCTAssertEqual(restored.controllerSwitch?.articulationIDs, [0, 1])
     }
 
     func testCC2DimensionAndVelocityStayIndependent() throws {
@@ -322,6 +326,19 @@ final class StudioSamplerGIGImporterTests: XCTestCase {
             }
             XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
         }
+    }
+
+    func testControllerSelectionValidatesSupportedCCNumbersAndUniqueIDs() throws {
+        XCTAssertTrue(StudioSamplerControllerSwitch(
+            controller: 1, articulationIDs: [0, 1]).isValid)
+        XCTAssertTrue(StudioSamplerControllerSwitch(
+            controller: 2, articulationIDs: [0, 2, 3]).isValid)
+        XCTAssertFalse(StudioSamplerControllerSwitch(
+            controller: 7, articulationIDs: [0, 1]).isValid)
+        XCTAssertFalse(StudioSamplerControllerSwitch(
+            controller: 1, articulationIDs: [0, 0]).isValid)
+        XCTAssertFalse(StudioSamplerControllerSwitch(
+            controller: 1, articulationIDs: [1, 0]).isValid)
     }
 
     func testNonPowerOfTwoDeclaredControllerSplitsFailSafely() throws {
