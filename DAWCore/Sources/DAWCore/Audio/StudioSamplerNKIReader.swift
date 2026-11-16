@@ -107,7 +107,14 @@ public enum StudioSamplerNKIReader {
             throw NKIError.unsupportedContainer
         }
         let limit = min(headerScanLength, data.count - 6)
+        var candidateCount = 0
         for start in 0..<limit where isZlibHeader(data, at: start) {
+            candidateCount += 1
+            // Reject binary blobs that merely contain many coincidental
+            // zlib-like byte pairs; never repeatedly allocate huge buffers.
+            guard candidateCount <= 8 else {
+                throw NKIError.protectedOrUnknownFormat
+            }
             let offset = start + 2
             guard data.count - offset >= 5 else { continue }
             let payload = data.subdata(in: offset..<(data.count - 4))
@@ -151,6 +158,15 @@ public enum StudioSamplerNKIReader {
         }
         let input = try Data(contentsOf: url, options: .mappedIfSafe)
         let document = try inflatedDocument(input)
+        // XMLParser's entity controls forbid external lookups; reject DTDs
+        // outright so internal recursive entity expansion cannot exhaust RAM.
+        let upper = Data(document.map { byte in
+            (97...122).contains(byte) ? byte - 32 : byte
+        })
+        guard upper.range(of: Data("<!DOCTYPE".utf8)) == nil,
+              upper.range(of: Data("<!ENTITY".utf8)) == nil else {
+            throw NKIError.malformedXML
+        }
         let parser = XMLParser(data: document)
         // No external-entity expansion, network access, or DTD resolution.
         parser.shouldResolveExternalEntities = false
