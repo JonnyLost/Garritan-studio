@@ -8,6 +8,10 @@ import UniformTypeIdentifiers
 struct StudioPictureMovieExportView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var exporter = StudioPictureMovieExporter()
+    @StateObject private var oneStep = StudioPictureOneStepExport()
+    @State private var renderWithStudio = true
+    @State private var audioTailSeconds = 3.0
+    @State private var audioBitDepth = 24
     @State private var scoreURL: URL?
     @State private var includeDialogue = true
     @State private var dialogueGain: Double
@@ -18,9 +22,11 @@ struct StudioPictureMovieExportView: View {
     @State private var exportTask: Task<Void, Never>?
 
     private let picture: StudioPictureProject
+    @ObservedObject private var viewModel: ProjectViewModel
 
-    init(picture: StudioPictureProject) {
+    init(picture: StudioPictureProject, viewModel: ProjectViewModel) {
         self.picture = picture
+        self.viewModel = viewModel
         _dialogueGain = State(initialValue: Double(picture.referenceAudioVolume ?? 0.65))
     }
 
@@ -33,7 +39,7 @@ struct StudioPictureMovieExportView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Export Scored Movie")
                         .font(.headline)
-                    Text("Combine your Studio Stereo Mix with the original picture.")
+                    Text("Render Studio's mix and deliver a scored movie in one operation.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -41,23 +47,43 @@ struct StudioPictureMovieExportView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("1. Render a Stereo Mix")
+                Text("1. Music source")
                     .font(.subheadline.weight(.semibold))
-                Text("First export your music as a Stereo Mix WAV using File → Export Audio & Stems. Then choose that WAV here. Your original movie is never changed.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                HStack {
-                    Button {
-                        chooseScore()
-                    } label: {
-                        Label("Choose Studio Mix WAV…", systemImage: "waveform")
-                    }
-                    Text(scoreURL?.lastPathComponent ?? "No mix selected")
+                Toggle("Render music directly from this Studio project",
+                       isOn: $renderWithStudio)
+                if renderWithStudio {
+                    Text("Studio uses its existing real-time Stereo Mix renderer. Stop playback before exporting. The temporary WAV is removed automatically.")
                         .font(.caption)
-                        .lineLimit(1)
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Text("Reverb tail")
+                            .font(.caption)
+                        Slider(value: $audioTailSeconds, in: 0...15, step: 0.5)
+                        Text(String(format: "%.1f s", audioTailSeconds))
+                            .font(.caption.monospacedDigit())
+                            .frame(width: 45)
+                    }
+                    Picker("Stereo mix depth", selection: $audioBitDepth) {
+                        Text("24-bit WAV").tag(24)
+                        Text("16-bit WAV").tag(16)
+                    }
+                    .frame(width: 230)
+                } else {
+                    Text("Use an existing WAV if you've already rendered the score.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    HStack {
+                        Button {
+                            chooseScore()
+                        } label: {
+                            Label("Choose Studio Mix WAV…", systemImage: "waveform")
+                        }
+                        Text(scoreURL?.lastPathComponent ?? "No mix selected")
+                            .font(.caption)
+                            .lineLimit(1)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
 
@@ -101,9 +127,9 @@ struct StudioPictureMovieExportView: View {
                 Text("Studio aligns the music to the movie using the saved picture offset (\(String(format: "%.2f", picture.timelineStartSeconds)) seconds). The export is limited to the movie duration.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                if exporter.isExporting {
-                    ProgressView(value: exporter.progress)
-                    Text(exporter.status)
+                if exporter.isExporting || oneStep.isExporting {
+                    ProgressView(value: renderWithStudio ? oneStep.progress : exporter.progress)
+                    Text(renderWithStudio ? oneStep.status : exporter.status)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -123,24 +149,27 @@ struct StudioPictureMovieExportView: View {
             Spacer(minLength: 0)
             HStack {
                 Button("Close") { dismiss() }
-                    .disabled(exporter.isExporting)
+                    .disabled(exporter.isExporting || oneStep.isExporting)
                 Spacer()
-                if exporter.isExporting {
+                if exporter.isExporting || oneStep.isExporting {
                     Button("Cancel Export") {
                         exportTask?.cancel()
                         exporter.cancel()
+                        oneStep.cancel()
                     }
                 }
                 Button("Export Scored Movie…") { chooseDestinationAndExport() }
                     .buttonStyle(.borderedProminent)
-                    .disabled(exporter.isExporting || scoreURL == nil)
+                    .disabled(exporter.isExporting || oneStep.isExporting ||
+                              (!renderWithStudio && scoreURL == nil))
             }
         }
         .padding(20)
-        .frame(width: 570, height: 510)
+        .frame(width: 600, height: 585)
         .onDisappear {
             exportTask?.cancel()
             exporter.cancel()
+            oneStep.cancel()
         }
     }
 
@@ -155,7 +184,7 @@ struct StudioPictureMovieExportView: View {
     }
 
     private func chooseDestinationAndExport() {
-        guard let scoreURL else { return }
+        guard renderWithStudio || scoreURL != nil else { return }
         let panel = NSSavePanel()
         panel.title = "Save Scored Movie"
         panel.allowedContentTypes = deliveryFormat == .mp4
@@ -170,14 +199,27 @@ struct StudioPictureMovieExportView: View {
         exportTask = Task {
             defer { exportTask = nil }
             do {
-                try await exporter.export(
-                    picture: picture,
-                    scoreURL: scoreURL,
-                    destination: destination,
-                    includeReferenceAudio: includeDialogue,
-                    referenceGain: Float(dialogueGain),
-                    format: deliveryFormat,
-                    burnInTimecode: burnInTimecode)
+                if renderWithStudio {
+                    try await oneStep.export(
+                        projectViewModel: viewModel,
+                        picture: picture,
+                        destination: destination,
+                        includeReferenceAudio: includeDialogue,
+                        referenceGain: Float(dialogueGain),
+                        format: deliveryFormat,
+                        burnInTimecode: burnInTimecode,
+                        tailSeconds: audioTailSeconds,
+                        bitDepth: audioBitDepth)
+                } else if let scoreURL {
+                    try await exporter.export(
+                        picture: picture,
+                        scoreURL: scoreURL,
+                        destination: destination,
+                        includeReferenceAudio: includeDialogue,
+                        referenceGain: Float(dialogueGain),
+                        format: deliveryFormat,
+                        burnInTimecode: burnInTimecode)
+                }
                 exportedURL = destination
             } catch is CancellationError {
                 errorMessage = "Movie export canceled. No source movie or audio was modified."
