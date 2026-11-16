@@ -535,48 +535,33 @@ public struct TrackPianoRollView: View {
             
             Divider().frame(height: 20)
             
-            HStack(spacing: 4) {
-                Button("Split") { splitSelectedAtPlayhead() }
+            Menu {
+                Button("Quantize…") { showQuantizeDialog = true }
                     .disabled(selectedNoteIDs.isEmpty)
-                    .help("Split selected notes at playhead")
-                Button("Glue") { glueSelectedNotes() }
+                Button("Timing Offset…") { showOffsetDialog = true }
+                    .disabled(selectedNoteIDs.isEmpty)
+                Divider()
+                Button("Split at Playhead") { splitSelectedAtPlayhead() }
+                    .disabled(selectedNoteIDs.isEmpty)
+                Button("Glue Notes") { glueSelectedNotes() }
                     .disabled(selectedNoteIDs.count < 2)
-                    .help("Join compatible adjacent notes in the same MIDI region")
-                Button("Mute") { toggleSelectedNoteMute() }
+                Button("Mute Notes") { toggleSelectedNoteMute() }
                     .disabled(selectedNoteIDs.isEmpty)
-                    .help("Toggle mute on selected notes")
+                Divider()
+                Button("Select All") { selectAllNotes() }
+                Button("Copy") { copySelectedNotes() }
+                    .disabled(selectedNoteIDs.isEmpty)
+                Button("Paste") { pasteNotes() }
+                    .disabled(copiedNotes.isEmpty)
+                Button("Duplicate") { duplicateSelectedNotes() }
+                    .disabled(selectedNoteIDs.isEmpty)
+                Button("Delete") { deleteSelectedNotes() }
+                    .disabled(selectedNoteIDs.isEmpty)
+            } label: {
+                Label("Edit", systemImage: "slider.horizontal.3")
             }
-            .font(.caption)
-            .buttonStyle(.bordered)
-
-            Button("Quantize") { showQuantizeDialog = true }
-                .font(.caption)
-                .buttonStyle(.bordered)
-                .disabled(selectedNoteIDs.isEmpty)
-            
-            Button("Offset") { showOffsetDialog = true }
-                .font(.caption)
-                .buttonStyle(.bordered)
-                .disabled(selectedNoteIDs.isEmpty)
-            
-            HStack(spacing: 5) {
-                Button(action: selectAllNotes) {
-                    Image(systemName: "checkmark.square")
-                }.help("Select All Notes (⌘A)")
-                Button(action: copySelectedNotes) {
-                    Image(systemName: "doc.on.doc")
-                }.disabled(selectedNoteIDs.isEmpty).help("Copy Notes (⌘C)")
-                Button(action: pasteNotes) {
-                    Image(systemName: "doc.on.clipboard")
-                }.disabled(copiedNotes.isEmpty).help("Paste Notes (⌘V)")
-                Button(action: duplicateSelectedNotes) {
-                    Image(systemName: "plus.square.on.square")
-                }.disabled(selectedNoteIDs.isEmpty).help("Duplicate Notes (⌘D)")
-                Button(action: deleteSelectedNotes) {
-                    Image(systemName: "trash")
-                }.disabled(selectedNoteIDs.isEmpty).help("Delete Notes")
-            }
-            .buttonStyle(.plain)
+            .menuStyle(.borderlessButton)
+            .help("Note editing actions, quantize and timing tools")
 
             Spacer()
             
