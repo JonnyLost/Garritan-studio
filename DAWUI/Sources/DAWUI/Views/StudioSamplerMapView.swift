@@ -29,6 +29,8 @@ public struct StudioSamplerMapView: View {
     @State private var showLibrary = false
     @State private var showFactory = false
     @State private var showPackageImporter = false
+    @State private var showSFZImporter = false
+    @State private var sfzWarnings: [String] = []
     @State private var showSaveSheet = false
     @State private var exportInsteadOfSave = false
     @State private var instrumentName = "New Instrument"
@@ -67,6 +69,7 @@ public struct StudioSamplerMapView: View {
                 Menu {
                     Button("Browse Instrument Library…") { showLibrary = true }
                     Button("Import .studioinstrument…") { showPackageImporter = true }
+                    Button("Import SFZ Instrument…") { showSFZImporter = true }
                     Divider()
                     Button("Save to Studio Library…") { beginSaving(export: false) }
                         .disabled(draft?.isValid != true)
@@ -185,6 +188,13 @@ public struct StudioSamplerMapView: View {
                 }
             }
 
+            if !sfzWarnings.isEmpty {
+                DisclosureGroup("SFZ compatibility notes (\(sfzWarnings.count))") {
+                    ForEach(sfzWarnings, id: \.self) { warning in
+                        Text(warning).font(.caption).foregroundStyle(.orange)
+                    }
+                }
+            }
             if let saveNotice {
                 Label(saveNotice, systemImage: "checkmark.circle")
                     .font(.caption).foregroundStyle(.secondary)
@@ -247,6 +257,17 @@ public struct StudioSamplerMapView: View {
             switch result {
             case .success(let urls):
                 if let url = urls.first { loadPackage(url) }
+            case .failure(let error): errorMessage = error.localizedDescription
+            }
+        }
+        .fileImporter(
+            isPresented: $showSFZImporter,
+            allowedContentTypes: [UTType(filenameExtension: "sfz") ?? .plainText],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                if let url = urls.first { importSFZ(url) }
             case .failure(let error): errorMessage = error.localizedDescription
             }
         }
@@ -354,6 +375,31 @@ public struct StudioSamplerMapView: View {
                 } catch {
                     errorMessage = error.localizedDescription
                 }
+            }
+        }
+    }
+
+    private func importSFZ(_ url: URL) {
+        guard !isImporting else { return }
+        isImporting = true
+        errorMessage = nil
+        saveNotice = nil
+        sfzWarnings = []
+        Task { @MainActor in
+            defer { isImporting = false }
+            do {
+                let imported = try await Task.detached(priority: .userInitiated) {
+                    let access = url.startAccessingSecurityScopedResource()
+                    defer { if access { url.stopAccessingSecurityScopedResource() } }
+                    return try StudioSamplerSFZImporter.importInstrument(url)
+                }.value
+                // Keep changes staged: the active instrument changes only after Apply Mapping.
+                draft = imported.patch
+                selectedIndex = 0
+                sfzWarnings = imported.warnings
+                saveNotice = "SFZ instrument imported into the mapping draft. Choose Apply Mapping to activate it."
+            } catch {
+                errorMessage = error.localizedDescription
             }
         }
     }
