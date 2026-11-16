@@ -87,6 +87,18 @@ Keyboard shortcuts: **Option-Command-P** opens Picture; **Option-Command-H** add
 
 **Remaining delivery work:** integrated one-step music bounce + movie delivery, configurable audio codec/bit depth, long-video performance checks, source-color preservation, external delivery standards, and MacBook visual/listening acceptance.
 
+## Milestone 10 — One-step scored-movie delivery
+
+- **Export Scored Movie** defaults to **Render music directly from this Studio project**. Studio uses the existing real-time Stereo Mix WAV engine and immediately packages its output with the referenced movie, without making composers manually select the bounced WAV.
+- The workflow supports a selectable reverb/release tail (0–15 seconds), 16-bit or 24-bit intermediate WAV, existing MOV/MP4/HEVC delivery choices, optional production/dialogue audio and SMPTE burn-in.
+- An **Use existing Stereo Mix WAV** fallback remains available for workflows where the music was previously bounced or edited elsewhere.
+- An isolated scratch folder in the chosen destination holds the intermediate WAV, and it is deleted after success, cancellation or failure. The final movie is handled by the existing staged, non-destructive AVFoundation exporter.
+- Output collision, source-movie overwrite and container-extension checks occur **before** any real-time audio bounce. The project snapshot, score source and picture are checked again between rendering music and delivering the movie.
+- Both phases expose progress, status and cancellation. The existing export coordinator owns transport restoration, instrument reset, hall-tail restoration and guide-audio suppression.
+- Standard Stereo Mix restrictions still apply: constant tempo, supported AVAudioEngine backend, no unsupported shared V-Rack or looped clips, and Studio must be stopped before rendering. No duplicated audio engine or third-party renderer is introduced.
+
+**Pending:** build and CI validation of the integrated workflow, a genuine full-length real-time Studio mix + scored-movie round trip on the MacBook, and frame/audio sync/latency review.
+
 ## Persistence and media safety
 
 - Only a video **reference** (path plus security-scoped bookmark when available), project offset, frame-rate mode, source timecode, audio/overlay preferences and hit-point data are encoded in the DAW project.
