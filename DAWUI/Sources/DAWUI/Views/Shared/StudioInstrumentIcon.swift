@@ -23,7 +23,11 @@ public struct StudioInstrumentIcon: View {
 
     public var body: some View {
         let identity = InstrumentIconIdentity.resolve(name: name, path: path, category: category)
-        let art = InstrumentIconDrawing.make(identity)
+        let group = StudioInstrumentGroupArtwork.resolve(
+            name: name, path: path, category: category
+        )
+        let art = group.map { InstrumentIconDrawing.makeGroup($0) }
+            ?? InstrumentIconDrawing.make(identity)
         let isCompact = dimension < 38
 
         Canvas(rendersAsynchronously: false) { graphics, bounds in
@@ -115,7 +119,7 @@ public struct StudioInstrumentIcon: View {
             }
         }
         .frame(width: dimension, height: dimension)
-        .accessibilityLabel(Text(identity.accessibilityLabel))
+        .accessibilityLabel(Text(group?.accessibilityLabel ?? identity.accessibilityLabel))
         .accessibilityHidden(false)
     }
 }
@@ -368,6 +372,69 @@ private struct InstrumentIconDrawing {
             silhouettes: fillShapes(for: kind, base: base),
             compactDetails: Array(base.details.prefix(4))
         )
+    }
+
+    /// Assemble one unmistakably grouped symbol from existing solo silhouettes.
+    ///
+    /// Each section uses two or three individually drawn instruments, sharing
+    /// the same renderer and theme as the solo icon. No external assets,
+    /// texture decoding or per-frame work is introduced.
+    static func makeGroup(_ group: StudioInstrumentGroupArtwork) -> Self {
+        let members: [InstrumentIconIdentity]
+        switch group {
+        case .violins: members = [.violin, .violin, .violin]
+        case .violas: members = [.viola, .viola, .viola]
+        case .cellos: members = [.cello, .cello, .cello]
+        case .basses: members = [.doubleBass, .doubleBass, .doubleBass]
+        case .highStrings: members = [.violin, .viola, .violin]
+        case .lowStrings: members = [.cello, .doubleBass, .cello]
+        case .strings: members = [.violin, .cello, .doubleBass]
+        case .flutes: members = [.flute, .flute, .flute]
+        case .clarinets: members = [.clarinet, .clarinet, .clarinet]
+        case .saxophones: members = [.sopranoSaxophone, .altoSaxophone, .baritoneSaxophone]
+        case .woodwinds: members = [.flute, .clarinet, .bassoon]
+        case .horns: members = [.horn, .horn, .horn]
+        case .trumpets: members = [.trumpet, .trumpet, .trumpet]
+        case .trombones: members = [.trombone, .trombone, .trombone]
+        case .highBrass: members = [.trumpet, .horn, .trumpet]
+        case .lowBrass: members = [.trombone, .euphonium, .tuba]
+        case .brass: members = [.horn, .trumpet, .trombone]
+        case .percussion: members = [.timpani, .snare, .cymbals]
+        case .choir: return make(.choir) // Existing choir illustration already shows several singers.
+        case .orchestra: members = [.violin, .horn, .timpani]
+        case .mixedEnsemble: members = [.flute, .cello, .horn]
+        }
+
+        // Fan-like arrangement fits the 100×100 drawing space at track-icon
+        // sizes and remains readable in the larger Instrument Browser preview.
+        let positions: [(CGFloat, CGFloat)] = [(0, 29), (27, 8), (51, 29)]
+        let scale: CGFloat = 0.49
+        var primary: [Path] = []
+        var details: [Path] = []
+        var silhouettes: [Path] = []
+        var compactDetails: [Path] = []
+        for (index, member) in members.enumerated() {
+            let drawing = make(member)
+            let transform = CGAffineTransform(
+                a: scale, b: 0, c: 0, d: scale,
+                tx: positions[index].0, ty: positions[index].1
+            )
+            primary += drawing.primary.map { $0.applying(transform) }
+            silhouettes += drawing.silhouettes.map { $0.applying(transform) }
+            details += drawing.details.prefix(3).map { $0.applying(transform) }
+            compactDetails += drawing.compactDetails.prefix(1).map { $0.applying(transform) }
+        }
+
+        // The three dots are an identity cue shared by all section artwork;
+        // they distinguish an ensemble from a solo in a 17 pt track header.
+        primary.append(line([(29, 96), (71, 96)]))
+        compactDetails += [
+            oval(35, 91, 5, 5),
+            oval(48, 91, 5, 5),
+            oval(61, 91, 5, 5)
+        ]
+        return Self(primary: primary, details: details, engraving: [],
+                    silhouettes: silhouettes, compactDetails: compactDetails)
     }
 
     /// Extra closed polygons that can be filled by Signature, Heritage and
