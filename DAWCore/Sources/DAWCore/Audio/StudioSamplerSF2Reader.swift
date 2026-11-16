@@ -22,11 +22,29 @@ public enum StudioSamplerSF2Reader {
         public let program: UInt16
         public let bagIndex: UInt16
     }
+    public struct Bag: Sendable, Equatable {
+        public let generatorIndex: UInt16
+        public let modulatorIndex: UInt16
+    }
+    public struct Generator: Sendable, Equatable {
+        public let opcode: UInt16
+        public let amount: UInt16
+        public var signedAmount: Int { Int(Int16(bitPattern: amount)) }
+    }
+    public struct Instrument: Sendable, Equatable {
+        public let name: String
+        public let bagIndex: UInt16
+    }
     public struct Catalog: Sendable {
         public let presets: [Preset]
         public let samples: [SampleHeader]
         public let pcm16Offset: Int
         public let pcm16ByteCount: Int
+        public let presetBags: [Bag]
+        public let presetGenerators: [Generator]
+        public let instruments: [Instrument]
+        public let instrumentBags: [Bag]
+        public let instrumentGenerators: [Generator]
         public let warnings: [String]
     }
     public enum SF2Error: Error, LocalizedError {
@@ -48,22 +66,22 @@ public enum StudioSamplerSF2Reader {
         let offset: Int
         let size: Int
     }
-    private static func u16(_ bytes: [UInt8], _ i: Int) -> UInt16 {
+    private static func u16(_ bytes: Data, _ i: Int) -> UInt16 {
         UInt16(bytes[i]) | (UInt16(bytes[i + 1]) << 8)
     }
-    private static func u32(_ bytes: [UInt8], _ i: Int) -> UInt32 {
+    private static func u32(_ bytes: Data, _ i: Int) -> UInt32 {
         UInt32(bytes[i]) | (UInt32(bytes[i + 1]) << 8) |
         (UInt32(bytes[i + 2]) << 16) | (UInt32(bytes[i + 3]) << 24)
     }
-    private static func tag(_ bytes: [UInt8], _ i: Int) -> String {
+    private static func tag(_ bytes: Data, _ i: Int) -> String {
         String(decoding: bytes[i..<(i + 4)], as: UTF8.self)
     }
-    private static func name(_ bytes: [UInt8], _ i: Int) -> String {
+    private static func name(_ bytes: Data, _ i: Int) -> String {
         let slice = bytes[i..<(i + 20)]
         return String(decoding: slice.prefix(while: { $0 != 0 }), as: UTF8.self)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
-    private static func chunks(_ bytes: [UInt8], start: Int, end: Int) throws -> [(String, Chunk)] {
+    private static func chunks(_ bytes: Data, start: Int, end: Int) throws -> [(String, Chunk)] {
         var cursor = start
         var found: [(String, Chunk)] = []
         while cursor < end {
@@ -85,7 +103,7 @@ public enum StudioSamplerSF2Reader {
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
         guard let size = attributes[.size] as? NSNumber, size.int64Value <= 512 * 1024 * 1024
         else { throw SF2Error.tooLarge }
-        let bytes = Array(try Data(contentsOf: url, options: .mappedIfSafe))
+        let bytes = try Data(contentsOf: url, options: .mappedIfSafe)
         guard bytes.count >= 12, tag(bytes, 0) == "RIFF",
               tag(bytes, 8) == "sfbk",
               Int(u32(bytes, 4)) == bytes.count - 8
@@ -116,6 +134,58 @@ public enum StudioSamplerSF2Reader {
                 throw SF2Error.missingRequiredChunk("pdta/\(key)")
             }
         }
+        func readBags(_ chunk: Chunk) -> [Bag] {
+            (0..<(chunk.size / 4)).map { index in
+                let at = chunk.offset + index * 4
+                return Bag(generatorIndex: u16(bytes, at),
+                           modulatorIndex: u16(bytes, at + 2))
+            }
+        }
+        func readGenerators(_ chunk: Chunk) -> [Generator] {
+            (0..<(chunk.size / 4)).map { index in
+                let at = chunk.offset + index * 4
+                return Generator(opcode: u16(bytes, at), amount: u16(bytes, at + 2))
+            }
+        }
+        let presetBags = readBags(pdta["pbag"]!)
+        let instrumentBags = readBags(pdta["ibag"]!)
+        let presetGenerators = readGenerators(pdta["pgen"]!)
+        let instrumentGenerators = readGenerators(pdta["igen"]!)
+        func validateBags(_ bags: [Bag], generatorCount: Int,
+                          modulatorCount: Int, label: String) throws {
+            guard bags.count >= 2 else { throw SF2Error.invalidRecord(label) }
+            for (index, bag) in bags.enumerated() {
+                guard Int(bag.generatorIndex) <= generatorCount,
+                      Int(bag.modulatorIndex) <= modulatorCount,
+                      index == 0 || (bag.generatorIndex >= bags[index - 1].generatorIndex &&
+                                     bag.modulatorIndex >= bags[index - 1].modulatorIndex) else {
+                    throw SF2Error.invalidRecord(label)
+                }
+            }
+        }
+        try validateBags(presetBags, generatorCount: presetGenerators.count,
+                         modulatorCount: pdta["pmod"]!.size / 10, label: "preset bag")
+        try validateBags(instrumentBags, generatorCount: instrumentGenerators.count,
+                         modulatorCount: pdta["imod"]!.size / 10, label: "instrument bag")
+        let instChunk = pdta["inst"]!
+        guard instChunk.size >= 44 else { throw SF2Error.invalidRecord("instrument table") }
+        let instruments = (0..<(instChunk.size / 22 - 1)).map { index in
+            let at = instChunk.offset + index * 22
+            return Instrument(name: name(bytes, at), bagIndex: u16(bytes, at + 20))
+        }
+        var lastInstBag: UInt16 = 0
+        for instrument in instruments {
+            guard instrument.bagIndex >= lastInstBag,
+                  Int(instrument.bagIndex) < instrumentBags.count - 1 else {
+                throw SF2Error.invalidRecord("instrument bag index")
+            }
+            lastInstBag = instrument.bagIndex
+        }
+        let instrumentTerminal = u16(bytes, instChunk.offset + instChunk.size - 2)
+        guard instrumentTerminal >= lastInstBag,
+              Int(instrumentTerminal) < instrumentBags.count else {
+            throw SF2Error.invalidRecord("instrument terminal")
+        }
         let presetChunk = pdta["phdr"]!
         let sampleChunk = pdta["shdr"]!
         let presetCount = presetChunk.size / 38 - 1
@@ -123,14 +193,21 @@ public enum StudioSamplerSF2Reader {
         guard presetCount <= 65_536, sampleCount <= 65_536
         else { throw SF2Error.tooLarge }
         var presets: [Preset] = []
+        var previousPresetBag: UInt16 = 0
         for index in 0..<presetCount {
             let at = presetChunk.offset + index * 38
             let bag = u16(bytes, at + 24)
-            guard Int(bag) < pdta["pbag"]!.size / 4 else {
+            guard Int(bag) < presetBags.count - 1, bag >= previousPresetBag else {
                 throw SF2Error.invalidRecord("preset bag index")
             }
+            previousPresetBag = bag
             presets.append(Preset(name: name(bytes, at), bank: u16(bytes, at + 22),
                                   program: u16(bytes, at + 20), bagIndex: bag))
+        }
+        let presetTerminal = u16(bytes, presetChunk.offset + presetChunk.size - 14)
+        guard presetTerminal >= previousPresetBag,
+              Int(presetTerminal) < presetBags.count else {
+            throw SF2Error.invalidRecord("preset terminal")
         }
         var samples: [SampleHeader] = []
         let frames = UInt32(pcm.size / 2)
@@ -155,7 +232,9 @@ public enum StudioSamplerSF2Reader {
         }
         return Catalog(presets: presets, samples: samples,
                        pcm16Offset: pcm.offset, pcm16ByteCount: pcm.size,
-                       warnings: ["Preset generator mapping and PCM extraction are not yet implemented.",
-                                  "SoundFont effects and modulators are not yet translated."])
+                       presetBags: presetBags, presetGenerators: presetGenerators,
+                       instruments: instruments, instrumentBags: instrumentBags,
+                       instrumentGenerators: instrumentGenerators,
+                       warnings: ["SoundFont modulators and built-in effects are not yet translated."])
     }
 }
