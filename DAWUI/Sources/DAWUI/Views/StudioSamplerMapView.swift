@@ -36,6 +36,8 @@ public struct StudioSamplerMapView: View {
     @State private var sf2Presets: [StudioSamplerSF2Reader.Preset] = []
     @State private var selectedSF2PresetIndex = 0
     @State private var showEXSImporter = false
+    @State private var showEXSSampleFolderImporter = false
+    @State private var pendingEXSURL: URL?
     @State private var showGIGImporter = false
     @State private var showGIGPicker = false
     @State private var gigSource: URL?
@@ -297,6 +299,22 @@ public struct StudioSamplerMapView: View {
             }
         }
         .fileImporter(
+            isPresented: $showEXSSampleFolderImporter,
+            allowedContentTypes: [.folder],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                if let folder = urls.first, let source = pendingEXSURL {
+                    pendingEXSURL = nil
+                    importEXS(source, samplesRoot: folder)
+                }
+            case .failure(let error):
+                pendingEXSURL = nil
+                errorMessage = error.localizedDescription
+            }
+        }
+        .fileImporter(
             isPresented: $showEXSImporter,
             allowedContentTypes: [UTType(filenameExtension: "exs") ?? .data],
             allowsMultipleSelection: false
@@ -494,7 +512,7 @@ public struct StudioSamplerMapView: View {
         }
     }
 
-    private func importEXS(_ url: URL) {
+    private func importEXS(_ url: URL, samplesRoot: URL? = nil) {
         guard !isImporting else { return }
         isImporting = true
         errorMessage = nil
@@ -505,14 +523,29 @@ public struct StudioSamplerMapView: View {
             do {
                 let imported = try await Task.detached(priority: .userInitiated) {
                     let access = url.startAccessingSecurityScopedResource()
-                    defer { if access { url.stopAccessingSecurityScopedResource() } }
-                    return try StudioSamplerEXSImporter.importInstrument(url)
+                    let folderAccess = samplesRoot?.startAccessingSecurityScopedResource() ?? false
+                    defer {
+                        if folderAccess { samplesRoot?.stopAccessingSecurityScopedResource() }
+                        if access { url.stopAccessingSecurityScopedResource() }
+                    }
+                    return try StudioSamplerEXSImporter.importInstrument(
+                        url, samplesRoot: samplesRoot)
                 }.value
                 draft = imported.patch
                 selectedIndex = 0
                 instrumentName = imported.instrumentName
                 compatibilityWarnings = imported.warnings
                 saveNotice = "Imported EXS24 instrument \(imported.instrumentName). Choose Apply Mapping to activate it."
+            } catch StudioSamplerEXSImporter.ImportError.missingAudio {
+                // An EXS file may reference samples stored separately by
+                // Logic. Only request folder access after the initial import
+                // cannot resolve its local files.
+                if samplesRoot == nil {
+                    pendingEXSURL = url
+                    showEXSSampleFolderImporter = true
+                } else {
+                    errorMessage = "A required EXS24 sample wasn't found in the selected folder. Choose a folder that contains the original sample recordings."
+                }
             } catch {
                 errorMessage = error.localizedDescription
             }
