@@ -38,12 +38,142 @@ public enum StudioSamplerEXSImporter {
         }
     }
 
+    /// Only one EXS group-selection mechanism can be represented for the
+    /// entire instrument in today's sampler. Parse/validate every used group
+    /// before sample files are copied; never invent keyswitch MIDI notes.
+    private struct GroupSelection {
+        var roundRobinByGroup: [Int: UInt8] = [:]
+        var articulationByGroup: [Int: UInt8] = [:]
+        var articulations: [StudioSamplerArticulation] = []
+        var defaultKeyswitchNote: UInt8?
+        var controllerSwitch: StudioSamplerControllerSwitch?
+        var warnings: [String] = []
+    }
+
+    private static func groupSelection(_ catalog: StudioSamplerEXSReader.Catalog)
+        throws -> GroupSelection {
+        let used = Set(catalog.zones.compactMap(\.groupIndex))
+        guard !used.isEmpty else { return GroupSelection() }
+        let groups: [StudioSamplerEXSReader.Group] = try used.sorted().map { index in
+            guard let group = catalog.groups[index] else {
+                throw ImportError.invalidZone("group \(index) is missing")
+            }
+            return group
+        }
+        let types = Set(groups.map(\.enableByType))
+        guard types.count == 1, let type = types.first else {
+            throw ImportError.unsupportedBehavior("mixed EXS group selectors")
+        }
+        var selection = GroupSelection()
+        switch type {
+        case 0:
+            guard groups.allSatisfy({ $0.roundRobinPosition == -1 }) else {
+                throw ImportError.unsupportedBehavior("inconsistent round-robin metadata")
+            }
+        case 2:
+            // EXS enables round robin using Select Group By = 2 and a zero-
+            // based position in each group. Studio accepts up to eight takes.
+            guard groups.count >= 2, groups.count <= 8 else {
+                throw ImportError.unsupportedBehavior("more than eight or fewer than two round-robin takes")
+            }
+            let positions = groups.map(\.roundRobinPosition).sorted()
+            guard positions == Array(0..<Int32(groups.count)) else {
+                throw ImportError.unsupportedBehavior("missing or duplicate round-robin positions")
+            }
+            for group in groups {
+                selection.roundRobinByGroup[group.index] =
+                    UInt8(group.roundRobinPosition)
+            }
+            selection.warnings.append(
+                "EXS round-robin takes use Studio's per-note counter; Logic's group-wide rotation may differ.")
+        case 1:
+            guard used.count == groups.count,
+                  catalog.zones.allSatisfy({ $0.groupIndex != nil }),
+                  (2...16).contains(groups.count) else {
+                throw ImportError.unsupportedBehavior("partial EXS keyswitch groups")
+            }
+            let ordered = groups.sorted {
+                $0.enableByNoteValue < $1.enableByNoteValue
+            }
+            let notes = ordered.map(\.enableByNoteValue)
+            guard notes.allSatisfy({ $0 <= 127 }),
+                  Set(notes).count == notes.count,
+                  !notes.contains(where: { note in
+                      catalog.zones.contains {
+                          $0.keyLow <= note && note <= $0.keyHigh
+                      }
+                  }) else {
+                throw ImportError.unsupportedBehavior("keyswitch notes overlap playable keys or are duplicated")
+            }
+            selection.defaultKeyswitchNote = ordered[0].enableByNoteValue
+            for (index, group) in ordered.enumerated() {
+                let id = UInt8(index)
+                selection.articulationByGroup[group.index] = id
+                if index > 0 {
+                    selection.articulations.append(StudioSamplerArticulation(
+                        id: id,
+                        name: String((group.name.isEmpty
+                                      ? "EXS Keyswitch \(group.enableByNoteValue)"
+                                      : group.name).prefix(48)),
+                        keyswitchNote: group.enableByNoteValue))
+                }
+            }
+            selection.warnings.append(
+                "EXS note-selected groups use Studio's latched keyswitch behavior; verify momentary switching in the source instrument.")
+        case 3:
+            // Studio's optional CC selector has uniformly stepped bands
+            // for CC1/CC2. Other controllers or irregular EXS ranges must
+            // not be approximated as though the conversion were faithful.
+            guard catalog.zones.allSatisfy({ $0.groupIndex != nil }),
+                  (2...16).contains(groups.count),
+                  let controller = groups.first?.enableByControlNumber,
+                  (controller == 1 || controller == 2),
+                  groups.allSatisfy({ $0.enableByControlNumber == controller })
+            else {
+                throw ImportError.unsupportedBehavior("non-CC1/CC2 controller group selection")
+            }
+            let ordered = groups.sorted {
+                $0.enableByControlLow < $1.enableByControlLow
+            }
+            for (index, group) in ordered.enumerated() {
+                let low = index * 128 / ordered.count
+                let high = (index + 1) * 128 / ordered.count - 1
+                guard group.enableByControlLow == UInt8(low),
+                      group.enableByControlHigh == UInt8(high) else {
+                    throw ImportError.unsupportedBehavior("custom EXS controller band thresholds")
+                }
+                let id = UInt8(index)
+                selection.articulationByGroup[group.index] = id
+                if index > 0 {
+                    selection.articulations.append(StudioSamplerArticulation(
+                        id: id, name: String((group.name.isEmpty
+                             ? "EXS CC\(controller) Band \(index + 1)"
+                             : group.name).prefix(48)),
+                        keyswitchNote: UInt8(127 - index)))
+                }
+            }
+            selection.controllerSwitch = StudioSamplerControllerSwitch(
+                controller: controller,
+                articulationIDs: (0..<groups.count).map { UInt8($0) })
+            selection.warnings.append(
+                "EXS CC\(controller) selects a discrete sample at note-on; simultaneous continuous timbre crossfades are not reproduced.")
+        default:
+            // Logic articulation IDs are attached to individual note events,
+            // and Studio's project MIDI model does not yet carry those tags.
+            throw ImportError.unsupportedBehavior(
+                "EXS articulation ID, pitch bend, channel, tempo, or other group conditions")
+        }
+        return selection
+    }
+
     /// Preview resolves the exact referenced recordings and inspects their
     /// durations, without modifying the original instrument or any samples.
     public static func preview(_ instrumentURL: URL) throws -> Result {
         let catalog = try StudioSamplerEXSReader.inspect(instrumentURL)
         guard catalog.zones.count <= 128 else { throw ImportError.tooManyZones }
+        let selection = try groupSelection(catalog)
         var warnings = Set(catalog.warnings)
+        warnings.formUnion(selection.warnings)
         var resolved: [Int: (url: URL, frames: UInt32, rate: Double)] = [:]
         for sampleIndex in Set(catalog.zones.map(\.sampleIndex)).sorted() {
             guard let sample = catalog.samples[sampleIndex] else {
@@ -82,12 +212,11 @@ public enum StudioSamplerEXSImporter {
                 guard let stored = catalog.groups[id] else {
                     throw ImportError.invalidZone("missing group \(id)")
                 }
-                if stored.mute || stored.enableByType != 0 ||
-                    stored.roundRobinPosition != -1 ||
+                if stored.mute ||
                     stored.velocityCrossfade != 0 ||
                     stored.keyCrossfade != 0 {
                     throw ImportError.unsupportedBehavior(
-                        "group triggers, crossfades, round robin, or muted groups")
+                        "muted groups or group crossfade processing")
                 }
                 group = stored
             } else {
@@ -132,6 +261,10 @@ public enum StudioSamplerEXSImporter {
             if end != availableFrames { zone.trimEndFrame = end }
             let releaseTrigger = group?.releaseTrigger == true
             if releaseTrigger { zone.isReleaseTrigger = true }
+            if let groupIndex = info.groupIndex {
+                zone.roundRobinIndex = selection.roundRobinByGroup[groupIndex]
+                zone.articulationID = selection.articulationByGroup[groupIndex]
+            }
             if info.loopFlags & 0x01 != 0 {
                 guard !releaseTrigger else {
                     throw ImportError.unsupportedBehavior("a looped release-trigger sample")
@@ -168,7 +301,12 @@ public enum StudioSamplerEXSImporter {
         guard !zones.isEmpty else {
             throw ImportError.invalidZone("no playable mappings remain")
         }
-        let patch = StudioSamplerPatch(zones: zones)
+        var patch = StudioSamplerPatch(zones: zones)
+        if !selection.articulations.isEmpty {
+            patch.articulations = selection.articulations
+            patch.defaultKeyswitchNote = selection.defaultKeyswitchNote
+            patch.controllerSwitch = selection.controllerSwitch
+        }
         guard patch.isValid else { throw ImportError.invalidZone("invalid Studio patch") }
         return Result(patch: patch, instrumentName: catalog.name,
                       warnings: warnings.sorted())
