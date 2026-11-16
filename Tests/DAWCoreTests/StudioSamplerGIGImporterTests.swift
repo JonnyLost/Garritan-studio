@@ -32,7 +32,7 @@ final class StudioSamplerGIGImporterTests: XCTestCase {
         return root
     }
     private func fixture(in root: URL, dimensions: UInt32 = 1,
-                         format: UInt16 = 1) throws -> URL {
+                         format: UInt16 = 1, gigSampleInfo: Bool = false) throws -> URL {
         let samples: [Int16] = [0, 1000, -1000, 250, -250,
                                  300, -300, 900, -900, 0, 0, 0]
         var pcm = Data()
@@ -40,9 +40,14 @@ final class StudioSamplerGIGImporterTests: XCTestCase {
         let info = list("INFO", [chunk("INAM", Data("GIG Test Instrument\0".utf8))])
         let fmt = u16(format) + u16(1) + u32(22_050) +
                   u32(44_100) + u16(2) + u16(16)
+        let gigSmpl = u32(0) + u32(0) + u32(0) + u32(60) +
+            u32(0) + u32(0) + u32(0) + u32(1) +
+            u32(0) + u32(0) + u32(0) + u32(2) + u32(8) +
+            Data(repeating: 0, count: 8)
         let wave = list("wave", [
             chunk("fmt ", fmt),
             chunk("data", pcm),
+            gigSampleInfo ? chunk("smpl", gigSmpl) : chunk("wsmp", parameters()),
             list("INFO", [chunk("INAM", Data("Test Sample\0".utf8))])
         ])
         // GIG's 3lnk: number of dimension cases at offset 0, sample-table
@@ -113,6 +118,20 @@ final class StudioSamplerGIGImporterTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: gig), original)
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(
             at: target, includingPropertiesForKeys: nil).count, 1)
+    }
+
+    func testGIGSmplWaveMetadataReadsPitchAndLoops() throws {
+        let root = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let gig = try fixture(in: root, gigSampleInfo: true)
+        let catalog = try StudioSamplerGIGReader.inspect(gig)
+        XCTAssertEqual(catalog.waves[0].parameters?.root, 60)
+        XCTAssertEqual(catalog.waves[0].parameters?.loopStart, 2)
+        XCTAssertEqual(catalog.waves[0].parameters?.loopEnd, 8)
+        let result = try StudioSamplerGIGImporter.importInstrument(
+            gig, instrumentIndex: 0, into: root.appendingPathComponent("managed"))
+        XCTAssertEqual(result.patch.zones[0].loopStartFrame, 2)
+        XCTAssertEqual(result.patch.zones[0].loopEndFrame, 8)
     }
 
     func testMultipleGigDimensionsAreRejectedRatherThanFlattened() throws {
