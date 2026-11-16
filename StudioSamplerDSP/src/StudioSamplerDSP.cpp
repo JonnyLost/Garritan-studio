@@ -796,7 +796,11 @@ struct SSSampler {
                         controllerArticulationIDs[index];
                 }
                 if (command.note == 1) targetCC1[command.channel] = command.velocity;
-                if (command.note == 2) targetCC2[command.channel] = command.velocity;
+                // A CC2 dimension selects discrete instrument samples and
+                // must not also attenuate them via the breath-expression gain.
+                // All ordinary instruments keep the existing CC2 behavior.
+                if (command.note == 2 && controllerArticulationCC != 2)
+                    targetCC2[command.channel] = command.velocity;
                 if (command.note == 11) targetCC11[command.channel] = command.velocity;
                 if (command.note == 21) targetCC21[command.channel] = command.velocity;
                 if (command.note == 120 || command.note == 123) {
