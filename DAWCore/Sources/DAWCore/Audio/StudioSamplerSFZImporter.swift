@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 
 /// First-stage SFZ compatibility reader. Translates supported SFZ regions into
 /// Studio's editable native mapping; it does not execute SFZ scripts or effects.
@@ -53,6 +54,9 @@ public enum StudioSamplerSFZImporter {
 
         var zones: [StudioSamplerZone] = []
         var warnings = Set<String>()
+        // Cache lightweight metadata per distinct source; avoid opening the
+        // same orchestral sample once for every note and velocity zone.
+        var audioFrames: [String: UInt32] = [:]
         let directory = url.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL
         let roots = [directory] + (samplesRoot.map {
             [$0.resolvingSymlinksInPath().standardizedFileURL]
@@ -84,6 +88,27 @@ public enum StudioSamplerSFZImporter {
             guard let realFile = resolved else {
                 throw ImportError.missingSample(sample)
             }
+            let frames: UInt32
+            if let cached = audioFrames[realFile.path] {
+                frames = cached
+            } else {
+                // A file with a .wav/.aif/.caf extension is not necessarily
+                // decodable audio. Reject it before staging an instrument.
+                let audio: AVAudioFile
+                do { audio = try AVAudioFile(forReading: realFile) }
+                catch { throw ImportError.invalidRegion(
+                    region.line, "unsupported or damaged sample: \(sample)") }
+                guard (1...2).contains(Int(audio.processingFormat.channelCount)),
+                      audio.processingFormat.sampleRate.isFinite,
+                      audio.processingFormat.sampleRate > 0,
+                      audio.length >= 2 && audio.length <= 500_000_000
+                else {
+                    throw ImportError.invalidRegion(
+                        region.line, "sample is not supported stereo/mono audio: \(sample)")
+                }
+                frames = UInt32(audio.length)
+                audioFrames[realFile.path] = frames
+            }
             func note(_ key: String, fallback: Int) throws -> Int {
                 guard let raw = p[key] else { return fallback }
                 if let n = Int(raw), (0...127).contains(n) { return n }
@@ -113,6 +138,11 @@ public enum StudioSamplerSFZImporter {
             if let loopMode = p["loop_mode"], loopMode == "loop_continuous" || loopMode == "loop_sustain" {
                 if let start = p["loop_start"].flatMap(UInt32.init),
                    let end = p["loop_end"].flatMap(UInt32.init), end < UInt32.max {
+                    guard start < end + 1, end + 1 <= frames,
+                          end + 1 - start >= 4 else {
+                        throw ImportError.invalidRegion(
+                            region.line, "sample loop exceeds recording bounds")
+                    }
                     zone.loopStartFrame = start
                     zone.loopEndFrame = end + 1 // SFZ end is inclusive; Studio end is exclusive.
                 } else {
