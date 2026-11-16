@@ -30,7 +30,9 @@ public enum StudioSamplerGIGReader {
         /// GigaStudio dimension controller code, e.g. velocity 0x82.
         public let type: UInt8
         public let bits: UInt8
-        public var zoneCount: Int { 1 << Int(bits) }
+        /// Explicit split count; newer GIGs may use fewer than 2^bits.
+        public let zones: UInt8
+        public var zoneCount: Int { zones == 0 ? 1 << Int(bits) : Int(zones) }
     }
 
     public struct SampleCase: Sendable {
@@ -57,6 +59,9 @@ public enum StudioSamplerGIGReader {
         public let name: String
         public let bank: UInt32
         public let program: UInt32
+        /// Inclusive MIDI keyswitch interval from the instrument's 3ewg.
+        /// Nil when the instrument has no explicit keyswitch metadata.
+        public let keyswitchRange: ClosedRange<UInt8>?
         public let regions: [Region]
     }
 
@@ -336,6 +341,25 @@ public enum StudioSamplerGIGReader {
             let header = try scanner.read(insh.offset, 12)
             let bank = u32(header, 4)
             let program = u32(header, 8)
+            var keyswitchRange: ClosedRange<UInt8>?
+            if let articulation = try scanner.firstList("lart", in: instrumentRecords) {
+                let settings = try scanner.children(of: articulation)
+                if let gigSettings = scanner.first("3ewg", in: settings) {
+                    // GIG global articulation: effect send UInt16, attenuation
+                    // Int32, fine tune Int16, pitch bend Int16, then two bytes
+                    // storing the dimension keyswitch interval.
+                    guard gigSettings.length >= 12 else {
+                        throw GIGError.invalidChunk("3ewg instrument settings")
+                    }
+                    let bytes = try scanner.read(gigSettings.offset + 10, 2)
+                    let low = bytes[0] >> 1
+                    let high = bytes[1]
+                    guard low <= 127, high <= 127 else {
+                        throw GIGError.invalidChunk("3ewg keyswitch range")
+                    }
+                    if high >= low { keyswitchRange = low...high }
+                }
+            }
             let name = try scanner.displayName(
                 scanner.firstList("INFO", in: instrumentRecords))
                 ?? "Instrument \(index + 1)"
@@ -379,19 +403,25 @@ public enum StudioSamplerGIGReader {
                     for i in 0..<slots {
                         let type = data[4 + i * 8]
                         let bits = data[5 + i * 8]
+                        let position = data[6 + i * 8]
+                        let zones = data[8 + i * 8]
                         if type == 0 {
                             guard bits == 0 else {
                                 throw GIGError.invalidChunk("unused 3lnk dimension")
                             }
                             continue
                         }
-                        guard bits > 0, bits <= 5, !seenTypes.contains(type),
+                        guard bits > 0, bits <= 5,
+                              Int(position) == totalBits,
+                              (zones == 0 || Int(zones) <= 1 << Int(bits)),
+                              !seenTypes.contains(type),
                               totalBits + Int(bits) <= 5 else {
                             throw GIGError.invalidChunk("3lnk dimension definition")
                         }
                         totalBits += Int(bits)
                         seenTypes.insert(type)
-                        definitions.append(Dimension(type: type, bits: bits))
+                        definitions.append(Dimension(type: type, bits: bits,
+                                                     zones: zones))
                     }
                     guard (1 << totalBits) == Int(dimensionCases) else {
                         throw GIGError.invalidChunk("3lnk dimension mismatch")
@@ -455,7 +485,8 @@ public enum StudioSamplerGIGReader {
                 guard regions.count <= 4_096 else { throw GIGError.tooManyEntries }
             }
             instruments.append(Instrument(name: name, bank: bank,
-                                          program: program, regions: regions))
+                                          program: program, keyswitchRange: keyswitchRange,
+                                          regions: regions))
         }
         return Catalog(instruments: instruments, waves: waves,
                        sampleIndexToWave: mapping, warnings: warnings.sorted(),
