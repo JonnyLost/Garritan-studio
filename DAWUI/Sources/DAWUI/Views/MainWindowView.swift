@@ -2273,7 +2273,7 @@ private struct ChannelWorkspaceView: View {
         HStack(spacing: 8) {
             Image(systemName: symbol)
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(StudioGUI.selection)
+                .foregroundStyle(palette.accent)
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -2288,7 +2288,7 @@ private struct ChannelWorkspaceView: View {
         }
         .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, minHeight: 54)
-        .background(StudioGUI.panel, in: RoundedRectangle(cornerRadius: 8))
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: 8))
         .accessibilityElement(children: .combine)
     }
 
