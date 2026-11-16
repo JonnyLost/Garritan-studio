@@ -139,7 +139,7 @@ final class StudioSamplerSF2ImporterTests: XCTestCase {
         let result = try StudioSamplerSF2Importer.importInstrument(
             source, presetIndex: 0, into: root.appendingPathComponent("managed"))
         let zone = try XCTUnwrap(result.patch.zones.first)
-        let wav = try Data(contentsOf: zone.sampleURL)
+        let wav = try Data(contentsOf: URL(fileURLWithPath: zone.filePath))
         XCTAssertEqual(wav.count, 44 + 12 * 4)
         XCTAssertEqual(Array(wav[22..<24]), [2, 0])
         XCTAssertEqual(Array(wav[48..<52]), [0xE8, 0x03, 0x18, 0xFC])
