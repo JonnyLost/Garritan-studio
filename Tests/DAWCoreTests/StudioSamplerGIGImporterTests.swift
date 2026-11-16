@@ -33,7 +33,8 @@ final class StudioSamplerGIGImporterTests: XCTestCase {
     }
     private func fixture(in root: URL, dimensions: UInt32 = 1,
                          format: UInt16 = 1, gigSampleInfo: Bool = false,
-                         definitions: [(UInt8, UInt8)] = []) throws -> URL {
+                         definitions: [(UInt8, UInt8)] = [],
+                         keyswitchRange: ClosedRange<UInt8>? = nil) throws -> URL {
         let sampleFrames: [Int16] = [0, 1000, -1000, 250, -250,
                                      300, -300, 900, -900, 0, 0, 0]
         let fmt = u16(format) + u16(1) + u32(22_050) +
@@ -66,15 +67,20 @@ final class StudioSamplerGIGImporterTests: XCTestCase {
         let declaredDefinitions = definitions.isEmpty && dimensions > 1
             ? [(UInt8(0x81), UInt8(1))] : definitions
         var dimensionHeader = u32(dimensions)
+        var dimensionBitPosition = 0
         for index in 0..<5 {
             if index < declaredDefinitions.count {
+                let bits = declaredDefinitions[index].1
                 dimensionHeader.append(declaredDefinitions[index].0)
-                dimensionHeader.append(declaredDefinitions[index].1)
+                dimensionHeader.append(bits)
+                dimensionHeader.append(UInt8(dimensionBitPosition))
+                dimensionHeader.append(0) // dimension bit mask (unused by reader)
+                dimensionHeader.append(0) // 0 means exactly 2^bits zones
+                dimensionHeader.append(Data(repeating: 0, count: 3))
+                dimensionBitPosition += Int(bits)
             } else {
-                dimensionHeader.append(0)
-                dimensionHeader.append(0)
+                dimensionHeader.append(Data(repeating: 0, count: 8))
             }
-            dimensionHeader.append(Data(repeating: 0, count: 6))
         }
         for caseIndex in 0..<32 {
             dimensionHeader.append(caseIndex < Int(dimensions)
@@ -90,10 +96,17 @@ final class StudioSamplerGIGImporterTests: XCTestCase {
             chunk("3lnk", dimensionHeader),
             list("3prg", dimensionLists)
         ])
-        let instrument = list("ins ", [
+        var instrumentNodes = [
             chunk("insh", u32(1) + u32(2) + u32(4)),
             info, list("lrgn", [region])
-        ])
+        ]
+        if let keys = keyswitchRange {
+            let settings = u16(0) + u32(0) + u16(0) + u16(2) +
+                Data([keys.lowerBound << 1, keys.upperBound]) +
+                Data(repeating: 0, count: 20)
+            instrumentNodes.append(list("lart", [chunk("3ewg", settings)]))
+        }
+        let instrument = list("ins ", instrumentNodes)
         let cues = poolOffsets.reduce(into: Data()) { $0.append(u32($1)) }
         let payload = fourCC("DLS ") +
             list("lins", [instrument]) +
@@ -233,6 +246,63 @@ final class StudioSamplerGIGImporterTests: XCTestCase {
         XCTAssertEqual(imported.patch.zones[1].isReleaseTrigger, true)
         XCTAssertNil(imported.patch.zones[1].loopStartFrame)
         XCTAssertTrue(imported.patch.isValid)
+    }
+
+    func testKeyboardDimensionPreservesGIGKeyswitchRangeAndArticulations() throws {
+        let root = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try fixture(in: root, dimensions: 2,
+            definitions: [(0x85, 1)], keyswitchRange: 24...25)
+        let catalog = try StudioSamplerGIGReader.inspect(source)
+        XCTAssertEqual(catalog.instruments[0].keyswitchRange, 24...25)
+        let result = try StudioSamplerGIGImporter.importInstrument(
+            source, instrumentIndex: 0, into: root.appendingPathComponent("managed"))
+        XCTAssertTrue(result.patch.isValid)
+        XCTAssertEqual(result.patch.defaultKeyswitchNote, 24)
+        XCTAssertEqual(result.patch.articulations?.count, 1)
+        XCTAssertEqual(result.patch.articulations?[0].keyswitchNote, 25)
+        XCTAssertEqual(result.patch.articulations?[0].id, 1)
+        XCTAssertEqual(result.patch.zones.map { $0.articulationID ?? 0 }, [0, 1])
+        XCTAssertNil(result.patch.controllerSwitch)
+    }
+
+    func testCC1DimensionConvertsToDiscreteControllerArticulationGroups() throws {
+        let root = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try fixture(in: root, dimensions: 2,
+            definitions: [(0x01, 1)])
+        let result = try StudioSamplerGIGImporter.importInstrument(
+            source, instrumentIndex: 0, into: root.appendingPathComponent("managed"))
+        XCTAssertTrue(result.patch.isValid)
+        XCTAssertEqual(result.patch.controllerSwitch?.controller, 1)
+        XCTAssertEqual(result.patch.controllerSwitch?.articulationIDs, [0, 1])
+        XCTAssertNil(result.patch.defaultKeyswitchNote)
+        XCTAssertEqual(result.patch.zones.map { $0.articulationID ?? 0 }, [0, 1])
+    }
+
+    func testCC2DimensionAndVelocityStayIndependent() throws {
+        let root = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try fixture(in: root, dimensions: 4,
+            definitions: [(0x82, 1), (0x02, 1)])
+        let result = try StudioSamplerGIGImporter.importInstrument(
+            source, instrumentIndex: 0, into: root.appendingPathComponent("managed"))
+        XCTAssertTrue(result.patch.isValid)
+        XCTAssertEqual(result.patch.controllerSwitch?.controller, 2)
+        XCTAssertEqual(result.patch.zones.map { $0.articulationID ?? 0 }, [0, 0, 1, 1])
+        XCTAssertEqual(result.patch.zones.map(\.lowestVelocity), [1, 64, 1, 64])
+        XCTAssertEqual(result.patch.zones.map(\.highestVelocity), [63, 127, 63, 127])
+    }
+
+    func testUnsupportedKeyswitchConfigurationFailsBeforeFileCopy() throws {
+        let root = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try fixture(in: root, dimensions: 2,
+            definitions: [(0x85, 1)]) // no 3ewg switch notes
+        let destination = root.appendingPathComponent("managed")
+        XCTAssertThrowsError(try StudioSamplerGIGImporter.importInstrument(
+            source, instrumentIndex: 0, into: destination))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
     }
 
     func testKeyswitchAndLayerDimensionsAreNotFlattenedIntoWrongInstruments() throws {
