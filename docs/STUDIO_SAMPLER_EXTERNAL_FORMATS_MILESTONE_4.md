@@ -24,8 +24,20 @@ Import existing sample-based instruments into editable Studio mappings and porta
    extraction, missing references and no source-file modifications.
    Outstanding: broader real-library compatibility, modulator/effect/envelope
    translation, larger-than-512-MB banks, and consolidated Mac audition testing.
-4. GIG: pending RIFF/DLS-derived container reader and dimension mapping, with
-   attention to format variations and sample encoding.
+4. GIG: **implemented first conservative import subset.** Native bounded
+   RIFF/DLS reader inspects `lins` instruments, `lrgn` key/velocity regions,
+   `ptbl` sample cues, `wvpl` waves, `wsmp` loops and GIG-specific
+   `3lnk` dimension links and `3prg/3ewl` articulations. Supports
+   selecting one instrument and copying validated **single-dimension,
+   uncompressed 16-bit PCM** mono/stereo recordings as WAV files into
+   Studio's managed sample library. The mapping is staged for Apply.
+   More complex GIG dimensions or compressed/unknown samples are
+   intentionally rejected rather than silently losing layers.
+   Synthetic regression tests cover a playable RIFF/DLS GIG fixture,
+   source-file immutability, dimensions, compressed/unsupported audio,
+   and damaged containers. Pending: real-world GIG file compatibility,
+   GIG 3+ extended containers, 24-bit/compressed wave decoding,
+   velocity/articulation dimensions, envelopes/filters/LFO, and Mac audition.
 5. EXS: pending investigation and implementation for accessible legacy EXS24
    instrument definitions and referenced samples.
 6. Round-trip validation and consolidated Mac testing.
@@ -42,6 +54,27 @@ Import existing sample-based instruments into editable Studio mappings and porta
   during offline conversion; new WAVs are staged and rolled back on error.
 - Current safety cap: **512 MB source files and 128 zones per preset**;
   support for very large orchestral banks is planned after this milestone.
+
+## GigaStudio support boundary
+
+**Implemented:** browsing instrument names/programs and native import of
+single-dimension GIG regions with conventional PCM wave data. Interprets GIG
+`3lnk` sample-pool references (distinct from DLS `wlnk`), GIG
+`3ewl` sample parameters, key/velocity bounds, and sample loops.
+WAV extraction is offline, staged, transactional and leaves the source intact.
+
+**Not yet implemented:** multi-dimension GIG instruments (including layered
+velocity/crossfade, round-robin, keyswitches, release samples, pedal and
+controller dimensions), compressed GIG wave decoding, GIG v3/v4 extended
+RIFF containers, finer per-dimension tuning, filters and modulation.
+A failure in this subset is **not evidence that a library is corrupted**.
+The importer must refuse unsupported regions instead of pretending that
+only the DLS base sample link fully represents a GigaStudio instrument.
+
+**Licensing:** GIG structure research was informed by publicly documented
+RIFF/DLS layout and format observations, but the implementation is original
+Swift/Foundation code, with no libgig dependency. libgig is GPL-licensed;
+integrating it would require separate licensing and architecture review.
 
 ## Compatibility limits
 Studio's current native sampler supports at most 128 zones, 4 microphone groups,
