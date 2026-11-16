@@ -318,7 +318,7 @@ public struct StudioSamplerMapView: View {
                     }
                 }
                 .frame(maxWidth: .infinity)
-                Text("The first GIG importer supports uncompressed 16-bit PCM and single-dimension regions. Complex GigaStudio dimensions are detected and rejected rather than played incorrectly.")
+                Text("Supports 16-bit PCM, regular velocity splits, round-robin takes, and release-trigger cases. Complex keyswitch, controller, crossfade, and compressed dimensions are not yet supported.")
                     .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Button("Cancel") {
