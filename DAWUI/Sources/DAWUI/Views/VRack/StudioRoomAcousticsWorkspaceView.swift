@@ -410,10 +410,7 @@ struct StudioRoomAcousticsWorkspaceView: View {
 
     private var microphoneMixer: some View {
         VStack(alignment: .leading, spacing: 14) {
-            StudioSectionHeading("Virtual Microphone Mixer", symbol: "slider.horizontal.3")
-            Text("Every live microphone receives each participating source, with its own directional gain and sound-travel delay. Auditioning replaces the original dry mix temporarily; an adjustable shared room return adds ambience without a second dry orchestra.")
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            StudioSectionHeading("Mic Mixer", symbol: "slider.horizontal.3")
 
             let sourceCount = viewModel.project.tracks.filter {
                 AudioEngine.isIndependentMicrophoneSource($0)
@@ -433,6 +430,8 @@ struct StudioRoomAcousticsWorkspaceView: View {
                 Text("\(min(4, microphoneObjects.count)) live mic channels · \(sourceCount) sources")
                     .font(.caption2).foregroundStyle(.secondary)
             }
+            DisclosureGroup(isExpanded: $showMicMixerAdvanced) {
+                VStack(alignment: .leading, spacing: 8) {
             Toggle("Experimental shared-history capture (one Audio Unit per source)",
                    isOn: Binding(
                        get: { viewModel.audioEngine.usesSharedMicrophoneMatrix },
@@ -443,9 +442,15 @@ struct StudioRoomAcousticsWorkspaceView: View {
                 .disabled(viewModel.audioEngine.isMicrophoneAuditionActive ||
                           !canChangeRoom)
                 .accessibilityIdentifier("experimental-microphone-matrix")
-            Text("Switch back to original capture with audition stopped. The experimental path still has the 16-source limit; both retain independent mic level, pan, mute, solo and alignment controls.")
-                .font(.caption2).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                    Text("Experimental matrix: maximum sixteen independent sources. Change mode with audition stopped.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 8)
+            } label: {
+                Label("Advanced Capture", systemImage: "slider.horizontal.3")
+                    .font(.subheadline.weight(.semibold))
+            }
             HStack(spacing: 12) {
                 Text("Shared room return").font(.caption)
                 Slider(value: Binding(
@@ -463,9 +468,7 @@ struct StudioRoomAcousticsWorkspaceView: View {
                     .font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Text("One shared hall field is blended into microphone audition. It uses existing stage sends, not measured reflections at each capsule. Set to 0% for direct/spill-only comparison.")
-                .font(.caption2).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+
             if let error = viewModel.microphoneAuditionError {
                 Text(error).font(.caption).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
@@ -485,11 +488,7 @@ struct StudioRoomAcousticsWorkspaceView: View {
                     micMixerStrip(mic)
                 }
             }
-            Divider()
-            Text("Experimental direct-and-spill monitoring: capsule pickup, distance attenuation, air damping and propagation delay are audible. The original dry route is muted while auditioning; the shared room return has its own wet trim. Align shifts an entire capsule's capture by up to ±20 ms; it is a manual timing correction, not automatic phase matching. Independent mic stems and large orchestral matrices remain future milestones.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+
         }
     }
 
@@ -513,7 +512,7 @@ struct StudioRoomAcousticsWorkspaceView: View {
                 .buttonStyle(.bordered)
             }
             HStack {
-                Text("Level").frame(width: 42, alignment: .leading)
+                Text("Level").frame(width: 48, alignment: .leading)
                 Slider(value: Binding(
                     get: { Double(mic.mixer.safeLevel) },
                     set: { level in
@@ -524,7 +523,7 @@ struct StudioRoomAcousticsWorkspaceView: View {
                     .monospacedDigit().frame(width: 53)
             }
             HStack {
-                Text("Align").frame(width: 42, alignment: .leading)
+                Text("Align").frame(width: 48, alignment: .leading)
                 Slider(value: Binding(
                     get: { Double(mic.mixer.safeAlignmentMilliseconds) },
                     set: { value in
@@ -541,7 +540,7 @@ struct StudioRoomAcousticsWorkspaceView: View {
                 .buttonStyle(.bordered)
             }
             HStack {
-                Text("Pan").frame(width: 42, alignment: .leading)
+                Text("Pan").frame(width: 48, alignment: .leading)
                 Slider(value: Binding(
                     get: { Double(mic.mixer.safePan) },
                     set: { value in
@@ -555,6 +554,11 @@ struct StudioRoomAcousticsWorkspaceView: View {
         .font(.caption)
         .padding(12)
         .background(palette.panel, in: RoundedRectangle(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(settings.isSolo ? palette.accent : palette.separator.opacity(0.6),
+                              lineWidth: settings.isSolo ? 1.5 : 0.7)
+        }
         .accessibilityIdentifier("mic-mixer-" + mic.id.uuidString)
     }
 
