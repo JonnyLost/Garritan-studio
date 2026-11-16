@@ -34,9 +34,12 @@ final class StudioSamplerSF2ImporterTests: XCTestCase {
     private func header(_ name: String, start: UInt32, end: UInt32,
                         loopStart: UInt32, loopEnd: UInt32,
                         link: UInt16 = 0, type: UInt16 = 1) -> Data {
-        fixedName(name, size: 20) + u32(start) + u32(end) +
-        u32(loopStart) + u32(loopEnd) + u32(44_100) +
-        Data([60, 0]) + u16(link) + u16(type)
+        var bytes = fixedName(name, size: 20)
+        for field in [u32(start), u32(end), u32(loopStart), u32(loopEnd),
+                      u32(44_100), Data([60, 0]), u16(link), u16(type)] {
+            bytes.append(field)
+        }
+        return bytes
     }
 
     private func fixture(in root: URL, stereo: Bool = false,
@@ -50,10 +53,14 @@ final class StudioSamplerSF2ImporterTests: XCTestCase {
         }
 
         // Preset bag 0 -> instrument 0, terminal bag 1.
-        let phdr = fixedName("Studio Test Preset", size: 20) +
-            u16(4) + u16(7) + u16(0) + u32(0) + u32(0) + u32(0) +
-            fixedName("EOP", size: 20) +
-            u16(0) + u16(0) + u16(1) + u32(0) + u32(0) + u32(0)
+        var phdr = fixedName("Studio Test Preset", size: 20)
+        for field in [u16(4), u16(7), u16(0),
+                      u32(0), u32(0), u32(0),
+                      fixedName("EOP", size: 20),
+                      u16(0), u16(0), u16(1),
+                      u32(0), u32(0), u32(0)] {
+            phdr.append(field)
+        }
         let pbag = u16(0) + u16(0) + u16(2) + u16(0)
         let pgen = generator(43, range(55, 72)) + generator(41, 0) +
                    generator(0, 0)

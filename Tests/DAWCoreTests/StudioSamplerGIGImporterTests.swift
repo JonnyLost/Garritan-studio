@@ -21,8 +21,12 @@ final class StudioSamplerGIGImporterTests: XCTestCase {
     }
     private func parameters() -> Data {
         // DLS wsmp: header (20), unity note 60, 1 sustaining loop (2...8).
-        u32(20) + u16(60) + u16(0) + u32(0) + u32(0) + u32(1) +
-            u32(16) + u32(0) + u32(2) + u32(6)
+        var bytes = Data()
+        for field in [u32(20), u16(60), u16(0), u32(0), u32(0), u32(1),
+                      u32(16), u32(0), u32(2), u32(6)] {
+            bytes.append(field)
+        }
+        return bytes
     }
     private func folder() throws -> URL {
         let root = FileManager.default.temporaryDirectory
@@ -40,10 +44,13 @@ final class StudioSamplerGIGImporterTests: XCTestCase {
                                      300, -300, 900, -900, 0, 0, 0]
         let fmt = u16(format) + u16(1) + u32(22_050) +
                   u32(44_100) + u16(2) + u16(16)
-        let gigSmpl = u32(0) + u32(0) + u32(0) + u32(60) +
-            u32(0) + u32(0) + u32(0) + u32(1) +
-            u32(0) + u32(0) + u32(0) + u32(2) + u32(8) +
-            Data(repeating: 0, count: 8)
+        var gigSmpl = Data()
+        for field in [u32(0), u32(0), u32(0), u32(60),
+                      u32(0), u32(0), u32(0), u32(1),
+                      u32(0), u32(0), u32(0), u32(2), u32(8),
+                      Data(repeating: 0, count: 8)] {
+            gigSmpl.append(field)
+        }
 
         // Every dimension case references a distinct uncompressed recording.
         // Pool cues are byte offsets from the first wvpl subchunk.
