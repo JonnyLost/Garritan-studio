@@ -15,6 +15,10 @@ enum StudioInstrumentGroupArtwork: String, CaseIterable, Equatable {
     case horns, trumpets, trombones, highBrass, lowBrass, brass
     case percussion, tunedPercussion, auxiliaryPercussion, drumline
     case guitarSection, rhythmSection, worldPercussion, concertBand, marchingBand
+    case piccolos, cornets, flugelhorns, mellophones, tenorHorns
+    case euphoniums, baritoneHorns, tubas, sousaphones, helicons
+    case jazzBigBand, worldEnsemble
+    case stringsAndWinds, stringsAndBrass, windsAndBrass, orchestraAndChoir
     case choir, orchestra, mixedEnsemble
 
     var accessibilityLabel: String {
@@ -50,6 +54,22 @@ enum StudioInstrumentGroupArtwork: String, CaseIterable, Equatable {
         case .worldPercussion: return "World percussion ensemble"
         case .concertBand: return "Concert band"
         case .marchingBand: return "Marching band"
+        case .piccolos: return "Piccolo section"
+        case .cornets: return "Cornet section"
+        case .flugelhorns: return "Flugelhorn section"
+        case .mellophones: return "Mellophone section"
+        case .tenorHorns: return "Tenor horn section"
+        case .euphoniums: return "Euphonium section"
+        case .baritoneHorns: return "Baritone horn section"
+        case .tubas: return "Tuba section"
+        case .sousaphones: return "Sousaphone section"
+        case .helicons: return "Helicon section"
+        case .jazzBigBand: return "Jazz big band"
+        case .worldEnsemble: return "World instrument ensemble"
+        case .stringsAndWinds: return "Strings and woodwinds ensemble"
+        case .stringsAndBrass: return "Strings and brass ensemble"
+        case .windsAndBrass: return "Woodwinds and brass ensemble"
+        case .orchestraAndChoir: return "Orchestra and choir ensemble"
         case .choir: return "Choir section"
         case .orchestra: return "Full orchestra"
         case .mixedEnsemble: return "Mixed orchestral ensemble"
@@ -65,6 +85,27 @@ enum StudioInstrumentGroupArtwork: String, CaseIterable, Equatable {
         func has(_ terms: [String]) -> Bool {
             terms.contains { n.contains($0) }
         }
+
+        // Names of section/ensemble programs appearing in published Garritan
+        // Jazz & Big Band, Concert & Marching Band and World catalogs.
+        // These group images are representative, never exact layer metadata.
+        if has(["japanese taiko ensemble", "ewe drumming ensemble", "djembe drumming ensemble", "gamelan bali orchestra", "gamelan java orchestra"]) { return .worldPercussion }
+        if has(["african orchestra", "chinese orchestra", "global village", "middle east takht", "indian hindustani ensemble", "indian carnatic ensemble", "japanese traditional", "celtic consort", "and​​ean highlands ensemble"]) { return .worldEnsemble }
+        if has(["big band #", "full big band", "big band ensemble"]) { return .jazzBigBand }
+        if has(["orchestra and choir", "orchestra octaves and choir", "lush orchestra octaves and choir", "orchestra and chorus"]) { return .orchestraAndChoir }
+        if has(["strings and winds", "strings & winds", "strings winds", "strings and woodwinds"]) { return .stringsAndWinds }
+        if has(["strings and brass", "strings & brass"]) { return .stringsAndBrass }
+        if has(["winds and brass", "brass and winds", "winds & brass", "brass & winds"]) { return .windsAndBrass }
+        if has(["piccolo group", "piccolo section", "piccolos"]) { return .piccolos }
+        if has(["cornet group", "cornet section", "cornets"]) { return .cornets }
+        if has(["flugelhorn group", "flugelhorn section", "flugelhorns"]) { return .flugelhorns }
+        if has(["mellophone group", "mellophone section", "mellophones"]) { return .mellophones }
+        if has(["tenor horn group", "tenor horn section", "tenor horns"]) { return .tenorHorns }
+        if has(["euphonium group", "euphonium section", "euphoniums"]) { return .euphoniums }
+        if has(["baritone group", "baritone horn section", "baritone horns"]) { return .baritoneHorns }
+        if has(["sousaphone group", "sousaphone section", "sousaphones"]) { return .sousaphones }
+        if has(["helicon group", "helicon section", "helicons"]) { return .helicons }
+        if has(["tuba group", "tuba section", "tubas"]) { return .tubas }
 
         // Explicit band/ensemble identities. These are schematic group
         // artwork, not claims about any patch's exact orchestration.
