@@ -73,7 +73,10 @@ public enum StudioSamplerEXSImporter {
         case 2:
             // EXS enables round robin using Select Group By = 2 and a zero-
             // based position in each group. Studio accepts up to eight takes.
-            guard groups.count >= 2, groups.count <= 8 else {
+            // Unassigned zones would remain permanently active and defeat
+            // exclusive take selection, so reject those mixed instruments.
+            guard catalog.zones.allSatisfy({ $0.groupIndex != nil }),
+                  groups.count >= 2, groups.count <= 8 else {
                 throw ImportError.unsupportedBehavior("more than eight or fewer than two round-robin takes")
             }
             let positions = groups.map(\.roundRobinPosition).sorted()
