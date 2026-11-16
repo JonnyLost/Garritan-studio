@@ -985,37 +985,11 @@ public struct VRackView: View {
                             }
 
                             if let instrument = previewInstrument {
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(
-                                            LinearGradient(
-                                                colors: [palette.raisedSurface,
-                                                         palette.accent.opacity(0.18),
-                                                         palette.panel],
-                                                startPoint: .topLeading,
-                                                endPoint: .bottomTrailing
-                                            )
-                                        )
-                                    Circle()
-                                        .strokeBorder(palette.accent.opacity(0.16), lineWidth: 1)
-                                        .frame(width: 168, height: 168)
-                                        .offset(x: 62, y: 35)
-                                    Circle()
-                                        .strokeBorder(palette.accent.opacity(0.12), lineWidth: 1)
-                                        .frame(width: 112, height: 112)
-                                        .offset(x: 62, y: 35)
-                                    StudioInstrumentIcon(
-                                        name: instrument.name,
-                                        path: instrument.path,
-                                        category: instrument.category,
-                                        size: 100
-                                    )
-                                    .frame(maxWidth: .infinity, alignment: .center)
-                                    .padding(.vertical, 12)
-                                }
-                                .frame(height: 166)
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                                .accessibilityLabel("Illustrated instrument preview: \(instrument.name)")
+                                StudioInstrumentArtworkCard(
+                                    name: instrument.name,
+                                    path: instrument.path,
+                                    category: instrument.category
+                                )
 
                                 Text(instrument.name)
                                     .font(.system(size: 20, weight: .semibold,
