@@ -352,6 +352,20 @@ public struct VRackView: View {
         }
     }
 
+    private func familySymbol(_ family: String) -> String {
+        switch family {
+        case "Woodwinds": return "wind"
+        case "Brass": return "music.note"
+        case "Percussion": return "circle.dotted"
+        case "Keys": return "pianokeys"
+        case "Choir": return "person.3"
+        case "Strings": return "music.note.list"
+        case "Synth": return "waveform"
+        case "World": return "globe"
+        default: return "square.grid.2x2"
+        }
+    }
+
     private func displayInstrumentType(_ type: String) -> String {
         // Garritan bank folder names use ordering prefixes, e.g. "03 Clarinets".
         // Keep the underlying folder name intact for accurate catalog filtering.
@@ -709,7 +723,9 @@ public struct VRackView: View {
                 subtitle: "Garritan instruments and Studio's native Synth sounds",
                 symbol: "music.note.list"
             ) {
-                Text("\(filteredCatalog.count) patches")
+                Text("\(expandedFilteredCatalog.count) sounds")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .monospacedDigit()
                     .foregroundStyle(palette.secondaryText)
                 Button("Done") { closeInstrumentWorkspace?() }
                     .keyboardShortcut(.cancelAction)
@@ -719,6 +735,21 @@ public struct VRackView: View {
                     .foregroundStyle(.secondary)
                 TextField("Search instruments or articulations", text: $searchText)
                     .textFieldStyle(.plain)
+                    .accessibilityLabel("Search instrument patches")
+                Button {
+                    showingFavoritesOnly.toggle()
+                } label: {
+                    Label("Favorites", systemImage: showingFavoritesOnly ? "star.fill" : "star")
+                        .labelStyle(.iconOnly)
+                        .foregroundStyle(showingFavoritesOnly ? palette.accent : palette.secondaryText)
+                        .frame(width: 27, height: 27)
+                        .background(showingFavoritesOnly ? palette.selectedBackground : palette.raisedSurface,
+                                    in: RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .help(showingFavoritesOnly ? "Show all instruments" : "Show favorite instruments")
+                .accessibilityLabel("Favorites filter")
+                .accessibilityAddTraits(showingFavoritesOnly ? .isSelected : [])
                 Text("LIBRARY")
                     .font(.system(size: 10, weight: .semibold))
                     .tracking(0.6)
@@ -796,12 +827,17 @@ public struct VRackView: View {
                                 audition.stop()
                                 previewInstrumentID = nil
                             } label: {
-                                HStack {
+                                HStack(spacing: 9) {
+                                    Image(systemName: family == "All" ? "square.grid.2x2" : familySymbol(family))
+                                        .font(.system(size: 12))
+                                        .frame(width: 16)
+                                        .foregroundStyle(familyFilter == family ? palette.accent : palette.secondaryText)
                                     Text(family == "All" ? "All Instruments" : family)
-                                    Spacer()
+                                        .font(.system(size: 12, weight: familyFilter == family ? .semibold : .regular))
+                                    Spacer(minLength: 0)
                                 }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 9)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
                                 .background(familyFilter == family ? palette.selectedBackground : Color.clear)
                                 .clipShape(RoundedRectangle(cornerRadius: 7))
                             }
@@ -826,8 +862,9 @@ public struct VRackView: View {
                                         .lineLimit(2)
                                     Spacer()
                                 }
+                                .font(.system(size: 12, weight: instrumentTypeFilter == type ? .semibold : .regular))
                                 .padding(.horizontal, 10)
-                                .padding(.vertical, 9)
+                                .padding(.vertical, 7)
                                 .background(instrumentTypeFilter == type ?
                                             palette.selectedBackground : Color.clear)
                                 .clipShape(RoundedRectangle(cornerRadius: 7))
