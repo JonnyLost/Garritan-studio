@@ -609,21 +609,31 @@ public struct MainWindowView: View {
                                  action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 5) {
-                Image(systemName: symbol).font(.system(size: 17))
-                Text(title).font(.system(size: 9))
+                Image(systemName: symbol)
+                    .font(.system(size: 18, weight: active ? .semibold : .regular))
+                    .frame(height: 21)
+                Text(title)
+                    .font(.system(size: 9, weight: active ? .semibold : .medium))
+                    .lineLimit(1)
             }
-            .foregroundColor(active ? palette.selectedText : palette.secondaryText)
+            .foregroundStyle(active ? palette.selectedText : palette.secondaryText)
             .frame(width: 68, height: 56)
-            .background(active ? palette.selectedBackground : Color.clear)
-            .cornerRadius(9)
-            .overlay {
-                RoundedRectangle(cornerRadius: 9)
-                    .strokeBorder(active ? palette.accent.opacity(0.6) : .clear, lineWidth: 1)
+            .background(active ? palette.selectedBackground : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 9))
+            .overlay(alignment: .leading) {
+                if active {
+                    Capsule()
+                        .fill(palette.accent)
+                        .frame(width: 3, height: 28)
+                        .offset(x: -1)
+                }
             }
             .animation(.easeInOut(duration: 0.15), value: active)
         }
         .buttonStyle(.plain)
         .help(title)
+        .accessibilityLabel("\(title) workspace")
+        .accessibilityAddTraits(active ? .isSelected : [])
     }
 
     private var compactWorkspaceStrip: some View {
