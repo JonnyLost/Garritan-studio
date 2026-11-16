@@ -520,9 +520,9 @@ public struct TrackPianoRollView: View {
             Divider().frame(height: 20)
             
             HStack(spacing: 4) {
-                Text("Snap:")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                Image(systemName: "circle.grid.cross")
+                    .foregroundStyle(palette.secondaryText)
+                    .help("Grid snapping")
                 
                 Picker("", selection: $snapMode) {
                     ForEach(SnapMode.allCases, id: \.self) { mode in
@@ -565,39 +565,19 @@ public struct TrackPianoRollView: View {
 
             Spacer()
             
-            // Zoom controls
-            HStack(spacing: 4) {
-                Text("H:")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                Button(action: { zoomHorizontal(zoomIn: false) }) {
-                    Image(systemName: "minus.magnifyingglass")
-                }
-                .buttonStyle(.plain)
-                .help("Zoom Out Horizontal (⌘←)")
-                Button(action: { zoomHorizontal(zoomIn: true) }) {
-                    Image(systemName: "plus.magnifyingglass")
-                }
-                .buttonStyle(.plain)
-                .help("Zoom In Horizontal (⌘→)")
+            // Zoom remains available without using four permanent toolbar buttons.
+            Menu {
+                Button("Zoom In Horizontally") { zoomHorizontal(zoomIn: true) }
+                Button("Zoom Out Horizontally") { zoomHorizontal(zoomIn: false) }
+                Divider()
+                Button("Zoom In Vertically") { zoomVertical(zoomIn: true) }
+                Button("Zoom Out Vertically") { zoomVertical(zoomIn: false) }
+            } label: {
+                Label("Zoom", systemImage: "plus.magnifyingglass")
             }
-            
-            HStack(spacing: 4) {
-                Text("V:")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                Button(action: { zoomVertical(zoomIn: false) }) {
-                    Image(systemName: "minus.magnifyingglass")
-                }
-                .buttonStyle(.plain)
-                .help("Zoom Out Vertical (⌘↓)")
-                Button(action: { zoomVertical(zoomIn: true) }) {
-                    Image(systemName: "plus.magnifyingglass")
-                }
-                .buttonStyle(.plain)
-                .help("Zoom In Vertical (⌘↑)")
-            }
-            
+            .menuStyle(.borderlessButton)
+            .help("Piano roll horizontal and vertical zoom")
+
             Divider().frame(height: 20)
             
             Toggle("Velocity", isOn: $showVelocityLane)
