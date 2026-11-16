@@ -187,6 +187,33 @@ final class StudioSamplerNKIImporterTests: XCTestCase {
             imported.patch, in: root, name: "NKI-Legacy")
     }
 
+    func testKontaktReleaseTriggerGroupsMapToNativeNoteOffSamples() throws {
+        let root = try temp()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let samples = root.appendingPathComponent("Samples")
+        try FileManager.default.createDirectory(
+            at: samples, withIntermediateDirectories: true)
+        _ = try wav("tone.wav", in: samples)
+        let source = try nki(document(zones: [
+            zoneXML(loop: false)
+        ], groupRelease: true), in: root)
+        let result = try StudioSamplerNKIImporter.preview(source)
+        XCTAssertEqual(result.patch.zones[0].isReleaseTrigger, true)
+        XCTAssertNil(result.patch.zones[0].loopStartFrame)
+    }
+
+    func testXMLDTDAndInternalEntityExpansionAreRejected() throws {
+        let root = try temp()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let content = """
+        <?xml version="1.0"?>
+        <!DOCTYPE K2_Container [<!ENTITY infinite "explosion">]>
+        <K2_Container><Programs><K2_Program name="Unsafe"/></Programs></K2_Container>
+        """
+        let file = try nki(content, in: root)
+        XCTAssertThrowsError(try StudioSamplerNKIReader.inspect(file))
+    }
+
     func testMissingExternalAudioCanBeRelinkedThroughExplicitSampleFolder() throws {
         let root = try temp()
         let external = try temp()
