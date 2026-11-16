@@ -19,10 +19,11 @@ public enum StudioGUI {
 /// Existing horizontal faders should remain for channel volume.
 public struct StudioParameterKnob: View {
     public let title: String
+    @Environment(\.studioPalette) private var palette
     @Binding public var value: Double
     public let range: ClosedRange<Double>
     public let formattedValue: (Double) -> String
-    public let tint: Color
+    public let tint: Color?
 
     @State private var dragStartValue: Double?
 
@@ -30,7 +31,7 @@ public struct StudioParameterKnob: View {
         _ title: String,
         value: Binding<Double>,
         in range: ClosedRange<Double>,
-        tint: Color = StudioGUI.selection,
+        tint: Color? = nil,
         formattedValue: @escaping (Double) -> String = { String(format: "%.0f", $0) }
     ) {
         self.title = title
@@ -50,11 +51,11 @@ public struct StudioParameterKnob: View {
         VStack(spacing: 6) {
             ZStack {
                 Circle()
-                    .fill(StudioGUI.background)
+                    .fill(palette.canvas)
                     .overlay(Circle().stroke(StudioGUI.raised, lineWidth: 2))
                 Circle()
                     .trim(from: 0, to: normalizedValue * 0.75)
-                    .stroke(tint, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                    .stroke(tint ?? palette.accent, style: StrokeStyle(lineWidth: 4, lineCap: .round))
                     .rotationEffect(.degrees(135))
                     .padding(4)
                 Capsule()
