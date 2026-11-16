@@ -90,7 +90,7 @@ enum StudioInstrumentGroupArtwork: String, CaseIterable, Equatable {
         // Jazz & Big Band, Concert & Marching Band and World catalogs.
         // These group images are representative, never exact layer metadata.
         if has(["japanese taiko ensemble", "ewe drumming ensemble", "djembe drumming ensemble", "gamelan bali orchestra", "gamelan java orchestra"]) { return .worldPercussion }
-        if has(["african orchestra", "chinese orchestra", "global village", "middle east takht", "indian hindustani ensemble", "indian carnatic ensemble", "japanese traditional", "celtic consort", "and​​ean highlands ensemble"]) { return .worldEnsemble }
+        if has(["african orchestra", "chinese orchestra", "global village", "middle east takht", "indian hindustani ensemble", "indian carnatic ensemble", "japanese traditional", "celtic consort", "andean highlands ensemble"]) { return .worldEnsemble }
         if has(["big band #", "full big band", "big band ensemble"]) { return .jazzBigBand }
         if has(["orchestra and choir", "orchestra octaves and choir", "lush orchestra octaves and choir", "orchestra and chorus"]) { return .orchestraAndChoir }
         if has(["strings and winds", "strings & winds", "strings winds", "strings and woodwinds"]) { return .stringsAndWinds }
