@@ -51,7 +51,12 @@ Import existing sample-based instruments into editable Studio mappings and porta
    Unsupported behaviors are explicitly rejected rather than silently
    changing playback. Synthetic EXS + WAV fixtures exercise decoding,
    velocity ranges, loops, groups, missing audio, malformed blocks and
-   non-destructive imports. Real EXS library testing and Mac build
+   non-destructive imports. **Milestone 4.9** adds bounded EXS
+   Select Group By translation: round-robin positions 0...7,
+   note-selected keyswitch articulation groups with preserved MIDI notes,
+   and CC1/CC2 group selection only where ranges divide the MIDI controller
+   space into regular, contiguous bands. The reader also now uses the
+   actual 32-bit EXS block length. Real EXS library testing and Mac build
    verification remain pending.
 6. Round-trip validation and consolidated Mac testing.
 
@@ -149,11 +154,22 @@ integrating it would require separate licensing and architecture review.
 - Source files remain unchanged. Duplicate references share one managed copy.
   No Logic or commercial sampler runtime is required.
 
-**Not yet reproduced:** group condition switching, complex keyswitches,
-round robin, tempo/channel/articulation conditions, reverse and one-shot
-playback, pitch-tracking disable, sophisticated synth/filter/envelope
-parameters, reverse or ping-pong loops, and EXS24/Logic modern extended
-format variants. Such import attempts fail clearly rather than silently
+**Group selection implemented in Milestone 4.9:** EXS enable-by-type
+2 (round-robin), 1 (MIDI-note keyswitch), and 3 (regular CC1/CC2 bands)
+now map to Studio's established variation, keyswitch, and controller
+articulation systems. The importer preserves group labels and switch
+MIDI notes, validates every used group before copying audio, and rejects
+missing or duplicate round-robin positions and overlapping keyswitch
+notes. Studio's native round-robin counter is per-note rather than
+EXS's global group rotation, and its CC switching is discrete at note-on.
+Warnings disclose these differences.
+
+**Not yet reproduced:** irregular controller thresholds, arbitrary CCs,
+combined/different group-selection conditions, Logic per-note
+Articulation IDs (which are not ordinary keyswitches), tempo/channel
+conditions, reverse and one-shot playback, pitch-tracking disable,
+sophisticated synth/filter/envelope parameters, reverse or ping-pong
+loops, and EXS24/Logic modern extended format variants. Such import attempts fail clearly rather than silently
 dropping expressive musical behavior. Wider audio-file resolution,
 sandboxed folder grants, big-endian EXS, and real-world file auditing
 remain future milestones.
