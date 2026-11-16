@@ -181,14 +181,17 @@ public enum StudioSamplerGIGImporter {
             }
             for dimension in region.dimensions {
                 switch dimension.type {
-                case 0x82: // velocity split
-                    break
+                case 0x82: // regular velocity split
+                    guard dimension.zoneCount == (1 << Int(dimension.bits)) else {
+                        throw ImportError.unsupportedDimensions(instrument.name)
+                    }
                 case 0x86: // note-on round robin, max eight Studio takes
-                    guard dimension.zoneCount <= 8 else {
+                    guard dimension.zoneCount <= 8,
+                          dimension.zoneCount == (1 << Int(dimension.bits)) else {
                         throw ImportError.unsupportedDimensions(instrument.name)
                     }
                 case 0x84: // 0 = sustain, 1 = release trigger
-                    guard dimension.zoneCount == 2 else {
+                    guard dimension.zoneCount == 2, dimension.bits == 1 else {
                         throw ImportError.unsupportedDimensions(instrument.name)
                     }
                 case 0x85, 0x01, 0x02: // keyboard, modwheel or breath switch
