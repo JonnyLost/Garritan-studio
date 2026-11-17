@@ -78,6 +78,38 @@ public enum StudioAutoSamplerReleaseCapture {
                       skippedCount: takes.count - releases.count)
     }
 
+    /// Prevent the same recorded note-off tail from sounding twice: once as
+    /// the end of the held WAV and again as a native release-trigger zone.
+    /// Original PCM stays intact for editing/reanalysis. This trim is applied
+    /// only when release capture is enabled, even if a silent tail was skipped.
+    /// Existing sustain-loop markers lie inside the held region.
+    public static func separatingHeldAndReleasePlayback(
+        in patch: StudioSamplerPatch, sustainSeconds: Double,
+        sampleRate: Double) throws -> StudioSamplerPatch {
+        guard sustainSeconds.isFinite, sampleRate.isFinite,
+              sustainSeconds > 0, sampleRate > 0,
+              sustainSeconds * sampleRate <= Double(UInt32.max) else {
+            throw ReleaseError.invalidConfiguration
+        }
+        let heldFrames = UInt32(sustainSeconds * sampleRate)
+        guard heldFrames >= 512 else { throw ReleaseError.invalidConfiguration }
+        var result = patch
+        for index in result.zones.indices where
+            result.zones[index].isReleaseTrigger != true {
+            var zone = result.zones[index]
+            // The source WAV contains heldFrames followed by release audio.
+            // Do not override an explicit shorter user-defined region.
+            zone.trimEndFrame = min(zone.trimEndFrame ?? heldFrames, heldFrames)
+            // Smooth the held recording's final edge, but keep the native
+            // release zone's independent attack and fade unchanged.
+            zone.fadeOutFrames = min(256, zone.trimEndFrame! / 4)
+            guard zone.isValid else { throw ReleaseError.invalidRecording }
+            result.zones[index] = zone
+        }
+        guard result.isValid else { throw ReleaseError.invalidRecording }
+        return result
+    }
+
     /// A short, non-destructive tail-end fade prevents discontinuities when
     /// a note-off recording ends before the source plugin fully decays. The
     /// already recorded PCM stays unchanged.
