@@ -61,11 +61,33 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+      - name: Test local artwork validator
+        run: python3 -m unittest discover -s scripts/tests -p 'test_validate_studio_artwork.py'
+      - name: Validate local artwork resource contract
+        run: python3 scripts/validate_studio_artwork.py --report "$RUNNER_TEMP/studio-artwork-inventory.json"
+      - name: Upload complete artwork identity inventory
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-artwork-inventory
+          path: ${{ runner.temp }}/studio-artwork-inventory.json
+          if-no-files-found: ignore
       - name: Resolve Swift packages
         run: swift package resolve
       - name: Build all Swift targets
         run: swift build
       - name: Test sampler and existing DAWCore
         run: swift test --parallel
+      - name: Export labelled instrument and section artwork PNGs
+        env:
+          STUDIO_ARTWORK_EXPORT_DIR: ${{ runner.temp }}/studio-artwork-review
+        run: swift test --filter StudioArtworkReviewExportTests/testExportContactSheets
+      - name: Upload all current Studio icon review sheets
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-icon-review-sheets
+          path: ${{ runner.temp }}/studio-artwork-review
+          if-no-files-found: ignore
       - name: Build the app in Release
         run: swift build -c release --product DAWApp

@@ -31,7 +31,28 @@ struct DAWApp: App {
         // Main document window
         WindowGroup("Garritan Studio") {
             StudioAppearanceHost {
-                MainWindowView(project: appState.currentProject)
+                Group {
+                    if appState.hasWorkspaceSession {
+                        ZStack {
+                            // Keep the editor alive behind New Project so saving
+                            // can synchronously capture hosted Audio Unit state.
+                            MainWindowView(project: appState.currentProject)
+                                .id(appState.projectID)
+                                .onReceive(NotificationCenter.default.publisher(for: .projectDidChange)) { notification in
+                                    guard let project = notification.object as? Project,
+                                          project.id == appState.currentProject.id else { return }
+                                    appState.updateProject(project)
+                                }
+                            if appState.isShowingTemplateManager {
+                                StudioTemplateManagerView()
+                            }
+                        }
+                    } else {
+                        // First launch: no unnecessary audio graph or empty
+                        // editor window behind the template picker.
+                        StudioTemplateManagerView()
+                    }
+                }
                 .background(StudioWindowCloseGuard(appState: appState))
                 .onAppear {
                     lifecycle.appState = appState
@@ -41,13 +62,6 @@ struct DAWApp: App {
                     }
                 }
                 .environmentObject(appState)
-                .id(appState.projectID)  // Force view recreation when project changes
-                .onReceive(NotificationCenter.default.publisher(for: .projectDidChange)) { notification in
-                    // Ignore stale messages from an editor of a replaced document.
-                    guard let project = notification.object as? Project,
-                          project.id == appState.currentProject.id else { return }
-                    appState.updateProject(project)
-                }
             }
         }
         .commands {
@@ -261,6 +275,8 @@ class AppState: ObservableObject {
     @Published var hasUnsavedChanges: Bool = false
     @Published var windowTitle: String = "Untitled Project"
     @Published var projectID: UUID = UUID()
+    @Published var isShowingTemplateManager = true
+    @Published var hasWorkspaceSession = false
 
     let recentProjectsManager = RecentProjectsManager()
     let autosaveManager = AutosaveManager()
@@ -417,6 +433,8 @@ class AppState: ObservableObject {
             currentProject = loadedProject
             currentProjectURL = asRecovery ? nil : url
             projectID = UUID()
+            hasWorkspaceSession = true
+            isShowingTemplateManager = false
             resetDocumentRevision()
             if asRecovery { markUnsavedChanges() }
             else {
@@ -590,6 +608,8 @@ class AppState: ObservableObject {
                     self.currentProject = imported
                     self.currentProjectURL = nil
                     self.projectID = UUID()
+                    self.hasWorkspaceSession = true
+                    self.isShowingTemplateManager = false
                     self.resetDocumentRevision()
                     self.markUnsavedChanges()
                     print("[AppState] Imported MIDI as a new project: \(url.path)")
@@ -684,17 +704,32 @@ class AppState: ObservableObject {
     }
 
     func newProject() {
+        // Select a template before attempting to replace a running project.
+        // The existing editor remains mounted so Save can collect plug-in state.
+        isShowingTemplateManager = true
+    }
+
+    func dismissTemplateManager() {
+        // On first launch, Cancel enters the default untitled workspace.
+        // When invoked from File > New, Cancel returns to the existing session.
+        hasWorkspaceSession = true
+        isShowingTemplateManager = false
+    }
+
+    func createProject(using template: StudioProjectTemplate) {
         Task {
             guard !isOpeningProject,
                   await confirmCanReplaceCurrentProject() else { return }
 
             autosaveManager.stopAutosave()
             NotificationCenter.default.post(name: .clearAllPlugins, object: nil)
-            currentProject = ProjectFactory.createNewProject()
+            currentProject = template.makeProject()
             currentProjectURL = nil
             projectID = UUID()
             resetDocumentRevision()
             updateWindowTitle()
+            hasWorkspaceSession = true
+            isShowingTemplateManager = false
         }
     }
 
@@ -877,7 +912,7 @@ private struct AppearanceSettingsView: View {
 
 struct GeneralSettingsView: View {
     @State private var autosaveInterval = 60
-    @State private var showWelcomeScreen = true
+    // Startup now consistently shows the Template Manager.
     
     var body: some View {
         Form {
@@ -893,7 +928,8 @@ struct GeneralSettingsView: View {
             }
             
             Section("Startup") {
-                Toggle("Show Welcome Screen", isOn: $showWelcomeScreen)
+                Text("Studio opens to Template Manager. Use File → New Project to return to it.")
+                    .foregroundStyle(.secondary)
             }
         }
         .padding()

@@ -7,6 +7,7 @@ import DAWCore
 struct StudioAcousticRoomDesignerView: View {
     @ObservedObject var viewModel: ProjectViewModel
     @State private var draft = StudioAcousticRoomDesign()
+    @State private var showAcousticAnalysis = false
 
     private var cannotApply: Bool {
         !viewModel.isEngineReady ||
@@ -18,24 +19,28 @@ struct StudioAcousticRoomDesignerView: View {
     private var predicted: [Double] { draft.predictedRT60 }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Label("Room Design", systemImage: "building.columns")
+                    .font(.headline)
+                Spacer()
+                Label("\(Int(draft.volumeCubicMeters.rounded())) m³", systemImage: "cube")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
             TextField("Room name", text: $draft.name)
                 .textFieldStyle(.roundedBorder)
 
-            VStack(alignment: .leading, spacing: 7) {
+            VStack(alignment: .leading, spacing: 9) {
+                Label("Dimensions", systemImage: "arrow.up.left.and.arrow.down.right")
+                    .font(.subheadline.weight(.semibold))
                 dimensionSlider("Length", value: $draft.lengthMeters, bounds: 3...80)
                 dimensionSlider("Width", value: $draft.widthMeters, bounds: 3...80)
                 dimensionSlider("Height", value: $draft.heightMeters, bounds: 2.2...35)
             }
 
-            HStack {
-                Text("Room volume")
-                Spacer()
-                Text("\(Int(draft.volumeCubicMeters.rounded())) m³")
-                    .monospacedDigit()
-            }
-            .font(.caption)
-
+            Label("Surfaces", systemImage: "square.3.layers.3d")
+                .font(.subheadline.weight(.semibold))
             materialPicker("Walls", selected: $draft.wallMaterial)
             materialPicker("Floor", selected: $draft.floorMaterial)
             materialPicker("Ceiling", selected: $draft.ceilingMaterial)
@@ -59,9 +64,10 @@ struct StudioAcousticRoomDesignerView: View {
             }
             .pickerStyle(.segmented)
 
-            Divider()
-            Text("Predicted RT60 by octave")
-                .font(.caption.weight(.semibold))
+            DisclosureGroup(isExpanded: $showAcousticAnalysis) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Predicted RT60 by octave")
+                        .font(.caption.weight(.semibold))
             ForEach(0..<6, id: \.self) { index in
                 HStack(spacing: 8) {
                     Text(Self.bandLabel(StudioAcousticRoomDesign.bandCentersHz[index]))
@@ -74,10 +80,16 @@ struct StudioAcousticRoomDesignerView: View {
                         .frame(width: 62, alignment: .trailing)
                 }
             }
-            Text("Diffuse-field estimates only. Actual reflections, room modes, and microphone placement vary. DSP decay targets are limited to 0.2–15 seconds.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                    Text("Diffuse-field estimates. Actual reflections and room modes vary; DSP decay targets are limited to 0.2–15 seconds.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.top, 8)
+            } label: {
+                Label("Acoustic Analysis", systemImage: "waveform.path.ecg")
+                    .font(.subheadline.weight(.semibold))
+            }
 
             Button {
                 viewModel.applyAcousticRoomDesign(draft)

@@ -6,11 +6,14 @@ import DAWCore
 /// action. Advanced techniques shown in design concepts are introduced only
 /// when their processing is implemented, rather than as nonfunctional knobs.
 public struct StudioSamplerInstrumentView: View {
+    @Environment(\.studioPalette) private var palette
     @ObservedObject public var viewModel: ProjectViewModel
     public let trackID: TrackID
 
     @State private var editMapping = false
     @State private var previewEmptyControls = false
+    @State private var showTechnicalSummary = false
+    @State private var showDetailedPerformance = false
 
     public init(viewModel: ProjectViewModel, trackID: TrackID) {
         self.viewModel = viewModel
@@ -78,15 +81,26 @@ public struct StudioSamplerInstrumentView: View {
                             controllerPanel
                             envelopePanel
                         }
-                        HStack(alignment: .top, spacing: 14) {
-                            legatoPanel
-                            microphoneMixer(patch)
+                        DisclosureGroup(isExpanded: $showDetailedPerformance) {
+                            HStack(alignment: .top, spacing: 14) {
+                                legatoPanel
+                                microphoneMixer(patch)
+                            }
+                            .padding(.top, 10)
+                        } label: {
+                            Label("Legato & Recorded Microphones", systemImage: "slider.horizontal.3")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(palette.primaryText)
                         }
-                        sampleOverview(patch)
                         keyboard
-                        Text("Legato uses recorded from→to transitions when available; otherwise it crossfades sustained notes. Individual microphone positions must be captured or imported; Studio does not invent extra mic recordings.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                        DisclosureGroup(isExpanded: $showTechnicalSummary) {
+                            sampleOverview(patch)
+                                .padding(.top, 10)
+                        } label: {
+                            Label("Sample Mapping Details", systemImage: "square.stack.3d.up")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(palette.primaryText)
+                        }
                     }
                     .padding(14)
                 }
@@ -105,14 +119,16 @@ public struct StudioSamplerInstrumentView: View {
         HStack(spacing: 12) {
             Image(systemName: kind == .cinematicPercussion ? "circle.grid.cross" :
                   kind == .choirAndTextures ? "waveform.path" : "waveform")
-                .font(.title2)
-                .foregroundStyle(.purple)
-                .frame(width: 34)
+                .font(.system(size: 24, weight: .medium))
+                .foregroundStyle(palette.accent)
+                .frame(width: 44, height: 44)
+                .background(palette.raisedSurface, in: RoundedRectangle(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 3) {
-                Text("Studio Sampler — \(kind.title)")
-                    .font(.title3.weight(.semibold))
-                Text("\(patch?.zones.count ?? 0) mapped samples · original Studio playback engine")
-                    .font(.caption).foregroundStyle(.secondary)
+                Text("STUDIO SAMPLER")
+                    .font(.system(.title3, design: .rounded, weight: .bold))
+                    .tracking(0.6)
+                Text("\(kind.title) · \(patch?.zones.count ?? 0) samples")
+                    .font(.caption).foregroundStyle(palette.secondaryText)
             }
             Spacer()
             if isLoaded {
@@ -120,9 +136,10 @@ public struct StudioSamplerInstrumentView: View {
                       systemImage: usesDiskStreaming ? "internaldrive" : "memorychip")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Label("Connected", systemImage: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.green)
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(StudioGUI.activity)
+                    .help("Sampler engine connected")
+                    .accessibilityLabel("Sampler engine connected")
             }
             Picker("Instrument layout", selection: Binding(
                 get: { kind },
@@ -355,8 +372,7 @@ public struct StudioSamplerInstrumentView: View {
                 set: { _ = viewModel.setStudioSamplerCC1Crossfade($0, for: trackID) }
             ))
             .disabled(!isLoaded)
-            Text("CC1 crossfade applies to new notes and requires multiple samples mapped to the same root note. Existing held notes finish normally.")
-                .font(.caption2).foregroundStyle(.secondary)
+
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -388,7 +404,8 @@ public struct StudioSamplerInstrumentView: View {
                 ) }
             ), in: 0...127)
             .disabled(!isLoaded)
-            Text(caption).font(.caption2).foregroundStyle(.secondary)
+            Text(caption).font(.caption2).foregroundStyle(palette.secondaryText)
+                .help(caption)
         }
     }
 
@@ -545,8 +562,7 @@ public struct StudioSamplerInstrumentView: View {
             envelopeControl("Decay", field: .decay, range: 0...5)
             envelopeControl("Sustain", field: .sustain, range: 0...1)
             envelopeControl("Release", field: .release, range: 0...10)
-            Text("ADSR changes apply to newly played notes. Release works with mapped sustain loops.")
-                .font(.caption2).foregroundStyle(.secondary)
+
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -569,8 +585,7 @@ public struct StudioSamplerInstrumentView: View {
                 summary("Release samples", value: "\(releaseCount)")
                 summary("RR takes", value: "\(max(1, variations))")
             }
-            Text("Samples are loaded from your imported recordings. This panel does not substitute synthetic sounds or bundled Garritan content.")
-                .font(.caption2).foregroundStyle(.secondary)
+
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)

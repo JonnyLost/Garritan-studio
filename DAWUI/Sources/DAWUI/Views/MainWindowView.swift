@@ -368,7 +368,11 @@ public struct MainWindowView: View {
                     Text("TRACKS")
                         .font(.system(size: 10, weight: .semibold))
                         .tracking(0.9)
-                        .foregroundColor(palette.secondaryText)
+                        .foregroundStyle(palette.secondaryText)
+                    Text("\(viewModel.project.tracks.count)")
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(palette.secondaryText)
                     Spacer()
                     Menu {
                         Button("Add Instrument") { addStudioTrack(.instrument) }
@@ -376,10 +380,17 @@ public struct MainWindowView: View {
                         Button("Add Synth") { addStudioTrack(.synth) }
                         Button("Add Audio") { addStudioTrack(.audio) }
                     } label: {
-                        Image(systemName: "plus").font(.caption)
+                        Image(systemName: "plus")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(palette.primaryText)
+                            .frame(width: 23, height: 23)
+                            .background(palette.raisedSurface,
+                                        in: RoundedRectangle(cornerRadius: 6))
                     }
                     .menuStyle(.borderlessButton)
-                    .frame(width: 20)
+                    .help("Add instrument, sampler, synth or audio track")
+                    .accessibilityLabel("Add track")
+                    .frame(width: 25)
                     // File > Track uses the same creation path as this menu.
                     .onReceive(NotificationCenter.default.publisher(for: .newStudioTrack)) { event in
                         guard let kind = event.object as? ProjectViewModel.StudioTrackKind else { return }
@@ -598,21 +609,31 @@ public struct MainWindowView: View {
                                  action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 5) {
-                Image(systemName: symbol).font(.system(size: 17))
-                Text(title).font(.system(size: 9))
+                Image(systemName: symbol)
+                    .font(.system(size: 18, weight: active ? .semibold : .regular))
+                    .frame(height: 21)
+                Text(title)
+                    .font(.system(size: 9, weight: active ? .semibold : .medium))
+                    .lineLimit(1)
             }
-            .foregroundColor(active ? palette.selectedText : palette.secondaryText)
+            .foregroundStyle(active ? palette.selectedText : palette.secondaryText)
             .frame(width: 68, height: 56)
-            .background(active ? palette.selectedBackground : Color.clear)
-            .cornerRadius(9)
-            .overlay {
-                RoundedRectangle(cornerRadius: 9)
-                    .strokeBorder(active ? palette.accent.opacity(0.6) : .clear, lineWidth: 1)
+            .background(active ? palette.selectedBackground : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 9))
+            .overlay(alignment: .leading) {
+                if active {
+                    Capsule()
+                        .fill(palette.accent)
+                        .frame(width: 3, height: 28)
+                        .offset(x: -1)
+                }
             }
             .animation(.easeInOut(duration: 0.15), value: active)
         }
         .buttonStyle(.plain)
         .help(title)
+        .accessibilityLabel("\(title) workspace")
+        .accessibilityAddTraits(active ? .isSelected : [])
     }
 
     private var compactWorkspaceStrip: some View {
@@ -2270,28 +2291,26 @@ private struct ChannelWorkspaceView: View {
     @ObservedObject var viewModel: ProjectViewModel
 
     private func signalNode(_ title: String, _ detail: String, _ symbol: String) -> some View {
-        VStack(spacing: 9) {
+        HStack(spacing: 8) {
             Image(systemName: symbol)
-                .font(.system(size: 21, weight: .medium))
+                .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(palette.accent)
-            Text(title)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(palette.primaryText)
-            Text(detail)
-                .font(.system(size: 10))
-                .foregroundStyle(palette.secondaryText)
-                .lineLimit(2)
-                .multilineTextAlignment(.center)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(palette.primaryText)
+                Text(detail)
+                    .font(.system(size: 10))
+                    .foregroundStyle(palette.secondaryText)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, minHeight: 96)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 12)
-        .background(palette.surface, in: RoundedRectangle(cornerRadius: 9))
-        .overlay {
-            RoundedRectangle(cornerRadius: 9)
-                .strokeBorder(palette.separator.opacity(0.8), lineWidth: 1)
-                .allowsHitTesting(false)
-        }
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, minHeight: 54)
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .combine)
     }
 
     var body: some View {
@@ -2344,31 +2363,18 @@ private struct ChannelWorkspaceView: View {
                             Rectangle().fill(palette.separator).frame(height: 1)
 
                             StudioSectionHeading("Channel Overview", symbol: "waveform")
-                            HStack {
-                                Text("Level")
-                                Spacer()
-                                Text(track.volume <= 0 ? "−∞ dB" :
-                                     String(format: "%.1f dB", 20 * log10(Double(track.volume))))
-                                    .monospacedDigit()
+                            HStack(spacing: 22) {
+                                Label(track.volume <= 0 ? "−∞ dB" :
+                                      String(format: "%.1f dB", 20 * log10(Double(track.volume))),
+                                      systemImage: "speaker.wave.2")
+                                Label(abs(track.pan) < 0.01 ? "Center" :
+                                      String(format: "%.0f%% %@", abs(track.pan) * 100,
+                                                     track.pan < 0 ? "Left" : "Right"),
+                                      systemImage: "arrow.left.and.right")
                             }
-                            .font(.system(size: 12))
+                            .font(.system(size: 12, weight: .medium))
+                            .monospacedDigit()
                             .foregroundStyle(palette.primaryText)
-                            ProgressView(value: min(max(Double(track.volume) / 1.4, 0), 1))
-                                .tint(palette.accent)
-                            HStack {
-                                Text("Pan")
-                                Spacer()
-                                Text(abs(track.pan) < 0.01 ? "Center" :
-                                     String(format: "%.0f%% %@", abs(track.pan) * 100,
-                                            track.pan < 0 ? "Left" : "Right"))
-                                    .monospacedDigit()
-                            }
-                            .font(.system(size: 12))
-                            .foregroundStyle(palette.primaryText)
-
-                            Text("Signal flow is a visual overview. Adjust the track controls on the left.")
-                                .font(.system(size: 11))
-                                .foregroundStyle(palette.secondaryText)
                         }
                         .padding(18)
                         .frame(maxWidth: .infinity, alignment: .leading)

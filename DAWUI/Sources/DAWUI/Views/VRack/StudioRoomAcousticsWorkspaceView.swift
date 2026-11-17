@@ -9,6 +9,9 @@ struct StudioRoomAcousticsWorkspaceView: View {
     @ObservedObject var viewModel: ProjectViewModel
     @State private var selectedTab: Tab = .library
     @State private var arrayToAdd: StudioMicrophoneArrayPreset = .spot
+    @State private var showMicPositionDetails = false
+    @State private var showMicPickupAnalysis = false
+    @State private var showMicMixerAdvanced = false
 
     private enum Tab: String, CaseIterable, Identifiable {
         case library = "Room Library"
@@ -118,30 +121,35 @@ struct StudioRoomAcousticsWorkspaceView: View {
 
     private var libraryPanel: some View {
         VStack(alignment: .leading, spacing: 14) {
-            StudioSectionHeading("Available Acoustic Spaces", symbol: "waveform.path")
-            Text("Choose the room the orchestra performs in. Instrument positions remain in the Stage workspace.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+                StudioSectionHeading("Acoustic Spaces", symbol: "waveform.path")
+                Spacer()
+                if !canChangeRoom {
+                    Label("Stop transport to change rooms", systemImage: "lock.fill")
+                        .font(.caption2)
+                        .foregroundStyle(palette.secondaryText)
+                }
+            }
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 10)], spacing: 10) {
                 roomTile(
                     id: "apple-medium-hall",
                     name: "Apple Medium Hall",
-                    detail: "Original, tested fallback",
-                    symbol: "speaker.wave.2"
+                    detail: "Tested Hall",
+                    symbol: "building.columns.fill"
                 )
                 ForEach(StudioRoomAcousticProfile.starterProfiles) { profile in
                     roomTile(
                         id: profile.id,
                         name: profile.name,
-                        detail: "Experimental original algorithmic interpretation",
-                        symbol: "building.columns"
+                        detail: "Experimental",
+                        symbol: "waveform.path"
                     )
                 }
                 roomTile(
                     id: StudioAcousticRoomDesign.profileID,
                     name: viewModel.project.dawState.acousticRoomDesign?.name ?? "Custom Acoustic Room",
-                    detail: "Your six-band room design",
+                    detail: "Custom Design",
                     symbol: "slider.horizontal.3"
                 )
             }
@@ -149,9 +157,6 @@ struct StudioRoomAcousticsWorkspaceView: View {
             HStack(spacing: 12) {
                 Button("Edit Custom Room") { selectedTab = .designer }
                     .buttonStyle(.bordered)
-                Text("Room changes require stopped transport. Project saves the selected room.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
             }
             selectionError
         }
@@ -159,42 +164,51 @@ struct StudioRoomAcousticsWorkspaceView: View {
 
     private func roomTile(id: String, name: String, detail: String,
                           symbol: String) -> some View {
-        Button {
+        let isSelected = id == currentRoomID
+        return Button {
             viewModel.selectConcertHallRoom(id: id)
         } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 10) {
                     Image(systemName: symbol)
-                        .font(.system(size: 20))
+                        .font(.system(size: 22, weight: .light))
+                        .foregroundStyle(isSelected ? palette.accent : palette.secondaryText)
+                        .frame(width: 32, height: 32)
                     Spacer()
-                    if id == currentRoomID {
-                        Label("Selected", systemImage: "checkmark.circle.fill")
-                            .font(.caption2)
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(palette.accent)
+                            .accessibilityHidden(true)
                     }
                 }
+                Spacer(minLength: 2)
                 Text(name)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(2)
                     .multilineTextAlignment(.leading)
-                Text(detail)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
+                Text(detail.uppercased())
+                    .font(.system(size: 9, weight: .medium))
+                    .tracking(0.65)
+                    .foregroundStyle(palette.secondaryText)
             }
-            .foregroundStyle(id == currentRoomID ? palette.accent : palette.primaryText)
-            .frame(maxWidth: .infinity, minHeight: 86, alignment: .leading)
-            .padding(12)
-            .background(id == currentRoomID ? palette.accentMuted : palette.panel,
-                        in: RoundedRectangle(cornerRadius: 10))
+            .foregroundStyle(palette.primaryText)
+            .frame(maxWidth: .infinity, minHeight: 112, alignment: .leading)
+            .padding(14)
+            .background(isSelected ? palette.accentMuted : palette.panel,
+                        in: RoundedRectangle(cornerRadius: 12))
             .overlay {
-                RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(id == currentRoomID ? palette.accent : palette.separator,
-                                  lineWidth: 1)
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(isSelected ? palette.accent : palette.separator,
+                                  lineWidth: isSelected ? 1.5 : 0.75)
                     .allowsHitTesting(false)
             }
+            .contentShape(RoundedRectangle(cornerRadius: 12))
         }
         .buttonStyle(.plain)
         .disabled(!canChangeRoom)
+        .help(isSelected ? "Current acoustic room" : "Select \(name) when transport is stopped")
+        .accessibilityLabel("\(name), \(detail)")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityIdentifier("room-profile-" + id)
     }
 
@@ -202,11 +216,7 @@ struct StudioRoomAcousticsWorkspaceView: View {
     /// supports only four live microphone channels and sixteen sources.
     private var microphonePanel: some View {
         VStack(alignment: .leading, spacing: 14) {
-            StudioSectionHeading("Virtual Recording Microphones", symbol: "mic.fill")
-            Text("Add and move individual microphone capsules in Stage. Arrays have editable spacing, and the Mic Mixer lets you hear direct sound and simulated spill.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            StudioSectionHeading("Microphone Setup", symbol: "mic.fill")
 
             HStack(spacing: 10) {
                 Picker("Add setup", selection: $arrayToAdd) {
@@ -222,15 +232,17 @@ struct StudioRoomAcousticsWorkspaceView: View {
                           viewModel.audioEngine.isMicrophoneAuditionActive)
                 .accessibilityIdentifier("add-stage-microphones")
                 Spacer()
-                Text("\(microphoneObjects.count)/32 capsules")
-                    .font(.caption2).foregroundStyle(.secondary)
+                Text("\(microphoneObjects.count) / 32 mics")
+                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
 
+            microphoneArrayPreview
+                .accessibilityIdentifier("microphone-array-preview")
+
             if microphoneObjects.isEmpty {
-                Text("No microphone objects yet. Add a spot mic, XY, ORTF, or Decca Tree. The original reverb remains unchanged.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .padding(16)
+                ContentUnavailableView("No Microphones", systemImage: "mic",
+                                       description: Text("Choose a setup above to place microphones on Stage."))
+                    .padding(12)
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 205), spacing: 8)],
                           spacing: 8) {
@@ -293,6 +305,8 @@ struct StudioRoomAcousticsWorkspaceView: View {
                 }
                 .frame(maxWidth: 380, alignment: .leading)
 
+                DisclosureGroup(isExpanded: $showMicPositionDetails) {
+                    VStack(alignment: .leading, spacing: 10) {
                 microphoneCoordinate("Left / Right", keyPath: \.position.xMeters,
                                      limits: (-roomDesign.safeWidth / 2)...(roomDesign.safeWidth / 2))
                 microphoneCoordinate("Front / Back", keyPath: \.position.yMeters,
@@ -304,17 +318,73 @@ struct StudioRoomAcousticsWorkspaceView: View {
                 microphoneCoordinate("Tilt", keyPath: \.elevationDegrees,
                                      limits: -90...90, suffix: "°")
 
-                Text("Positions use meters. Front is y=0; microphones face toward the back of the stage at 0° direction. Drag the mic symbol in Stage to move its horizontal location.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                sourcePickupPreview(microphone: mic)
+                    }
+                    .padding(.top, 8)
+                } label: {
+                    Label("Position and Aiming", systemImage: "scope")
+                        .font(.subheadline.weight(.semibold))
+                }
+                DisclosureGroup(isExpanded: $showMicPickupAnalysis) {
+                    sourcePickupPreview(microphone: mic)
+                        .padding(.top, 8)
+                } label: {
+                    Label("Estimated Pickup", systemImage: "waveform")
+                        .font(.subheadline.weight(.semibold))
+                }
             }
-            Divider()
-            Text("The Mic Mixer offers explicit direct/spill audition for up to four capsules and sixteen sources. Add/remove capsules with audition off; position and pickup changes are live while auditioning. The normal mix remains the default.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// Lightweight local illustration of the chosen microphone setup. The real
+    /// capsule coordinates and pickup patterns are edited below and on Stage.
+    private var microphoneArrayPreview: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label(arrayToAdd.displayName, systemImage: "mic.fill")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text("SETUP PREVIEW")
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(0.7)
+                    .foregroundStyle(palette.secondaryText)
+            }
+            GeometryReader { proxy in
+                let count = arrayToAdd.microphoneCount
+                let width = proxy.size.width
+                let center = width / 2
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(palette.raisedSurface)
+                    // A deliberately schematic arrangement, not a measurement.
+                    Ellipse()
+                        .stroke(palette.separator.opacity(0.6), lineWidth: 1)
+                        .frame(width: min(width * 0.82, 360), height: 48)
+                        .offset(y: 32)
+                    ForEach(0..<count, id: \.self) { index in
+                        let spread = count > 1 ? Double(index) / Double(count - 1) - 0.5 : 0
+                        let x = center + CGFloat(spread) * min(width * 0.62, 230)
+                        let y: CGFloat = count == 3 && index == 1 ? -18 : 0
+                        VStack(spacing: 3) {
+                            Image(systemName: "mic.fill")
+                                .font(.system(size: 30, weight: .light))
+                                .foregroundStyle(palette.accent)
+                                .rotationEffect(.degrees(count == 2 ? (index == 0 ? -20 : 20) : 0))
+                            Capsule()
+                                .fill(palette.secondaryText.opacity(0.6))
+                                .frame(width: 2, height: 22)
+                        }
+                        .position(x: x, y: proxy.size.height / 2 + y)
+                    }
+                }
+            }
+            .frame(height: 112)
+            .accessibilityLabel("\(arrayToAdd.displayName) schematic showing \(arrayToAdd.microphoneCount) microphones")
+            Text("Illustration only · Set exact capsule positions on Stage")
+                .font(.caption2)
+                .foregroundStyle(palette.secondaryText)
+        }
+        .padding(12)
+        .background(palette.panel, in: RoundedRectangle(cornerRadius: 12))
     }
 
     private func microphoneCoordinate(
@@ -395,10 +465,7 @@ struct StudioRoomAcousticsWorkspaceView: View {
 
     private var microphoneMixer: some View {
         VStack(alignment: .leading, spacing: 14) {
-            StudioSectionHeading("Virtual Microphone Mixer", symbol: "slider.horizontal.3")
-            Text("Every live microphone receives each participating source, with its own directional gain and sound-travel delay. Auditioning replaces the original dry mix temporarily; an adjustable shared room return adds ambience without a second dry orchestra.")
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            StudioSectionHeading("Mic Mixer", symbol: "slider.horizontal.3")
 
             let sourceCount = viewModel.project.tracks.filter {
                 AudioEngine.isIndependentMicrophoneSource($0)
@@ -418,6 +485,8 @@ struct StudioRoomAcousticsWorkspaceView: View {
                 Text("\(min(4, microphoneObjects.count)) live mic channels · \(sourceCount) sources")
                     .font(.caption2).foregroundStyle(.secondary)
             }
+            DisclosureGroup(isExpanded: $showMicMixerAdvanced) {
+                VStack(alignment: .leading, spacing: 8) {
             Toggle("Experimental shared-history capture (one Audio Unit per source)",
                    isOn: Binding(
                        get: { viewModel.audioEngine.usesSharedMicrophoneMatrix },
@@ -428,9 +497,15 @@ struct StudioRoomAcousticsWorkspaceView: View {
                 .disabled(viewModel.audioEngine.isMicrophoneAuditionActive ||
                           !canChangeRoom)
                 .accessibilityIdentifier("experimental-microphone-matrix")
-            Text("Switch back to original capture with audition stopped. The experimental path still has the 16-source limit; both retain independent mic level, pan, mute, solo and alignment controls.")
-                .font(.caption2).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                    Text("Experimental matrix: maximum sixteen independent sources. Change mode with audition stopped.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 8)
+            } label: {
+                Label("Advanced Capture", systemImage: "slider.horizontal.3")
+                    .font(.subheadline.weight(.semibold))
+            }
             HStack(spacing: 12) {
                 Text("Shared room return").font(.caption)
                 Slider(value: Binding(
@@ -448,9 +523,7 @@ struct StudioRoomAcousticsWorkspaceView: View {
                     .font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Text("One shared hall field is blended into microphone audition. It uses existing stage sends, not measured reflections at each capsule. Set to 0% for direct/spill-only comparison.")
-                .font(.caption2).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+
             if let error = viewModel.microphoneAuditionError {
                 Text(error).font(.caption).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
@@ -470,11 +543,7 @@ struct StudioRoomAcousticsWorkspaceView: View {
                     micMixerStrip(mic)
                 }
             }
-            Divider()
-            Text("Experimental direct-and-spill monitoring: capsule pickup, distance attenuation, air damping and propagation delay are audible. The original dry route is muted while auditioning; the shared room return has its own wet trim. Align shifts an entire capsule's capture by up to ±20 ms; it is a manual timing correction, not automatic phase matching. Independent mic stems and large orchestral matrices remain future milestones.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+
         }
     }
 
@@ -498,7 +567,7 @@ struct StudioRoomAcousticsWorkspaceView: View {
                 .buttonStyle(.bordered)
             }
             HStack {
-                Text("Level").frame(width: 42, alignment: .leading)
+                Text("Level").frame(width: 48, alignment: .leading)
                 Slider(value: Binding(
                     get: { Double(mic.mixer.safeLevel) },
                     set: { level in
@@ -509,7 +578,7 @@ struct StudioRoomAcousticsWorkspaceView: View {
                     .monospacedDigit().frame(width: 53)
             }
             HStack {
-                Text("Align").frame(width: 42, alignment: .leading)
+                Text("Align").frame(width: 48, alignment: .leading)
                 Slider(value: Binding(
                     get: { Double(mic.mixer.safeAlignmentMilliseconds) },
                     set: { value in
@@ -526,7 +595,7 @@ struct StudioRoomAcousticsWorkspaceView: View {
                 .buttonStyle(.bordered)
             }
             HStack {
-                Text("Pan").frame(width: 42, alignment: .leading)
+                Text("Pan").frame(width: 48, alignment: .leading)
                 Slider(value: Binding(
                     get: { Double(mic.mixer.safePan) },
                     set: { value in
@@ -540,6 +609,11 @@ struct StudioRoomAcousticsWorkspaceView: View {
         .font(.caption)
         .padding(12)
         .background(palette.panel, in: RoundedRectangle(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(settings.isSolo ? palette.accent : palette.separator.opacity(0.6),
+                              lineWidth: settings.isSolo ? 1.5 : 0.7)
+        }
         .accessibilityIdentifier("mic-mixer-" + mic.id.uuidString)
     }
 

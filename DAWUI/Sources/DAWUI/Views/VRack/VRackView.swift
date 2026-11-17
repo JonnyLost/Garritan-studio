@@ -151,6 +151,23 @@ public struct VRackView: View {
     @StateObject private var audition = BrowserAudition()
     @State private var previewInstrumentID: String?
     @State private var instrumentTypeFilter = "All"
+    @State private var showingFavoritesOnly = false
+    @AppStorage("studio.instrumentBrowser.favoriteIDs") private var favoriteIDsData = Data()
+
+    private var favoriteInstrumentIDs: Set<String> {
+        (try? JSONDecoder().decode(Set<String>.self, from: favoriteIDsData)) ?? []
+    }
+
+    private func toggleFavorite(_ instrument: DrawerInstrument) {
+        var favorites = favoriteInstrumentIDs
+        if !favorites.insert(instrument.id).inserted {
+            favorites.remove(instrument.id)
+        }
+        if let encoded = try? JSONEncoder().encode(favorites) {
+            favoriteIDsData = encoded
+        }
+    }
+
 
 
     public init(viewModel: ProjectViewModel, openStageWorkspace: (() -> Void)? = nil,
@@ -335,6 +352,20 @@ public struct VRackView: View {
         }
     }
 
+    private func familySymbol(_ family: String) -> String {
+        switch family {
+        case "Woodwinds": return "wind"
+        case "Brass": return "music.note"
+        case "Percussion": return "circle.dotted"
+        case "Keys": return "pianokeys"
+        case "Choir": return "person.3"
+        case "Strings": return "music.note.list"
+        case "Synth": return "waveform"
+        case "World": return "globe"
+        default: return "square.grid.2x2"
+        }
+    }
+
     private func displayInstrumentType(_ type: String) -> String {
         // Garritan bank folder names use ordering prefixes, e.g. "03 Clarinets".
         // Keep the underlying folder name intact for accurate catalog filtering.
@@ -349,7 +380,8 @@ public struct VRackView: View {
 
     private var expandedFilteredCatalog: [DrawerInstrument] {
         filteredCatalog.filter {
-            instrumentTypeFilter == "All" || $0.instrumentType == instrumentTypeFilter
+            (instrumentTypeFilter == "All" || $0.instrumentType == instrumentTypeFilter) &&
+            (!showingFavoritesOnly || favoriteInstrumentIDs.contains($0.id))
         }
     }
 
@@ -681,7 +713,7 @@ public struct VRackView: View {
     // Full-width browser shares the same catalog, filters and ARIA loader
     // as the compact picker. Browsing never loads a patch until requested.
     private var previewInstrument: DrawerInstrument? {
-        (catalog.isEmpty ? (Self.cachedCatalog ?? []) : catalog).first { $0.id == previewInstrumentID }
+        expandedFilteredCatalog.first { $0.id == previewInstrumentID }
     }
 
     var expandedInstrumentBrowser: some View {
@@ -691,7 +723,9 @@ public struct VRackView: View {
                 subtitle: "Garritan instruments and Studio's native Synth sounds",
                 symbol: "music.note.list"
             ) {
-                Text("\(filteredCatalog.count) patches")
+                Text("\(expandedFilteredCatalog.count) sounds")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .monospacedDigit()
                     .foregroundStyle(palette.secondaryText)
                 Button("Done") { closeInstrumentWorkspace?() }
                     .keyboardShortcut(.cancelAction)
@@ -701,6 +735,21 @@ public struct VRackView: View {
                     .foregroundStyle(.secondary)
                 TextField("Search instruments or articulations", text: $searchText)
                     .textFieldStyle(.plain)
+                    .accessibilityLabel("Search instrument patches")
+                Button {
+                    showingFavoritesOnly.toggle()
+                } label: {
+                    Label("Favorites", systemImage: showingFavoritesOnly ? "star.fill" : "star")
+                        .labelStyle(.iconOnly)
+                        .foregroundStyle(showingFavoritesOnly ? palette.accent : palette.secondaryText)
+                        .frame(width: 27, height: 27)
+                        .background(showingFavoritesOnly ? palette.selectedBackground : palette.raisedSurface,
+                                    in: RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .help(showingFavoritesOnly ? "Show all instruments" : "Show favorite instruments")
+                .accessibilityLabel("Favorites filter")
+                .accessibilityAddTraits(showingFavoritesOnly ? .isSelected : [])
                 Text("LIBRARY")
                     .font(.system(size: 10, weight: .semibold))
                     .tracking(0.6)
@@ -778,12 +827,17 @@ public struct VRackView: View {
                                 audition.stop()
                                 previewInstrumentID = nil
                             } label: {
-                                HStack {
+                                HStack(spacing: 9) {
+                                    Image(systemName: family == "All" ? "square.grid.2x2" : familySymbol(family))
+                                        .font(.system(size: 12))
+                                        .frame(width: 16)
+                                        .foregroundStyle(familyFilter == family ? palette.accent : palette.secondaryText)
                                     Text(family == "All" ? "All Instruments" : family)
-                                    Spacer()
+                                        .font(.system(size: 12, weight: familyFilter == family ? .semibold : .regular))
+                                    Spacer(minLength: 0)
                                 }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 9)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
                                 .background(familyFilter == family ? palette.selectedBackground : Color.clear)
                                 .clipShape(RoundedRectangle(cornerRadius: 7))
                             }
@@ -808,8 +862,9 @@ public struct VRackView: View {
                                         .lineLimit(2)
                                     Spacer()
                                 }
+                                .font(.system(size: 12, weight: instrumentTypeFilter == type ? .semibold : .regular))
                                 .padding(.horizontal, 10)
-                                .padding(.vertical, 9)
+                                .padding(.vertical, 7)
                                 .background(instrumentTypeFilter == type ?
                                             palette.selectedBackground : Color.clear)
                                 .clipShape(RoundedRectangle(cornerRadius: 7))
@@ -825,45 +880,80 @@ public struct VRackView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 5) {
                         ForEach(expandedFilteredCatalog) { instrument in
-                            Button {
-                                audition.stop()
-                                previewInstrumentID = instrument.id
-                            } label: {
-                                HStack(spacing: 12) {
-                                    StudioInstrumentIcon(
-                                        name: instrument.name,
-                                        path: instrument.path,
-                                        category: instrument.category,
-                                        size: 31
-                                    )
-                                    .frame(width: 35)
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(instrument.name)
-                                            .font(.subheadline.weight(.medium))
-                                        Text(instrument.category + " · " +
-                                             (instrument.library == "Garritan Personal Orchestra 5" ? "GPO5" :
-                                              instrument.library == StudioSynthFactoryCatalog.libraryName ? instrument.instrumentType : "Instant Orchestra"))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                            HStack(spacing: 8) {
+                                Button {
+                                    audition.stop()
+                                    previewInstrumentID = instrument.id
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        StudioInstrumentIcon(
+                                            name: instrument.name,
+                                            path: instrument.path,
+                                            category: instrument.category,
+                                            size: 27
+                                        )
+                                        .frame(width: 32, height: 32)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(instrument.name)
+                                                .font(.system(size: 12, weight: .medium))
+                                                .lineLimit(1)
+                                            Text(instrument.category + " · " +
+                                                 (instrument.library == "Garritan Personal Orchestra 5" ? "GPO5" :
+                                                  instrument.library == StudioSynthFactoryCatalog.libraryName ? instrument.instrumentType : "Instant Orchestra"))
+                                                .font(.system(size: 10))
+                                                .foregroundStyle(palette.secondaryText)
+                                                .lineLimit(1)
+                                        }
+                                        Spacer(minLength: 2)
+                                        if previewInstrumentID == instrument.id {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .foregroundStyle(palette.accent)
+                                                .font(.system(size: 13))
+                                        }
                                     }
-                                    Spacer()
-                                    if previewInstrumentID == instrument.id {
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .foregroundStyle(palette.accent)
-                                    }
+                                    .frame(maxWidth: .infinity, minHeight: 42)
+                                    .contentShape(Rectangle())
                                 }
-                                .padding(10)
-                                .background(previewInstrumentID == instrument.id ?
-                                            palette.selectedBackground :
-                                            palette.surface)
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(instrument.name)
+                                .accessibilityAddTraits(previewInstrumentID == instrument.id ? .isSelected : [])
+
+                                Button {
+                                    toggleFavorite(instrument)
+                                } label: {
+                                    Image(systemName: favoriteInstrumentIDs.contains(instrument.id) ? "star.fill" : "star")
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(favoriteInstrumentIDs.contains(instrument.id) ? palette.accent : palette.secondaryText)
+                                        .frame(width: 26, height: 34)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .help(favoriteInstrumentIDs.contains(instrument.id) ? "Remove favorite" : "Add favorite")
+                                .accessibilityLabel(favoriteInstrumentIDs.contains(instrument.id) ?
+                                                    "Remove \(instrument.name) from favorites" :
+                                                    "Add \(instrument.name) to favorites")
                             }
-                            .buttonStyle(.plain)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 3)
+                            .background(previewInstrumentID == instrument.id ?
+                                        palette.selectedBackground : palette.surface,
+                                        in: RoundedRectangle(cornerRadius: 7))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 7)
+                                    .strokeBorder(previewInstrumentID == instrument.id ?
+                                                  palette.accent.opacity(0.55) : Color.clear, lineWidth: 1)
+                            }
                         }
                         if expandedFilteredCatalog.isEmpty {
-                            Text("No instruments match these filters.")
-                                .foregroundStyle(.secondary)
-                                .padding()
+                            ContentUnavailableView(
+                                showingFavoritesOnly ? "No Favorite Instruments" : "No Matching Instruments",
+                                systemImage: showingFavoritesOnly ? "star" : "magnifyingglass",
+                                description: Text(showingFavoritesOnly ?
+                                                  "Star instruments to keep them here." :
+                                                  "Try another family, library or search term.")
+                            )
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 40)
                         }
                     }
                     .padding(12)
@@ -875,24 +965,31 @@ public struct VRackView: View {
                 VStack(spacing: 0) {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 12) {
-                            Text("INSTRUMENT DETAILS")
-                                .font(.system(size: 10, weight: .semibold))
-                                .tracking(1.1)
-                                .foregroundStyle(palette.secondaryText)
+                            HStack {
+                                Text("PATCH PREVIEW")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .tracking(1)
+                                    .foregroundStyle(palette.secondaryText)
+                                Spacer()
+                                if let instrument = previewInstrument {
+                                    Button {
+                                        toggleFavorite(instrument)
+                                    } label: {
+                                        Image(systemName: favoriteInstrumentIDs.contains(instrument.id) ? "star.fill" : "star")
+                                            .foregroundStyle(favoriteInstrumentIDs.contains(instrument.id) ? palette.accent : palette.secondaryText)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Toggle favorite")
+                                    .accessibilityLabel("Toggle favorite for \(instrument.name)")
+                                }
+                            }
 
                             if let instrument = previewInstrument {
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(palette.surface)
-                                    StudioInstrumentIcon(
-                                        name: instrument.name,
-                                        path: instrument.path,
-                                        category: instrument.category,
-                                        size: 88
-                                    )
-                                    .padding(.vertical, 10)
-                                }
-                                .frame(height: 114)
+                                StudioInstrumentArtworkCard(
+                                    name: instrument.name,
+                                    path: instrument.path,
+                                    category: instrument.category
+                                )
 
                                 Text(instrument.name)
                                     .font(.system(size: 20, weight: .semibold,
@@ -918,15 +1015,16 @@ public struct VRackView: View {
                                     .foregroundStyle(palette.primaryText)
                                     .fixedSize(horizontal: false, vertical: true)
 
-                                Text("PATCH LOCATION")
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .tracking(1.0)
-                                    .foregroundStyle(palette.secondaryText)
-                                Text(instrument.path)
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(palette.secondaryText)
-                                    .lineLimit(4)
-                                    .textSelection(.enabled)
+                                DisclosureGroup("Patch Location") {
+                                    Text(instrument.path)
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(palette.secondaryText)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .textSelection(.enabled)
+                                        .padding(.top, 5)
+                                }
+                                .font(.system(size: 11))
+                                .foregroundStyle(palette.secondaryText)
                             } else {
                                 Text("Choose an instrument to see its details and load it.")
                                     .font(.subheadline)
@@ -995,6 +1093,14 @@ public struct VRackView: View {
             }
         }
         .onDisappear { audition.stop() }
+        // Reconcile preview with every filter, including favorites/search/library,
+        // rather than showing details for a patch hidden from the results.
+        .onChange(of: expandedFilteredCatalog.map(\.id)) { _, ids in
+            if !ids.contains(previewInstrumentID ?? "") {
+                audition.stop()
+                previewInstrumentID = ids.first
+            }
+        }
         .onChange(of: familyFilter) { _, _ in
             if !filteredCatalog.contains(where: { $0.id == previewInstrumentID }) {
                 previewInstrumentID = filteredCatalog.first?.id

@@ -153,24 +153,38 @@ struct ChannelStripView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // Track name with color indicator
-            VStack(spacing: 2) {
+            // Track identity: clearly selected, with an instrument/track color key.
+            VStack(alignment: .leading, spacing: 5) {
                 RoundedRectangle(cornerRadius: 2)
-                    .fill(Color(hex: track.color.hex) ?? .blue)
+                    .fill(Color(hex: track.color.hex) ?? palette.accent)
                     .frame(height: 4)
-                
-                Text(track.name)
-                    .font(.system(size: 11, weight: .semibold))
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Image(systemName: "waveform")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(palette.secondaryText)
+                    Text(track.name)
+                        .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(palette.primaryText)
+                .help(track.name)
             }
-            .padding(.horizontal, 7)
-            .padding(.top, 7)
+            .padding(.horizontal, 9)
+            .padding(.top, 8)
+            .padding(.bottom, 6)
             
             // Four initially visible inserts, with additional restored
             // slots displayed automatically. Only contiguous slots can be
             // newly populated; this preserves AudioEngine's ordered chain.
             if showInsertSlots {
-                VStack(spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("INSERTS")
+                        .font(.system(size: 9, weight: .semibold))
+                        .tracking(0.8)
+                        .foregroundStyle(palette.secondaryText)
+                        .padding(.bottom, 2)
                     ForEach(0..<max(4, track.pluginSlots.count), id: \.self) { index in
                         let slot: PluginSlot? =
                             index < track.pluginSlots.count ? track.pluginSlots[index] : nil
@@ -189,50 +203,48 @@ struct ChannelStripView: View {
                                   }.count != index)
                     }
                 }
-                .padding(.vertical, 4)
+.padding(.horizontal, 9)
+                .padding(.vertical, 6)
             }
 
-            // Independent Concert Hall send: 0% dry, 100% stage default,
-            // up to 200% for a deliberately wetter mix. No stage relocation.
-            VStack(spacing: 2) {
-                HStack(spacing: 2) {
-                    Text("HALL")
-                        .font(.system(size: 8, weight: .semibold))
-                    Spacer(minLength: 0)
-                    Text("\(Int(((track.stageWetTrim ?? 1) * 100).rounded()))%")
-                        .font(.system(size: 8, design: .monospaced))
-                }
-                Slider(
+            // Both controls retain the original live playback bindings.
+            HStack(alignment: .top, spacing: 5) {
+                StudioParameterKnob(
+                    "Hall",
                     value: Binding(
                         get: { Double(track.stageWetTrim ?? 1) },
                         set: { viewModel.setTrackStageWetTrim(id: track.id, trim: Float($0)) }
                     ),
-                    in: 0...2
+                    in: 0...2,
+                    tint: StudioGUI.accent,
+                    formattedValue: { String(format: "%.0f%%", $0 * 100) }
                 )
-                .controlSize(.mini)
                 .accessibilityLabel("Concert Hall send for \(track.name)")
-            }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 4)
 
-            // Pan knob
-            KnobView(
-                value: Binding(
-                    get: { Double(track.pan) },
-                    set: { viewModel.setTrackPan(id: track.id, pan: Float($0)) }
-                ),
-                range: -1...1,
-                label: ""
-            )
-            .frame(width: 36, height: 36)
-            
+                StudioParameterKnob(
+                    "Pan",
+                    value: Binding(
+                        get: { Double(track.pan) },
+                        set: { viewModel.setTrackPan(id: track.id, pan: Float($0)) }
+                    ),
+                    in: -1...1,
+                    formattedValue: {
+                        abs($0) < 0.01 ? "C" :
+                            String(format: "%.0f%@", abs($0) * 100, $0 < 0 ? "L" : "R")
+                    }
+                )
+            }
+            .padding(.horizontal, 5)
+            .padding(.vertical, 7)
+
             Spacer(minLength: 4)
             
-            // Meter and fader side by side
-            HStack(spacing: 2) {
+            // Dedicated metering and volume section.
+            HStack(spacing: 9) {
                 if showMeters {
                     StereoMeterView(leftLevel: meterLevels.left, rightLevel: meterLevels.right)
-                        .frame(width: 15, height: 145)
+                        .frame(width: 18, height: 145)
+                        .accessibilityLabel("Stereo level meter for \(track.name)")
                 }
                 
                 FaderView(
@@ -245,9 +257,11 @@ struct ChannelStripView: View {
                 .frame(width: 26, height: 145)
             }
             
-            Text(volumeText)
-                .font(.system(size: 8, design: .monospaced))
-                .foregroundColor(.secondary)
+            Text(volumeText + " dB")
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(palette.primaryText)
+                .padding(.top, 4)
+                .padding(.bottom, 8)
             
             // Solo/Mute
             HStack(spacing: 4) {
@@ -273,7 +287,7 @@ struct ChannelStripView: View {
             }
             .padding(.bottom, 6)
         }
-        .frame(width: 110, height: 455)
+        .frame(width: 166, height: 455)
         .background(isSelected ? palette.selectedBackground.opacity(0.6) : palette.panel)
         .overlay {
             RoundedRectangle(cornerRadius: 10)
@@ -372,7 +386,7 @@ private struct StudioPictureGuideChannelStripView: View {
             .padding(.bottom, 6)
         }
         .padding(.horizontal, 7)
-        .frame(width: 110, height: 455)
+        .frame(width: 166, height: 455)
         .background(palette.panel)
         .overlay {
             RoundedRectangle(cornerRadius: 10)
@@ -407,11 +421,13 @@ struct MasterChannelStripView: View {
                     .frame(height: 4)
                 
                 Text("MASTER")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.system(size: 12, weight: .bold))
+                    .tracking(1)
+                    .foregroundStyle(palette.primaryText)
             }
-            .padding(.horizontal, 4)
-            .padding(.top, 4)
-            
+            .padding(.horizontal, 9)
+            .padding(.top, 8)
+
             Spacer(minLength: 8)
             
             // Meter and fader
@@ -432,11 +448,11 @@ struct MasterChannelStripView: View {
             }
             
             Text(masterVolumeText)
-                .font(.system(size: 9, design: .monospaced))
-                .foregroundColor(.secondary)
-                .padding(.bottom, 8)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(palette.primaryText)
+                .padding(.bottom, 10)
         }
-        .frame(width: 104, height: 335)
+        .frame(width: 166, height: 455)
         .background(palette.raisedSurface)
         .overlay {
             RoundedRectangle(cornerRadius: 10)
@@ -456,50 +472,60 @@ struct MasterChannelStripView: View {
 // MARK: - Plugin Slot View
 
 struct PluginSlotView: View {
+    @Environment(\.studioPalette) private var palette
     let slot: PluginSlot?
     let onClick: () -> Void
     let onOpenEditor: (() -> Void)?
-    
+
     init(slot: PluginSlot?, onClick: @escaping () -> Void, onOpenEditor: (() -> Void)? = nil) {
         self.slot = slot
         self.onClick = onClick
         self.onOpenEditor = onOpenEditor
     }
-    
+
+    private var isOccupied: Bool { slot?.pluginID != nil }
+
     var body: some View {
-        Button(action: {
-            if slot?.pluginID != nil, let openEditor = onOpenEditor {
-                openEditor()
+        Button {
+            if isOccupied, let onOpenEditor {
+                onOpenEditor()
             } else {
                 onClick()
             }
-        }) {
-            HStack {
-                if let slot = slot, slot.pluginID != nil {
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: isOccupied ? "slider.horizontal.3" : "plus")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(isOccupied ? palette.accent : palette.secondaryText)
+
+                Text(slot?.pluginID?.name ?? "Add Effect")
+                    .font(.system(size: 10, weight: isOccupied ? .medium : .regular))
+                    .foregroundStyle(isOccupied ? palette.primaryText : palette.secondaryText)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Spacer(minLength: 0)
+
+                if isOccupied {
                     Circle()
-                        .fill(slot.isEnabled ? Color.green : Color.orange)
+                        .fill(slot?.isEnabled == true ? StudioGUI.activity : palette.secondaryText)
                         .frame(width: 6, height: 6)
-                    
-                    Text(slot.pluginID?.name ?? "Plugin")
-                        .font(.system(size: 8))
-                        .lineLimit(1)
-                } else {
-                    Text("—")
-                        .font(.system(size: 8))
-                        .foregroundColor(.secondary)
                 }
-                
-                Spacer()
             }
-            .padding(.horizontal, 4)
-            .padding(.vertical, 2)
-            .frame(width: 80, height: 22)
-            .background(Color.gray.opacity(0.2))
-            .cornerRadius(2)
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, minHeight: 24)
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: 5))
+            .overlay {
+                RoundedRectangle(cornerRadius: 5)
+                    .strokeBorder(palette.separator.opacity(0.65), lineWidth: 0.7)
+            }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help(isOccupied ? "Open effect editor" : "Add an effect to this insert")
+        .accessibilityLabel(isOccupied ? "Effect: \(slot?.pluginID?.name ?? "Plugin")" : "Add effect")
         .contextMenu {
-            if slot?.pluginID != nil {
+            if isOccupied {
                 Button("Open Editor") { onOpenEditor?() }
             }
         }

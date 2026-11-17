@@ -8,6 +8,8 @@ import DAWCore
 public struct StudioSynthPanelView: View {
     @ObservedObject private var viewModel: ProjectViewModel
     public let trackID: TrackID
+    @Environment(\.studioPalette) private var palette
+    @State private var showPerformanceDetails = false
     @State private var focusedEngine: StudioSynthEngine?
     @State private var selectedLayerID: UUID?
     @State private var selectedAdditiveHarmonic = 0
@@ -54,14 +56,17 @@ public struct StudioSynthPanelView: View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 Image(systemName: "waveform.path")
-                    .font(.system(size: 28))
-                    .foregroundStyle(.cyan)
+                    .font(.system(size: 26, weight: .medium))
+                    .foregroundStyle(palette.accent)
+                    .frame(width: 44, height: 44)
+                    .background(palette.raisedSurface, in: RoundedRectangle(cornerRadius: 10))
                 VStack(alignment: .leading, spacing: 3) {
                     Text("STUDIO SYNTH")
-                        .font(.system(.title2, design: .rounded, weight: .bold))
+                        .font(.system(.title3, design: .rounded, weight: .bold))
+                        .tracking(0.6)
                     Text(patch.isHybrid ? "Hybrid · \(patch.layers.count) layers" :
-                         "Individual · \(patch.layers.count) layer")
-                        .font(.caption).foregroundStyle(.secondary)
+                         "Single engine · \(patch.layers.count) layer")
+                        .font(.caption).foregroundStyle(palette.secondaryText)
                 }
                 Spacer()
                 Menu {
@@ -117,9 +122,10 @@ public struct StudioSynthPanelView: View {
                     Label("Make Sampled Instrument", systemImage: "square.stack.3d.up")
                 }
                 .buttonStyle(.bordered)
-                Label(connected ? "Audio connected" : "Engine unavailable",
-                      systemImage: connected ? "checkmark.circle" : "exclamationmark.triangle")
-                    .font(.caption).foregroundStyle(.secondary)
+                Image(systemName: connected ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(connected ? StudioGUI.activity : .orange)
+                    .help(connected ? "Audio connected" : "Engine unavailable")
+                    .accessibilityLabel(connected ? "Audio connected" : "Engine unavailable")
                 Button {
                     viewModel.playbackEngine.playTestNote(on: trackID)
                 } label: {
@@ -133,7 +139,7 @@ public struct StudioSynthPanelView: View {
             Divider()
 
             HStack(spacing: 8) {
-                Button("Hybrid / Layers") { focusedEngine = nil }
+                Button("All Layers") { focusedEngine = nil }
                     .buttonStyle(.bordered)
                     .tint(focusedEngine == nil ? .cyan : .gray)
 
@@ -236,14 +242,20 @@ public struct StudioSynthPanelView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("Select a layer to edit its native engine. All enabled layers play together; switching editor tabs does not affect the sound.")
-                        .font(.caption).foregroundStyle(.secondary)
-
                     layerOverview
                     synthAutomationEditor
 
-                    StudioSynthModulationView(viewModel: viewModel, trackID: trackID)
-                    StudioSynthMIDILearnView(viewModel: viewModel, trackID: trackID)
+                    DisclosureGroup(isExpanded: $showPerformanceDetails) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            StudioSynthModulationView(viewModel: viewModel, trackID: trackID)
+                            StudioSynthMIDILearnView(viewModel: viewModel, trackID: trackID)
+                        }
+                        .padding(.top, 8)
+                    } label: {
+                        Label("Modulation & MIDI Learn", systemImage: "slider.horizontal.3")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(palette.primaryText)
+                    }
 
                     if let layer = selectedLayer {
                         VStack(alignment: .leading, spacing: 12) {
@@ -633,9 +645,14 @@ public struct StudioSynthPanelView: View {
 
     private var layerOverview: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("LAYERS")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.secondary)
+            HStack {
+                Label("Sound Layers", systemImage: "square.3.layers.3d")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text("\(patch.layers.filter(\.enabled).count) active")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(palette.secondaryText)
+            }
             ForEach(patch.layers) { layer in
                 HStack(spacing: 10) {
                     Button {
@@ -652,7 +669,7 @@ public struct StudioSynthPanelView: View {
                         .frame(width: 175, alignment: .leading)
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(selectedLayer?.id == layer.id ? Color.cyan : Color.primary)
+                    .foregroundStyle(selectedLayer?.id == layer.id ? palette.accent : palette.primaryText)
 
                     Toggle("On", isOn: Binding(
                         get: { layer.enabled },
@@ -669,7 +686,7 @@ public struct StudioSynthPanelView: View {
                     .disabled(layer.enabled &&
                               patch.layers.filter(\.enabled).count == 1)
 
-                    Text("Level").font(.caption).foregroundStyle(.secondary)
+                    Text("LEVEL").font(.system(size: 10, weight: .medium)).foregroundStyle(palette.secondaryText)
                     Slider(value: Binding<Double>(
                         get: { Double(currentLayer(layer.id)?.gain ?? layer.gain) },
                         set: { gain in
@@ -681,7 +698,7 @@ public struct StudioSynthPanelView: View {
                     ), in: 0...1)
                     .disabled(!layer.enabled)
 
-                    Text("Pan").font(.caption).foregroundStyle(.secondary)
+                    Text("PAN").font(.system(size: 10, weight: .medium)).foregroundStyle(palette.secondaryText)
                     Slider(value: Binding<Double>(
                         get: { Double(currentLayer(layer.id)?.pan ?? layer.pan) },
                         set: { pan in
@@ -716,8 +733,13 @@ public struct StudioSynthPanelView: View {
                     .buttonStyle(.borderless)
                 }
                 .padding(10)
-                .background(Color.primary.opacity(0.04),
-                            in: RoundedRectangle(cornerRadius: 7))
+                .background(selectedLayer?.id == layer.id ? palette.selectedBackground : palette.panel,
+                            in: RoundedRectangle(cornerRadius: 9))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 9)
+                        .strokeBorder(selectedLayer?.id == layer.id ? palette.accent : palette.separator,
+                                      lineWidth: selectedLayer?.id == layer.id ? 1.2 : 0.7)
+                }
             }
         }
     }

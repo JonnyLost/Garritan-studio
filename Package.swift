@@ -164,7 +164,8 @@ let package = Package(
             dependencies: ["DAWCore"],
             path: "DAWUI/Sources/DAWUI",
             resources: [
-                .copy("Resources/GPO5_keyswitch_catalog.json")
+                .copy("Resources/GPO5_keyswitch_catalog.json"),
+                .copy("Resources/InstrumentArtwork")
             ]
         ),
         

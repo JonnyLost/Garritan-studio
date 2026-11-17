@@ -21,7 +21,7 @@ struct TrackHeaderView: View {
             HStack(spacing: 6) {
                 // Track color indicator
                 RoundedRectangle(cornerRadius: 2)
-                    .fill(Color(hex: track.color.hex) ?? .blue)
+                    .fill(Color(hex: track.color.hex) ?? palette.accent)
                     .frame(width: 4, height: 60)
                 
                 VStack(alignment: .leading, spacing: 4) {
@@ -39,8 +39,10 @@ struct TrackHeaderView: View {
                                     .frame(width: 19)
                             }
                             Text(track.name)
-                                .font(.system(size: 12, weight: .medium))
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(palette.primaryText)
                                 .lineLimit(1)
+                                .help(track.name)
                                 .onTapGesture(count: 2) {
                                     startEditing()
                                 }
@@ -102,17 +104,27 @@ struct TrackHeaderView: View {
                         Button(action: { viewModel.toggleTrackMute(id: track.id) }) {
                             Text("M")
                                 .font(.system(size: 10, weight: .bold))
-                                .foregroundColor(track.isMuted ? .orange : .secondary)
+                                .foregroundStyle(track.isMuted ? Color.black : palette.secondaryText)
+                                .frame(width: 24, height: 20)
+                                .background(track.isMuted ? Color.orange : palette.raisedSurface,
+                                            in: RoundedRectangle(cornerRadius: 5))
                         }
                         .buttonStyle(.plain)
-                        
+                        .help(track.isMuted ? "Unmute \(track.name)" : "Mute \(track.name)")
+                        .accessibilityLabel(track.isMuted ? "Unmute \(track.name)" : "Mute \(track.name)")
+
                         // Solo
                         Button(action: { viewModel.toggleTrackSolo(id: track.id) }) {
                             Text("S")
                                 .font(.system(size: 10, weight: .bold))
-                                .foregroundColor(track.isSolo ? .yellow : .secondary)
+                                .foregroundStyle(track.isSolo ? Color.black : palette.secondaryText)
+                                .frame(width: 24, height: 20)
+                                .background(track.isSolo ? Color.yellow : palette.raisedSurface,
+                                            in: RoundedRectangle(cornerRadius: 5))
                         }
                         .buttonStyle(.plain)
+                        .help(track.isSolo ? "Unsolo \(track.name)" : "Solo \(track.name)")
+                        .accessibilityLabel(track.isSolo ? "Unsolo \(track.name)" : "Solo \(track.name)")
                         
                         Spacer()
                         
@@ -128,8 +140,10 @@ struct TrackHeaderView: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 8)
-            
-            Divider()
+
+            Rectangle()
+                .fill(palette.separator.opacity(0.65))
+                .frame(height: 1)
         }
         .sheet(isPresented: $showInstrumentBrowser) {
             InstrumentBrowserSheet(
