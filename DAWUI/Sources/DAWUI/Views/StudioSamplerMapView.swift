@@ -30,6 +30,26 @@ public struct StudioSamplerMapView: View {
     @State private var showFactory = false
     @State private var showAutoSampler = false
     @State private var showPackageImporter = false
+    @State private var showSFZImporter = false
+    @State private var showSFZSampleFolderImporter = false
+    @State private var pendingSFZURL: URL?
+    @State private var showSF2Importer = false
+    @State private var showSF2Picker = false
+    @State private var sf2Source: URL?
+    @State private var sf2Presets: [StudioSamplerSF2Reader.Preset] = []
+    @State private var selectedSF2PresetIndex = 0
+    @State private var showNKIImporter = false
+    @State private var showNKISampleFolderImporter = false
+    @State private var pendingNKIURL: URL?
+    @State private var showEXSImporter = false
+    @State private var showEXSSampleFolderImporter = false
+    @State private var pendingEXSURL: URL?
+    @State private var showGIGImporter = false
+    @State private var showGIGPicker = false
+    @State private var gigSource: URL?
+    @State private var gigInstruments: [StudioSamplerGIGReader.Instrument] = []
+    @State private var selectedGIGIndex = 0
+    @State private var compatibilityWarnings: [String] = []
     @State private var showSaveSheet = false
     @State private var exportInsteadOfSave = false
     @State private var instrumentName = "New Instrument"
@@ -68,6 +88,11 @@ public struct StudioSamplerMapView: View {
                 Menu {
                     Button("Browse Instrument Library…") { showLibrary = true }
                     Button("Import .studioinstrument…") { showPackageImporter = true }
+                    Button("Import SFZ Instrument…") { showSFZImporter = true }
+                    Button("Import SoundFont 2 (.sf2)…") { showSF2Importer = true }
+                    Button("Import GigaStudio (.gig)…") { showGIGImporter = true }
+                    Button("Import Logic EXS24 (.exs)…") { showEXSImporter = true }
+                    Button("Import Kontakt Instrument (.nki)…") { showNKIImporter = true }
                     Divider()
                     Button("Save to Studio Library…") { beginSaving(export: false) }
                         .disabled(draft?.isValid != true)
@@ -193,6 +218,13 @@ public struct StudioSamplerMapView: View {
                 }
             }
 
+            if !compatibilityWarnings.isEmpty {
+                DisclosureGroup("Instrument compatibility notes (\(compatibilityWarnings.count))") {
+                    ForEach(compatibilityWarnings, id: \.self) { warning in
+                        Text(warning).font(.caption).foregroundStyle(.orange)
+                    }
+                }
+            }
             if let saveNotice {
                 Label(saveNotice, systemImage: "checkmark.circle")
                     .font(.caption).foregroundStyle(.secondary)
@@ -257,6 +289,177 @@ public struct StudioSamplerMapView: View {
                 if let url = urls.first { loadPackage(url) }
             case .failure(let error): errorMessage = error.localizedDescription
             }
+        }
+        .fileImporter(
+            isPresented: $showSFZSampleFolderImporter,
+            allowedContentTypes: [.folder],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                if let folder = urls.first, let source = pendingSFZURL {
+                    pendingSFZURL = nil
+                    importSFZ(source, samplesRoot: folder)
+                }
+            case .failure(let error):
+                pendingSFZURL = nil
+                errorMessage = error.localizedDescription
+            }
+        }
+        .fileImporter(
+            isPresented: $showSFZImporter,
+            allowedContentTypes: [UTType(filenameExtension: "sfz") ?? .plainText],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                if let url = urls.first { importSFZ(url) }
+            case .failure(let error): errorMessage = error.localizedDescription
+            }
+        }
+        .fileImporter(
+            isPresented: $showSF2Importer,
+            allowedContentTypes: [UTType(filenameExtension: "sf2") ?? .data],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                if let url = urls.first { inspectSF2(url) }
+            case .failure(let error): errorMessage = error.localizedDescription
+            }
+        }
+        .fileImporter(
+            isPresented: $showEXSSampleFolderImporter,
+            allowedContentTypes: [.folder],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                if let folder = urls.first, let source = pendingEXSURL {
+                    pendingEXSURL = nil
+                    importEXS(source, samplesRoot: folder)
+                }
+            case .failure(let error):
+                pendingEXSURL = nil
+                errorMessage = error.localizedDescription
+            }
+        }
+        .fileImporter(
+            isPresented: $showNKISampleFolderImporter,
+            allowedContentTypes: [.folder],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                if let folder = urls.first, let source = pendingNKIURL {
+                    pendingNKIURL = nil
+                    importNKI(source, samplesRoot: folder)
+                }
+            case .failure(let error):
+                pendingNKIURL = nil
+                errorMessage = error.localizedDescription
+            }
+        }
+        .fileImporter(
+            isPresented: $showNKIImporter,
+            allowedContentTypes: [UTType(filenameExtension: "nki") ?? .data],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                if let url = urls.first { importNKI(url) }
+            case .failure(let error): errorMessage = error.localizedDescription
+            }
+        }
+        .fileImporter(
+            isPresented: $showEXSImporter,
+            allowedContentTypes: [UTType(filenameExtension: "exs") ?? .data],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                if let url = urls.first { importEXS(url) }
+            case .failure(let error): errorMessage = error.localizedDescription
+            }
+        }
+        .fileImporter(
+            isPresented: $showGIGImporter,
+            allowedContentTypes: [UTType(filenameExtension: "gig") ?? .data],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                if let url = urls.first { inspectGIG(url) }
+            case .failure(let error): errorMessage = error.localizedDescription
+            }
+        }
+        .sheet(isPresented: $showGIGPicker) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Import GigaStudio Instrument").font(.title3.weight(.semibold))
+                Text("Select one instrument to convert into Studio's native sampler.")
+                    .font(.callout).foregroundStyle(.secondary)
+                Picker("Instrument", selection: $selectedGIGIndex) {
+                    ForEach(gigInstruments.indices, id: \.self) { index in
+                        let item = gigInstruments[index]
+                        Text("\(item.name) · Bank \(item.bank), Program \(item.program) · \(item.regions.count) regions")
+                            .tag(index)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                Text("Supports 16-bit PCM, velocity splits, round-robin, release samples, explicit GIG keyswitch notes and stepped CC1/CC2 sample selection. Other controller and complex GIG dimensions remain unsupported.")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Button("Cancel") {
+                        showGIGPicker = false
+                        gigSource = nil
+                    }
+                    Spacer()
+                    Button("Import Selected Instrument") {
+                        guard let source = gigSource else { return }
+                        showGIGPicker = false
+                        gigSource = nil
+                        importGIG(source, instrumentIndex: selectedGIGIndex)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!gigInstruments.indices.contains(selectedGIGIndex))
+                }
+            }
+            .padding(20)
+            .frame(width: 520)
+        }
+        .sheet(isPresented: $showSF2Picker) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Import SoundFont Preset").font(.title3.weight(.semibold))
+                Text("Choose one SoundFont preset to convert into a native, editable Studio instrument.")
+                    .font(.callout).foregroundStyle(.secondary)
+                Picker("Preset", selection: $selectedSF2PresetIndex) {
+                    ForEach(sf2Presets.indices, id: \.self) { index in
+                        let preset = sf2Presets[index]
+                        Text("\(preset.name) · Bank \(preset.bank), Program \(preset.program)")
+                            .tag(index)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                Text("Samples will be copied into Studio's library. Unsupported SoundFont modulation and effects will be reported.")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Button("Cancel") {
+                        showSF2Picker = false
+                        sf2Source = nil
+                    }
+                    Spacer()
+                    Button("Import Selected Preset") {
+                        guard let source = sf2Source else { return }
+                        showSF2Picker = false
+                        sf2Source = nil
+                        importSF2(source, presetIndex: selectedSF2PresetIndex)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!sf2Presets.indices.contains(selectedSF2PresetIndex))
+                }
+            }
+            .padding(20)
+            .frame(width: 500)
         }
         .sheet(isPresented: $showLibrary) {
             StudioSamplerLibraryBrowser(onChoose: { url in loadPackage(url) })
@@ -365,6 +568,226 @@ public struct StudioSamplerMapView: View {
                 } catch {
                     errorMessage = error.localizedDescription
                 }
+            }
+        }
+    }
+
+    private func importNKI(_ url: URL, samplesRoot: URL? = nil) {
+        guard !isImporting else { return }
+        isImporting = true
+        errorMessage = nil
+        saveNotice = nil
+        compatibilityWarnings = []
+        Task { @MainActor in
+            defer { isImporting = false }
+            do {
+                let imported = try await Task.detached(priority: .userInitiated) {
+                    let access = url.startAccessingSecurityScopedResource()
+                    let folderAccess = samplesRoot?.startAccessingSecurityScopedResource() ?? false
+                    defer {
+                        if folderAccess { samplesRoot?.stopAccessingSecurityScopedResource() }
+                        if access { url.stopAccessingSecurityScopedResource() }
+                    }
+                    return try StudioSamplerNKIImporter.importInstrument(
+                        url, samplesRoot: samplesRoot)
+                }.value
+                draft = imported.patch
+                selectedIndex = 0
+                instrumentName = imported.name
+                compatibilityWarnings = imported.warnings
+                saveNotice = "Imported Kontakt instrument \(imported.name). Choose Apply Mapping to activate it."
+            } catch StudioSamplerNKIImporter.ImportError.missingSample {
+                if samplesRoot == nil {
+                    pendingNKIURL = url
+                    showNKISampleFolderImporter = true
+                } else {
+                    errorMessage = "A Kontakt sample is still missing. Choose the folder containing its original WAV/AIFF recordings."
+                }
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func importEXS(_ url: URL, samplesRoot: URL? = nil) {
+        guard !isImporting else { return }
+        isImporting = true
+        errorMessage = nil
+        saveNotice = nil
+        compatibilityWarnings = []
+        Task { @MainActor in
+            defer { isImporting = false }
+            do {
+                let imported = try await Task.detached(priority: .userInitiated) {
+                    let access = url.startAccessingSecurityScopedResource()
+                    let folderAccess = samplesRoot?.startAccessingSecurityScopedResource() ?? false
+                    defer {
+                        if folderAccess { samplesRoot?.stopAccessingSecurityScopedResource() }
+                        if access { url.stopAccessingSecurityScopedResource() }
+                    }
+                    return try StudioSamplerEXSImporter.importInstrument(
+                        url, samplesRoot: samplesRoot)
+                }.value
+                draft = imported.patch
+                selectedIndex = 0
+                instrumentName = imported.instrumentName
+                compatibilityWarnings = imported.warnings
+                saveNotice = "Imported EXS24 instrument \(imported.instrumentName). Choose Apply Mapping to activate it."
+            } catch StudioSamplerEXSImporter.ImportError.missingAudio {
+                // An EXS file may reference samples stored separately by
+                // Logic. Only request folder access after the initial import
+                // cannot resolve its local files.
+                if samplesRoot == nil {
+                    pendingEXSURL = url
+                    showEXSSampleFolderImporter = true
+                } else {
+                    errorMessage = "A required EXS24 sample wasn't found in the selected folder. Choose a folder that contains the original sample recordings."
+                }
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func inspectGIG(_ url: URL) {
+        guard !isImporting else { return }
+        isImporting = true
+        errorMessage = nil
+        saveNotice = nil
+        Task { @MainActor in
+            defer { isImporting = false }
+            do {
+                let catalog = try await Task.detached(priority: .userInitiated) {
+                    let access = url.startAccessingSecurityScopedResource()
+                    defer { if access { url.stopAccessingSecurityScopedResource() } }
+                    return try StudioSamplerGIGReader.inspect(url)
+                }.value
+                guard !catalog.instruments.isEmpty else {
+                    errorMessage = "The selected GigaStudio file contains no instruments."
+                    return
+                }
+                gigSource = url
+                gigInstruments = catalog.instruments
+                selectedGIGIndex = 0
+                showGIGPicker = true
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func importGIG(_ url: URL, instrumentIndex: Int) {
+        guard !isImporting else { return }
+        isImporting = true
+        errorMessage = nil
+        saveNotice = nil
+        compatibilityWarnings = []
+        Task { @MainActor in
+            defer { isImporting = false }
+            do {
+                let imported = try await Task.detached(priority: .userInitiated) {
+                    let access = url.startAccessingSecurityScopedResource()
+                    defer { if access { url.stopAccessingSecurityScopedResource() } }
+                    return try StudioSamplerGIGImporter.importInstrument(
+                        url, instrumentIndex: instrumentIndex)
+                }.value
+                draft = imported.patch
+                selectedIndex = 0
+                instrumentName = imported.instrument.name
+                compatibilityWarnings = imported.warnings
+                saveNotice = "Imported GigaStudio instrument \(imported.instrument.name). Choose Apply Mapping to activate it."
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func inspectSF2(_ url: URL) {
+        guard !isImporting else { return }
+        isImporting = true
+        errorMessage = nil
+        saveNotice = nil
+        Task { @MainActor in
+            defer { isImporting = false }
+            do {
+                let catalog = try await Task.detached(priority: .userInitiated) {
+                    let access = url.startAccessingSecurityScopedResource()
+                    defer { if access { url.stopAccessingSecurityScopedResource() } }
+                    return try StudioSamplerSF2Reader.inspect(url)
+                }.value
+                guard !catalog.presets.isEmpty else {
+                    errorMessage = "The selected SoundFont contains no presets."
+                    return
+                }
+                sf2Source = url
+                sf2Presets = catalog.presets
+                selectedSF2PresetIndex = 0
+                showSF2Picker = true
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func importSF2(_ url: URL, presetIndex: Int) {
+        guard !isImporting else { return }
+        isImporting = true
+        errorMessage = nil
+        saveNotice = nil
+        compatibilityWarnings = []
+        Task { @MainActor in
+            defer { isImporting = false }
+            do {
+                let imported = try await Task.detached(priority: .userInitiated) {
+                    let access = url.startAccessingSecurityScopedResource()
+                    defer { if access { url.stopAccessingSecurityScopedResource() } }
+                    return try StudioSamplerSF2Importer.importInstrument(
+                        url, presetIndex: presetIndex)
+                }.value
+                draft = imported.patch
+                selectedIndex = 0
+                instrumentName = imported.preset.name
+                compatibilityWarnings = imported.warnings
+                saveNotice = "Imported SoundFont preset \(imported.preset.name). Choose Apply Mapping to activate it."
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func importSFZ(_ url: URL, samplesRoot: URL? = nil) {
+        guard !isImporting else { return }
+        isImporting = true
+        errorMessage = nil
+        saveNotice = nil
+        compatibilityWarnings = []
+        Task { @MainActor in
+            defer { isImporting = false }
+            do {
+                let imported = try await Task.detached(priority: .userInitiated) {
+                    let access = url.startAccessingSecurityScopedResource()
+                    let folderAccess = samplesRoot?.startAccessingSecurityScopedResource() ?? false
+                    defer {
+                        if folderAccess { samplesRoot?.stopAccessingSecurityScopedResource() }
+                        if access { url.stopAccessingSecurityScopedResource() }
+                    }
+                    return try StudioSamplerSFZImporter.importInstrument(
+                        url, samplesRoot: samplesRoot)
+                }.value
+                // Keep changes staged: the active instrument changes only after Apply Mapping.
+                draft = imported.patch
+                selectedIndex = 0
+                compatibilityWarnings = imported.warnings
+                saveNotice = "SFZ instrument imported into the mapping draft. Choose Apply Mapping to activate it."
+            } catch StudioSamplerSFZImporter.ImportError.missingSample {
+                if samplesRoot == nil {
+                    pendingSFZURL = url
+                    showSFZSampleFolderImporter = true
+                } else {
+                    errorMessage = "The SFZ instrument still has missing recordings. Choose the folder containing its original samples."
+                }
+            } catch {
+                errorMessage = error.localizedDescription
             }
         }
     }

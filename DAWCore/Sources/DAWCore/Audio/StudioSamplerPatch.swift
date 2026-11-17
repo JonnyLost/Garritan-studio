@@ -123,6 +123,28 @@ public struct StudioSamplerArticulation: Codable, Equatable, Sendable, Identifia
     }
 }
 
+/// Selects one native articulation group from a stepped MIDI controller.
+/// IDs correspond to StudioSamplerZone.articulationID; the value is divided
+/// into equally sized controller bands at note-on, not used as a crossfade.
+/// This is optional, so older sampler projects retain their exact behavior.
+public struct StudioSamplerControllerSwitch: Codable, Equatable, Sendable {
+    public var controller: UInt8
+    public var articulationIDs: [UInt8]
+
+    public init(controller: UInt8, articulationIDs: [UInt8]) {
+        self.controller = controller
+        self.articulationIDs = articulationIDs
+    }
+
+    public var isValid: Bool {
+        (controller == 1 || controller == 2) &&
+        (2...16).contains(articulationIDs.count) &&
+        articulationIDs[0] == 0 &&
+        Set(articulationIDs).count == articulationIDs.count &&
+        articulationIDs.allSatisfy { $0 <= 15 }
+    }
+}
+
 /// ADSR in seconds and linear sustain gain; optional on old projects.
 public struct StudioSamplerEnvelope: Codable, Equatable, Sendable {
     public var attackSeconds: Float
@@ -212,6 +234,9 @@ public struct StudioSamplerPatch: Codable, Equatable, Sendable {
     public var defaultKeyswitchNote: UInt8?
     /// Restored selection when opening the saved instrument.
     public var selectedArticulationID: UInt8?
+    /// Optional discrete CC1/CC2 group selection for converted GIG instruments.
+    /// When present, keyswitch notes stored on articulation labels are inactive.
+    public var controllerSwitch: StudioSamplerControllerSwitch?
     /// Optional legacy-safe controls; 0 vibrato, 127 full breath by default.
     public var vibratoCC21: UInt8?
     public var breathCC2: UInt8?
@@ -264,7 +289,12 @@ public struct StudioSamplerPatch: Codable, Equatable, Sendable {
               Set(items.map(\.id)).count == items.count &&
               Set(items.map(\.keyswitchNote)).count == items.count else { return false }
         let ids = Set(items.map(\.id)).union([0])
-        return ids.contains(selectedArticulationID ?? 0) &&
-            zones.allSatisfy { ids.contains($0.articulationID ?? 0) }
+        guard ids.contains(selectedArticulationID ?? 0),
+              zones.allSatisfy({ ids.contains($0.articulationID ?? 0) })
+        else { return false }
+        guard let selector = controllerSwitch else { return true }
+        return selector.isValid && defaultKeyswitchNote == nil &&
+            cc1Crossfade != true &&
+            Set(selector.articulationIDs) == ids
     }
 }
