@@ -20,7 +20,10 @@ final class StudioAutoSamplerArticulationsTests: XCTestCase {
         XCTAssertTrue(plan.isValid(for: [48, 60, 72],
                                    velocities: [64, 112],
                                    captureReleases: false))
-        XCTAssertFalse(plan.isValid(for: [48, 60, 72],
+        XCTAssertTrue(plan.isValid(for: [48, 60, 72],
+                                   velocities: [64, 112],
+                                   captureReleases: true))
+        XCTAssertFalse(plan.isValid(for: Array(40...72).map(UInt8.init),
                                     velocities: [64, 112],
                                     captureReleases: true))
         XCTAssertFalse(plan.isValid(for: [24, 48],
