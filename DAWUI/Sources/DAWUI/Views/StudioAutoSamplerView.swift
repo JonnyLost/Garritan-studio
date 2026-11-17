@@ -239,8 +239,9 @@ public struct StudioAutoSamplerView: View {
                         .foregroundStyle(.secondary)
                     if captureReleaseTails {
                         Text("Up to \(samplingPlan.sampleCount * 2) total sampler zones, including note-off tails")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 VStack(alignment: .leading, spacing: 8) {
                     Text(String(format: "Held note: %.1f seconds", sustainSeconds))
