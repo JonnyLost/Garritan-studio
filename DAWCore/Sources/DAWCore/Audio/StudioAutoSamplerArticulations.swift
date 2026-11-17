@@ -30,11 +30,13 @@ public enum StudioAutoSamplerArticulations {
             (entries.isEmpty || entries.count >= 2) &&
             Set(entries.map { $0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }).count == entries.count &&
             Set(entries.map(\.sourceKeyswitch)).count == entries.count &&
-            entries.allSatisfy {
-                let name = $0.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            (entries.isEmpty || entries[0].name.trimmingCharacters(
+                in: .whitespacesAndNewlines).lowercased() == "sustain") &&
+            entries.enumerated().allSatisfy { index, entry in
+                let name = entry.name.trimmingCharacters(in: .whitespacesAndNewlines)
                 return !name.isEmpty && name.count <= 48 &&
-                    !["sustain", "default"].contains(name.lowercased()) &&
-                    $0.sourceKeyswitch <= 127
+                    (index == 0 || !["sustain", "default"].contains(name.lowercased())) &&
+                    entry.sourceKeyswitch <= 127
             }
         }
 
