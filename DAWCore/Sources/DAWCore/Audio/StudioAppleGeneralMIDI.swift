@@ -182,14 +182,17 @@ public enum StudioAppleGeneralMIDI {
     }
 
     public static func name(for program: UInt8) -> String {
-        names[Int(program)]
+        let index = Int(program)
+        return names.indices.contains(index) ? names[index] : "Unknown Program"
     }
 
     public static func family(for program: UInt8) -> String {
-        families[Int(program) / 8]
+        let index = Int(program) / 8
+        return families.indices.contains(index) ? families[index] : "Unknown"
     }
 
     public static func category(for program: UInt8) -> String {
-        categories[Int(program) / 8]
+        let index = Int(program) / 8
+        return categories.indices.contains(index) ? categories[index] : "Other"
     }
 }
