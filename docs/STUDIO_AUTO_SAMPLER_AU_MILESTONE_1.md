@@ -40,3 +40,20 @@ No changes to `PlaybackEngine`, live instrument routing, native DSP, or project 
 - In-host AU editor / custom AU state and program capture (including Garritan when supported).
 - Configurable keyboard/velocity ranges, silence-skip rules, progress reporting and resume.
 - Automatic loop suggestions, optional release/round-robin capture, and CC1/CC11 expression layers after renderer and package format checks.
+
+## Milestone 2 — capture a configured sound already loaded in Studio
+
+The Auto Sampler sheet now offers two source modes:
+
+1. **Configured in Studio**: choose an Audio Unit already playing on a track or a V-Rack slot. The source's current plugin state is serialized using Studio's existing `PluginHost.savePreset(pluginID:)` (via `fullStateForDocument` / `fullState`), using the exact plugin instance ID held by `PlaybackEngine`. The captured property list is bounded and prevalidated, then restored onto a **newly instantiated** AU Music Device in the offline graph. No live AU is replaced, reset or bypassed.
+2. **Installed Audio Unit**: retain the original default/factory-preset workflow.
+
+When a loaded source has no serializable state, capture stops with a visible error instead of rendering the wrong default sound. The native package receives only PCM audio and mapping; plugin state is deliberately omitted. Test preflight rejects invalid/oversized state and factory-preset/state conflicts before plugin instantiation.
+
+### Current limits
+
+- Configured sound capture depends on the source plugin correctly implementing Audio Unit state serialization and restoration, and on supporting offline rendering. Real-world Garritan ARIA compatibility is still **unverified**.
+- Multi-timbral Garritan programs may require recording from a selectable MIDI channel and/or a dedicated program-select sequence. This milestone sends notes on **MIDI channel 1** only. A channel selector is a separate follow-up.
+- A plugin editor can still be opened on its original Studio track/V-Rack. Auto Sampler does not host a second editable plugin window; it copies the configured AU state just before capture.
+- Only installed licensed resources remain accessible to the temporary source plugin while sampling. Portable native packages cannot carry or grant licenses.
+- Save/render behavior and live AU state fidelity require macOS CI and a hands-on hardware/plugin test before calling this production-ready.
