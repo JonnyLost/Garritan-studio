@@ -38,6 +38,7 @@ public struct StudioAutoSamplerView: View {
     @State private var name = "My Sampled Instrument"
     @State private var sustainSeconds = 1.5
     @State private var releaseSeconds = 0.65
+    @State private var autoLoopSustains = true
     @State private var isCapturing = false
     @State private var isLoadingPresets = false
     @State private var errorMessage: String?
@@ -282,6 +283,20 @@ public struct StudioAutoSamplerView: View {
             }
             .disabled(isCapturing)
 
+            VStack(alignment: .leading, spacing: 5) {
+                Toggle("Find sustain loops automatically",
+                       isOn: $autoLoopSustains)
+                Text("Studio examines only the held portion of each recording. Strong matches receive editable loop and crossfade markers; decaying, short, or uncertain sounds remain one-shots. The original WAVs are not changed.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                if autoLoopSustains && sustainSeconds < 0.8 {
+                    Text("Held notes shorter than 0.8 seconds are preserved as one-shots.")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+            }
+            .disabled(isCapturing)
+
             if isCapturing {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
@@ -304,6 +319,15 @@ public struct StudioAutoSamplerView: View {
                 Label("Saved \(result.takeCount) recordings to \(result.packageURL.lastPathComponent)",
                       systemImage: "checkmark.circle")
                     .font(.callout)
+                if result.loopCount > 0 {
+                    Text("\(result.loopCount) sustain loops with crossfades · \(result.loopSkippedCount) one-shot recordings")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if autoLoopSustains && result.loopSkippedCount > 0 {
+                    Text("No reliable sustain loops found. All recordings remain one-shots; you can edit loops in Sampler Mapping.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 HStack {
                     Button("Load as Sampler on This Track") {
                         do {
@@ -393,6 +417,7 @@ public struct StudioAutoSamplerView: View {
         let sourceName = name
         let captureOptions = options
         let selectedPlan = samplingPlan
+        let loopEnabled = autoLoopSustains
         let chosenPreset = soundSourceMode == .installed ? selectedPreset : nil
         result = nil
         errorMessage = nil
@@ -402,7 +427,7 @@ public struct StudioAutoSamplerView: View {
                 let output = try await StudioAutoSamplerCapture.capture(
                     source: source, name: sourceName, options: captureOptions,
                     presetNumber: chosenPreset, configuredState: currentSound,
-                    plan: selectedPlan)
+                    plan: selectedPlan, autoLoopSustains: loopEnabled)
                 await MainActor.run {
                     self.result = output
                     self.isCapturing = false
