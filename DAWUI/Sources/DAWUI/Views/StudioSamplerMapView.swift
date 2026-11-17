@@ -28,6 +28,7 @@ public struct StudioSamplerMapView: View {
     @State private var saveNotice: String?
     @State private var showLibrary = false
     @State private var showFactory = false
+    @State private var showAutoSampler = false
     @State private var showPackageImporter = false
     @State private var showSaveSheet = false
     @State private var exportInsteadOfSave = false
@@ -80,6 +81,12 @@ public struct StudioSamplerMapView: View {
                     showFactory = true
                 } label: {
                     Label("Instrument Factory…", systemImage: "waveform.badge.mic")
+                }
+                .disabled(isImporting)
+                Button {
+                    showAutoSampler = true
+                } label: {
+                    Label("Auto Sampler…", systemImage: "pianokeys")
                 }
                 .disabled(isImporting)
                 Button {
@@ -177,6 +184,7 @@ public struct StudioSamplerMapView: View {
                     HStack {
                         Button("Record / Build Instrument…") { showFactory = true }
                             .buttonStyle(.borderedProminent)
+                        Button("Auto Sampler…") { showAutoSampler = true }
                         Button("Add Samples…") { showImporter = true }
                     }
                 }
@@ -256,6 +264,9 @@ public struct StudioSamplerMapView: View {
         .sheet(isPresented: $showFactory) {
             StudioSamplerFactoryView(viewModel: viewModel, trackID: trackID,
                                      onAdd: { takes in addFactoryTakes(takes) })
+        }
+        .sheet(isPresented: $showAutoSampler) {
+            StudioAutoSamplerView(viewModel: viewModel, trackID: trackID)
         }
         .sheet(isPresented: $showSaveSheet) {
             instrumentSaveSheet
