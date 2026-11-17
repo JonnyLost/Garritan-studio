@@ -266,7 +266,9 @@ struct OrchestralStageView: View {
         let zone: Int
         let pan: CGFloat
         let span: CGFloat
-        var id: String { "\(zone)-\(name)" }
+        // Distinct sections can share a name and row (for example, left/right Taiko).
+        // Include their fixed stage pan so SwiftUI keeps one stable ID per marker.
+        var id: String { "\(zone)-\(name)-\(pan)" }
     }
 
     private let symphonySeating: [SeatSection] = [
