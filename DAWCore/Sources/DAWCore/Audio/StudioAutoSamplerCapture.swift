@@ -1,0 +1,290 @@
+import Foundation
+import AVFoundation
+import AudioToolbox
+
+/// Converts locally installed Audio Unit MIDI instruments into independent
+/// Studio Sampler packages. The plug-in is instantiated in a PRIVATE offline
+/// AVAudioEngine: existing project tracks and the live engine are untouched.
+/// Only Music Device Audio Units are supported in this first milestone.
+public enum StudioAutoSamplerCapture {
+    public struct Source: Identifiable, Hashable, Sendable {
+        public let type: UInt32
+        public let subtype: UInt32
+        public let manufacturer: UInt32
+        public let name: String
+        public let vendor: String
+
+        public init(type: UInt32, subtype: UInt32, manufacturer: UInt32,
+                    name: String, vendor: String) {
+            self.type = type
+            self.subtype = subtype
+            self.manufacturer = manufacturer
+            self.name = name
+            self.vendor = vendor
+        }
+
+        public var id: String { "\(type)-\(subtype)-\(manufacturer)" }
+
+        fileprivate var componentDescription: AudioComponentDescription {
+            AudioComponentDescription(componentType: type, componentSubType: subtype,
+                                      componentManufacturer: manufacturer,
+                                      componentFlags: 0, componentFlagsMask: 0)
+        }
+    }
+
+    public struct Preset: Identifiable, Equatable, Sendable {
+        public let number: Int
+        public let name: String
+        public var id: Int { number }
+    }
+
+    public enum Coverage: String, CaseIterable, Identifiable, Sendable {
+        case quick, standard, deep
+        public var id: String { rawValue }
+
+        public var title: String {
+            switch self {
+            case .quick: return "Quick"
+            case .standard: return "Standard"
+            case .deep: return "Deep"
+            }
+        }
+
+        public var options: StudioSynthSamplerCapture.Options {
+            switch self {
+            case .quick:
+                return .init(rootNotes: [48, 60, 72], velocities: [100])
+            case .standard:
+                return .init(rootNotes: [36, 48, 60, 72, 84],
+                             velocities: [64, 112])
+            case .deep:
+                return .init(rootNotes: [36, 42, 48, 54, 60, 66, 72, 78, 84, 90, 96],
+                             velocities: [32, 64, 96, 120])
+            }
+        }
+    }
+
+    public struct Result: Sendable {
+        public let patch: StudioSamplerPatch
+        public let packageURL: URL
+        public let takeCount: Int
+    }
+
+    public enum CaptureError: Error, LocalizedError {
+        case invalidConfiguration
+        case unavailableInstrument
+        case unsupportedInstrument
+        case presetUnavailable
+        case cannotRenderOffline
+        case renderingFailed
+        case silentNote(UInt8)
+        case cancelled
+
+        public var errorDescription: String? {
+            switch self {
+            case .invalidConfiguration:
+                return "Choose an Audio Unit instrument, valid notes, and a nonempty instrument name."
+            case .unavailableInstrument:
+                return "The selected Audio Unit is not installed or could not be loaded."
+            case .unsupportedInstrument:
+                return "This Audio Unit is not a MIDI instrument. Auto Sampler currently supports Music Device Audio Units."
+            case .presetUnavailable:
+                return "The selected Audio Unit factory preset is no longer available."
+            case .cannotRenderOffline:
+                return "This Audio Unit cannot render in Studio's offline capture engine. Real-time capture is not yet supported."
+            case .renderingFailed:
+                return "The Audio Unit failed or returned invalid audio during sampling."
+            case .silentNote(let note):
+                return "The instrument produced silence at MIDI note \(note). Adjust its patch or note range and try again."
+            case .cancelled:
+                return "Auto Sampler capture was cancelled."
+            }
+        }
+    }
+
+    /// Installed and registered MIDI instruments, not effects or file-system
+    /// guesses. Requery each time so newly installed AUs are recognized.
+    public static func availableSources() -> [Source] {
+        let match = AudioComponentDescription(componentType: kAudioUnitType_MusicDevice,
+                                               componentSubType: 0,
+                                               componentManufacturer: 0,
+                                               componentFlags: 0, componentFlagsMask: 0)
+        let results = AVAudioUnitComponentManager.shared().components(matching: match)
+        return results.map { component in
+            let d = component.audioComponentDescription
+            return Source(type: d.componentType, subtype: d.componentSubType,
+                          manufacturer: d.componentManufacturer, name: component.name,
+                          vendor: component.manufacturerName)
+        }.sorted {
+            if $0.vendor != $1.vendor { return $0.vendor < $1.vendor }
+            return $0.name < $1.name
+        }
+    }
+
+    /// Presets are read from an isolated instance; selecting one never changes
+    /// any loaded plug-in in the current project.
+    public static func presets(for source: Source) async throws -> [Preset] {
+        let instrument = try await instantiate(source)
+        return (instrument.auAudioUnit.factoryPresets ?? []).map {
+            Preset(number: $0.number, name: $0.name)
+        }
+    }
+
+    /// Call from a detached utility task, NOT an audio callback. A new AU
+    /// instance is used so existing user presets and tracks stay unchanged.
+    /// The resulting package contains audio files, never the source plug-in.
+    public static func capture(source: Source, name: String,
+                               options: StudioSynthSamplerCapture.Options = .init(),
+                               presetNumber: Int? = nil,
+                               sampleDirectory: URL? = nil,
+                               packageDirectory: URL? = nil) async throws -> Result {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard source.type == kAudioUnitType_MusicDevice,
+              options.isValid, !trimmed.isEmpty, trimmed.count <= 120
+        else { throw CaptureError.invalidConfiguration }
+        guard !Task<Never, Never>.isCancelled else { throw CaptureError.cancelled }
+
+        let instrument = try await instantiate(source)
+        if let presetNumber {
+            guard let preset = instrument.auAudioUnit.factoryPresets?.first(where: {
+                $0.number == presetNumber
+            }) else { throw CaptureError.presetUnavailable }
+            instrument.auAudioUnit.currentPreset = preset
+        }
+
+        let staging = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "studio-au-capture-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: staging,
+                                                 withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: staging) }
+
+        let engine = AVAudioEngine()
+        engine.attach(instrument)
+        engine.connect(instrument, to: engine.mainMixerNode, format: nil)
+        guard let format = AVAudioFormat(
+            standardFormatWithSampleRate: options.sampleRate, channels: 2),
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 512)
+        else { throw CaptureError.cannotRenderOffline }
+
+        do {
+            try engine.enableManualRenderingMode(.offline, format: format,
+                                                 maximumFrameCount: 512)
+            try engine.start()
+        } catch {
+            throw CaptureError.cannotRenderOffline
+        }
+        defer {
+            engine.stop()
+            engine.disableManualRenderingMode()
+        }
+
+        var takes: [StudioSamplerFactoryTake] = []
+        for root in options.rootNotes.sorted() {
+            for velocity in options.velocities.sorted() {
+                guard !Task<Never, Never>.isCancelled else {
+                    throw CaptureError.cancelled
+                }
+                // Flush voices and effect tails between takes without changing
+                // the factory preset chosen on this isolated AU instance.
+                instrument.stopNote(root, onChannel: 0)
+                instrument.sendMIDIEvent(0xB0, data1: 120, data2: 0)
+                instrument.auAudioUnit.reset()
+                engine.reset()
+
+                let output = staging.appendingPathComponent(
+                    "midi-\(root)-velocity-\(velocity).wav")
+                try renderOne(instrument, engine: engine, buffer: buffer,
+                              note: root, velocity: velocity, options: options,
+                              destination: output)
+                takes.append(StudioSamplerFactoryTake(
+                    source: output, rootNote: root, velocity: velocity))
+            }
+        }
+        // Audio is complete; release the AU engine BEFORE any file copying
+        // or hash-heavy packaging to avoid rendering while doing disk work.
+        engine.stop()
+
+        var sampler = try StudioSamplerInstrumentFactory.assemble(
+            takes, sampleDirectory: sampleDirectory)
+        if sampleDirectory != nil {
+            for i in sampler.zones.indices { sampler.zones[i].managedFileName = nil }
+        }
+        let metadata = StudioSamplerInstrumentPackage.Metadata(
+            name: trimmed, category: "Auto Sampler",
+            tags: ["Audio Unit", "Native Multisample", source.vendor])
+        do {
+            let package = try StudioSamplerInstrumentPackage.saveToLibrary(
+                sampler, metadata: metadata, in: packageDirectory)
+            return Result(patch: sampler, packageURL: package, takeCount: takes.count)
+        } catch {
+            for zone in sampler.zones where zone.managedFileName != nil {
+                try? FileManager.default.removeItem(at: zone.sampleURL)
+            }
+            throw error
+        }
+    }
+
+    private static func instantiate(_ source: Source) async throws
+        -> AVAudioUnitMIDIInstrument {
+        guard source.type == kAudioUnitType_MusicDevice else {
+            throw CaptureError.unsupportedInstrument
+        }
+        return try await withCheckedThrowingContinuation { continuation in
+            AVAudioUnit.instantiate(with: source.componentDescription, options: []) {
+                unit, error in
+                if let instrument = unit as? AVAudioUnitMIDIInstrument {
+                    continuation.resume(returning: instrument)
+                } else {
+                    continuation.resume(throwing:
+                        error ?? CaptureError.unavailableInstrument)
+                }
+            }
+        }
+    }
+
+    private static func renderOne(_ instrument: AVAudioUnitMIDIInstrument,
+                                  engine: AVAudioEngine, buffer: AVAudioPCMBuffer,
+                                  note: UInt8, velocity: UInt8,
+                                  options: StudioSynthSamplerCapture.Options,
+                                  destination: URL) throws {
+        let rate = options.sampleRate
+        let writer = try AVAudioFile(forWriting: destination, settings: [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: rate,
+            AVNumberOfChannelsKey: 2,
+            AVLinearPCMBitDepthKey: 32,
+            AVLinearPCMIsFloatKey: true,
+            AVLinearPCMIsBigEndianKey: false,
+            AVLinearPCMIsNonInterleaved: false
+        ], commonFormat: .pcmFormatFloat32, interleaved: false)
+
+        let heldFrames = Int(rate * options.sustainSeconds)
+        let totalFrames = heldFrames + Int(rate * options.releaseSeconds)
+        var position = 0
+        var peak: Float = 0
+        instrument.startNote(note, withVelocity: velocity, onChannel: 0)
+        defer { instrument.stopNote(note, onChannel: 0) }
+
+        while position < totalFrames {
+            if Task<Never, Never>.isCancelled { throw CaptureError.cancelled }
+            if position == heldFrames { instrument.stopNote(note, onChannel: 0) }
+            let edge = position < heldFrames ? heldFrames : totalFrames
+            let count = AVAudioFrameCount(min(512, edge - position))
+            guard count > 0,
+                  try engine.renderOffline(count, to: buffer) == .success,
+                  buffer.frameLength == count,
+                  let channels = buffer.floatChannelData
+            else { throw CaptureError.cannotRenderOffline }
+            for channel in 0..<2 {
+                for i in 0..<Int(count) {
+                    let value = channels[channel][i]
+                    guard value.isFinite else { throw CaptureError.renderingFailed }
+                    peak = max(peak, abs(value))
+                }
+            }
+            try writer.write(from: buffer)
+            position += Int(count)
+        }
+        guard peak > 0.000001 else { throw CaptureError.silentNote(note) }
+    }
+}
