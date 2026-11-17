@@ -54,16 +54,35 @@ public enum StudioAutoSamplerExpression {
                                    !captureReleaseTails))
         }
 
-        public func point(for mappedVelocity: UInt8) -> Point {
+        /// The native sampler's CC1 crossfader uses the midpoint of each
+        /// factory-assigned velocity *band*, not the original MIDI velocity
+        /// label. Capture at those actual band centers so playback at CC1=90
+        /// interpolates the timbres the performer heard at capture time.
+        public static func cc1Centers(for layers: [UInt8]) -> [UInt8] {
+            let sorted = Array(Set(layers)).sorted()
+            return sorted.indices.map { index in
+                let low = index == 0 ? 1 :
+                    (Int(sorted[index - 1]) + Int(sorted[index])) / 2 + 1
+                let high = index + 1 == sorted.count ? 127 :
+                    (Int(sorted[index]) + Int(sorted[index + 1])) / 2
+                return UInt8((low + high + 1) / 2)
+            }
+        }
+
+        public func point(for mappedVelocity: UInt8,
+                          allLayers: [UInt8]) -> Point {
             switch mode {
             case .velocity:
                 return Point(mappedVelocity: mappedVelocity,
                              playedVelocity: mappedVelocity,
                              sourceCC1: nil, sourceCC11: sourceCC11)
             case .cc1Layers:
+                let sorted = Array(Set(allLayers)).sorted()
+                let centers = Self.cc1Centers(for: sorted)
+                let layerIndex = sorted.firstIndex(of: mappedVelocity)
                 return Point(mappedVelocity: mappedVelocity,
                              playedVelocity: fixedNoteVelocity,
-                             sourceCC1: mappedVelocity,
+                             sourceCC1: layerIndex.map { centers[$0] },
                              sourceCC11: sourceCC11 ?? 127)
             }
         }
