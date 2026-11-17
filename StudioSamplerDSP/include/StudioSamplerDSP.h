@@ -171,6 +171,15 @@ int32_t ss_configure_keyswitches(SSSampler *sampler,
                                 const uint8_t *notes,
                                 const uint8_t *articulation_ids,
                                 int32_t count);
+/* Optional stepped CC1/CC2 articulation selector for imported instruments.
+ * Exactly one controller with 2...16 unique articulation IDs (first ID 0).
+ * Setup is off-thread and precedes the first MIDI/render callback.
+ * Do not register conflicting keyswitches in this mode. */
+int32_t ss_configure_controller_articulations(SSSampler *sampler,
+                                              uint8_t controller,
+                                              const uint8_t *articulation_ids,
+                                              int32_t count);
+
 int32_t ss_select_articulation(SSSampler *sampler,
                               uint8_t articulation_id, uint8_t channel);
 

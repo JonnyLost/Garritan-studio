@@ -192,6 +192,9 @@ struct SSSampler {
     uint64_t nextNoteSerial = 0;
     std::array<uint8_t, 128> keyswitchArticulations{};
     std::array<uint8_t, 16> selectedArticulations{};
+    uint8_t controllerArticulationCC = 0; // 0 disables stepped selector
+    uint8_t controllerArticulationCount = 0;
+    std::array<uint8_t, 16> controllerArticulationIDs{};
     // Fixed-size, real-time-owned note state and variation counters.
     // No allocation, lock, or mutation on the Swift/MIDI producer thread.
     std::array<std::array<std::array<HeldNote, kHeldDepth>, 128>, 16> heldNotes{};
@@ -756,16 +759,32 @@ struct SSSampler {
         for (int mic = 0; mic < 4; ++mic) {
             const Sample *release = nullptr;
             int nearest = std::numeric_limits<int>::max();
+            int nearestLayer = std::numeric_limits<int>::max();
+            // In CC1 crossfade mode, captured release timbres are indexed
+            // by the dynamic layer's velocity band, not the played note-on
+            // velocity. Choose the nearest captured CC1 center at note-off.
+            // Discrete velocity mode keeps its original selection behavior.
+            // MIDI CC1 and note-off can arrive in the same render block.
+            // Match the newest controller value, not the smoothed value
+            // from the previous audio block.
+            const float releaseCC1 = targetCC1[channel];
             for (const auto& zone : samples) {
                 if (!zone.releaseTrigger || zone.microphone != mic ||
                     zone.articulation != held.articulation ||
                     note < zone.low || note > zone.high ||
-                    held.velocity < zone.minVelocity ||
-                    held.velocity > zone.maxVelocity) continue;
+                    (!cc1Crossfade &&
+                     (held.velocity < zone.minVelocity ||
+                      held.velocity > zone.maxVelocity))) continue;
                 const int distance = std::abs(int(note) - int(zone.root));
-                if (distance < nearest) {
+                const float center = (float(zone.minVelocity) +
+                                      float(zone.maxVelocity)) * 0.5f;
+                const int layerDistance = cc1Crossfade
+                    ? int(std::abs(releaseCC1 - center) * 100.f) : 0;
+                if (distance < nearest ||
+                    (distance == nearest && layerDistance < nearestLayer)) {
                     release = &zone;
                     nearest = distance;
+                    nearestLayer = layerDistance;
                 }
             }
             if (!release) continue;
@@ -775,8 +794,11 @@ struct SSSampler {
                     zone.root == release->root &&
                     zone.roundRobin == held.roundRobin &&
                     note >= zone.low && note <= zone.high &&
-                    held.velocity >= zone.minVelocity &&
-                    held.velocity <= zone.maxVelocity) {
+                    (cc1Crossfade
+                        ? (zone.minVelocity == release->minVelocity &&
+                           zone.maxVelocity == release->maxVelocity)
+                        : (held.velocity >= zone.minVelocity &&
+                           held.velocity <= zone.maxVelocity))) {
                     release = &zone;
                     break;
                 }
@@ -803,8 +825,18 @@ struct SSSampler {
                 for (auto& voice : voices) if (voice.active) startRelease(voice);
                 break;
             case CommandKind::controller:
+                if (controllerArticulationCount >= 2 &&
+                    command.note == controllerArticulationCC) {
+                    const uint32_t index = std::min(
+                        uint32_t(controllerArticulationCount - 1),
+                        (uint32_t(command.velocity) * controllerArticulationCount) / 128);
+                    selectedArticulations[command.channel] =
+                        controllerArticulationIDs[index];
+                }
                 if (command.note == 1) targetCC1[command.channel] = command.velocity;
-                if (command.note == 2) targetCC2[command.channel] = command.velocity;
+                // Stepped CC2 selection must not also scale the audio gain.
+                if (command.note == 2 && controllerArticulationCC != 2)
+                    targetCC2[command.channel] = command.velocity;
                 if (command.note == 11) targetCC11[command.channel] = command.velocity;
                 if (command.note == 21) targetCC21[command.channel] = command.velocity;
                 if (command.note == 120 || command.note == 123) {
@@ -1198,6 +1230,24 @@ int32_t ss_configure_keyswitches(SSSampler *sampler,
     return 1;
 }
 
+int32_t ss_configure_controller_articulations(
+    SSSampler *sampler, uint8_t controller, const uint8_t *ids, int32_t count) {
+    if (!sampler || (controller != 1 && controller != 2) ||
+        !ids || count < 2 || count > 16 || ids[0] != 0) return 0;
+    std::array<bool, 16> visited{};
+    for (int32_t i = 0; i < count; ++i) {
+        if (ids[i] > 15 || visited[ids[i]]) return 0;
+        visited[ids[i]] = true;
+    }
+    // Configuration only. Never allocate or modify the mapping during render.
+    sampler->controllerArticulationIDs.fill(0);
+    for (int32_t i = 0; i < count; ++i)
+        sampler->controllerArticulationIDs[i] = ids[i];
+    sampler->controllerArticulationCount = uint8_t(count);
+    sampler->controllerArticulationCC = controller;
+    return 1;
+}
+
 int32_t ss_select_articulation(SSSampler *sampler,
                               uint8_t articulation_id, uint8_t channel) {
     if (!sampler || articulation_id > 15 || channel > 15) return 0;
@@ -1345,11 +1395,15 @@ void ss_render(SSSampler *sampler, float *left, float *right, int32_t frames) {
                 amplitude *= float(++voice.legatoFadeProgress) /
                     float(voice.legatoFadeFrames);
             }
-            if (sampler->cc1Crossfade && !voice.releaseTrigger) {
-                amplitude *= sampler->dynamicWeight(voice, dynamics);
-            } else {
-                // In discrete-layer mode CC1 is still a continuous volume
-                // control, but does not switch the sample after note-on.
+            if (sampler->cc1Crossfade) {
+                // Captured CC1 release WAVs already contain the source
+                // instrument's dynamic level. Multiplying by CC1 again
+                // would attenuate quiet releases a second time.
+                if (!voice.releaseTrigger)
+                    amplitude *= sampler->dynamicWeight(voice, dynamics);
+            } else if (sampler->controllerArticulationCC != 1) {
+                // In regular velocity mode CC1 is volume modulation, but
+                // a stepped CC1 importer selector chooses samples instead.
                 amplitude *= dynamics / 127.f;
             }
             amplitude *= std::max(0.f, voice.envelopeLevel);
@@ -1443,8 +1497,11 @@ void ss_render(SSSampler *sampler, float *left, float *right, int32_t frames) {
             }
             const float fade = float(tail.framesLeft) / float(kFadeFrames);
             const float cc1 = sampler->smoothCC1[old.channel];
-            const float layer = (sampler->cc1Crossfade && !old.releaseTrigger)
-                ? sampler->dynamicWeight(old, cc1) : cc1 / 127.f;
+            const float layer = sampler->cc1Crossfade
+                ? (old.releaseTrigger ? 1.f :
+                   sampler->dynamicWeight(old, cc1))
+                : (sampler->controllerArticulationCC == 1 ? 1.f :
+                   cc1 / 127.f);
             const float expression = sampler->smoothCC11[old.channel] / 127.f;
             float gain = tail.gain * fade * layer * expression;
             // Match the source-relative fades used by normal voices so

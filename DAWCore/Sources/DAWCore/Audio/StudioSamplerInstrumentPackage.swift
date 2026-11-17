@@ -220,8 +220,14 @@ public enum StudioSamplerInstrumentPackage {
                 throw PackageError.invalidPackage
             }
             patch.zones[index].filePath = copiedURL.path
-            patch.zones[index].managedFileName =
-                StudioSamplerSampleLibrary.managedName(for: copiedURL, in: sampleDirectory)
+            // Only the default app-owned directory is a managed library.
+            // When a caller supplies a custom destination (e.g. an exported
+            // project or an isolated test folder), a managedFileName would
+            // incorrectly redirect sampleURL to the global Application
+            // Support folder, leaving playable recordings unresolved.
+            patch.zones[index].managedFileName = sampleDirectory == nil
+                ? StudioSamplerSampleLibrary.managedName(for: copiedURL)
+                : nil
         }
         return (patch, manifest.metadata)
     }
