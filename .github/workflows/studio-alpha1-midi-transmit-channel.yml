@@ -1,0 +1,33 @@
+name: Alpha 1 track MIDI transmit channel
+
+on:
+  push:
+    branches:
+      - fix/alpha1-track-midi-transmit-channel-2026-11-17
+  pull_request:
+    branches:
+      - fix/alpha1-mac-crash-triage-2026-11-17
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mac-tests:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain and exact revision
+        run: |
+          sw_vers
+          swift --version
+          git rev-parse HEAD
+      - name: Resolve dependencies
+        run: swift package resolve
+      - name: Compile Studio
+        run: swift build
+      - name: MIDI routing and complete regression tests
+        run: swift test --parallel
+      - name: Optimize DAWApp
+        run: swift build -c release --product DAWApp
