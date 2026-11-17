@@ -761,7 +761,10 @@ struct SSSampler {
             // by the dynamic layer's velocity band, not the played note-on
             // velocity. Choose the nearest captured CC1 center at note-off.
             // Discrete velocity mode keeps its original selection behavior.
-            const float releaseCC1 = smoothCC1[channel];
+            // MIDI CC1 and note-off can arrive in the same render block.
+            // Match the newest controller value, not the smoothed value
+            // from the previous audio block.
+            const float releaseCC1 = targetCC1[channel];
             for (const auto& zone : samples) {
                 if (!zone.releaseTrigger || zone.microphone != mic ||
                     zone.articulation != held.articulation ||
@@ -1361,11 +1364,14 @@ void ss_render(SSSampler *sampler, float *left, float *right, int32_t frames) {
                 amplitude *= float(++voice.legatoFadeProgress) /
                     float(voice.legatoFadeFrames);
             }
-            if (sampler->cc1Crossfade && !voice.releaseTrigger) {
-                amplitude *= sampler->dynamicWeight(voice, dynamics);
+            if (sampler->cc1Crossfade) {
+                // Captured CC1 release WAVs already contain the source
+                // instrument's dynamic level. Multiplying by CC1 again
+                // would attenuate quiet releases a second time.
+                if (!voice.releaseTrigger)
+                    amplitude *= sampler->dynamicWeight(voice, dynamics);
             } else {
-                // In discrete-layer mode CC1 is still a continuous volume
-                // control, but does not switch the sample after note-on.
+                // Preserve legacy volume modulation in velocity mode.
                 amplitude *= dynamics / 127.f;
             }
             amplitude *= std::max(0.f, voice.envelopeLevel);
@@ -1459,8 +1465,10 @@ void ss_render(SSSampler *sampler, float *left, float *right, int32_t frames) {
             }
             const float fade = float(tail.framesLeft) / float(kFadeFrames);
             const float cc1 = sampler->smoothCC1[old.channel];
-            const float layer = (sampler->cc1Crossfade && !old.releaseTrigger)
-                ? sampler->dynamicWeight(old, cc1) : cc1 / 127.f;
+            const float layer = sampler->cc1Crossfade
+                ? (old.releaseTrigger ? 1.f :
+                   sampler->dynamicWeight(old, cc1))
+                : cc1 / 127.f;
             const float expression = sampler->smoothCC11[old.channel] / 127.f;
             float gain = tail.gain * fade * layer * expression;
             // Match the source-relative fades used by normal voices so
