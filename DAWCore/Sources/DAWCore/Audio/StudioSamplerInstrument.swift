@@ -76,6 +76,12 @@ public final class StudioSamplerInstrument {
             keys.insert(defaultKey, at: 0)
             identifiers.insert(0, at: 0)
         }
+        // Controller-selected GIG/EXS articulations are not MIDI keyswitches.
+        // Their labels are for display only; the native selector listens to CC.
+        if patch.controllerSwitch != nil {
+            keys.removeAll()
+            identifiers.removeAll()
+        }
         let configurationSucceeded = keys.withUnsafeBufferPointer { keysBuffer in
             identifiers.withUnsafeBufferPointer { idsBuffer in
                 ss_configure_keyswitches(
@@ -85,6 +91,14 @@ public final class StudioSamplerInstrument {
             }
         }
         guard configurationSucceeded else { throw StudioSamplerError.invalidPatch }
+        if let selector = patch.controllerSwitch {
+            let configured = selector.articulationIDs.withUnsafeBufferPointer { ids in
+                ss_configure_controller_articulations(
+                    sampler, selector.controller, ids.baseAddress,
+                    Int32(ids.count)) == 1
+            }
+            guard configured else { throw StudioSamplerError.invalidPatch }
+        }
         var cumulativeResidentFrames: Int64 = 0
         var streamSources: [URL?] = []
         streamSources.reserveCapacity(patch.zones.count)
@@ -214,13 +228,27 @@ public final class StudioSamplerInstrument {
         // Prepare the controller state and crossfade mode before the
         // AVAudioSourceNode is attached or can start rendering.
         let env = patch.envelope ?? StudioSamplerEnvelope()
+        // Controller-selected patches initialize their group from the saved
+        // selected articulation rather than defaulting to the final CC band.
+        let initialControllerBand: UInt8? = patch.controllerSwitch.map { selector in
+            let index = selector.articulationIDs.firstIndex(
+                of: patch.selectedArticulationID ?? 0) ?? 0
+            return UInt8(min(127,
+                (index * 128 + 64) / selector.articulationIDs.count))
+        }
+        let initialCC1: UInt8 = patch.dynamicsCC1 ??
+            (patch.controllerSwitch?.controller == 1
+             ? initialControllerBand ?? 0 : 127)
+        let initialCC2: UInt8 = patch.breathCC2 ??
+            (patch.controllerSwitch?.controller == 2
+             ? initialControllerBand ?? 0 : 127)
         guard ss_select_articulation(sampler, patch.selectedArticulationID ?? 0, 0) == 1,
               ss_set_adsr(sampler, env.attackSeconds, env.decaySeconds,
                           env.sustainLevel, env.releaseSeconds) == 1,
               ss_set_cc1_crossfade(sampler, patch.cc1Crossfade == true ? 1 : 0) == 1,
-              ss_control_change(sampler, 1, patch.dynamicsCC1 ?? 127, 0) == 1,
+              ss_control_change(sampler, 1, initialCC1, 0) == 1,
               ss_control_change(sampler, 11, patch.expressionCC11 ?? 127, 0) == 1,
-              ss_control_change(sampler, 2, patch.breathCC2 ?? 127, 0) == 1,
+              ss_control_change(sampler, 2, initialCC2, 0) == 1,
               ss_control_change(sampler, 21, patch.vibratoCC21 ?? 0, 0) == 1,
               ss_set_legato_mode(sampler, patch.legatoEnabled == true ? 1 : 0,
                                  patch.legatoCrossfadeMilliseconds ?? 40) == 1 else {
