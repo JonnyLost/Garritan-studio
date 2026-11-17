@@ -39,6 +39,7 @@ public struct StudioAutoSamplerView: View {
     @State private var sustainSeconds = 1.5
     @State private var releaseSeconds = 0.65
     @State private var autoLoopSustains = true
+    @State private var captureReleaseTails = false
     @State private var isCapturing = false
     @State private var isLoadingPresets = false
     @State private var errorMessage: String?
@@ -115,6 +116,12 @@ public struct StudioAutoSamplerView: View {
     private var options: StudioSynthSamplerCapture.Options {
         samplingPlan.options(sustainSeconds: sustainSeconds,
                              releaseSeconds: releaseSeconds)
+    }
+
+    private var fitsSampleZoneLimit: Bool {
+        StudioAutoSamplerReleaseCapture.fitsZoneLimit(
+            heldSampleCount: samplingPlan.sampleCount,
+            includeReleases: captureReleaseTails)
     }
 
     private func noteLabel(_ number: Int) -> String {
@@ -227,7 +234,11 @@ public struct StudioAutoSamplerView: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    Text("\(samplingPlan.rootNotes.count) notes × \(samplingPlan.velocities.count) velocities = \(samplingPlan.sampleCount) recordings")
+                    Text("\(samplingPlan.rootNotes.count) notes × \(samplingPlan.velocities.count) velocities = \(samplingPlan.sampleCount) held recordings")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    if captureReleaseTails {
+                        Text("Up to \(samplingPlan.sampleCount * 2) total sampler zones, including note-off tails")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
@@ -297,6 +308,21 @@ public struct StudioAutoSamplerView: View {
             }
             .disabled(isCapturing)
 
+            VStack(alignment: .leading, spacing: 5) {
+                Toggle("Capture natural note-off release samples",
+                       isOn: $captureReleaseTails)
+                Text("Studio extracts the actual note-off portion of each offline recording. Audible tails become dedicated release-trigger zones; silent tails are skipped. This may nearly double instrument storage.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                if captureReleaseTails && !fitsSampleZoneLimit {
+                    Label("Release samples require 64 or fewer held recordings to fit Studio's 128-zone instrument limit. Reduce the key or velocity coverage, or disable release capture.",
+                          systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
+            .disabled(isCapturing)
+
             if isCapturing {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
@@ -319,6 +345,15 @@ public struct StudioAutoSamplerView: View {
                 Label("Saved \(result.takeCount) recordings to \(result.packageURL.lastPathComponent)",
                       systemImage: "checkmark.circle")
                     .font(.callout)
+                if result.releaseCount > 0 {
+                    Text("\(result.releaseCount) natural release tails · \(result.releaseSkippedCount) silent or unsuitable tails skipped")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if captureReleaseTails {
+                    Text("No audible release tails found. The held samples remain usable without release triggers.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 if result.loopCount > 0 {
                     Text("\(result.loopCount) sustain loops with crossfades · \(result.loopSkippedCount) one-shot recordings")
                         .font(.caption)
@@ -356,7 +391,8 @@ public struct StudioAutoSamplerView: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(isCapturing || captureSource == nil ||
                               name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                              !options.isValid || !samplingPlan.isValid)
+                              !options.isValid || !samplingPlan.isValid ||
+                              !fitsSampleZoneLimit)
             }
         }
         .padding(22)
@@ -397,7 +433,8 @@ public struct StudioAutoSamplerView: View {
 
     private func beginCapture() {
         guard let source = captureSource, options.isValid,
-              samplingPlan.isValid, !isCapturing else { return }
+              samplingPlan.isValid, fitsSampleZoneLimit,
+              !isCapturing else { return }
         // Copy the actual, most recent state while still on Studio's host
         // control actor; no AU objects are passed into the detached capture.
         let currentSound: Data?
@@ -418,6 +455,7 @@ public struct StudioAutoSamplerView: View {
         let captureOptions = options
         let selectedPlan = samplingPlan
         let loopEnabled = autoLoopSustains
+        let includeReleases = captureReleaseTails
         let chosenPreset = soundSourceMode == .installed ? selectedPreset : nil
         result = nil
         errorMessage = nil
@@ -427,7 +465,8 @@ public struct StudioAutoSamplerView: View {
                 let output = try await StudioAutoSamplerCapture.capture(
                     source: source, name: sourceName, options: captureOptions,
                     presetNumber: chosenPreset, configuredState: currentSound,
-                    plan: selectedPlan, autoLoopSustains: loopEnabled)
+                    plan: selectedPlan, autoLoopSustains: loopEnabled,
+                    captureReleaseTails: includeReleases)
                 await MainActor.run {
                     self.result = output
                     self.isCapturing = false
