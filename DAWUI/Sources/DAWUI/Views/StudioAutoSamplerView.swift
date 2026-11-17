@@ -29,6 +29,10 @@ public struct StudioAutoSamplerView: View {
     @State private var presets: [StudioAutoSamplerCapture.Preset] = []
     @State private var selectedPreset: Int?
     @State private var coverage: StudioAutoSamplerCapture.Coverage = .standard
+    @State private var dynamicsMode: StudioAutoSamplerExpression.Mode = .velocity
+    @State private var fixedNoteVelocity = 100
+    @State private var sendCC11 = false
+    @State private var sourceCC11 = 127
     @State private var midiChannel = 1
     @State private var customRange = false
     @State private var lowestNote = 36
@@ -118,10 +122,20 @@ public struct StudioAutoSamplerView: View {
                              releaseSeconds: releaseSeconds)
     }
 
+    private var expressionConfiguration: StudioAutoSamplerExpression.Configuration {
+        .init(mode: dynamicsMode,
+              fixedNoteVelocity: UInt8(clamping: fixedNoteVelocity),
+              sourceCC11: dynamicsMode == .cc1Layers || sendCC11
+                  ? UInt8(clamping: sourceCC11) : nil)
+    }
+
     private var fitsSampleZoneLimit: Bool {
         StudioAutoSamplerReleaseCapture.fitsZoneLimit(
             heldSampleCount: samplingPlan.sampleCount,
-            includeReleases: captureReleaseTails)
+            includeReleases: captureReleaseTails) &&
+        expressionConfiguration.canCaptureLayers(
+            samplingPlan.velocities,
+            captureReleaseTails: captureReleaseTails)
     }
 
     private func noteLabel(_ number: Int) -> String {
@@ -131,6 +145,7 @@ public struct StudioAutoSamplerView: View {
     }
 
     public var body: some View {
+        ScrollView {
         VStack(alignment: .leading, spacing: 15) {
             HStack {
                 Label("Studio Auto Sampler", systemImage: "pianokeys")
@@ -295,6 +310,52 @@ public struct StudioAutoSamplerView: View {
             }
             .disabled(isCapturing)
 
+            VStack(alignment: .leading, spacing: 9) {
+                Picker("Source dynamics", selection: $dynamicsMode) {
+                    ForEach(StudioAutoSamplerExpression.Mode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: dynamicsMode) { _, selected in
+                    if selected == .cc1Layers { captureReleaseTails = false }
+                }
+                if dynamicsMode == .cc1Layers {
+                    Text("Capture the source Audio Unit at fixed MIDI velocity while sweeping CC1 across the native sampler's dynamic layer centers. On playback, Studio crossfades these timbres using live CC1.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Stepper("Source note velocity: \(fixedNoteVelocity)",
+                            value: $fixedNoteVelocity, in: 1...127)
+                    let centers = StudioAutoSamplerExpression.Configuration
+                        .cc1Centers(for: samplingPlan.velocities)
+                    Text("Source CC1 positions: \(centers.map(String.init).joined(separator: ", "))")
+                        .font(.caption.monospacedDigit())
+                    if samplingPlan.velocities.count < 2 {
+                        Label("Select Standard or Deep coverage: CC1 crossfading requires at least two dynamic layers.",
+                              systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                    Text("Release-trigger capture is unavailable in CC1 mode until note-off samples can follow live dynamic-layer selection.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Record ordinary MIDI velocity layers, preserving the existing sampling behavior.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Toggle("Set a source CC11 reference level",
+                           isOn: $sendCC11)
+                }
+                if dynamicsMode == .cc1Layers || sendCC11 {
+                    Stepper("Source CC11 (expression): \(sourceCC11)",
+                            value: $sourceCC11, in: 1...127)
+                    Text("This level is recorded into each WAV. The finished Studio sampler retains independent live CC11 volume/expression control, starting at 127 to avoid double attenuation.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .disabled(isCapturing)
+
             VStack(alignment: .leading, spacing: 5) {
                 Toggle("Find sustain loops automatically",
                        isOn: $autoLoopSustains)
@@ -312,6 +373,7 @@ public struct StudioAutoSamplerView: View {
             VStack(alignment: .leading, spacing: 5) {
                 Toggle("Capture natural note-off release samples",
                        isOn: $captureReleaseTails)
+                    .disabled(dynamicsMode == .cc1Layers)
                 Text("Studio extracts the actual note-off portion of each offline recording. Audible tails become dedicated release-trigger zones; silent tails are skipped. This may nearly double instrument storage.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -346,6 +408,15 @@ public struct StudioAutoSamplerView: View {
                 Label("Saved \(result.takeCount) recordings to \(result.packageURL.lastPathComponent)",
                       systemImage: "checkmark.circle")
                     .font(.callout)
+                if result.dynamicsMode == .cc1Layers {
+                    Label("CC1 dynamic layers captured; live CC1 crossfade and CC11 expression enabled.",
+                          systemImage: "waveform.path")
+                        .font(.caption)
+                } else if let cc11 = result.sourceCC11 {
+                    Text("Source expression CC11 set to \(cc11) during sampling; live CC11 remains adjustable.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 if result.releaseCount > 0 {
                     Text("\(result.releaseCount) natural release tails · \(result.releaseSkippedCount) silent or unsuitable tails skipped")
                         .font(.caption)
@@ -397,6 +468,7 @@ public struct StudioAutoSamplerView: View {
             }
         }
         .padding(22)
+        }
         .frame(minWidth: 670, minHeight: 510)
         .interactiveDismissDisabled(isCapturing)
         .onAppear {
@@ -456,6 +528,7 @@ public struct StudioAutoSamplerView: View {
         let captureOptions = options
         let selectedPlan = samplingPlan
         let loopEnabled = autoLoopSustains
+        let captureExpression = expressionConfiguration
         let includeReleases = captureReleaseTails
         let chosenPreset = soundSourceMode == .installed ? selectedPreset : nil
         result = nil
@@ -467,7 +540,8 @@ public struct StudioAutoSamplerView: View {
                     source: source, name: sourceName, options: captureOptions,
                     presetNumber: chosenPreset, configuredState: currentSound,
                     plan: selectedPlan, autoLoopSustains: loopEnabled,
-                    captureReleaseTails: includeReleases)
+                    captureReleaseTails: includeReleases,
+                    expression: captureExpression)
                 await MainActor.run {
                     self.result = output
                     self.isCapturing = false
