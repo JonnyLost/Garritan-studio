@@ -90,6 +90,10 @@ public struct Track: Identifiable, Codable, Sendable {
     /// nil = All (preserve source MIDI channel); 0...15 = only that channel.
     /// Optional for backward-compatible decoding of existing projects.
     public var midiOutputChannel: UInt8?
+    /// nil preserves the event's source channel; 0...15 overrides the MIDI
+    /// channel sent to the track instrument. V-Rack routing has its own
+    /// destination channel and takes precedence. Optional for old projects.
+    public var midiTransmitChannel: UInt8?
     /// Optional ARIA instrument mixer level (MIDI CC7, 0...127).
     public var instrumentLevelCC7: UInt8?
     /// Zero-based MIDI channel used by the instrument-level control.
@@ -139,7 +143,8 @@ public struct Track: Identifiable, Codable, Sendable {
         self.garritanProgramID = nil
         self.articulationMap = nil
         self.midiOutput = nil  // Default: use track instrument
-        self.midiOutputChannel = nil  // All channels
+        self.midiOutputChannel = nil  // All input channels
+        self.midiTransmitChannel = nil  // Preserve the source channel by default
         self.instrumentLevelCC7 = nil  // Do not override ARIA's existing level until edited
         self.instrumentLevelChannel = nil  // Channel 1
         self.pluginSlots = []
@@ -158,6 +163,13 @@ public struct Track: Identifiable, Codable, Sendable {
     /// MIDI channels are zero-based (0...15); nil means all channels.
     public func acceptsMIDIChannel(_ channel: UInt8) -> Bool {
         midiOutputChannel == nil || midiOutputChannel == channel
+    }
+
+    /// Only for the track's own instrument; rack MIDI uses its selected
+    /// rack channel instead. Notes, controllers, keyswitches and note-offs
+    /// must all use the same resolved channel.
+    public func transmittedMIDIChannel(for sourceChannel: UInt8) -> UInt8 {
+        (midiTransmitChannel ?? sourceChannel) & 0x0F
     }
     
     /// Volume in decibels (-inf to +6 dB)
