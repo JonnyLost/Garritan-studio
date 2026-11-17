@@ -33,6 +33,10 @@ public struct StudioAutoSamplerView: View {
     @State private var fixedNoteVelocity = 100
     @State private var sendCC11 = false
     @State private var sourceCC11 = 127
+    @State private var captureArticulations = false
+    @State private var sustainKeyswitch = 24
+    @State private var alternateKeyswitch = 25
+    @State private var alternateName = "Staccato"
     @State private var midiChannel = 1
     @State private var customRange = false
     @State private var lowestNote = 36
@@ -129,13 +133,25 @@ public struct StudioAutoSamplerView: View {
                   ? UInt8(clamping: sourceCC11) : nil)
     }
 
+    private var articulationPlan: StudioAutoSamplerArticulations.Plan {
+        .init(entries: captureArticulations ? [
+            .init(name: "Sustain", sourceKeyswitch: UInt8(clamping: sustainKeyswitch)),
+            .init(name: alternateName,
+                  sourceKeyswitch: UInt8(clamping: alternateKeyswitch))
+        ] : [], sourceChannel: UInt8(clamping: midiChannel))
+    }
+
     private var fitsSampleZoneLimit: Bool {
         StudioAutoSamplerReleaseCapture.fitsZoneLimit(
-            heldSampleCount: samplingPlan.sampleCount,
+            heldSampleCount: samplingPlan.sampleCount *
+                (captureArticulations ? 2 : 1),
             includeReleases: captureReleaseTails) &&
         expressionConfiguration.canCaptureLayers(
             samplingPlan.velocities,
-            captureReleaseTails: captureReleaseTails)
+            captureReleaseTails: captureReleaseTails) &&
+        articulationPlan.isValid(for: samplingPlan.rootNotes,
+                                 velocities: samplingPlan.velocities,
+                                 captureReleases: captureReleaseTails)
     }
 
     private var cc1CapturePositionsLabel: String {
@@ -316,6 +332,33 @@ public struct StudioAutoSamplerView: View {
             }
             .disabled(isCapturing)
 
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("Capture source keyswitch articulations",
+                       isOn: $captureArticulations)
+                if captureArticulations {
+                    Text("Capture Sustain and one alternate playing technique from the same Audio Unit. Enter the source plugin's keyswitch MIDI notes; Studio builds its own native keyswitch map.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    HStack {
+                        Stepper("Sustain source switch: \(sustainKeyswitch)",
+                                value: $sustainKeyswitch, in: 0...127)
+                        Stepper("Alternate source switch: \(alternateKeyswitch)",
+                                value: $alternateKeyswitch, in: 0...127)
+                    }
+                    TextField("Alternate articulation name", text: $alternateName)
+                    Text("Requires two distinct keyswitch notes outside the sampled root notes. Doubles the recordings and may exceed the 128-zone limit.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    if !fitsSampleZoneLimit {
+                        Label("Check keyswitch notes, articulation name and the 128-zone recording budget.",
+                              systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
+            }
+            .disabled(isCapturing)
+
             VStack(alignment: .leading, spacing: 9) {
                 Picker("Source dynamics", selection: $dynamicsMode) {
                     ForEach(StudioAutoSamplerExpression.Mode.allCases) { mode in
@@ -412,6 +455,11 @@ public struct StudioAutoSamplerView: View {
                 Label("Saved \(result.takeCount) recordings to \(result.packageURL.lastPathComponent)",
                       systemImage: "checkmark.circle")
                     .font(.callout)
+                if result.articulationCount > 1 {
+                    Label("\(result.articulationCount) keyswitched articulations mapped into the native instrument.",
+                          systemImage: "pianokeys")
+                        .font(.caption)
+                }
                 if result.dynamicsMode == .cc1Layers {
                     Label("CC1 dynamic layers captured; live CC1 crossfade and CC11 expression enabled.",
                           systemImage: "waveform.path")
@@ -533,6 +581,7 @@ public struct StudioAutoSamplerView: View {
         let selectedPlan = samplingPlan
         let loopEnabled = autoLoopSustains
         let captureExpression = expressionConfiguration
+        let selectedArticulations = articulationPlan
         let includeReleases = captureReleaseTails
         let chosenPreset = soundSourceMode == .installed ? selectedPreset : nil
         result = nil
@@ -545,7 +594,8 @@ public struct StudioAutoSamplerView: View {
                     presetNumber: chosenPreset, configuredState: currentSound,
                     plan: selectedPlan, autoLoopSustains: loopEnabled,
                     captureReleaseTails: includeReleases,
-                    expression: captureExpression)
+                    expression: captureExpression,
+                    articulations: selectedArticulations)
                 await MainActor.run {
                     self.result = output
                     self.isCapturing = false
