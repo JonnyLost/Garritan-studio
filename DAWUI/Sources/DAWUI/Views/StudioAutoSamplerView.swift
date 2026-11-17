@@ -403,9 +403,6 @@ public struct StudioAutoSamplerView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .onChange(of: dynamicsMode) { _, selected in
-                    if selected == .cc1Layers { captureReleaseTails = false }
-                }
                 if dynamicsMode == .cc1Layers {
                     Text("Capture the source Audio Unit at fixed MIDI velocity while sweeping CC1 across the native sampler's dynamic layer centers. On playback, Studio crossfades these timbres using live CC1.")
                         .font(.caption2)
@@ -457,8 +454,7 @@ public struct StudioAutoSamplerView: View {
             VStack(alignment: .leading, spacing: 5) {
                 Toggle("Capture natural note-off release samples",
                        isOn: $captureReleaseTails)
-                    .disabled(dynamicsMode == .cc1Layers)
-                Text("Studio extracts the actual note-off portion of each offline recording. Audible tails become dedicated release-trigger zones; silent tails are skipped. This may nearly double instrument storage.")
+                Text("Studio extracts real note-off tails for each articulation and dynamic layer. During CC1 crossfade playback, the closest recorded release timbre follows the current CC1 position. Silent tails are skipped.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 if captureReleaseTails && !fitsSampleZoneLimit {
