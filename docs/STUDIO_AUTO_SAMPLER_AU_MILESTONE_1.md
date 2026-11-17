@@ -107,3 +107,64 @@ StudioSamplerDSP, or the user's live project routing.
 **Still not included:** MIDI program-change selection, per-channel controller
 snapshots, automatic silence-skipping, round robins, looping, real-time fallback,
 or a production-tested ARIA integration.
+
+## Milestone 4 — conservative sustain loops and native crossfade markers
+
+**Capture UI:** `Find sustain loops automatically` is enabled by default
+and can be switched off. If it finds reliable sustain regions, Auto Sampler
+adds editable non-destructive `loopStartFrame`, `loopEndFrame`, and
+`loopCrossfadeFrames` to the captured native Sampler patch. The original
+WAV file bytes remain unchanged. The existing Studio Sampler playback engine
+and waveform loop editor already understand the markers.
+
+**Method:** after the offline Audio Unit rendering engine stops, analyze each
+temporary WAV independently on the worker task:
+
+1. Require at least 0.8 seconds of held note and readable mono or stereo PCM.
+2. Measure bounded RMS windows at 25% and 75% of the held segment. A strongly
+   decaying, nearly silent, or abruptly growing sustain is **not** auto-looped.
+3. Call the existing `StudioSamplerLoopFinder` on only the middle 25–90% of
+   the *held* segment, excluding the attack and the recorded note-off tail.
+4. Require a much stricter normalized waveform mismatch than the interactive
+   waveform-editor suggestion: at most 0.10, not the editor's 0.50 threshold.
+5. Reuse the finder's constrained crossfade (at most 256 frames), and apply
+   suggestions to the correct key **and velocity partition**. Release-trigger
+   zones are excluded.
+6. If no reliable match is found, silently retain the unmodified one-shot zone
+   and report how many candidate loops were accepted/skipped.
+7. Apply native mapping and portable packaging as before. No live track, DSP
+   graph, or source Audio Unit is changed.
+
+**A distinction:** the loop markers allow sustained notes to play for longer
+without requiring longer held-note recordings. Milestone 4 does **not**
+truncate WAV files or independently model the source plugin's note-off tail.
+Therefore it does not yet guarantee smaller disk use or completely natural
+release behavior for all instruments. The existing sampler envelope and loop
+playback still determine note-off behavior; this needs listening tests.
+
+### Added tests
+
+- Deterministic synthesized sustained sine-WAV successfully gains a loop,
+  nonzero crossfade, valid patch, and serializable markers without modifying
+  source bytes.
+- Short, decaying WAVs are left one-shot.
+- Velocity partitions each receive the correct loop markers; release-trigger
+  recordings never get sustain loops.
+- Swift syntax CI parses new source/tests on Linux; macOS `swift test` is
+  required to execute AVFoundation tests.
+
+### Acceptance gates
+
+1. macOS debug and release build and full XCTest pass.
+2. Listen to loop transitions on sustained organ/synth/woodwind/string samples,
+   including stereo and modulation-rich sounds; ensure clicks/pumping are not
+   introduced.
+3. Confirm the loop ends strictly before note-off and cannot include recorded
+   release content.
+4. Reopen exported `.studioinstrument`, review loop markers in the Sampler
+   editor, and compare with the original plugin.
+5. Confirm percussive, pizzicato, rapidly decaying and short sounds remain
+   unlooped; test cancellation with many velocity layers.
+
+**Pending:** loop audition, automatic trimming/disk-size reduction, release
+sample extraction, and broader expression-aware capture.
