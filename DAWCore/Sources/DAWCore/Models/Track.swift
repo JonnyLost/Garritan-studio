@@ -80,6 +80,10 @@ public struct Track: Identifiable, Codable, Sendable {
     public var studioSamplerPatch: StudioSamplerPatch?
     /// Selected Garritan catalog entry (library:path), persisted per track.
     public var garritanProgramID: String?
+    /// Apple macOS DLS General MIDI melodic preset (0...127) for the built-in
+    /// fallback sampler. nil is the original Acoustic Grand Piano default.
+    /// Optional for backward-compatible decoding of older Studio projects.
+    public var appleGeneralMIDIProgram: UInt8?
     /// Embedded per-track articulation map. Nil decodes legacy project files.
     /// Maps are independent of instrument patches and are not shared by reference.
     public var articulationMap: StudioArticulationMap?
@@ -141,6 +145,7 @@ public struct Track: Identifiable, Codable, Sendable {
         self.studioSynthPatch = nil
         self.studioSamplerPatch = nil
         self.garritanProgramID = nil
+        self.appleGeneralMIDIProgram = nil
         self.articulationMap = nil
         self.midiOutput = nil  // Default: use track instrument
         self.midiOutputChannel = nil  // All input channels
