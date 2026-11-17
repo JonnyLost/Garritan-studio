@@ -93,6 +93,73 @@ int main() {
     assert(!ss_control_change(morph, 200, 30, 0));
     ss_destroy(morph);
 
+    // CC1-sampled releases must follow the current CC1 timbre even when a
+    // controller move and note-off arrive in the SAME audio block. Releasing
+    // at low CC1 must not apply a second CC1 attenuation to the recorded PCM.
+    // The original note-on articulation must survive a later keyswitch.
+    SSSampler *expressionRelease = ss_create(44100, 16);
+    assert(expressionRelease);
+    std::vector<float> silentHeld(16000, 0.f);
+    std::vector<float> sustainQuietRelease(16000, .75f);
+    std::vector<float> sustainStrongRelease(16000, -.75f);
+    std::vector<float> pizzQuietRelease(16000, -.50f);
+    std::vector<float> pizzStrongRelease(16000, .50f);
+    auto addExpression = [&](const std::vector<float>& wave, uint8_t low,
+                             uint8_t high, uint8_t articulation,
+                             uint8_t release) {
+        return ss_add_zone_with_variation(expressionRelease, 60, 48, 84,
+            low, high, 44100, wave.data(), nullptr, 16000,
+            0, 16000, 0, 0, 0, 0, 0, articulation, 0, release);
+    };
+    for (uint8_t articulation = 0; articulation < 2; ++articulation) {
+        assert(addExpression(silentHeld, 1, 63, articulation, 0));
+        assert(addExpression(silentHeld, 64, 127, articulation, 0));
+    }
+    assert(addExpression(sustainQuietRelease, 1, 63, 0, 1));
+    assert(addExpression(sustainStrongRelease, 64, 127, 0, 1));
+    assert(addExpression(pizzQuietRelease, 1, 63, 1, 1));
+    assert(addExpression(pizzStrongRelease, 64, 127, 1, 1));
+    assert(ss_set_cc1_crossfade(expressionRelease, 1));
+    std::vector<float> expressiveL(20000), expressiveR(20000);
+    assert(ss_control_change(expressionRelease, 1, 10, 0));
+    assert(ss_note_on(expressionRelease, 60, 100, 0));
+    ss_render(expressionRelease, expressiveL.data(), expressiveR.data(), 4000);
+    // Change the selected articulation after note-on: the release remains
+    // in the original Sustain articulation and low-CC1 band.
+    assert(ss_select_articulation(expressionRelease, 1, 0));
+    assert(ss_note_off(expressionRelease, 60, 0));
+    ss_render(expressionRelease, expressiveL.data(), expressiveR.data(), 1024);
+    assert(expressiveL[400] > .03f);
+    ss_render(expressionRelease, expressiveL.data(), expressiveR.data(), 20000);
+
+    // Begin in Sustain while the smoothed CC1 is still low. Sending CC1=120
+    // immediately before note-off must choose the loud, negative release.
+    assert(ss_select_articulation(expressionRelease, 0, 0));
+    assert(ss_control_change(expressionRelease, 1, 10, 0));
+    assert(ss_note_on(expressionRelease, 60, 100, 0));
+    ss_render(expressionRelease, expressiveL.data(), expressiveR.data(), 2000);
+    assert(ss_control_change(expressionRelease, 1, 120, 0));
+    assert(ss_note_off(expressionRelease, 60, 0));
+    ss_render(expressionRelease, expressiveL.data(), expressiveR.data(), 1024);
+    assert(expressiveL[400] < -.03f);
+    ss_render(expressionRelease, expressiveL.data(), expressiveR.data(), 20000);
+
+    // Pizzicato retains its own release sample even if selection returns
+    // to Sustain just before note-off. CC1=10 chooses its quiet (negative)
+    // sample, which differs from Sustain's quiet (positive) release.
+    assert(ss_select_articulation(expressionRelease, 1, 0));
+    assert(ss_note_on(expressionRelease, 60, 100, 0));
+    ss_render(expressionRelease, expressiveL.data(), expressiveR.data(), 2000);
+    assert(ss_select_articulation(expressionRelease, 0, 0));
+    assert(ss_control_change(expressionRelease, 1, 10, 0));
+    assert(ss_note_off(expressionRelease, 60, 0));
+    ss_render(expressionRelease, expressiveL.data(), expressiveR.data(), 1024);
+    assert(expressiveL[400] < -.03f);
+    assert(ss_note_off(expressionRelease, 60, 0)); // no extra release
+    ss_render(expressionRelease, expressiveL.data(), expressiveR.data(), 20000);
+    assert(expressiveL[19999] == 0.f);
+    ss_destroy(expressionRelease);
+
     // ADSR: attack rises, decay reaches the sustain level, and note-off
     // releases progressively instead of stopping at a fixed 64-frame fade.
     SSSampler *adsr = ss_create(44100, 4);
