@@ -146,6 +146,10 @@ public enum StudioAutoSamplerCapture {
         public let loopCount: Int
         /// Recordings preserved as one-shots because loops were unsuitable.
         public let loopSkippedCount: Int
+        /// Actual audible note-off tails captured as independent samples.
+        public let releaseCount: Int
+        /// Note-off tails too quiet to merit a release-trigger zone.
+        public let releaseSkippedCount: Int
     }
 
     public enum CaptureError: Error, LocalizedError {
@@ -163,7 +167,7 @@ public enum StudioAutoSamplerCapture {
         public var errorDescription: String? {
             switch self {
             case .invalidConfiguration:
-                return "Choose an Audio Unit instrument, valid notes, and a nonempty instrument name."
+                return "Choose valid notes, velocities, and an instrument name. Capturing release samples requires at most 64 held recordings (128 total zones)."
             case .unavailableInstrument:
                 return "The selected Audio Unit is not installed or could not be loaded."
             case .unsupportedInstrument:
@@ -235,6 +239,7 @@ public enum StudioAutoSamplerCapture {
                                configuredState: Data? = nil,
                                plan: SamplingPlan? = nil,
                                autoLoopSustains: Bool = true,
+                               captureReleaseTails: Bool = false,
                                sampleDirectory: URL? = nil,
                                packageDirectory: URL? = nil) async throws -> Result {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -245,6 +250,10 @@ public enum StudioAutoSamplerCapture {
         } ?? options
         guard source.type == kAudioUnitType_MusicDevice,
               (plan?.isValid ?? true), captureOptions.isValid,
+              StudioAutoSamplerReleaseCapture.fitsZoneLimit(
+                  heldSampleCount: captureOptions.rootNotes.count *
+                      captureOptions.velocities.count,
+                  includeReleases: captureReleaseTails),
               !trimmed.isEmpty, trimmed.count <= 120,
               !(presetNumber != nil && configuredState != nil)
         else { throw CaptureError.invalidConfiguration }
@@ -316,10 +325,19 @@ public enum StudioAutoSamplerCapture {
                     source: output, rootNote: root, velocity: velocity))
             }
         }
-        // Audio is complete; release the AU engine BEFORE loop analysis,
-        // file copying or hash-heavy packaging. Never analyze on the audio
-        // callback or change the original PCM recordings.
+        // Audio is complete; release the AU engine BEFORE tail extraction,
+        // loop analysis or hash-heavy packaging. Never process the sample
+        // WAVs on the live DAW audio thread.
         engine.stop()
+
+        let releases: StudioAutoSamplerReleaseCapture.Result?
+        if captureReleaseTails {
+            releases = try StudioAutoSamplerReleaseCapture.extract(
+                from: takes, sustainSeconds: captureOptions.sustainSeconds,
+                sampleRate: captureOptions.sampleRate, into: staging)
+        } else {
+            releases = nil
+        }
 
         let loops: StudioAutoSamplerLooping.Analysis
         if autoLoopSustains {
@@ -334,8 +352,9 @@ public enum StudioAutoSamplerCapture {
             throw CaptureError.cancelled
         }
 
+        let allTakes = takes + (releases?.takes ?? [])
         var sampler = try StudioSamplerInstrumentFactory.assemble(
-            takes, sampleDirectory: sampleDirectory)
+            allTakes, sampleDirectory: sampleDirectory)
         let mappedLoops = StudioAutoSamplerLooping.apply(
             loops, to: sampler, takes: takes)
         sampler = mappedLoops.patch
@@ -348,14 +367,17 @@ public enum StudioAutoSamplerCapture {
         let metadata = StudioSamplerInstrumentPackage.Metadata(
             name: trimmed, category: "Auto Sampler",
             tags: ["Audio Unit", "Native Multisample", source.vendor,
-                   configuredState == nil ? "Factory Sound" : "Configured Sound"])
+                   configuredState == nil ? "Factory Sound" : "Configured Sound"] +
+                   (captureReleaseTails ? ["Release Samples"] : []))
         do {
             let package = try StudioSamplerInstrumentPackage.saveToLibrary(
                 sampler, metadata: metadata, in: packageDirectory)
             return Result(patch: sampler, packageURL: package,
                           takeCount: takes.count,
                           loopCount: mappedLoops.loopCount,
-                          loopSkippedCount: loops.attempted - mappedLoops.loopCount)
+                          loopSkippedCount: loops.attempted - mappedLoops.loopCount,
+                          releaseCount: releases?.count ?? 0,
+                          releaseSkippedCount: releases?.skippedCount ?? 0)
         } catch {
             for zone in sampler.zones where zone.managedFileName != nil {
                 try? FileManager.default.removeItem(at: zone.sampleURL)
