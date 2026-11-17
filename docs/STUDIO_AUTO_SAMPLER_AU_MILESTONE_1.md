@@ -368,3 +368,35 @@ The editor does not infer source library keyswitch assignments and
 does not claim automatic recognition of an instrument's articulations.
 Future work can add verified per-library presets and editable
 native keyswitch destinations.
+
+## Milestone 9 — articulation-aware natural note-off release recordings
+
+The release-tail extractor now preserves each source take's **articulation
+name and microphone ID**, alongside its root note and velocity. Native
+Instrument Factory groups release-trigger zones by articulation and
+velocity, and the existing real-time DSP matches releases to the
+articulation held at note-on rather than the articulation currently
+selected at note-off. No DSP or live routing changes were necessary.
+
+The M8 articulation editor can now enable natural release-tail capture.
+The full plan must still fit **64 held takes plus at most 64 release
+zones** (128 total). Core preflight and the UI independently validate
+this limit. CC1 crossfade mode remains incompatible with release-tail
+capture because the current release dispatcher uses note-on velocity,
+not the CC1 crossfade position.
+
+**Related fix:** M4 sustain-loop recommendations now include the
+articulation label in their identity and match the correct native zone.
+Previously, same-pitch/same-velocity samples from different techniques
+could overwrite each other's loop suggestions.
+
+**New regression coverage:** Two source articulations (Sustain and
+Pizzicato) with identical root and velocity produce separate release
+recordings and distinct native release zones. Tests also verify
+multi-articulation capture within the doubled zone budget and reject
+oversized plans. No source WAV is modified.
+
+**Acceptance gates:** macOS compile and XCTest, actual ARIA note-off
+articulation switching, short and long note-off tails, repeated-note
+behavior, cancellation and native package reopen. This feature is
+implemented but not yet audio-verified on a Mac.
