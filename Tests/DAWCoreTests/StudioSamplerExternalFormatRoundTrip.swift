@@ -42,6 +42,12 @@ enum StudioSamplerExternalFormatRoundTrip {
             XCTAssertNotEqual(sources[index].path, reopened.zones[index].filePath,
                               file: file, line: line)
             let restored = URL(fileURLWithPath: reopened.zones[index].filePath)
+            XCTAssertNil(reopened.zones[index].managedFileName,
+                         "Custom package destinations must not be marked as app-managed",
+                         file: file, line: line)
+            XCTAssertEqual(reopened.zones[index].sampleURL, restored,
+                           "Native renderer must use the restored recording path",
+                           file: file, line: line)
             XCTAssertEqual(try Data(contentsOf: restored), originals[index],
                            file: file, line: line)
             expected.zones[index].filePath = "SOURCE"

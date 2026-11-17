@@ -53,6 +53,15 @@ final class StudioSamplerInstrumentPackageTests: XCTestCase {
         XCTAssertEqual(restored.zones.count, 2)
         XCTAssertEqual(restored.zones[0].filePath, restored.zones[1].filePath)
         XCTAssertNotEqual(restored.zones[0].filePath, source.path)
+        // A custom restoration target must not claim app-global ownership:
+        // StudioSamplerZone.sampleURL prefers managedFileName when present.
+        // That used to redirect valid restored audio into the wrong folder.
+        for zone in restored.zones {
+            XCTAssertNil(zone.managedFileName)
+            XCTAssertEqual(zone.sampleURL, URL(fileURLWithPath: zone.filePath))
+            XCTAssertEqual(zone.sampleURL.deletingLastPathComponent(),
+                           installedSamples.standardizedFileURL)
+        }
         XCTAssertEqual(restored.zones[0].loopStartFrame, 20)
         XCTAssertEqual(restored.zones[0].trimEndFrame, 128)
         XCTAssertEqual(restored.articulations, patch.articulations)
