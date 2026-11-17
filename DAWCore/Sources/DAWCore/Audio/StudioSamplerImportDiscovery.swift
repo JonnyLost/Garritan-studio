@@ -53,13 +53,18 @@ public enum StudioSamplerImportDiscovery {
                                      maxEntries: Int = 20_000,
                                      maxDepth: Int = 16) throws -> Report {
         let fm = FileManager.default
-        let rootURL = root.standardizedFileURL
-        let rootValues = try? rootURL.resourceValues(
+        // Validate the user-selected root BEFORE canonicalizing paths.
+        // macOS may expose temporary directories as /var/... while the
+        // directory enumerator returns /private/var/...; mixing these paths
+        // corrupts the displayed relative path and breaks import discovery.
+        let selectedRoot = root.standardizedFileURL
+        let rootValues = try? selectedRoot.resourceValues(
             forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
         guard rootValues?.isDirectory == true,
               rootValues?.isSymbolicLink != true else {
             throw DiscoveryError.invalidRoot
         }
+        let rootURL = selectedRoot.resolvingSymlinksInPath().standardizedFileURL
         let entryLimit = max(1, min(maxEntries, 100_000))
         let depthLimit = max(0, min(maxDepth, 64))
         var pending: [(URL, Int)] = [(rootURL, 0)]
