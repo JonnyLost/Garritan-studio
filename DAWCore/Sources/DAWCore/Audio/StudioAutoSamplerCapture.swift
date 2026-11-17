@@ -75,6 +75,8 @@ public enum StudioAutoSamplerCapture {
         case unavailableInstrument
         case unsupportedInstrument
         case presetUnavailable
+        case missingConfiguredState
+        case invalidConfiguredState
         case cannotRenderOffline
         case renderingFailed
         case silentNote(UInt8)
@@ -90,6 +92,10 @@ public enum StudioAutoSamplerCapture {
                 return "This Audio Unit is not a MIDI instrument. Auto Sampler currently supports Music Device Audio Units."
             case .presetUnavailable:
                 return "The selected Audio Unit factory preset is no longer available."
+            case .missingConfiguredState:
+                return "This Audio Unit did not expose a saved sound state; use an available factory preset instead."
+            case .invalidConfiguredState:
+                return "The configured Audio Unit sound state was invalid or too large to restore."
             case .cannotRenderOffline:
                 return "This Audio Unit cannot render in Studio's offline capture engine. Real-time capture is not yet supported."
             case .renderingFailed:
@@ -130,18 +136,34 @@ public enum StudioAutoSamplerCapture {
         }
     }
 
+    /// Decode only bounded property-list data, consistent with PluginHost's
+    /// savePreset format. The sound data is used only to restore the temporary
+    /// capture instance; it is NOT embedded in the resulting instrument.
+    public static func validatedConfiguredState(_ data: Data) throws -> [String: Any] {
+        guard !data.isEmpty, data.count <= 64 * 1024 * 1024,
+              let propertyList = try? PropertyListSerialization.propertyList(
+                from: data, options: [], format: nil),
+              let state = propertyList as? [String: Any], !state.isEmpty
+        else { throw CaptureError.invalidConfiguredState }
+        return state
+    }
+
     /// Call from a detached utility task, NOT an audio callback. A new AU
     /// instance is used so existing user presets and tracks stay unchanged.
     /// The resulting package contains audio files, never the source plug-in.
     public static func capture(source: Source, name: String,
                                options: StudioSynthSamplerCapture.Options = .init(),
                                presetNumber: Int? = nil,
+                               configuredState: Data? = nil,
                                sampleDirectory: URL? = nil,
                                packageDirectory: URL? = nil) async throws -> Result {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard source.type == kAudioUnitType_MusicDevice,
-              options.isValid, !trimmed.isEmpty, trimmed.count <= 120
+              options.isValid, !trimmed.isEmpty, trimmed.count <= 120,
+              !(presetNumber != nil && configuredState != nil)
         else { throw CaptureError.invalidConfiguration }
+        // Decode and validate before instantiating a plugin or touching disk.
+        let restoredState = try configuredState.map(validatedConfiguredState)
         guard !Task<Never, Never>.isCancelled else { throw CaptureError.cancelled }
 
         let instrument = try await instantiate(source)
@@ -150,6 +172,11 @@ public enum StudioAutoSamplerCapture {
                 $0.number == presetNumber
             }) else { throw CaptureError.presetUnavailable }
             instrument.auAudioUnit.currentPreset = preset
+        } else if let restoredState {
+            // PluginHost also sets both state accessors to restore legacy AUs.
+            // This affects ONLY the fresh instance created above.
+            instrument.auAudioUnit.fullStateForDocument = restoredState
+            instrument.auAudioUnit.fullState = restoredState
         }
 
         let staging = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -211,7 +238,8 @@ public enum StudioAutoSamplerCapture {
         }
         let metadata = StudioSamplerInstrumentPackage.Metadata(
             name: trimmed, category: "Auto Sampler",
-            tags: ["Audio Unit", "Native Multisample", source.vendor])
+            tags: ["Audio Unit", "Native Multisample", source.vendor,
+                   configuredState == nil ? "Factory Sound" : "Configured Sound"])
         do {
             let package = try StudioSamplerInstrumentPackage.saveToLibrary(
                 sampler, metadata: metadata, in: packageDirectory)
