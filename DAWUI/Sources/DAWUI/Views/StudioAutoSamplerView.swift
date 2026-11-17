@@ -138,6 +138,12 @@ public struct StudioAutoSamplerView: View {
             captureReleaseTails: captureReleaseTails)
     }
 
+    private var cc1CapturePositionsLabel: String {
+        StudioAutoSamplerExpression.Configuration
+            .cc1Centers(for: samplingPlan.velocities)
+            .map { String($0) }.joined(separator: ", ")
+    }
+
     private func noteLabel(_ number: Int) -> String {
         let names = ["C", "C♯", "D", "D♯", "E", "F", "F♯",
                      "G", "G♯", "A", "A♯", "B"]
@@ -154,7 +160,7 @@ public struct StudioAutoSamplerView: View {
                 Button("Close") { dismiss() }
                     .disabled(isCapturing)
             }
-            Text("Capture a compatible, installed Audio Unit instrument as independent WAV samples, map the keys and velocities, and save a native Studio instrument. Studio uses a separate offline engine; the current project keeps playing.")
+            Text("Capture an installed or configured Audio Unit as independent native samples. Choose velocity or CC1 dynamics, map the playable range, and save a Studio instrument without changing the live project.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
             Divider()
@@ -326,9 +332,7 @@ public struct StudioAutoSamplerView: View {
                         .foregroundStyle(.secondary)
                     Stepper("Source note velocity: \(fixedNoteVelocity)",
                             value: $fixedNoteVelocity, in: 1...127)
-                    let centers = StudioAutoSamplerExpression.Configuration
-                        .cc1Centers(for: samplingPlan.velocities)
-                    Text("Source CC1 positions: \(centers.map(String.init).joined(separator: ", "))")
+                    Text("Source CC1 positions: \(cc1CapturePositionsLabel)")
                         .font(.caption.monospacedDigit())
                     if samplingPlan.velocities.count < 2 {
                         Label("Select Standard or Deep coverage: CC1 crossfading requires at least two dynamic layers.",
