@@ -226,3 +226,74 @@ and preflight rejection of a potentially oversized release-enabled capture.
 **Not yet included:** custom note-off articulations/legato samples, recording
 CC1/CC11 expression dimensions, round robins, hardware/real-time capture,
 batch resume, or automatic memory/disk compaction.
+
+## Milestone 6 — CC1 orchestral dynamics and CC11 expression reference
+
+The Auto Sampler sheet now offers two mutually exclusive **Source dynamics**
+capture modes:
+
+- **Velocity layers (default):** remains the existing MIDI velocity capture.
+  The source's preset state and CC11 level are preserved by default. Optionally
+  send a composer-selected **source CC11 reference** before each note; this
+  level is baked into the resulting PCM.
+- **CC1 dynamics:** records each musical key with **fixed note-on velocity**
+  (default 100), independently sweeping CC1 through two or four dynamic
+  layers (Standard and Deep coverage). Uses the **native sampler's existing**
+  `cc1Crossfade` playback and `dynamicsCC1` state to morph continuously
+  between the recorded source timbres. CC11 is set to a configurable capture
+  reference level (default 127). The output sampler's own CC11 starts at
+  127 and is independently adjustable by MIDI, so a chosen capture
+  attenuation is **not** inadvertently applied twice.
+
+**Exact crossfade alignment:** Studio's current DSP interpolates according
+to the midpoint of each zone's assigned velocity interval, **not the raw
+velocity label used to build the zone map**. The expression capture planner
+therefore sends the appropriate zone-center CC1 to the source plugin:
+Standard map [64,112] uses source CC1 [45,108]; Deep map
+[32,64,96,120] uses source CC1 [25,65,95,118]. This deliberately matches
+the existing native crossfade without editing native DSP, project format,
+or the portable .studioinstrument version.
+
+**Precise capture order:** Each take uses the isolated AU Music Device's
+selected zero-based MIDI channel. First flush/reset voices, then program
+CC1/CC11 (as applicable), render and discard about 50 ms of offline audio
+to settle controller smoothing, then send note-on at the chosen fixed
+velocity and record the held/released note. Only the attack onward is
+written to WAV. Existing loop analysis, key coverage and instrument
+package creation continue unchanged. Source controller values do not
+change any live Studio Audio Unit.
+
+**Guardrails:** A CC1 capture must contain 2–8 dynamic layers. Quick mode
+(one layer) is not eligible. **Natural release-trigger recording is disabled
+in CC1 mode**, because Studio's existing release-zone dispatch chooses
+by incoming MIDI velocity while CC1 layer crossfading chooses by the
+current CC1 position; combining them would select a potentially
+mismatched release sound. It will be supported after an expression-aware
+release design. Existing velocity-mode release capture is unchanged.
+The patch stores only WAV data and the native zone/CC mapping, not AU
+state, external library metadata, or source license data.
+
+**What this is not:** Capturing at a selected CC11 reference plus exposing
+live CC11 as a gain/expression control is **not a two-dimensional sample
+grid for CC1×CC11**. An Audio Unit that uses CC11 to alter timbre as well
+as loudness will not have that continuously variable timbre reproduced
+by native playback; additional expressive axes require a sampler-format
+and DSP design. Crossfading captured CC1 timbres is an approximation
+of the original synthesis, not a byte-for-byte recreation.
+
+**New tests:** ordinary velocity mode backward compatibility, computed
+native crossfade centers and fixed source note-on velocity, CC11 reference
+behavior, mapped patch serializable state, rejection of one-layer CC1
+capture, release-mode conflict, and source configuration validation.
+
+### Outstanding gates
+
+- Full macOS debug/release build and XCTest, plus Audio Unit capture on
+  an actual Mac, are mandatory before including this PR in Alpha 1.
+- Listen for unnatural CC1 crossfades and compare source vs Studio at low,
+  medium and high dynamics, including ARIA strings, brass and woodwinds.
+- Verify real CC11 volume/expression automation does not produce double
+  attenuation; test source instruments that internally use both CC1/CC11
+  for distinct timbral purposes.
+- Validate controller settling, disabled release samples, and reliable
+  package reopening with AU-hosted custom preset state intact.
