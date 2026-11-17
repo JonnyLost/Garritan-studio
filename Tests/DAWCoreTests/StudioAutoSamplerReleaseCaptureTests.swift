@@ -122,6 +122,35 @@ final class StudioAutoSamplerReleaseCaptureTests: XCTestCase {
             at: source.folder, includingPropertiesForKeys: nil).count, 1)
     }
 
+    func testReleaseTailsRetainSourceArticulationAndNativeKeyswitchIdentity() throws {
+        let source = try makeCapturedWAV(heldFrames: 22_050,
+                                         tailFrames: 11_025,
+                                         tailIsAudible: true)
+        defer { try? FileManager.default.removeItem(at: source.folder) }
+        let sustain = StudioSamplerFactoryTake(
+            source: source.url, rootNote: 60, velocity: 100,
+            articulation: "Sustain")
+        let pizzicato = StudioSamplerFactoryTake(
+            source: source.url, rootNote: 60, velocity: 100,
+            articulation: "Pizzicato")
+        let result = try StudioAutoSamplerReleaseCapture.extract(
+            from: [sustain, pizzicato], sustainSeconds: 0.5,
+            sampleRate: sampleRate, into: source.folder)
+        XCTAssertEqual(result.count, 2)
+        XCTAssertEqual(Set(result.takes.map(\.articulation)),
+                       Set(["Sustain", "Pizzicato"]))
+        XCTAssertTrue(result.takes.allSatisfy { $0.releaseTrigger })
+        let patch = try StudioSamplerInstrumentFactory.assemble(
+            [sustain, pizzicato] + result.takes)
+        XCTAssertTrue(patch.isValid)
+        XCTAssertEqual(patch.zones.count, 4)
+        let releaseZones = patch.zones.filter { $0.isReleaseTrigger == true }
+        XCTAssertEqual(releaseZones.count, 2)
+        XCTAssertEqual(Set(releaseZones.map { $0.articulationID ?? 0 }),
+                       Set([UInt8(0), UInt8(1)]))
+        XCTAssertEqual(patch.articulations?.first?.name, "Pizzicato")
+    }
+
     func testReleaseSampleZoneBudget() {
         XCTAssertTrue(StudioAutoSamplerReleaseCapture.fitsZoneLimit(
             heldSampleCount: 64, includeReleases: true))
