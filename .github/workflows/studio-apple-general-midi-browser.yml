@@ -1,0 +1,34 @@
+name: Studio Apple General MIDI browser
+
+on:
+  push:
+    branches:
+      - feature/studio-apple-gm-browser-2026-11-17
+  pull_request:
+    branches:
+      - fix/alpha1-track-midi-transmit-channel-2026-11-17
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mac-tests:
+    name: macOS build and full regression suite
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain and commit
+        run: |
+          sw_vers
+          swift --version
+          git rev-parse HEAD
+      - name: Resolve
+        run: swift package resolve
+      - name: Build
+        run: swift build
+      - name: Regression tests
+        run: swift test --parallel
+      - name: Build optimized Studio
+        run: swift build -c release --product DAWApp

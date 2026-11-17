@@ -772,6 +772,25 @@ public final class ProjectViewModel: ObservableObject {
         updateTrack(track, description: "Load Studio Synth")
     }
 
+    /// Select Apple's factory General MIDI program on the already-hosted
+    /// fallback sampler. Never evict an ARIA or Studio native instrument.
+    public func setAppleGeneralMIDIProgram(id: TrackID, program: UInt8) throws {
+        guard program < 128, var track = project.track(withID: id),
+              (track.type == .instrument || track.type == .midi),
+              track.instrumentSlot?.pluginID == nil,
+              track.studioSamplerPatch == nil,
+              track.studioSynthEnabled != true,
+              track.studioFMEnabled != true,
+              track.studioAnalogEnabled != true else {
+            throw NSError(domain: "StudioAppleGeneralMIDI", code: 2,
+                userInfo: [NSLocalizedDescriptionKey:
+                    "Select a track using the default Apple instrument, or create a new Instrument track."])
+        }
+        try playbackEngine.selectAppleGeneralMIDIProgram(program, for: id)
+        track.appleGeneralMIDIProgram = program
+        updateTrack(track, description: "Change Apple General MIDI Instrument")
+    }
+
     /// Open a fully editable native sampler without requiring a recording.
     /// This stores a lightweight, empty patch on the track; playback remains
     /// silent until the mapping editor applies real samples. Reopening an

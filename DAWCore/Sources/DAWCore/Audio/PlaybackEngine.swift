@@ -291,8 +291,8 @@ public final class PlaybackEngine: ObservableObject {
             audioEngine.engine.connect(sampler, to: trackNode.inputMixer, format: format)
         }
         
-        // Load default sound (built-in piano)
-        try await loadDefaultSound(for: sampler)
+        // Restore the saved Apple GM sound; old projects still start at piano.
+        try await loadDefaultSound(for: sampler, program: track.appleGeneralMIDIProgram ?? 0)
         
         trackInstruments[track.id] = .sampler(sampler)
         midiProcessingQueue.sync {
@@ -1095,26 +1095,49 @@ public final class PlaybackEngine: ObservableObject {
         print("[DEBUG] ========================================")
     }
     
-    /// Load a SoundFont or default instrument into a sampler
-    private func loadDefaultSound(for sampler: AVAudioUnitSampler) async throws {
-        // Try to load the built-in piano sound from the system
-        // This uses the DLS (Downloadable Sounds) format built into macOS
-        
-        // Path to the built-in Grand Piano
-        let soundBankURL = URL(fileURLWithPath: "/System/Library/Components/CoreAudio.component/Contents/Resources/gs_instruments.dls")
-        
-        if FileManager.default.fileExists(atPath: soundBankURL.path) {
-            try sampler.loadSoundBankInstrument(
-                at: soundBankURL,
-                program: 0,        // Piano
-                bankMSB: 0x79,     // Melodic bank
-                bankLSB: 0
-            )
-        } else {
-            // Fallback: Use a simple sine wave instrument
-            // The sampler will produce a basic sound without a sound bank
-            print("Warning: Could not load system sound bank, using basic synthesis")
+    /// Load the Apple's installed General MIDI DLS bank into the fallback
+    /// AVAudioUnitSampler without loading a commercial plug-in.
+    private func loadDefaultSound(for sampler: AVAudioUnitSampler, program: UInt8) async throws {
+        guard StudioAppleGeneralMIDI.isAvailable else {
+            print("[Apple GM] System DLS bank unavailable; leaving fallback sampler unchanged")
+            return
         }
+        try sampler.loadSoundBankInstrument(
+            at: StudioAppleGeneralMIDI.soundBankURL,
+            program: program < 128 ? program : 0,
+            bankMSB: 0x79,
+            bankLSB: 0
+        )
+    }
+
+    /// Change an existing Apple sampler's patch in-place, preserving the
+    /// established audio graph, track sends, and other hosted instruments.
+    /// This intentionally refuses to replace an ARIA or native Synth instance.
+    public func selectAppleGeneralMIDIProgram(_ program: UInt8,
+                                               for trackID: TrackID) throws {
+        guard program < 128,
+              case .sampler(let sampler) = trackInstruments[trackID] else {
+            throw PlaybackError.instrumentNotLoaded(trackID)
+        }
+        guard StudioAppleGeneralMIDI.isAvailable else {
+            throw PlaybackError.soundBankLoadFailed(
+                StudioAppleGeneralMIDI.soundBankURL,
+                NSError(domain: "StudioAppleGeneralMIDI", code: 1,
+                        userInfo: [NSLocalizedDescriptionKey: "The macOS General MIDI sound bank was not found."])
+            )
+        }
+        // Stop hanging notes (including pedal-held notes) before changing
+        // the instrument, but do not change audio graph topology.
+        for channel: UInt8 in 0..<16 {
+            sampler.sendController(64, withValue: 0, onChannel: channel)
+            sampler.sendController(123, withValue: 0, onChannel: channel)
+        }
+        try sampler.loadSoundBankInstrument(
+            at: StudioAppleGeneralMIDI.soundBankURL,
+            program: program,
+            bankMSB: 0x79,
+            bankLSB: 0
+        )
     }
     
     /// Load a custom SoundFont for a track

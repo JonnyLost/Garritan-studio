@@ -341,10 +341,16 @@ struct InstrumentSlotButton: View {
     @State private var showStudioFMPanel = false
     @State private var showStudioSynthPanel = false
     @State private var showStudioSamplerPanel = false
-    
+    @State private var showAppleGMBrowser = false
+
+    private var isAppleSampler: Bool {
+        viewModel.playbackEngine.sampler(for: track.id) != nil
+    }
+
     var body: some View {
         Button(action: {
-            showBrowser = true
+            if isAppleSampler { showAppleGMBrowser = true }
+            else { showBrowser = true }
         }) {
             HStack(spacing: 4) {
                 Image(systemName: "pianokeys")
@@ -370,6 +376,11 @@ struct InstrumentSlotButton: View {
                     Text(pluginID.name)
                         .font(.system(size: 10))
                         .lineLimit(1)
+                } else if isAppleSampler {
+                    Text("Apple GM · " + StudioAppleGeneralMIDI.name(
+                        for: track.appleGeneralMIDIProgram ?? 0))
+                        .font(.system(size: 10))
+                        .lineLimit(1)
                 } else {
                     Text("No Instrument")
                         .font(.system(size: 10))
@@ -378,7 +389,7 @@ struct InstrumentSlotButton: View {
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background((track.instrumentSlot?.pluginID != nil || track.studioAnalogEnabled == true || track.studioFMEnabled == true || track.studioSynthEnabled == true || track.studioSamplerPatch != nil) ? Color.purple.opacity(0.3) : Color.gray.opacity(0.2))
+            .background((track.instrumentSlot?.pluginID != nil || isAppleSampler || track.studioAnalogEnabled == true || track.studioFMEnabled == true || track.studioSynthEnabled == true || track.studioSamplerPatch != nil) ? Color.purple.opacity(0.3) : Color.gray.opacity(0.2))
             .cornerRadius(4)
         }
         .buttonStyle(.plain)
@@ -408,6 +419,11 @@ struct InstrumentSlotButton: View {
                 Button("Open Instrument Controls...") { openInstrumentUI() }
                 Divider()
                 Button("Remove Instrument", role: .destructive) { removeInstrument() }
+            } else if isAppleSampler {
+                Button("Browse Apple General MIDI Sounds…") { showAppleGMBrowser = true }
+                Button("Try C4") { viewModel.playbackEngine.playTestNote(on: track.id) }
+                Divider()
+                Button("Browse Other Instruments…") { showBrowser = true }
             } else {
                 Button("Load Instrument...") { showBrowser = true }
             }
@@ -427,6 +443,9 @@ struct InstrumentSlotButton: View {
         .sheet(isPresented: $showStudioSamplerPanel) {
             StudioSamplerInstrumentView(viewModel: viewModel, trackID: track.id)
                 .frame(minWidth: 930, minHeight: 600)
+        }
+        .sheet(isPresented: $showAppleGMBrowser) {
+            StudioAppleGeneralMIDIBrowserView(viewModel: viewModel, trackID: track.id)
         }
     }
     
