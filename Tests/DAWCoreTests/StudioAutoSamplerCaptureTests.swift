@@ -34,6 +34,51 @@ final class StudioAutoSamplerCaptureTests: XCTestCase {
         XCTAssertEqual(Set(results.map(\.id)).count, results.count)
     }
 
+    func testConfiguredStateAcceptsPropertyListsFromStudioPluginHost() throws {
+        let example: [String: Any] = [
+            "name": "Custom Piano",
+            "data": Data([0, 12, 255, 42]),
+            "parameters": ["brightness": 0.67, "detune": 0.12]
+        ]
+        let encoded = try PropertyListSerialization.data(
+            fromPropertyList: example, format: .binary, options: 0)
+        let restored = try StudioAutoSamplerCapture.validatedConfiguredState(encoded)
+        XCTAssertEqual(restored["name"] as? String, "Custom Piano")
+        XCTAssertEqual(restored["data"] as? Data, Data([0, 12, 255, 42]))
+    }
+
+    func testConfiguredStateRejectsBadOrEmptyDataBeforeLoadingAnyPlugin() async {
+        for payload in [Data(), Data([1, 2, 3, 4])] {
+            XCTAssertThrowsError(
+                try StudioAutoSamplerCapture.validatedConfiguredState(payload))
+        }
+
+        let fakeInstrument = StudioAutoSamplerCapture.Source(
+            type: kAudioUnitType_MusicDevice, subtype: 0,
+            manufacturer: 0, name: "Fake AU", vendor: "Test")
+        do {
+            _ = try await StudioAutoSamplerCapture.capture(
+                source: fakeInstrument, name: "Invalid State",
+                configuredState: Data([1, 2, 3, 4]))
+            XCTFail("Invalid state should fail before an AU instance is created")
+        } catch StudioAutoSamplerCapture.CaptureError.invalidConfiguredState {
+            // Expected preflight failure.
+        } catch {
+            XCTFail("Unexpected preflight error: \(error)")
+        }
+
+        do {
+            _ = try await StudioAutoSamplerCapture.capture(
+                source: fakeInstrument, name: "Conflicting Inputs",
+                presetNumber: 0, configuredState: Data([1]))
+            XCTFail("Cannot select a factory preset and a configured state together")
+        } catch StudioAutoSamplerCapture.CaptureError.invalidConfiguration {
+            // Expected before instantiation.
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
     func testCaptureRejectsNonInstrumentAndInvalidOptionsWithoutLoadingPlugin() async {
         let effect = StudioAutoSamplerCapture.Source(
             type: kAudioUnitType_Effect, subtype: 0, manufacturer: 0,
