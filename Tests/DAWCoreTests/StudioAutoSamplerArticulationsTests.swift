@@ -76,7 +76,7 @@ final class StudioAutoSamplerArticulationsTests: XCTestCase {
         let entries = ["Sustain", "Staccato", "Pizzicato"]
         let takes = entries.enumerated().map { index, name in
             StudioSamplerFactoryTake(
-                source: directory.appendingPathComponent("art-\\(index).wav"),
+                source: directory.appendingPathComponent("art-\(index).wav"),
                 rootNote: 60, velocity: 100, articulation: name)
         }
         let patch = try StudioSamplerInstrumentFactory.assemble(takes)
@@ -84,7 +84,7 @@ final class StudioAutoSamplerArticulationsTests: XCTestCase {
         XCTAssertEqual(patch.zones.count, 3)
         XCTAssertEqual(patch.zones.filter { $0.articulationID == nil }.count, 1)
         XCTAssertEqual(patch.articulations?.count, 2)
-        XCTAssertEqual(Set(patch.articulations?.map(\\.keyswitchNote) ?? []).count, 2)
+        XCTAssertEqual(Set(patch.articulations?.map(\.keyswitchNote) ?? []).count, 2)
     }
 
     func testCapturePreflightRejectsArticulationBudgetBeforeLoadingAU() async {
