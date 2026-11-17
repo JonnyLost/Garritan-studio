@@ -69,28 +69,30 @@ final class StudioAutoSamplerExpressionTests: XCTestCase {
             fixedNoteVelocity: 0).isValid)
     }
 
-    func testCC1RequiresMultipleLayersAndCannotUseVelocityBasedReleaseTriggers() {
+    func testCC1ReleaseCaptureRequiresMultipleLayersAndRespectsZoneLimit() {
         let config = StudioAutoSamplerExpression.Configuration(mode: .cc1Layers)
         XCTAssertFalse(config.canCaptureLayers([100],
                                                captureReleaseTails: false))
-        XCTAssertFalse(config.canCaptureLayers([64, 112],
-                                               captureReleaseTails: true))
+        XCTAssertTrue(config.canCaptureLayers([64, 112],
+                                              captureReleaseTails: true))
         XCTAssertTrue(config.canCaptureLayers([32, 64, 96, 120],
                                               captureReleaseTails: false))
         XCTAssertFalse(config.canCaptureLayers(Array(1...9).map(UInt8.init),
                                                captureReleaseTails: false))
     }
 
-    func testIncompatibleExpressionConfigurationsFailBeforeLoadingAudioUnit() async {
+    func testOversizedCC1ReleaseConfigurationFailsBeforeLoadingAudioUnit() async {
         let source = StudioAutoSamplerCapture.Source(
             type: kAudioUnitType_MusicDevice, subtype: 0, manufacturer: 0,
             name: "Not Installed", vendor: "Test")
         let config = StudioAutoSamplerExpression.Configuration(mode: .cc1Layers)
         do {
             _ = try await StudioAutoSamplerCapture.capture(
-                source: source, name: "Reject release mismatch",
+                source: source, name: "Reject oversized release capture",
+                options: .init(rootNotes: Array(36...100).map(UInt8.init),
+                               velocities: [64, 112]),
                 captureReleaseTails: true, expression: config)
-            XCTFail("CC1-sampled dynamics must not be paired with velocity-driven release triggering")
+            XCTFail("Oversized CC1 release capture must fail before loading the AU")
         } catch StudioAutoSamplerCapture.CaptureError.invalidConfiguration {
             // Expected preflight error; never load the plugin.
         } catch {
