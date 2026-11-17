@@ -564,7 +564,7 @@ public struct VRackView: View {
                                     set: { viewModel.setInstrumentLevel(id: id, value: UInt8(min(127, max(0, Int($0.rounded()))))) }
                                 ), in: 0...127, step: 1)
                                 HStack {
-                                    Text("ARIA MIDI Channel")
+                                    Text("ARIA Volume Channel (CC7)")
                                     Spacer()
                                     Picker("ARIA MIDI Channel", selection: Binding<Int>(
                                         get: { Int(viewModel.project.track(withID: id)?.instrumentLevelChannel ?? 0) },
@@ -580,20 +580,41 @@ public struct VRackView: View {
                             }
                         }
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("MIDI Output")
+                            Text("MIDI Transmit Channel")
                                 .font(.subheadline)
-                            Picker("MIDI Output", selection: Binding<Int>(
-                                get: { viewModel.project.track(withID: id)?.midiOutputChannel.map { Int($0) } ?? -1 },
-                                set: { viewModel.setTrackMIDIOutputChannel(id: id, channel: $0 < 0 ? nil : UInt8($0)) }
+                            Picker("MIDI Transmit Channel", selection: Binding<Int>(
+                                get: { viewModel.project.track(withID: id)?.midiTransmitChannel.map { Int($0) } ?? -1 },
+                                set: { viewModel.setTrackMIDITransmitChannel(id: id, channel: $0 < 0 ? nil : UInt8($0)) }
                             )) {
-                                Text("All Channels").tag(-1)
+                                Text("Follow MIDI Source").tag(-1)
                                 ForEach(0..<16, id: \.self) { channel in
                                     Text("Channel \(channel + 1)").tag(channel)
                                 }
                             }
                             .labelsHidden()
                             .frame(maxWidth: .infinity)
-                            Text("All preserves each event's MIDI channel.")
+                            Text("For a track instrument, sends notes, keyswitches and expression to the selected channel. Choose Channel 1 for ARIA's default part.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Text("V-Rack channels are selected in the track's output destination. Restart playback after changing this setting.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("MIDI Input Channel Filter")
+                                .font(.subheadline)
+                            Picker("MIDI Input Channel Filter", selection: Binding<Int>(
+                                get: { viewModel.project.track(withID: id)?.midiOutputChannel.map { Int($0) } ?? -1 },
+                                set: { viewModel.setTrackMIDIOutputChannel(id: id, channel: $0 < 0 ? nil : UInt8($0)) }
+                            )) {
+                                Text("All Input Channels").tag(-1)
+                                ForEach(0..<16, id: \.self) { channel in
+                                    Text("Channel \(channel + 1)").tag(channel)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(maxWidth: .infinity)
+                            Text("Only determines which incoming or recorded MIDI events are accepted; it does not change their output channel.")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
