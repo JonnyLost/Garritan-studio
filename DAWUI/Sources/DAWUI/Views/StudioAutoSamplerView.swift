@@ -29,6 +29,12 @@ public struct StudioAutoSamplerView: View {
     @State private var presets: [StudioAutoSamplerCapture.Preset] = []
     @State private var selectedPreset: Int?
     @State private var coverage: StudioAutoSamplerCapture.Coverage = .standard
+    @State private var midiChannel = 1
+    @State private var customRange = false
+    @State private var lowestNote = 36
+    @State private var highestNote = 84
+    @State private var semitoneStep = 12
+    @State private var limitPlaybackToRange = true
     @State private var name = "My Sampled Instrument"
     @State private var sustainSeconds = 1.5
     @State private var releaseSeconds = 0.65
@@ -92,11 +98,28 @@ public struct StudioAutoSamplerView: View {
         soundSourceMode == .loaded ? selectedLoadedSource?.source : selectedSource
     }
 
+    private var samplingPlan: StudioAutoSamplerCapture.SamplingPlan {
+        if customRange {
+            return .init(coverage: coverage,
+                         lowestNote: UInt8(clamping: lowestNote),
+                         highestNote: UInt8(clamping: highestNote),
+                         semitoneStep: UInt8(clamping: semitoneStep),
+                         midiChannel: UInt8(clamping: midiChannel),
+                         limitPlaybackToRange: limitPlaybackToRange)
+        }
+        return .init(coverage: coverage,
+                     midiChannel: UInt8(clamping: midiChannel))
+    }
+
     private var options: StudioSynthSamplerCapture.Options {
-        var setting = coverage.options
-        setting.sustainSeconds = sustainSeconds
-        setting.releaseSeconds = releaseSeconds
-        return setting
+        samplingPlan.options(sustainSeconds: sustainSeconds,
+                             releaseSeconds: releaseSeconds)
+    }
+
+    private func noteLabel(_ number: Int) -> String {
+        let names = ["C", "C♯", "D", "D♯", "E", "F", "F♯",
+                     "G", "G♯", "A", "A♯", "B"]
+        return "\(names[number % 12])\(number / 12 - 1) · MIDI \(number)"
     }
 
     public var body: some View {
@@ -182,6 +205,19 @@ public struct StudioAutoSamplerView: View {
                 .textFieldStyle(.roundedBorder)
                 .disabled(isCapturing)
 
+            HStack(spacing: 12) {
+                Picker("Source MIDI channel", selection: $midiChannel) {
+                    ForEach(1...16, id: \.self) { channel in
+                        Text("Channel \(channel)").tag(channel)
+                    }
+                }
+                .pickerStyle(.menu)
+                .disabled(isCapturing)
+                Text("Choose the channel containing the instrument program, especially for multitimbral ARIA instances.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Divider()
             HStack(alignment: .top, spacing: 18) {
                 VStack(alignment: .leading, spacing: 8) {
                     Picker("Coverage", selection: $coverage) {
@@ -190,7 +226,7 @@ public struct StudioAutoSamplerView: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    Text("\(options.rootNotes.count) notes × \(options.velocities.count) velocities = \(options.rootNotes.count * options.velocities.count) recordings")
+                    Text("\(samplingPlan.rootNotes.count) notes × \(samplingPlan.velocities.count) velocities = \(samplingPlan.sampleCount) recordings")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
@@ -201,6 +237,48 @@ public struct StudioAutoSamplerView: View {
                     Slider(value: $releaseSeconds, in: 0.1...3, step: 0.1)
                 }
                 .font(.caption)
+            }
+            .disabled(isCapturing)
+
+            VStack(alignment: .leading, spacing: 9) {
+                Toggle("Custom note range and sampling interval",
+                       isOn: $customRange)
+                    .onChange(of: customRange) { _, enabled in
+                        if enabled {
+                            let defaults = StudioAutoSamplerCapture.SamplingPlan(
+                                coverage: coverage)
+                            lowestNote = Int(defaults.lowestNote)
+                            highestNote = Int(defaults.highestNote)
+                            semitoneStep = Int(defaults.semitoneStep)
+                        }
+                    }
+                if customRange {
+                    HStack(spacing: 18) {
+                        Stepper("Lowest: \(noteLabel(lowestNote))",
+                                value: $lowestNote, in: 0...highestNote)
+                        Stepper("Highest: \(noteLabel(highestNote))",
+                                value: $highestNote, in: lowestNote...127)
+                    }
+                    Picker("Sample every", selection: $semitoneStep) {
+                        ForEach([1, 2, 3, 4, 6, 12, 24], id: \.self) { distance in
+                            Text("\(distance) semitone\(distance == 1 ? "" : "s")")
+                                .tag(distance)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    Toggle("Only play within selected key range",
+                           isOn: $limitPlaybackToRange)
+                    if !samplingPlan.isValid {
+                        Label("Too many samples (maximum 128), or an invalid note range. Increase the sampling interval or choose Quick/Standard coverage.",
+                              systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                } else {
+                    Text("Preset note coverage. Enable custom range to limit sampling to the instrument's actual playable notes.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
             .disabled(isCapturing)
 
@@ -254,7 +332,7 @@ public struct StudioAutoSamplerView: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(isCapturing || captureSource == nil ||
                               name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                              !options.isValid)
+                              !options.isValid || !samplingPlan.isValid)
             }
         }
         .padding(22)
@@ -295,7 +373,7 @@ public struct StudioAutoSamplerView: View {
 
     private func beginCapture() {
         guard let source = captureSource, options.isValid,
-              !isCapturing else { return }
+              samplingPlan.isValid, !isCapturing else { return }
         // Copy the actual, most recent state while still on Studio's host
         // control actor; no AU objects are passed into the detached capture.
         let currentSound: Data?
@@ -314,6 +392,7 @@ public struct StudioAutoSamplerView: View {
         }
         let sourceName = name
         let captureOptions = options
+        let selectedPlan = samplingPlan
         let chosenPreset = soundSourceMode == .installed ? selectedPreset : nil
         result = nil
         errorMessage = nil
@@ -322,7 +401,8 @@ public struct StudioAutoSamplerView: View {
             do {
                 let output = try await StudioAutoSamplerCapture.capture(
                     source: source, name: sourceName, options: captureOptions,
-                    presetNumber: chosenPreset, configuredState: currentSound)
+                    presetNumber: chosenPreset, configuredState: currentSound,
+                    plan: selectedPlan)
                 await MainActor.run {
                     self.result = output
                     self.isCapturing = false
