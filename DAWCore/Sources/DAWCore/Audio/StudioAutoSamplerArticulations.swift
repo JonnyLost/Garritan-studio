@@ -42,7 +42,8 @@ public enum StudioAutoSamplerArticulations {
 
         public func isValid(for roots: [UInt8], velocities: [UInt8],
                             captureReleases: Bool) -> Bool {
-            guard isValid, !roots.isEmpty, !velocities.isEmpty else { return false }
+            guard isValid, !roots.isEmpty, !velocities.isEmpty,
+                  (entries.isEmpty || !captureReleases) else { return false }
             let count = roots.count * velocities.count * max(1, entries.count)
             return count > 0 && count <= (captureReleases ? 64 : 128) &&
                 entries.allSatisfy { !roots.contains($0.sourceKeyswitch) }
