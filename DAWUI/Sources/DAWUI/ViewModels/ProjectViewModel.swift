@@ -248,8 +248,10 @@ public final class ProjectViewModel: ObservableObject {
                 // Route to V-Rack instrument on specified channel
                 return (playbackEngine.rackInstrument(for: rackID), min(16, max(1, ch)) - 1)
             case .trackInstrument, .none:
-                // Route to the track instrument on the incoming MIDI channel.
-                return (playbackEngine.instrument(for: trackID), event.channel)
+                // Apply the track's output channel consistently to live notes,
+                // note-offs, expression CCs, program changes and bends.
+                return (playbackEngine.instrument(for: trackID),
+                        track.transmittedMIDIChannel(for: event.channel))
             }
         }()
         
@@ -1470,14 +1472,14 @@ public final class ProjectViewModel: ObservableObject {
         guard let track = project.track(withID: trackID),
               let level = track.instrumentLevelCC7 else { return }
         playbackEngine.instrument(for: trackID)?.sendController(
-            7, value: level, channel: track.instrumentLevelChannel ?? 0)
+            7, value: level, channel: track.instrumentLevelChannel ?? track.midiTransmitChannel ?? 0)
     }
 
     public func setInstrumentLevel(id: TrackID, value: UInt8) {
         guard value <= 127, var track = project.track(withID: id) else { return }
         track.instrumentLevelCC7 = value
         updateTrack(track, description: "Change Instrument Level")
-        playbackEngine.instrument(for: id)?.sendController(7, value: value, channel: track.instrumentLevelChannel ?? 0)
+        playbackEngine.instrument(for: id)?.sendController(7, value: value, channel: track.instrumentLevelChannel ?? track.midiTransmitChannel ?? 0)
     }
 
     public func setInstrumentLevelChannel(id: TrackID, channel: UInt8) {
@@ -1498,12 +1500,37 @@ public final class ProjectViewModel: ObservableObject {
         playbackEngine.updateTrackVolume(id, volume: volume)
     }
     
-    /// nil = All MIDI channels; otherwise filter to the selected zero-based channel.
+    /// nil = All source MIDI channels; otherwise accept only this input channel.
+    /// This is an input filter, independent of the channel sent to the AU.
     public func setTrackMIDIOutputChannel(id: TrackID, channel: UInt8?) {
         guard channel == nil || channel! < 16,
               var track = project.track(withID: id) else { return }
         track.midiOutputChannel = channel
-        updateTrack(track, description: "Change MIDI Output Channel")
+        updateTrack(track, description: "Change MIDI Input Filter")
+    }
+
+    /// The output channel belongs to the track instrument, not the keyboard.
+    /// A nil override preserves recorded or live MIDI event channels.
+    public func setTrackMIDITransmitChannel(id: TrackID, channel: UInt8?) {
+        guard channel == nil || channel! < 16,
+              var track = project.track(withID: id),
+              track.midiTransmitChannel != channel else { return }
+        // Avoid leaving sustained voices on the previous channel if the
+        // user changes this live. V-Rack channels belong to their own route.
+        if case .rackInstrument = track.midiOutput {
+            // The V-Rack explicitly selects its own MIDI destination channel.
+        } else if let instrument = playbackEngine.instrument(for: id) {
+            for oldChannel: UInt8 in 0..<16 {
+                instrument.sendController(64, value: 0, channel: oldChannel)
+                instrument.sendController(123, value: 0, channel: oldChannel)
+            }
+        }
+        track.midiTransmitChannel = channel
+        updateTrack(track, description: "Change MIDI Transmit Channel")
+        if let level = track.instrumentLevelCC7, track.instrumentLevelChannel == nil {
+            playbackEngine.instrument(for: id)?.sendController(
+                7, value: level, channel: channel ?? 0)
+        }
     }
 
     /// Update a track's stage position without changing its existing audio routing.
