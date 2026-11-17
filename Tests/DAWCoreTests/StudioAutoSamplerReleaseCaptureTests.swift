@@ -84,7 +84,15 @@ final class StudioAutoSamplerReleaseCaptureTests: XCTestCase {
             patch.zones[index].managedFileName = nil
         }
         XCTAssertTrue(patch.isValid)
+        patch = StudioAutoSamplerReleaseCapture.smoothingReleaseEndings(in: patch)
+        XCTAssertTrue(patch.isValid)
         XCTAssertEqual(patch.zones.count, 2)
+        XCTAssertEqual(
+            patch.zones.first(where: { $0.isReleaseTrigger == true })?.fadeOutFrames,
+            256)
+        XCTAssertEqual(
+            patch.zones.first(where: { $0.isReleaseTrigger != true })?.fadeOutFrames,
+            nil)
         XCTAssertEqual(patch.zones.filter { $0.isReleaseTrigger == true }.count, 1)
         XCTAssertEqual(patch.zones.filter { $0.isReleaseTrigger != true }.count, 1)
         XCTAssertTrue(patch.zones.allSatisfy { !$0.hasSustainLoop })
