@@ -408,6 +408,13 @@ public enum StudioAutoSamplerCapture {
         let mappedLoops = StudioAutoSamplerLooping.apply(
             loops, to: sampler, takes: takes)
         sampler = mappedLoops.patch
+        if captureReleaseTails {
+            sampler = try StudioAutoSamplerReleaseCapture
+                .separatingHeldAndReleasePlayback(
+                    in: sampler,
+                    sustainSeconds: captureOptions.sustainSeconds,
+                    sampleRate: captureOptions.sampleRate)
+        }
         sampler = expression.applying(to: sampler)
         if let plan {
             sampler = plan.applyingPlaybackRange(to: sampler)
