@@ -430,3 +430,24 @@ patch with two articulations, two CC1 layers and corresponding
 release-trigger zones. Actual note-off timbre, velocity independence,
 CC1 movement just before note-off, and CPU behavior still require
 native macOS regression and listening tests.
+
+## Milestone 11 — prevent doubled note-off tails
+
+Previously, the original held-note WAV still contained the source AU's
+recorded note-off tail, while the same tail was also extracted into a
+separate native release-trigger sample. Without playback boundaries,
+both tails could sound simultaneously on note-off.
+
+When natural release capture is enabled, Studio now installs a
+**non-destructive held-zone trim end** at the exact MIDI note-off frame
+(`sustainSeconds * sampleRate`) and a short 256-frame fade-out.
+Release-trigger zones remain independent and retain their original
+attack. The source WAV is never rewritten, so composers can still
+edit the underlying recording. Existing sustain loops stay within
+the held region and remain valid.
+
+The trim is not installed when release capture is disabled, preserving
+the original single-WAV behavior. New XCTest cases cover separation,
+unchanged PCM, release-zone independence and preservation of sustain
+loop markers. Full macOS build, real AU note-off listening, and
+round-trip package verification are still required.
