@@ -355,6 +355,8 @@ public enum StudioAutoSamplerCapture {
         let allTakes = takes + (releases?.takes ?? [])
         var sampler = try StudioSamplerInstrumentFactory.assemble(
             allTakes, sampleDirectory: sampleDirectory)
+        sampler = StudioAutoSamplerReleaseCapture.smoothingReleaseEndings(
+            in: sampler)
         let mappedLoops = StudioAutoSamplerLooping.apply(
             loops, to: sampler, takes: takes)
         sampler = mappedLoops.patch
