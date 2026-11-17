@@ -1208,7 +1208,7 @@ public final class PlaybackEngine: ObservableObject {
                     channel = min(16, max(1, ch)) - 1
                 } else {
                     destination = .track(scheduled.trackID)
-                    channel = nil
+                    channel = scheduled.midiTransmitChannel
                 }
                 return StudioMIDIFrameCompiler.messages(
                     StudioMIDISessionEvent(clipID: scheduled.clipID,
@@ -1662,49 +1662,51 @@ public final class PlaybackEngine: ObservableObject {
                         clipID: entry.clipID,
                         absoluteBeat: entry.absoluteBeat,
                         event: event,
-                        midiOutput: .rackInstrument(id: info.rackID, channel: info.channel)
+                        midiOutput: .rackInstrument(id: info.rackID, channel: info.channel),
+                        midiTransmitChannel: nil
                     ))
                 } else {
                     let samplePos = Int64((entry.absoluteBeat / tempo) * 60.0 * sampleRate)
+                    let channel = track.transmittedMIDIChannel(for: event.channel)
                     switch event.type {
                     case .note(let noteData):
                         coreAudioMIDIEvents.append(.noteOn(
                             trackID: track.id, samplePosition: samplePos,
                             note: noteData.pitch, velocity: noteData.velocity,
-                            channel: event.channel))
+                            channel: channel))
                         let durationSamples = max(1, Int64(
                             (noteData.duration / tempo) * 60.0 * sampleRate))
                         coreAudioMIDIEvents.append(.noteOff(
                             trackID: track.id,
                             samplePosition: samplePos + durationSamples,
-                            note: noteData.pitch, channel: event.channel))
+                            note: noteData.pitch, channel: channel))
                     case .controlChange(let cc, let value):
                         coreAudioMIDIEvents.append(.controlChange(
                             trackID: track.id, samplePosition: samplePos,
-                            controller: cc, value: value, channel: event.channel))
+                            controller: cc, value: value, channel: channel))
                     case .programChange(let program):
                         coreAudioMIDIEvents.append(ScheduledMIDIEvent(
                             trackID: track.id, samplePosition: samplePos,
-                            status: 0xC0 | (event.channel & 0x0F),
-                            data1: program, data2: 0, channel: event.channel))
+                            status: 0xC0 | (channel & 0x0F),
+                            data1: program, data2: 0, channel: channel))
                     case .pitchBend(let value):
                         let bend = UInt16(clamping: Int(value) + 8192)
                         coreAudioMIDIEvents.append(ScheduledMIDIEvent(
                             trackID: track.id, samplePosition: samplePos,
-                            status: 0xE0 | (event.channel & 0x0F),
+                            status: 0xE0 | (channel & 0x0F),
                             data1: UInt8(bend & 0x7F),
                             data2: UInt8((bend >> 7) & 0x7F),
-                            channel: event.channel))
+                            channel: channel))
                     case .aftertouch(let pressure):
                         coreAudioMIDIEvents.append(ScheduledMIDIEvent(
                             trackID: track.id, samplePosition: samplePos,
-                            status: 0xD0 | (event.channel & 0x0F),
-                            data1: pressure, data2: 0, channel: event.channel))
+                            status: 0xD0 | (channel & 0x0F),
+                            data1: pressure, data2: 0, channel: channel))
                     case .polyAftertouch(let note, let pressure):
                         coreAudioMIDIEvents.append(ScheduledMIDIEvent(
                             trackID: track.id, samplePosition: samplePos,
-                            status: 0xA0 | (event.channel & 0x0F),
-                            data1: note, data2: pressure, channel: event.channel))
+                            status: 0xA0 | (channel & 0x0F),
+                            data1: note, data2: pressure, channel: channel))
                     case .sysex:
                         break
                     }
@@ -1847,7 +1849,8 @@ public final class PlaybackEngine: ObservableObject {
                 localScheduledMIDIEvents.append(ScheduledEvent(
                     trackID: track.id, clipID: entry.clipID,
                     absoluteBeat: entry.absoluteBeat, event: entry.event,
-                    midiOutput: track.midiOutput
+                    midiOutput: track.midiOutput,
+                    midiTransmitChannel: track.midiTransmitChannel
                 ))
             }
         }
@@ -1876,7 +1879,7 @@ public final class PlaybackEngine: ObservableObject {
                         if scheduled.absoluteBeat >= playbackStartBeat { invalid = true }
                         continue
                     }
-                    let channel = scheduled.event.channel & 0x0F
+                    let channel = (scheduled.midiTransmitChannel ?? scheduled.event.channel) & 0x0F
                     switch scheduled.event.type {
                     case .note(let note):
                         if note.velocity == 0 {
@@ -2482,6 +2485,7 @@ private struct ScheduledEvent {
     let absoluteBeat: Double
     let event: MIDIEvent
     let midiOutput: MIDIOutputDestination?  // Where to route this event
+    let midiTransmitChannel: UInt8?  // Override only for the track's own instrument
 }
 
 /// Info about an audio clip for playback timing
