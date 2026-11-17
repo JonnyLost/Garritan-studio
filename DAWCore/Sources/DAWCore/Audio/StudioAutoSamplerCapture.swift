@@ -154,6 +154,8 @@ public enum StudioAutoSamplerCapture {
         public let dynamicsMode: StudioAutoSamplerExpression.Mode
         /// Source Audio Unit CC11 reference, if explicitly set for capture.
         public let sourceCC11: UInt8?
+        /// Number of source articulation sounds included in the instrument.
+        public let articulationCount: Int
     }
 
     public enum CaptureError: Error, LocalizedError {
@@ -245,6 +247,7 @@ public enum StudioAutoSamplerCapture {
                                autoLoopSustains: Bool = true,
                                captureReleaseTails: Bool = false,
                                expression: StudioAutoSamplerExpression.Configuration = .init(),
+                               articulations: StudioAutoSamplerArticulations.Plan = .init(),
                                sampleDirectory: URL? = nil,
                                packageDirectory: URL? = nil) async throws -> Result {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -261,6 +264,11 @@ public enum StudioAutoSamplerCapture {
                   includeReleases: captureReleaseTails),
               expression.canCaptureLayers(captureOptions.velocities,
                                           captureReleaseTails: captureReleaseTails),
+              articulations.isValid(for: captureOptions.rootNotes,
+                                    velocities: captureOptions.velocities,
+                                    captureReleases: captureReleaseTails),
+              (articulations.entries.isEmpty ||
+                  articulations.sourceChannel == (plan?.midiChannel ?? 1)),
               !trimmed.isEmpty, trimmed.count <= 120,
               !(presetNumber != nil && configuredState != nil)
         else { throw CaptureError.invalidConfiguration }
@@ -309,6 +317,7 @@ public enum StudioAutoSamplerCapture {
         }
 
         var takes: [StudioSamplerFactoryTake] = []
+        for articulation in articulations.effectiveEntries {
         for root in captureOptions.rootNotes.sorted() {
             for mappedVelocity in captureOptions.velocities.sorted() {
                 guard !Task<Never, Never>.isCancelled else {
@@ -321,6 +330,16 @@ public enum StudioAutoSamplerCapture {
                 instrument.sendMIDIEvent(0xB0 | channel, data1: 123, data2: 0)
                 instrument.auAudioUnit.reset()
                 engine.reset()
+
+                // The source AU's articulation switch is intentionally sent
+                // AFTER reset, since some plug-ins clear latched switches on
+                // reset. Source notes are not recorded in the resulting WAV.
+                if !articulations.entries.isEmpty {
+                    instrument.startNote(articulation.sourceKeyswitch,
+                                         withVelocity: 100, onChannel: channel)
+                    instrument.stopNote(articulation.sourceKeyswitch,
+                                        onChannel: channel)
+                }
 
                 let point = expression.point(
                     for: mappedVelocity, allLayers: captureOptions.velocities)
@@ -342,15 +361,17 @@ public enum StudioAutoSamplerCapture {
                 }
 
                 let output = staging.appendingPathComponent(
-                    "midi-\(root)-layer-\(mappedVelocity).wav")
+                    "art-\(articulations.effectiveEntries.firstIndex(of: articulation) ?? 0)-midi-\(root)-layer-\(mappedVelocity).wav")
                 try renderOne(instrument, engine: engine, buffer: buffer,
                               note: root, velocity: point.playedVelocity,
                               channel: channel, options: captureOptions,
                               destination: output)
                 takes.append(StudioSamplerFactoryTake(
                     source: output, rootNote: root,
-                    velocity: point.mappedVelocity))
+                    velocity: point.mappedVelocity,
+                    articulation: articulation.name))
             }
+        }
         }
         // Audio is complete; release the AU engine BEFORE tail extraction,
         // loop analysis or hash-heavy packaging. Never process the sample
@@ -400,7 +421,8 @@ public enum StudioAutoSamplerCapture {
                    configuredState == nil ? "Factory Sound" : "Configured Sound"] +
                    (captureReleaseTails ? ["Release Samples"] : []) +
                    (expression.mode == .cc1Layers ? ["CC1 Dynamic Layers"] : []) +
-                   (expression.sourceCC11.map { ["Source CC11 \($0)"] } ?? []))
+                   (expression.sourceCC11.map { ["Source CC11 \($0)"] } ?? []) +
+                   (articulations.entries.isEmpty ? [] : ["Keyswitched Articulations"]))
         do {
             let package = try StudioSamplerInstrumentPackage.saveToLibrary(
                 sampler, metadata: metadata, in: packageDirectory)
@@ -412,7 +434,8 @@ public enum StudioAutoSamplerCapture {
                           releaseSkippedCount: releases?.skippedCount ?? 0,
                           dynamicsMode: expression.mode,
                           sourceCC11: expression.sourceCC11 ??
-                              (expression.mode == .cc1Layers ? 127 : nil))
+                              (expression.mode == .cc1Layers ? 127 : nil),
+                          articulationCount: articulations.effectiveEntries.count)
         } catch {
             for zone in sampler.zones where zone.managedFileName != nil {
                 try? FileManager.default.removeItem(at: zone.sampleURL)
