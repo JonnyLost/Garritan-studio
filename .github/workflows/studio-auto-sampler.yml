@@ -8,6 +8,8 @@ on:
     paths:
       - "DAWCore/Sources/DAWCore/Audio/StudioAutoSamplerCapture.swift"
       - "DAWCore/Sources/DAWCore/Audio/StudioAutoSamplerLooping.swift"
+      - "DAWCore/Sources/DAWCore/Audio/StudioAutoSamplerReleaseCapture.swift"
+      - "Tests/DAWCoreTests/StudioAutoSamplerReleaseCaptureTests.swift"
       - "Tests/DAWCoreTests/StudioAutoSamplerLoopingTests.swift"
       - "DAWUI/Sources/DAWUI/Views/StudioAutoSamplerView.swift"
       - "DAWUI/Sources/DAWUI/Views/StudioSamplerMapView.swift"
@@ -34,6 +36,8 @@ jobs:
           swiftc -frontend -parse \
             DAWCore/Sources/DAWCore/Audio/StudioAutoSamplerCapture.swift \
             DAWCore/Sources/DAWCore/Audio/StudioAutoSamplerLooping.swift \
+            DAWCore/Sources/DAWCore/Audio/StudioAutoSamplerReleaseCapture.swift \
+            Tests/DAWCoreTests/StudioAutoSamplerReleaseCaptureTests.swift \
             Tests/DAWCoreTests/StudioAutoSamplerLoopingTests.swift \
             DAWUI/Sources/DAWUI/Views/StudioAutoSamplerView.swift \
             DAWUI/Sources/DAWUI/Views/StudioSamplerMapView.swift \
