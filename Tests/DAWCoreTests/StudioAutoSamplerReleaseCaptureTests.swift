@@ -177,7 +177,7 @@ final class StudioAutoSamplerReleaseCaptureTests: XCTestCase {
         XCTAssertEqual(patch.zones.count, 8)
         let releaseZones = patch.zones.filter { $0.isReleaseTrigger == true }
         XCTAssertEqual(releaseZones.count, 4)
-        for articulationID: UInt8 in [0, 1] {
+        for articulationID in [UInt8(0), UInt8(1)] {
             let layers = releaseZones.filter {
                 ($0.articulationID ?? 0) == articulationID
             }
