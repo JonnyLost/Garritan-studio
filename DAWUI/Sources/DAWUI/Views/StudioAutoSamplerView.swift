@@ -34,9 +34,10 @@ public struct StudioAutoSamplerView: View {
     @State private var sendCC11 = false
     @State private var sourceCC11 = 127
     @State private var captureArticulations = false
-    @State private var sustainKeyswitch = 24
-    @State private var alternateKeyswitch = 25
-    @State private var alternateName = "Staccato"
+    @State private var articulationEntries: [StudioAutoSamplerArticulations.Entry] = [
+        .init(name: "Sustain", sourceKeyswitch: 24),
+        .init(name: "Staccato", sourceKeyswitch: 25)
+    ]
     @State private var midiChannel = 1
     @State private var customRange = false
     @State private var lowestNote = 36
@@ -134,17 +135,14 @@ public struct StudioAutoSamplerView: View {
     }
 
     private var articulationPlan: StudioAutoSamplerArticulations.Plan {
-        .init(entries: captureArticulations ? [
-            .init(name: "Sustain", sourceKeyswitch: UInt8(clamping: sustainKeyswitch)),
-            .init(name: alternateName,
-                  sourceKeyswitch: UInt8(clamping: alternateKeyswitch))
-        ] : [], sourceChannel: UInt8(clamping: midiChannel))
+        .init(entries: captureArticulations ? articulationEntries : [],
+              sourceChannel: UInt8(clamping: midiChannel))
     }
 
     private var fitsSampleZoneLimit: Bool {
         StudioAutoSamplerReleaseCapture.fitsZoneLimit(
             heldSampleCount: samplingPlan.sampleCount *
-                (captureArticulations ? 2 : 1),
+                (captureArticulations ? articulationEntries.count : 1),
             includeReleases: captureReleaseTails) &&
         expressionConfiguration.canCaptureLayers(
             samplingPlan.velocities,
@@ -339,17 +337,52 @@ public struct StudioAutoSamplerView: View {
                         if enabled { captureReleaseTails = false }
                     }
                 if captureArticulations {
-                    Text("Capture Sustain and one alternate playing technique from the same Audio Unit. Enter the source plugin's keyswitch MIDI notes; Studio builds its own native keyswitch map.")
+                    Text("Define each source playing technique and its MIDI keyswitch. Sustain is the default. Studio automatically maps each captured technique to its own native articulation.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                    HStack {
-                        Stepper("Sustain source switch: \(sustainKeyswitch)",
-                                value: $sustainKeyswitch, in: 0...127)
-                        Stepper("Alternate source switch: \(alternateKeyswitch)",
-                                value: $alternateKeyswitch, in: 0...127)
+                    ForEach(articulationEntries.indices, id: \.self) { index in
+                        HStack(spacing: 8) {
+                            if index == 0 {
+                                Text("Sustain")
+                                    .frame(width: 120, alignment: .leading)
+                            } else {
+                                TextField("Technique name", text: Binding(
+                                    get: { articulationEntries[index].name },
+                                    set: { articulationEntries[index].name = $0 }))
+                                    .frame(minWidth: 110)
+                            }
+                            Stepper("Source key \(articulationEntries[index].sourceKeyswitch)",
+                                    value: Binding(
+                                        get: { Int(articulationEntries[index].sourceKeyswitch) },
+                                        set: { articulationEntries[index].sourceKeyswitch = UInt8(clamping: $0) }),
+                                    in: 0...127)
+                            if index > 1 {
+                                Button {
+                                    articulationEntries.remove(at: index)
+                                } label: {
+                                    Image(systemName: "minus.circle")
+                                }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel("Remove \(articulationEntries[index].name)")
+                            }
+                        }
                     }
-                    TextField("Alternate articulation name", text: $alternateName)
-                    Text("Requires two distinct keyswitch notes outside the sampled root notes. Doubles the recordings and may exceed the 128-zone limit. Natural release tails are unavailable in multi-articulation mode until their native routing is articulation-aware.")
+                    HStack {
+                        Button("Add articulation") {
+                            guard articulationEntries.count < 15 else { return }
+                            let used = Set(articulationEntries.map(\.sourceKeyswitch))
+                            let next = (0...127).first { !used.contains(UInt8($0)) } ?? 0
+                            articulationEntries.append(.init(
+                                name: "Articulation \(articulationEntries.count + 1)",
+                                sourceKeyswitch: UInt8(next)))
+                        }
+                        .disabled(articulationEntries.count >= 15)
+                        Spacer()
+                        Text("\(articulationEntries.count)/15 articulations · \(samplingPlan.sampleCount * articulationEntries.count) recordings")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("Use distinct source keyswitches outside the sampled root notes. Maximum 128 total zones. Natural release tails remain unavailable in multi-articulation mode.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                     if !fitsSampleZoneLimit {
