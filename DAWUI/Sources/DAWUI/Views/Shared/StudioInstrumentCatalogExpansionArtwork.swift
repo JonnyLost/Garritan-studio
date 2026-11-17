@@ -115,8 +115,11 @@ extension InstrumentIconDrawing {
                 silhouettes: [O(12, 26, 69, 63)]
             )
         case .bansuri:
-            let toneHoles = (0..<6).map { i in
-                O(CGFloat(30 + i * 9), CGFloat(70 - i * 7), 5, 5)
+            var toneHoles: [Path] = []
+            for index in 0..<6 {
+                let x = CGFloat(30 + index * 9)
+                let y = CGFloat(70 - index * 7)
+                toneHoles.append(O(x, y, 5, 5))
             }
             return Self(
                 primary: [
@@ -241,33 +244,38 @@ extension InstrumentIconDrawing {
                 silhouettes: [line([(34, 36), (70, 36), (70, 60), (34, 60)], closed: true)]
             )
         case .recorder:
-            return Self(
-                primary: [
-                    L([(32, 13), (44, 9), (67, 89), (55, 93), (32, 13)]),
-                    L([(32, 13), (25, 15), (27, 32), (36, 32)]),
-                    L([(39, 11), (45, 31)])
-                ],
-                details: (0..<6).map { i in
-                    O(CGFloat(41 + i * 3), CGFloat(34 + i * 9), 5, 5)
-                },
-                engraving: [],
-                silhouettes: [line([(32, 13), (44, 9), (67, 89), (55, 93)], closed: true)]
-            )
+            let body: [Path] = [
+                L([(32, 13), (44, 9), (67, 89), (55, 93), (32, 13)]),
+                L([(32, 13), (25, 15), (27, 32), (36, 32)]),
+                L([(39, 11), (45, 31)])
+            ]
+            var holes: [Path] = []
+            for index in 0..<6 {
+                let x = CGFloat(41 + index * 3)
+                let y = CGFloat(34 + index * 9)
+                holes.append(O(x, y, 5, 5))
+            }
+            let silhouette = line([(32, 13), (44, 9), (67, 89), (55, 93)], closed: true)
+            return Self(primary: body, details: holes, engraving: [], silhouettes: [silhouette])
         case .sarrusophone:
-            return Self(
-                primary: [
-                    L([(33, 18), (41, 20), (61, 69), (76, 82)]),
-                    L([(41, 19), (48, 17), (70, 68), (80, 80)]),
-                    L([(76, 82), (90, 65), (93, 81), (76, 94), (61, 80)]),
-                    L([(34, 17), (30, 4), (38, 3)])
-                ],
-                details: (0..<6).map { i in
-                    O(CGFloat(44 + i * 3), CGFloat(31 + i * 8), 4, 4)
-                },
-                engraving: [],
-                silhouettes: [line([(34, 18), (41, 20), (70, 68), (76, 82),
-                                    (90, 65), (93, 81), (76, 94), (61, 80)], closed: true)]
+            let body: [Path] = [
+                L([(33, 18), (41, 20), (61, 69), (76, 82)]),
+                L([(41, 19), (48, 17), (70, 68), (80, 80)]),
+                L([(76, 82), (90, 65), (93, 81), (76, 94), (61, 80)]),
+                L([(34, 17), (30, 4), (38, 3)])
+            ]
+            var keys: [Path] = []
+            for index in 0..<6 {
+                let x = CGFloat(44 + index * 3)
+                let y = CGFloat(31 + index * 8)
+                keys.append(O(x, y, 4, 4))
+            }
+            let bell = line(
+                [(34, 18), (41, 20), (70, 68), (76, 82),
+                 (90, 65), (93, 81), (76, 94), (61, 80)],
+                closed: true
             )
+            return Self(primary: body, details: keys, engraving: [], silhouettes: [bell])
         default:
             return nil
         }
