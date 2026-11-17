@@ -64,6 +64,80 @@ public enum StudioAutoSamplerCapture {
         }
     }
 
+    /// One bounded MIDI capture schedule. The UI displays channels 1...16,
+    /// while Core Audio uses the corresponding zero-based 0...15 channel.
+    /// The sampling endpoints are always included so a composer's requested
+    /// upper playable note is represented by a real captured recording.
+    public struct SamplingPlan: Sendable, Equatable {
+        public var lowestNote: UInt8
+        public var highestNote: UInt8
+        public var semitoneStep: UInt8
+        public var midiChannel: UInt8
+        public var limitPlaybackToRange: Bool
+        public var velocities: [UInt8]
+
+        public init(coverage: Coverage = .standard,
+                    lowestNote: UInt8? = nil, highestNote: UInt8? = nil,
+                    semitoneStep: UInt8? = nil, midiChannel: UInt8 = 1,
+                    limitPlaybackToRange: Bool = false) {
+            let defaults = coverage.options
+            self.lowestNote = lowestNote ?? defaults.rootNotes.first ?? 60
+            self.highestNote = highestNote ?? defaults.rootNotes.last ?? 60
+            self.semitoneStep = semitoneStep ?? UInt8(
+                defaults.rootNotes.count > 1
+                    ? Int(defaults.rootNotes[1]) - Int(defaults.rootNotes[0]) : 12)
+            self.midiChannel = midiChannel
+            self.limitPlaybackToRange = limitPlaybackToRange
+            self.velocities = defaults.velocities
+        }
+
+        public var rootNotes: [UInt8] {
+            guard lowestNote <= 127, highestNote <= 127,
+                  lowestNote <= highestNote,
+                  (1...24).contains(semitoneStep) else { return [] }
+            var notes = stride(from: Int(lowestNote), through: Int(highestNote),
+                               by: Int(semitoneStep)).map(UInt8.init)
+            if notes.last != highestNote { notes.append(highestNote) }
+            return notes
+        }
+
+        public var sampleCount: Int { rootNotes.count * velocities.count }
+
+        public var isValid: Bool {
+            (1...16).contains(midiChannel) &&
+            lowestNote <= highestNote && highestNote <= 127 &&
+            (1...24).contains(semitoneStep) &&
+            !rootNotes.isEmpty && sampleCount <= 128 &&
+            !velocities.isEmpty && Set(velocities).count == velocities.count &&
+            velocities.allSatisfy { (1...127).contains($0) }
+        }
+
+        public func options(sustainSeconds: Double = 1.5,
+                            releaseSeconds: Double = 0.65,
+                            sampleRate: Double = 44_100)
+            -> StudioSynthSamplerCapture.Options {
+            .init(rootNotes: rootNotes, velocities: velocities,
+                  sustainSeconds: sustainSeconds,
+                  releaseSeconds: releaseSeconds, sampleRate: sampleRate)
+        }
+
+        /// Existing factory partitions continue to decide which samples own
+        /// notes within the selected range. The optional clamp only prevents
+        /// notes outside that range from sounding in the exported instrument.
+        public func applyingPlaybackRange(to patch: StudioSamplerPatch)
+            -> StudioSamplerPatch {
+            guard limitPlaybackToRange, isValid else { return patch }
+            var result = patch
+            for index in result.zones.indices {
+                result.zones[index].lowestNote = max(
+                    result.zones[index].lowestNote, lowestNote)
+                result.zones[index].highestNote = min(
+                    result.zones[index].highestNote, highestNote)
+            }
+            return result
+        }
+    }
+
     public struct Result: Sendable {
         public let patch: StudioSamplerPatch
         public let packageURL: URL
@@ -155,13 +229,21 @@ public enum StudioAutoSamplerCapture {
                                options: StudioSynthSamplerCapture.Options = .init(),
                                presetNumber: Int? = nil,
                                configuredState: Data? = nil,
+                               plan: SamplingPlan? = nil,
                                sampleDirectory: URL? = nil,
                                packageDirectory: URL? = nil) async throws -> Result {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let captureOptions = plan.map {
+            $0.options(sustainSeconds: options.sustainSeconds,
+                       releaseSeconds: options.releaseSeconds,
+                       sampleRate: options.sampleRate)
+        } ?? options
         guard source.type == kAudioUnitType_MusicDevice,
-              options.isValid, !trimmed.isEmpty, trimmed.count <= 120,
+              (plan?.isValid ?? true), captureOptions.isValid,
+              !trimmed.isEmpty, trimmed.count <= 120,
               !(presetNumber != nil && configuredState != nil)
         else { throw CaptureError.invalidConfiguration }
+        let channel: UInt8 = (plan?.midiChannel ?? 1) - 1
         // Decode and validate before instantiating a plugin or touching disk.
         let restoredState = try configuredState.map(validatedConfiguredState)
         guard !Task<Never, Never>.isCancelled else { throw CaptureError.cancelled }
@@ -189,7 +271,7 @@ public enum StudioAutoSamplerCapture {
         engine.attach(instrument)
         engine.connect(instrument, to: engine.mainMixerNode, format: nil)
         guard let format = AVAudioFormat(
-            standardFormatWithSampleRate: options.sampleRate, channels: 2),
+            standardFormatWithSampleRate: captureOptions.sampleRate, channels: 2),
               let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 512)
         else { throw CaptureError.cannotRenderOffline }
 
@@ -206,22 +288,24 @@ public enum StudioAutoSamplerCapture {
         }
 
         var takes: [StudioSamplerFactoryTake] = []
-        for root in options.rootNotes.sorted() {
-            for velocity in options.velocities.sorted() {
+        for root in captureOptions.rootNotes.sorted() {
+            for velocity in captureOptions.velocities.sorted() {
                 guard !Task<Never, Never>.isCancelled else {
                     throw CaptureError.cancelled
                 }
                 // Flush voices and effect tails between takes without changing
                 // the factory preset chosen on this isolated AU instance.
-                instrument.stopNote(root, onChannel: 0)
-                instrument.sendMIDIEvent(0xB0, data1: 120, data2: 0)
+                instrument.stopNote(root, onChannel: channel)
+                instrument.sendMIDIEvent(0xB0 | channel, data1: 120, data2: 0)
+                instrument.sendMIDIEvent(0xB0 | channel, data1: 123, data2: 0)
                 instrument.auAudioUnit.reset()
                 engine.reset()
 
                 let output = staging.appendingPathComponent(
                     "midi-\(root)-velocity-\(velocity).wav")
                 try renderOne(instrument, engine: engine, buffer: buffer,
-                              note: root, velocity: velocity, options: options,
+                              note: root, velocity: velocity,
+                              channel: channel, options: captureOptions,
                               destination: output)
                 takes.append(StudioSamplerFactoryTake(
                     source: output, rootNote: root, velocity: velocity))
@@ -233,6 +317,9 @@ public enum StudioAutoSamplerCapture {
 
         var sampler = try StudioSamplerInstrumentFactory.assemble(
             takes, sampleDirectory: sampleDirectory)
+        if let plan {
+            sampler = plan.applyingPlaybackRange(to: sampler)
+        }
         if sampleDirectory != nil {
             for i in sampler.zones.indices { sampler.zones[i].managedFileName = nil }
         }
@@ -273,6 +360,7 @@ public enum StudioAutoSamplerCapture {
     private static func renderOne(_ instrument: AVAudioUnitMIDIInstrument,
                                   engine: AVAudioEngine, buffer: AVAudioPCMBuffer,
                                   note: UInt8, velocity: UInt8,
+                                  channel: UInt8,
                                   options: StudioSynthSamplerCapture.Options,
                                   destination: URL) throws {
         let rate = options.sampleRate
@@ -290,12 +378,12 @@ public enum StudioAutoSamplerCapture {
         let totalFrames = heldFrames + Int(rate * options.releaseSeconds)
         var position = 0
         var peak: Float = 0
-        instrument.startNote(note, withVelocity: velocity, onChannel: 0)
-        defer { instrument.stopNote(note, onChannel: 0) }
+        instrument.startNote(note, withVelocity: velocity, onChannel: channel)
+        defer { instrument.stopNote(note, onChannel: channel) }
 
         while position < totalFrames {
             if Task<Never, Never>.isCancelled { throw CaptureError.cancelled }
-            if position == heldFrames { instrument.stopNote(note, onChannel: 0) }
+            if position == heldFrames { instrument.stopNote(note, onChannel: channel) }
             let edge = position < heldFrames ? heldFrames : totalFrames
             let count = AVAudioFrameCount(min(512, edge - position))
             guard count > 0,
