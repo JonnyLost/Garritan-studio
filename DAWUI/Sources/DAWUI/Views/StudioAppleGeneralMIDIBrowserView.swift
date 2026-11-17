@@ -89,7 +89,7 @@ struct StudioAppleGeneralMIDIBrowserView: View {
                                 Spacer()
                                 if selectedProgram == program {
                                     Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(.tint)
+                                        .foregroundStyle(Color.accentColor)
                                 }
                             }
                             .padding(8)
