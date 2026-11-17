@@ -150,6 +150,10 @@ public enum StudioAutoSamplerCapture {
         public let releaseCount: Int
         /// Note-off tails too quiet to merit a release-trigger zone.
         public let releaseSkippedCount: Int
+        /// Which source controller determined the captured dynamic layers.
+        public let dynamicsMode: StudioAutoSamplerExpression.Mode
+        /// Source Audio Unit CC11 reference, if explicitly set for capture.
+        public let sourceCC11: UInt8?
     }
 
     public enum CaptureError: Error, LocalizedError {
@@ -240,6 +244,7 @@ public enum StudioAutoSamplerCapture {
                                plan: SamplingPlan? = nil,
                                autoLoopSustains: Bool = true,
                                captureReleaseTails: Bool = false,
+                               expression: StudioAutoSamplerExpression.Configuration = .init(),
                                sampleDirectory: URL? = nil,
                                packageDirectory: URL? = nil) async throws -> Result {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -254,6 +259,8 @@ public enum StudioAutoSamplerCapture {
                   heldSampleCount: captureOptions.rootNotes.count *
                       captureOptions.velocities.count,
                   includeReleases: captureReleaseTails),
+              expression.canCaptureLayers(captureOptions.velocities,
+                                          captureReleaseTails: captureReleaseTails),
               !trimmed.isEmpty, trimmed.count <= 120,
               !(presetNumber != nil && configuredState != nil)
         else { throw CaptureError.invalidConfiguration }
@@ -303,7 +310,7 @@ public enum StudioAutoSamplerCapture {
 
         var takes: [StudioSamplerFactoryTake] = []
         for root in captureOptions.rootNotes.sorted() {
-            for velocity in captureOptions.velocities.sorted() {
+            for mappedVelocity in captureOptions.velocities.sorted() {
                 guard !Task<Never, Never>.isCancelled else {
                     throw CaptureError.cancelled
                 }
@@ -315,14 +322,34 @@ public enum StudioAutoSamplerCapture {
                 instrument.auAudioUnit.reset()
                 engine.reset()
 
+                let point = expression.point(
+                    for: mappedVelocity, allLayers: captureOptions.velocities)
+                // Program controllers on the isolated AU *after* resetting
+                // its voices and *before* each note-on. Render 50 ms of
+                // controller settling without writing those frames to WAV:
+                // a slow instrument should start at the requested timbre.
+                if let cc1 = point.sourceCC1 {
+                    instrument.sendMIDIEvent(0xB0 | channel,
+                                             data1: 1, data2: cc1)
+                }
+                if let cc11 = point.sourceCC11 {
+                    instrument.sendMIDIEvent(0xB0 | channel,
+                                             data1: 11, data2: cc11)
+                }
+                if point.sourceCC1 != nil || point.sourceCC11 != nil {
+                    try settleControllers(engine: engine, buffer: buffer,
+                                          sampleRate: captureOptions.sampleRate)
+                }
+
                 let output = staging.appendingPathComponent(
-                    "midi-\(root)-velocity-\(velocity).wav")
+                    "midi-\(root)-layer-\(mappedVelocity).wav")
                 try renderOne(instrument, engine: engine, buffer: buffer,
-                              note: root, velocity: velocity,
+                              note: root, velocity: point.playedVelocity,
                               channel: channel, options: captureOptions,
                               destination: output)
                 takes.append(StudioSamplerFactoryTake(
-                    source: output, rootNote: root, velocity: velocity))
+                    source: output, rootNote: root,
+                    velocity: point.mappedVelocity))
             }
         }
         // Audio is complete; release the AU engine BEFORE tail extraction,
@@ -360,6 +387,7 @@ public enum StudioAutoSamplerCapture {
         let mappedLoops = StudioAutoSamplerLooping.apply(
             loops, to: sampler, takes: takes)
         sampler = mappedLoops.patch
+        sampler = expression.applying(to: sampler)
         if let plan {
             sampler = plan.applyingPlaybackRange(to: sampler)
         }
@@ -370,7 +398,9 @@ public enum StudioAutoSamplerCapture {
             name: trimmed, category: "Auto Sampler",
             tags: ["Audio Unit", "Native Multisample", source.vendor,
                    configuredState == nil ? "Factory Sound" : "Configured Sound"] +
-                   (captureReleaseTails ? ["Release Samples"] : []))
+                   (captureReleaseTails ? ["Release Samples"] : []) +
+                   (expression.mode == .cc1Layers ? ["CC1 Dynamic Layers"] : []) +
+                   (expression.sourceCC11.map { ["Source CC11 \($0)"] } ?? []))
         do {
             let package = try StudioSamplerInstrumentPackage.saveToLibrary(
                 sampler, metadata: metadata, in: packageDirectory)
@@ -379,7 +409,10 @@ public enum StudioAutoSamplerCapture {
                           loopCount: mappedLoops.loopCount,
                           loopSkippedCount: loops.attempted - mappedLoops.loopCount,
                           releaseCount: releases?.count ?? 0,
-                          releaseSkippedCount: releases?.skippedCount ?? 0)
+                          releaseSkippedCount: releases?.skippedCount ?? 0,
+                          dynamicsMode: expression.mode,
+                          sourceCC11: expression.sourceCC11 ??
+                              (expression.mode == .cc1Layers ? 127 : nil))
         } catch {
             for zone in sampler.zones where zone.managedFileName != nil {
                 try? FileManager.default.removeItem(at: zone.sampleURL)
@@ -403,6 +436,24 @@ public enum StudioAutoSamplerCapture {
                         error ?? CaptureError.unavailableInstrument)
                 }
             }
+        }
+    }
+
+    /// Give third-party Audio Units time to apply modulation/expression before
+    /// the attack. These 50 ms of offline rendering are discarded rather than
+    /// changing the recorded note's start position. No callback does file I/O.
+    private static func settleControllers(engine: AVAudioEngine,
+                                          buffer: AVAudioPCMBuffer,
+                                          sampleRate: Double) throws {
+        var remaining = Int(sampleRate * 0.05)
+        while remaining > 0 {
+            if Task<Never, Never>.isCancelled { throw CaptureError.cancelled }
+            let frames = AVAudioFrameCount(min(512, remaining))
+            guard try engine.renderOffline(frames, to: buffer) == .success,
+                  buffer.frameLength == frames else {
+                throw CaptureError.cannotRenderOffline
+            }
+            remaining -= Int(frames)
         }
     }
 
