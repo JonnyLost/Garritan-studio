@@ -40,9 +40,12 @@ public enum StudioAutoSamplerReleaseCapture {
     public static func extract(from takes: [StudioSamplerFactoryTake],
                                sustainSeconds: Double, sampleRate: Double,
                                into directory: URL) throws -> Result {
-        guard sustainSeconds.isFinite, sustainSeconds >= 0.1,
-              sampleRate.isFinite, sampleRate > 0,
-              takes.count <= 64 else { throw ReleaseError.invalidConfiguration }
+        guard sustainSeconds.isFinite,
+              (0.1...5).contains(sustainSeconds),
+              [44_100.0, 48_000.0, 96_000.0].contains(sampleRate),
+              !takes.isEmpty, takes.count <= 64 else {
+            throw ReleaseError.invalidConfiguration
+        }
         let held = Int(sustainSeconds * sampleRate)
         guard held >= 2 else { throw ReleaseError.invalidConfiguration }
         try FileManager.default.createDirectory(at: directory,
