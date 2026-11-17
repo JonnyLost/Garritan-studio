@@ -756,16 +756,29 @@ struct SSSampler {
         for (int mic = 0; mic < 4; ++mic) {
             const Sample *release = nullptr;
             int nearest = std::numeric_limits<int>::max();
+            int nearestLayer = std::numeric_limits<int>::max();
+            // In CC1 crossfade mode, captured release timbres are indexed
+            // by the dynamic layer's velocity band, not the played note-on
+            // velocity. Choose the nearest captured CC1 center at note-off.
+            // Discrete velocity mode keeps its original selection behavior.
+            const float releaseCC1 = smoothCC1[channel];
             for (const auto& zone : samples) {
                 if (!zone.releaseTrigger || zone.microphone != mic ||
                     zone.articulation != held.articulation ||
                     note < zone.low || note > zone.high ||
-                    held.velocity < zone.minVelocity ||
-                    held.velocity > zone.maxVelocity) continue;
+                    (!cc1Crossfade &&
+                     (held.velocity < zone.minVelocity ||
+                      held.velocity > zone.maxVelocity))) continue;
                 const int distance = std::abs(int(note) - int(zone.root));
-                if (distance < nearest) {
+                const float center = (float(zone.minVelocity) +
+                                      float(zone.maxVelocity)) * 0.5f;
+                const int layerDistance = cc1Crossfade
+                    ? int(std::abs(releaseCC1 - center) * 100.f) : 0;
+                if (distance < nearest ||
+                    (distance == nearest && layerDistance < nearestLayer)) {
                     release = &zone;
                     nearest = distance;
+                    nearestLayer = layerDistance;
                 }
             }
             if (!release) continue;
@@ -775,8 +788,11 @@ struct SSSampler {
                     zone.root == release->root &&
                     zone.roundRobin == held.roundRobin &&
                     note >= zone.low && note <= zone.high &&
-                    held.velocity >= zone.minVelocity &&
-                    held.velocity <= zone.maxVelocity) {
+                    (cc1Crossfade
+                        ? (zone.minVelocity == release->minVelocity &&
+                           zone.maxVelocity == release->maxVelocity)
+                        : (held.velocity >= zone.minVelocity &&
+                           held.velocity <= zone.maxVelocity))) {
                     release = &zone;
                     break;
                 }
