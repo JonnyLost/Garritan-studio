@@ -51,8 +51,7 @@ public enum StudioAutoSamplerExpression {
             Set(layers).count == layers.count &&
             layers.allSatisfy { (1...127).contains($0) } &&
             (mode != .cc1Layers || (layers.count >= 2 &&
-                                   layers.count <= 8 &&
-                                   !captureReleaseTails))
+                                   layers.count <= 8))
         }
 
         /// The native sampler's CC1 crossfader uses the midpoint of each
