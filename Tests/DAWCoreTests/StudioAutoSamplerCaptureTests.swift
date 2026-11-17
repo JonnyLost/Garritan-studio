@@ -184,6 +184,29 @@ final class StudioAutoSamplerCaptureTests: XCTestCase {
         }
     }
 
+    func testReleaseZoneLimitRejectsOversizedPlanBeforePluginInstantiation() async {
+        let source = StudioAutoSamplerCapture.Source(
+            type: kAudioUnitType_MusicDevice,
+            subtype: 0, manufacturer: 0, name: "No Installed AU",
+            vendor: "Test")
+        // The normal 128-zone factory accepts 65 distinct held notes, but
+        // pairing them with release-trigger recordings could exceed 128.
+        let options = StudioSynthSamplerCapture.Options(
+            rootNotes: (0...64).map { UInt8($0) },
+            velocities: [100])
+        XCTAssertTrue(options.isValid)
+        do {
+            _ = try await StudioAutoSamplerCapture.capture(
+                source: source, name: "Reject oversized release capture",
+                options: options, captureReleaseTails: true)
+            XCTFail("Must fail without instantiating an Audio Unit")
+        } catch StudioAutoSamplerCapture.CaptureError.invalidConfiguration {
+            // Correct early preflight validation.
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
     func testCaptureRejectsNonInstrumentAndInvalidOptionsWithoutLoadingPlugin() async {
         let effect = StudioAutoSamplerCapture.Source(
             type: kAudioUnitType_Effect, subtype: 0, manufacturer: 0,
