@@ -193,6 +193,8 @@ released sound rather than applying a fabricated generic decay.
   which has separate key/velocity partitions for release triggers.
 - Leaves the original complete capture WAV untouched, including any existing
   auto-loop crossfade markers on sustain zones. Release zones have no loops.
+  Release zones receive a non-destructive 256-frame fade-out marker at the
+  end of their captured tail to avoid clicks at the recording boundary.
 - The native `.studioinstrument` package includes actual release PCM,
   without embedding the source Audio Unit binary or serialized plugin state.
 - Reports accepted and skipped release recordings in the Auto Sampler sheet.
