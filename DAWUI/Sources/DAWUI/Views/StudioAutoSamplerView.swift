@@ -333,8 +333,9 @@ public struct StudioAutoSamplerView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Toggle("Capture source keyswitch articulations",
                        isOn: $captureArticulations)
-                    .onChange(of: captureArticulations) { _, enabled in
-                        if enabled { captureReleaseTails = false }
+                    .onChange(of: captureArticulations) { _, _ in
+                        // Release tails are articulation-aware; the zone budget
+                        // validates this combination before capture.
                     }
                 if captureArticulations {
                     Text("Define each source playing technique and its MIDI keyswitch. Sustain is the default. Studio automatically maps each captured technique to its own native articulation.")
@@ -382,7 +383,7 @@ public struct StudioAutoSamplerView: View {
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
-                    Text("Use distinct source keyswitches outside the sampled root notes. Maximum 128 total zones. Natural release tails remain unavailable in multi-articulation mode.")
+                    Text("Use distinct source keyswitches outside the sampled root notes. Maximum 128 total zones including release samples; note-off tails retain each articulation.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                     if !fitsSampleZoneLimit {
@@ -456,7 +457,7 @@ public struct StudioAutoSamplerView: View {
             VStack(alignment: .leading, spacing: 5) {
                 Toggle("Capture natural note-off release samples",
                        isOn: $captureReleaseTails)
-                    .disabled(dynamicsMode == .cc1Layers || captureArticulations)
+                    .disabled(dynamicsMode == .cc1Layers)
                 Text("Studio extracts the actual note-off portion of each offline recording. Audible tails become dedicated release-trigger zones; silent tails are skipped. This may nearly double instrument storage.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
