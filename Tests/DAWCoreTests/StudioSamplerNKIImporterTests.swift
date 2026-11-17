@@ -406,29 +406,72 @@ final class StudioSamplerNKIImporterTests: XCTestCase {
     func testNKIRejectsDetachedZonesAndDuplicateParameters() throws {
         let root = try temp()
         defer { try? FileManager.default.removeItem(at: root) }
-        // Well-formed XML with a Zone outside its owning K2_Group must
-        // fail, rather than quietly producing a partial instrument map.
+        func expectMalformed(_ xml: String) throws {
+            let source = try nki(xml, in: root)
+            XCTAssertThrowsError(try StudioSamplerNKIReader.inspect(source)) { error in
+                guard case StudioSamplerNKIReader.NKIError.malformedXML = error else {
+                    XCTFail("Expected malformed XML mapping, got \(error)")
+                    return
+                }
+            }
+        }
+
+        // Well-formed XML with a Zone outside its owning K2_Group must fail.
         let detached = document(zones: [zoneXML(loop: false)])
             .replacingOccurrences(of: "</Groups>",
                                   with: "\(zoneXML(loop: false))\n</Groups>")
-        let source = try nki(detached, in: root)
-        XCTAssertThrowsError(try StudioSamplerNKIReader.inspect(source))
+        try expectMalformed(detached)
 
-        // A duplicate key could otherwise override an earlier zone mapping.
+        // Duplicate zone and group keys must never silently override mappings.
         let original = "<V name=\"rootKey\" value=\"60\"/>"
         let duplicate = "\(original)\n<V name=\"rootKey\" value=\"72\"/>"
         let duplicated = document(zones: [zoneXML(loop: false)
             .replacingOccurrences(of: original, with: duplicate)])
-        _ = try nki(duplicated, in: root)
-        XCTAssertThrowsError(try StudioSamplerNKIReader.inspect(source))
+        try expectMalformed(duplicated)
 
-        // Duplicate group parameters can also change the velocity range
-        // without being visible in the converted sampler's report.
         let groupParameter = "<V name=\"highVelocity\" value=\"127\"/>"
         let groupDuplicate = document(zones: [zoneXML(loop: false)])
             .replacingOccurrences(of: groupParameter,
                                   with: "\(groupParameter)\n\(groupParameter)")
-        _ = try nki(groupDuplicate, in: root)
-        XCTAssertThrowsError(try StudioSamplerNKIReader.inspect(source))
+        try expectMalformed(groupDuplicate)
+    }
+
+    func testIndependentPlainKontaktGroupsRemainPlayableAfterNativeRoundTrip() throws {
+        let root = try temp()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let samples = root.appendingPathComponent("Samples", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: samples, withIntermediateDirectories: true)
+        _ = try wav("tone.wav", in: samples)
+
+        // Ordinary groups without advanced start conditions still work.
+        let secondGroup = """
+        <K2_Group index="1" name="Upper Voice">
+          <Parameters>
+            <V name="lowVelocity" value="64"/>
+            <V name="highVelocity" value="120"/>
+          </Parameters>
+          <Zones>
+          \(zoneXML(low: 61, high: 72, loop: false))
+          </Zones>
+        </K2_Group>
+        """
+        let xml = document(zones: [zoneXML(low: 48, high: 60, loop: false)])
+            .replacingOccurrences(of: "</Groups>",
+                                  with: "\(secondGroup)\n</Groups>")
+        let source = try nki(xml, in: root)
+        let catalog = try StudioSamplerNKIReader.inspect(source)
+        XCTAssertEqual(catalog.zones.count, 2)
+        XCTAssertEqual(catalog.zones.map(\.groupName),
+                       ["Main Recordings", "Upper Voice"])
+        XCTAssertEqual(catalog.zones.map(\.lowKey), [48, 61])
+        XCTAssertEqual(catalog.zones.map(\.highKey), [60, 72])
+        XCTAssertEqual(catalog.zones.map(\.lowVelocity), [8, 64])
+
+        let imported = try StudioSamplerNKIImporter.importInstrument(
+            source, into: root.appendingPathComponent("managed"))
+        XCTAssertEqual(imported.patch.zones.count, 2)
+        try StudioSamplerExternalFormatRoundTrip.assertPreserved(
+            imported.patch, in: root, name: "NKI-MultiplePlainGroups")
     }
 }
