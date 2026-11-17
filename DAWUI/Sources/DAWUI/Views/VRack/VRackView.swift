@@ -771,7 +771,7 @@ public struct VRackView: View {
         VStack(spacing: 0) {
             StudioWorkspaceHeader(
                 "Instrument Browser",
-                subtitle: "Garritan instruments and Studio's native Synth sounds",
+                subtitle: "Garritan, Studio Synth and Apple's built-in General MIDI sounds",
                 symbol: "music.note.list"
             ) {
                 Text("\(filteredCatalog.count) patches")
@@ -799,11 +799,15 @@ public struct VRackView: View {
                     Button("Studio Synth") {
                         libraryFilter = StudioSynthFactoryCatalog.libraryName
                     }
+                    Button("Apple General MIDI") {
+                        libraryFilter = StudioAppleGeneralMIDI.libraryName
+                    }
                 } label: {
                     HStack(spacing: 6) {
                         Text(libraryFilter == "All Libraries" ? "All Libraries" :
                              libraryFilter == "Garritan Personal Orchestra 5" ? "GPO5" :
-                             libraryFilter == StudioSynthFactoryCatalog.libraryName ? "Synth" : "Instant Orchestra")
+                             libraryFilter == StudioSynthFactoryCatalog.libraryName ? "Synth" :
+                             libraryFilter == StudioAppleGeneralMIDI.libraryName ? "Apple GM" : "Instant Orchestra")
                             .lineLimit(1)
                         Spacer(minLength: 2)
                         Image(systemName: "chevron.down")
@@ -925,7 +929,8 @@ public struct VRackView: View {
                                             .font(.subheadline.weight(.medium))
                                         Text(instrument.category + " · " +
                                              (instrument.library == "Garritan Personal Orchestra 5" ? "GPO5" :
-                                              instrument.library == StudioSynthFactoryCatalog.libraryName ? instrument.instrumentType : "Instant Orchestra"))
+                                              instrument.library == StudioSynthFactoryCatalog.libraryName ? instrument.instrumentType :
+                                              instrument.library == StudioAppleGeneralMIDI.libraryName ? "Apple GM" : "Instant Orchestra"))
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
@@ -1094,6 +1099,24 @@ public struct VRackView: View {
     /// independent expandable engine-type folders beneath it.
     private func compactSynthFolder(_ instruments: [DrawerInstrument]) -> some View {
         DisclosureGroup {
+            let appleSounds = instruments.filter { $0.appleProgram != nil }
+            if !appleSounds.isEmpty {
+                DisclosureGroup("Apple General MIDI (\(appleSounds.count))") {
+                    ForEach(appleSounds) { sound in
+                        Button { chooseInstrument(sound) } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "waveform").frame(width: 20)
+                                Text(sound.name).font(.system(size: 12)).lineLimit(1)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.vertical, 5)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .font(.system(size: 12, weight: .medium))
+                .padding(.leading, 6)
+            }
             ForEach([
                 "Analog", "FM", "Wavetable", "Additive", "Granular",
                 "Physical Modeling", "Hybrid"
@@ -1177,6 +1200,7 @@ public struct VRackView: View {
                         Text("GPO5").tag("Garritan Personal Orchestra 5")
                         Text("Instant").tag("Garritan Instant Orchestra")
                         Text("Synth").tag(StudioSynthFactoryCatalog.libraryName)
+                Text("Apple GM").tag(StudioAppleGeneralMIDI.libraryName)
                     }
                     .help("Instrument library")
                     Picker("Family", selection: $familyFilter) {
@@ -1236,7 +1260,8 @@ public struct VRackView: View {
                                                 .font(.system(size: 12, weight: .medium))
                                                 .lineLimit(1)
                                             Text(instrument.library == "Garritan Personal Orchestra 5" ? "GPO5" :
-                                                 instrument.library == StudioSynthFactoryCatalog.libraryName ? instrument.instrumentType : "Instant Orchestra")
+                                                 instrument.library == StudioSynthFactoryCatalog.libraryName ? instrument.instrumentType :
+                                                 instrument.library == StudioAppleGeneralMIDI.libraryName ? "Apple GM" : "Instant Orchestra")
                                                 .font(.system(size: 10))
                                                 .foregroundColor(.secondary)
                                         }
