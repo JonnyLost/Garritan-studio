@@ -72,6 +72,19 @@ public enum StudioAutoSamplerReleaseCapture {
                       skippedCount: takes.count - releases.count)
     }
 
+    /// A short, non-destructive tail-end fade prevents discontinuities when
+    /// a note-off recording ends before the source plugin fully decays. The
+    /// already recorded PCM stays unchanged.
+    public static func smoothingReleaseEndings(in patch: StudioSamplerPatch)
+        -> StudioSamplerPatch {
+        var result = patch
+        for index in result.zones.indices where
+            result.zones[index].isReleaseTrigger == true {
+            result.zones[index].fadeOutFrames = 256
+        }
+        return result
+    }
+
     /// Read and copy in blocks; never retain a full recording in memory.
     /// Reject effectively silent release tails rather than creating hundreds
     /// of empty release-trigger zones in percussion or synth patches.
