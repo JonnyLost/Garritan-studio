@@ -335,6 +335,9 @@ public struct StudioAutoSamplerView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Toggle("Capture source keyswitch articulations",
                        isOn: $captureArticulations)
+                    .onChange(of: captureArticulations) { _, enabled in
+                        if enabled { captureReleaseTails = false }
+                    }
                 if captureArticulations {
                     Text("Capture Sustain and one alternate playing technique from the same Audio Unit. Enter the source plugin's keyswitch MIDI notes; Studio builds its own native keyswitch map.")
                         .font(.caption2)
@@ -346,7 +349,7 @@ public struct StudioAutoSamplerView: View {
                                 value: $alternateKeyswitch, in: 0...127)
                     }
                     TextField("Alternate articulation name", text: $alternateName)
-                    Text("Requires two distinct keyswitch notes outside the sampled root notes. Doubles the recordings and may exceed the 128-zone limit.")
+                    Text("Requires two distinct keyswitch notes outside the sampled root notes. Doubles the recordings and may exceed the 128-zone limit. Natural release tails are unavailable in multi-articulation mode until their native routing is articulation-aware.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                     if !fitsSampleZoneLimit {
@@ -420,7 +423,7 @@ public struct StudioAutoSamplerView: View {
             VStack(alignment: .leading, spacing: 5) {
                 Toggle("Capture natural note-off release samples",
                        isOn: $captureReleaseTails)
-                    .disabled(dynamicsMode == .cc1Layers)
+                    .disabled(dynamicsMode == .cc1Layers || captureArticulations)
                 Text("Studio extracts the actual note-off portion of each offline recording. Audible tails become dedicated release-trigger zones; silent tails are skipped. This may nearly double instrument storage.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
