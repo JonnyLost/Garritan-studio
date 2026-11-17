@@ -1,0 +1,36 @@
+name: Studio Auto Sampler source checks
+
+on:
+  push:
+    branches:
+      - feature/studio-auto-sampler-au-m1
+  pull_request:
+    paths:
+      - "DAWCore/Sources/DAWCore/Audio/StudioAutoSamplerCapture.swift"
+      - "DAWUI/Sources/DAWUI/Views/StudioAutoSamplerView.swift"
+      - "DAWUI/Sources/DAWUI/Views/StudioSamplerMapView.swift"
+      - "Tests/DAWCoreTests/StudioAutoSamplerCaptureTests.swift"
+      - ".github/workflows/studio-auto-sampler.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-auto-sampler-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  swift-parse:
+    name: Swift syntax and file integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse changed Swift files
+        run: |
+          swiftc -frontend -parse \
+            DAWCore/Sources/DAWCore/Audio/StudioAutoSamplerCapture.swift \
+            DAWUI/Sources/DAWUI/Views/StudioAutoSamplerView.swift \
+            DAWUI/Sources/DAWUI/Views/StudioSamplerMapView.swift \
+            Tests/DAWCoreTests/StudioAutoSamplerCaptureTests.swift
+      - name: Check formatting and patch cleanliness
+        run: git diff --check HEAD^ HEAD
