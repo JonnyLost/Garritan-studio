@@ -151,6 +151,42 @@ final class StudioAutoSamplerReleaseCaptureTests: XCTestCase {
         XCTAssertEqual(patch.articulations?.first?.name, "Pizzicato")
     }
 
+    func testCC1LayeredArticulationReleaseZonesSurviveNativeMapping() throws {
+        let source = try makeCapturedWAV(heldFrames: 22_050,
+                                         tailFrames: 11_025,
+                                         tailIsAudible: true)
+        defer { try? FileManager.default.removeItem(at: source.folder) }
+        let takes = ["Sustain", "Pizzicato"].flatMap { name in
+            [UInt8(64), UInt8(112)].map { velocity in
+                StudioSamplerFactoryTake(source: source.url, rootNote: 60,
+                                          velocity: velocity, articulation: name)
+            }
+        }
+        let releases = try StudioAutoSamplerReleaseCapture.extract(
+            from: takes, sustainSeconds: 0.5,
+            sampleRate: sampleRate, into: source.folder)
+        XCTAssertEqual(releases.count, 4)
+        let mapped = try StudioSamplerInstrumentFactory.assemble(
+            takes + releases.takes)
+        let config = StudioAutoSamplerExpression.Configuration(mode: .cc1Layers)
+        XCTAssertTrue(config.canCaptureLayers([64, 112],
+                                              captureReleaseTails: true))
+        let patch = config.applying(to: mapped)
+        XCTAssertTrue(patch.isValid)
+        XCTAssertEqual(patch.cc1Crossfade, true)
+        XCTAssertEqual(patch.zones.count, 8)
+        let releaseZones = patch.zones.filter { $0.isReleaseTrigger == true }
+        XCTAssertEqual(releaseZones.count, 4)
+        for articulationID: UInt8 in [0, 1] {
+            let layers = releaseZones.filter {
+                ($0.articulationID ?? 0) == articulationID
+            }
+            XCTAssertEqual(layers.count, 2)
+            XCTAssertEqual(Set(layers.map(\.lowestVelocity)),
+                           Set([UInt8(1), UInt8(89)]))
+        }
+    }
+
     func testReleaseSampleZoneBudget() {
         XCTAssertTrue(StudioAutoSamplerReleaseCapture.fitsZoneLimit(
             heldSampleCount: 64, includeReleases: true))
