@@ -57,3 +57,53 @@ When a loaded source has no serializable state, capture stops with a visible err
 - A plugin editor can still be opened on its original Studio track/V-Rack. Auto Sampler does not host a second editable plugin window; it copies the configured AU state just before capture.
 - Only installed licensed resources remain accessible to the temporary source plugin while sampling. Portable native packages cannot carry or grant licenses.
 - Save/render behavior and live AU state fidelity require macOS CI and a hands-on hardware/plugin test before calling this production-ready.
+
+## Milestone 3 — multitimbral MIDI channel and custom key coverage
+
+The Auto Sampler sheet now includes a **Source MIDI channel** selector (1–16).
+This selects the MIDI channel for both note-on and note-off; per-take all-sounds-off
+(CC120) and all-notes-off (CC123) are sent only on the chosen channel. Unrelated
+channels are not intentionally reset by the MIDI messages. The **temporary**
+plugin instance still receives AUAudioUnit.reset() and AVAudioEngine.reset()
+between samples, so any plugin-specific reset behavior should be checked on Mac.
+
+For an ARIA multitimbral setup, choose the loaded V-Rack or track instance,
+select the channel corresponding to the desired ARIA slot/program, then capture.
+There is no MIDI program-change override in this milestone: **the existing
+plugin's configured state must already contain the desired programs**.
+
+An optional **Custom note range and sampling interval** setting enables:
+
+- Lower and upper MIDI notes (0...127), displayed as note name plus MIDI number.
+- Root-note spacing: 1, 2, 3, 4, 6, 12, or 24 semitones.
+- Always capture the requested highest note even when the spacing does not
+  divide the range evenly.
+- Optionally clamp the playable region of the finished native sampler
+  to the selected low/high notes. The original factory key/velocity partitions
+  stay intact and the original plugin/track mapping is never changed.
+- Automatic plan validation: up to 128 samples total across velocity layers.
+  Invalid configurations disable Capture before any plugin is loaded.
+
+When custom mode is off, Quick, Standard and Deep retain their previously
+defined root notes, velocity arrays, and *full-keyboard* sampler mapping.
+
+The capture engine takes the plan by value, sends the selected zero-based
+Core Audio MIDI channel, and uses the existing isolated offline AVAudioEngine,
+native factory and package writer. It does not modify PlaybackEngine,
+StudioSamplerDSP, or the user's live project routing.
+
+### Remaining acceptance
+
+1. macOS debug/release build and XCTest pass for this PR.
+2. Test independent programs loaded on separate ARIA MIDI channels. Verify
+   selecting channel 2 actually samples ARIA slot 2, and does not change slot 1.
+3. Reopen a native custom-range capture and verify out-of-range keys are silent
+   when the clamp option is enabled, with proper notes at the boundaries.
+4. Verify AU state is preserved in the isolated plugin instance across repeated
+   resets and that sustain/release behavior matches the source.
+5. Honor the source instrument's license. Some commercial sample libraries
+   prohibit resampling or redistribution even of derived WAV recordings.
+
+**Still not included:** MIDI program-change selection, per-channel controller
+snapshots, automatic silence-skipping, round robins, looping, real-time fallback,
+or a production-tested ARIA integration.
