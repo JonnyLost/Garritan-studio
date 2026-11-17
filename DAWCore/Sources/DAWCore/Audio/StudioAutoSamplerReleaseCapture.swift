@@ -62,7 +62,10 @@ public enum StudioAutoSamplerReleaseCapture {
                                   heldFrames: held, sampleRate: sampleRate) {
                     releases.append(StudioSamplerFactoryTake(
                         source: output, rootNote: take.rootNote,
-                        velocity: take.velocity, releaseTrigger: true))
+                        velocity: take.velocity,
+                        microphoneID: take.microphoneID,
+                        articulation: take.articulation,
+                        releaseTrigger: true))
                 } else {
                     try? FileManager.default.removeItem(at: output)
                 }
