@@ -34,6 +34,111 @@ final class StudioAutoSamplerCaptureTests: XCTestCase {
         XCTAssertEqual(Set(results.map(\.id)).count, results.count)
     }
 
+    func testDefaultPlansPreserveQuickStandardAndDeepCaptureNotes() {
+        let expected: [(StudioAutoSamplerCapture.Coverage, [UInt8], [UInt8])] = [
+            (.quick, [48, 60, 72], [100]),
+            (.standard, [36, 48, 60, 72, 84], [64, 112]),
+            (.deep, [36, 42, 48, 54, 60, 66, 72, 78, 84, 90, 96],
+             [32, 64, 96, 120])
+        ]
+        for (coverage, notes, velocities) in expected {
+            let plan = StudioAutoSamplerCapture.SamplingPlan(coverage: coverage)
+            XCTAssertTrue(plan.isValid)
+            XCTAssertEqual(plan.rootNotes, notes)
+            XCTAssertEqual(plan.velocities, velocities)
+            XCTAssertEqual(plan.midiChannel, 1)
+            XCTAssertEqual(plan.options().rootNotes, notes)
+        }
+    }
+
+    func testMIDIChannelRangeIsOneToSixteen() {
+        for channel: UInt8 in 1...16 {
+            let plan = StudioAutoSamplerCapture.SamplingPlan(
+                coverage: .standard, midiChannel: channel)
+            XCTAssertTrue(plan.isValid)
+        }
+        XCTAssertFalse(StudioAutoSamplerCapture.SamplingPlan(
+            midiChannel: 0).isValid)
+        XCTAssertFalse(StudioAutoSamplerCapture.SamplingPlan(
+            midiChannel: 17).isValid)
+    }
+
+    func testCustomRangeIncludesRequestedHighNoteAndBoundsZoneCount() {
+        let plan = StudioAutoSamplerCapture.SamplingPlan(
+            coverage: .standard, lowestNote: 50, highestNote: 62,
+            semitoneStep: 5, midiChannel: 4, limitPlaybackToRange: true)
+        XCTAssertEqual(plan.rootNotes, [50, 55, 60, 62])
+        XCTAssertEqual(plan.sampleCount, 8)
+        XCTAssertTrue(plan.isValid)
+        XCTAssertEqual(plan.options().velocities, [64, 112])
+
+        let single = StudioAutoSamplerCapture.SamplingPlan(
+            coverage: .deep, lowestNote: 60, highestNote: 60,
+            semitoneStep: 12)
+        XCTAssertTrue(single.isValid)
+        XCTAssertEqual(single.rootNotes, [60])
+
+        let overflowing = StudioAutoSamplerCapture.SamplingPlan(
+            coverage: .deep, lowestNote: 0, highestNote: 127,
+            semitoneStep: 1)
+        XCTAssertEqual(overflowing.rootNotes.count, 128)
+        XCTAssertEqual(overflowing.sampleCount, 512)
+        XCTAssertFalse(overflowing.isValid)
+
+        XCTAssertFalse(StudioAutoSamplerCapture.SamplingPlan(
+            lowestNote: 90, highestNote: 40).isValid)
+        XCTAssertFalse(StudioAutoSamplerCapture.SamplingPlan(
+            semitoneStep: 0).isValid)
+        XCTAssertFalse(StudioAutoSamplerCapture.SamplingPlan(
+            highestNote: 128).isValid)
+    }
+
+    func testCustomPlaybackRangeDoesNotChangeExistingFactoryMap() {
+        let url = URL(fileURLWithPath: "/tmp/studio-auto-sampler-test.wav")
+        let zoneA = StudioSamplerZone(
+            sampleURL: url, rootNote: 48, lowestNote: 0, highestNote: 60)
+        let zoneB = StudioSamplerZone(
+            sampleURL: url, rootNote: 72, lowestNote: 61, highestNote: 127)
+        let original = StudioSamplerPatch(zones: [zoneA, zoneB])
+        let plan = StudioAutoSamplerCapture.SamplingPlan(
+            coverage: .standard, lowestNote: 48, highestNote: 72,
+            semitoneStep: 12, limitPlaybackToRange: true)
+        let clamped = plan.applyingPlaybackRange(to: original)
+        XCTAssertTrue(clamped.isValid)
+        XCTAssertEqual(clamped.zones.map(\.lowestNote), [48, 61])
+        XCTAssertEqual(clamped.zones.map(\.highestNote), [60, 72])
+        XCTAssertEqual(original.zones.map(\.lowestNote), [0, 61])
+        XCTAssertEqual(original.zones.map(\.highestNote), [60, 127])
+        let unrestricted = StudioAutoSamplerCapture.SamplingPlan(
+            coverage: .standard, lowestNote: 48, highestNote: 72,
+            semitoneStep: 12, limitPlaybackToRange: false)
+        XCTAssertEqual(unrestricted.applyingPlaybackRange(to: original), original)
+    }
+
+    func testCaptureRejectsInvalidCapturePlansBeforeCreatingPlugin() async {
+        let fake = StudioAutoSamplerCapture.Source(
+            type: kAudioUnitType_MusicDevice, subtype: 0,
+            manufacturer: 0, name: "Fake source", vendor: "Test")
+        let plans: [StudioAutoSamplerCapture.SamplingPlan] = [
+            .init(midiChannel: 0),
+            .init(midiChannel: 17),
+            .init(lowestNote: 90, highestNote: 40),
+            .init(coverage: .deep, lowestNote: 0, highestNote: 127,
+                  semitoneStep: 1)
+        ]
+        for plan in plans {
+            do {
+                _ = try await StudioAutoSamplerCapture.capture(
+                    source: fake, name: "Invalid configuration", plan: plan)
+                XCTFail("Capture should fail before attempting to load any AU")
+            } catch StudioAutoSamplerCapture.CaptureError.invalidConfiguration {
+                // Expected.
+            } catch {
+                XCTFail("Unexpected preflight error: \(error)")
+            }
+        }
+    }
+
     func testConfiguredStateAcceptsPropertyListsFromStudioPluginHost() throws {
         let example: [String: Any] = [
             "name": "Custom Piano",
