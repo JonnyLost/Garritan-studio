@@ -400,3 +400,33 @@ oversized plans. No source WAV is modified.
 articulation switching, short and long note-off tails, repeated-note
 behavior, cancellation and native package reopen. This feature is
 implemented but not yet audio-verified on a Mac.
+
+## Milestone 10 — CC1-aware note-off timbre selection
+
+CC1 dynamic-layer capture and natural release tails can now be enabled
+together, including when source keyswitch articulations are captured.
+The existing native sampler already crossfades held voices across CC1
+bands. Its note-off dispatcher previously required the original
+note-on **velocity** to fall inside a release zone's band, which is
+incorrect when those bands represent **source CC1 timbres**.
+
+The native DSP now chooses the closest recorded **CC1 band center**
+from release-trigger zones of the held note's **original articulation**
+and microphone, preferring the nearest pitch first. It then selects
+the matching round-robin variation in that same band. Only one
+release sample per microphone is triggered: release samples are
+**not** continuously crossfaded, avoiding a large voice-count increase
+on note-off. Ordinary velocity-driven instruments retain the original
+release matching path.
+
+The UI no longer forces release capture off when CC1 dynamics are
+selected. Core preflight still requires at least two and at most
+eight CC1 layers, and the complete capture (including all
+articulations and possible release tails) must fit **128 zones**,
+with no more than 64 held recordings when release capture is on.
+
+Tests now cover CC1/release preflight, zone budgets and a native
+patch with two articulations, two CC1 layers and corresponding
+release-trigger zones. Actual note-off timbre, velocity independence,
+CC1 movement just before note-off, and CPU behavior still require
+native macOS regression and listening tests.
