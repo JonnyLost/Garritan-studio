@@ -142,6 +142,10 @@ public enum StudioAutoSamplerCapture {
         public let patch: StudioSamplerPatch
         public let packageURL: URL
         public let takeCount: Int
+        /// Number of high-confidence sustain loops applied to native zones.
+        public let loopCount: Int
+        /// Recordings preserved as one-shots because loops were unsuitable.
+        public let loopSkippedCount: Int
     }
 
     public enum CaptureError: Error, LocalizedError {
@@ -230,6 +234,7 @@ public enum StudioAutoSamplerCapture {
                                presetNumber: Int? = nil,
                                configuredState: Data? = nil,
                                plan: SamplingPlan? = nil,
+                               autoLoopSustains: Bool = true,
                                sampleDirectory: URL? = nil,
                                packageDirectory: URL? = nil) async throws -> Result {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -311,12 +316,29 @@ public enum StudioAutoSamplerCapture {
                     source: output, rootNote: root, velocity: velocity))
             }
         }
-        // Audio is complete; release the AU engine BEFORE any file copying
-        // or hash-heavy packaging to avoid rendering while doing disk work.
+        // Audio is complete; release the AU engine BEFORE loop analysis,
+        // file copying or hash-heavy packaging. Never analyze on the audio
+        // callback or change the original PCM recordings.
         engine.stop()
+
+        let loops: StudioAutoSamplerLooping.Analysis
+        if autoLoopSustains {
+            loops = try StudioAutoSamplerLooping.analyze(
+                takes: takes, sustainSeconds: captureOptions.sustainSeconds,
+                sampleRate: captureOptions.sampleRate)
+        } else {
+            loops = StudioAutoSamplerLooping.Analysis(
+                attempted: 0, recommendations: [:])
+        }
+        guard !Task<Never, Never>.isCancelled else {
+            throw CaptureError.cancelled
+        }
 
         var sampler = try StudioSamplerInstrumentFactory.assemble(
             takes, sampleDirectory: sampleDirectory)
+        let mappedLoops = StudioAutoSamplerLooping.apply(
+            loops, to: sampler, takes: takes)
+        sampler = mappedLoops.patch
         if let plan {
             sampler = plan.applyingPlaybackRange(to: sampler)
         }
@@ -330,7 +352,10 @@ public enum StudioAutoSamplerCapture {
         do {
             let package = try StudioSamplerInstrumentPackage.saveToLibrary(
                 sampler, metadata: metadata, in: packageDirectory)
-            return Result(patch: sampler, packageURL: package, takeCount: takes.count)
+            return Result(patch: sampler, packageURL: package,
+                          takeCount: takes.count,
+                          loopCount: mappedLoops.loopCount,
+                          loopSkippedCount: loops.attempted - mappedLoops.loopCount)
         } catch {
             for zone in sampler.zones where zone.managedFileName != nil {
                 try? FileManager.default.removeItem(at: zone.sampleURL)
