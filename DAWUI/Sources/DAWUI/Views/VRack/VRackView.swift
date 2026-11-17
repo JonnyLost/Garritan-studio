@@ -644,9 +644,11 @@ public struct VRackView: View {
                         Divider()
                         if selectedARIAID == id {
                             Button {
-                                viewModel.openTrackInstrumentUI(id, preferNativeARIA: true)
+                                // Default to the generic Audio Unit editor during Alpha 1
+                                // acceptance. Native ARIA UI remains an explicit advanced choice.
+                                viewModel.openTrackInstrumentUI(id)
                             } label: {
-                                Label("Open ARIA Player", systemImage: "slider.horizontal.3")
+                                Label("Open ARIA Controls", systemImage: "slider.horizontal.3")
                             }
                             .buttonStyle(.bordered)
                         } else {
