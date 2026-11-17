@@ -339,3 +339,32 @@ timing and selected patch persistence need a Mac listening test.
 Future iterations should add an editable list of up to 15
 articulations, presets for known source banks, and articulation-aware
 release extraction.
+
+## Milestone 8 — complete editable articulation list
+
+The Auto Sampler now exposes a dynamic editor for **2–15** source-AU
+articulations, replacing the previous fixed Sustain/Staccato pair.
+The first row is always **Sustain** (the native default); subsequent
+rows have editable technique names and source MIDI keyswitch notes.
+Composers can add or remove additional techniques, including Legato,
+Pizzicato, Tremolo, Trills, Harmonics and more. The list is passed
+directly to the existing M7 capture loop, which records every selected
+technique at every selected root and dynamic layer.
+
+The panel shows the exact projected recording count and prevents
+captures exceeding Studio's existing **128-zone limit**. Core preflight
+also rejects duplicate source keyswitches, duplicate/blank names,
+switches colliding with sampled root notes, unsupported channels,
+over 15 articulations, and multi-articulation release-tail capture.
+All samples are assembled using the existing native Instrument Factory
+and its built-in articulation/keyswitch map.
+
+Added tests cover the maximum 15-articulation configuration, an
+oversized configuration, and the resulting native zone/articulation
+mapping. **Actual AU switching, audible technique correctness and
+macOS compilation remain acceptance gates.**
+
+The editor does not infer source library keyswitch assignments and
+does not claim automatic recognition of an instrument's articulations.
+Future work can add verified per-library presets and editable
+native keyswitch destinations.
