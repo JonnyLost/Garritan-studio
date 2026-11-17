@@ -297,3 +297,45 @@ capture, release-mode conflict, and source configuration validation.
   for distinct timbral purposes.
 - Validate controller settling, disabled release samples, and reliable
   package reopening with AU-hosted custom preset state intact.
+
+## Milestone 7 — explicit Audio Unit keyswitch articulation capture
+
+A new opt-in Auto Sampler section records **Sustain** and one named
+alternate source playing technique (default **Staccato**) from a single
+Audio Unit. The composer supplies each source keyswitch's actual MIDI
+note number; Studio **does not infer** Garritan or third-party plug-in
+keyswitch conventions. Source switches are transmitted as momentary
+note-on/off events to the isolated AU, after the per-take reset and
+before CC1/CC11 programming and audible note capture. They are not
+recorded as musical notes or included in the resulting WAV.
+
+The native Instrument Factory already supports articulation-labeled
+takes and generates portable `StudioSamplerArticulation` definitions,
+zone IDs and its own internal keyswitch assignments. This milestone
+reuses that implementation without changing the real-time DSP. The
+first source articulation is always Sustain and maps to native default
+articulation 0; the alternate becomes a native selectable articulation
+with its own key/velocity zones. The exported instrument contains the
+recorded PCM and Studio's native mapping, not the source AU.
+
+**Bounded capture:** at most 128 total sample zones; duplicate switch
+notes, duplicate names, keyswitch/root-note collisions, invalid MIDI
+channels and oversized captures are rejected before AU loading. Existing
+single-sound capture remains unchanged.
+
+**Deliberate guardrail:** multi-articulation mode cannot yet combine
+with natural note-off release-tail extraction, since the existing
+release extractor does not preserve the source articulation label.
+Otherwise release recordings could play the wrong articulation. The UI
+disables that combination and the core validates it independently.
+CC1 layer capture can be used alongside articulation capture if the
+total sample budget fits.
+
+**Verification:** new tests cover default compatibility, distinct
+source switches, the two-articulation budget, invalid names and
+keyswitches, release incompatibility and pre-instantiation validation.
+CI must pass macOS builds and tests; actual Garritan/ARIA keyswitch
+timing and selected patch persistence need a Mac listening test.
+Future iterations should add an editable list of up to 15
+articulations, presets for known source banks, and articulation-aware
+release extraction.
