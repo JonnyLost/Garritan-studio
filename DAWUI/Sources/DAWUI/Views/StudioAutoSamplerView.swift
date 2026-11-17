@@ -1,15 +1,30 @@
 import SwiftUI
+import AudioToolbox
 import DAWCore
 
 /// Audio Unit Auto Sampler lives beside the existing recording/import factory.
 /// It never modifies the source plug-in or the live DAW audio graph. A finished
 /// instrument can be loaded here, or later from Studio's Instrument Library.
 public struct StudioAutoSamplerView: View {
+    private enum SoundSourceMode: String, CaseIterable {
+        case loaded = "Configured in Studio"
+        case installed = "Installed Audio Unit"
+    }
+
+    private struct LoadedSource: Identifiable {
+        let id: String
+        let title: String
+        let pluginID: UUID
+        let source: StudioAutoSamplerCapture.Source
+    }
+
     @ObservedObject public var viewModel: ProjectViewModel
     public let trackID: TrackID
     @Environment(\.dismiss) private var dismiss
 
     @State private var sources: [StudioAutoSamplerCapture.Source] = []
+    @State private var soundSourceMode: SoundSourceMode = .loaded
+    @State private var selectedLoadedID = ""
     @State private var selectedSourceID = ""
     @State private var presets: [StudioAutoSamplerCapture.Preset] = []
     @State private var selectedPreset: Int?
@@ -28,8 +43,53 @@ public struct StudioAutoSamplerView: View {
         self.trackID = trackID
     }
 
+    /// Read only the actual loaded AU instances on tracks and in the V-Rack.
+    /// Do not use cached preset data because it may predate the latest edits.
+    private var loadedSources: [LoadedSource] {
+        var items: [LoadedSource] = []
+        for track in viewModel.project.tracks {
+            guard let instrument = viewModel.playbackEngine.instrument(for: track.id),
+                  case .auInstrument(let unit, let pluginID) = instrument,
+                  viewModel.pluginHost.loadedPlugins[pluginID] != nil else { continue }
+            let d = unit.audioComponentDescription
+            guard d.componentType == kAudioUnitType_MusicDevice else { continue }
+            let source = StudioAutoSamplerCapture.Source(
+                type: d.componentType, subtype: d.componentSubType,
+                manufacturer: d.componentManufacturer,
+                name: track.instrumentSlot?.pluginID?.name ?? track.name,
+                vendor: track.instrumentSlot?.pluginID?.manufacturer ?? "Audio Unit")
+            items.append(LoadedSource(id: pluginID.uuidString,
+                                      title: "Track: \(track.name) — \(source.name)",
+                                      pluginID: pluginID, source: source))
+        }
+        for rack in viewModel.project.vRack.instruments {
+            guard let instrument = viewModel.playbackEngine.rackInstrument(for: rack.id),
+                  case .auInstrument(let unit, let pluginID) = instrument,
+                  viewModel.pluginHost.loadedPlugins[pluginID] != nil else { continue }
+            let d = unit.audioComponentDescription
+            guard d.componentType == kAudioUnitType_MusicDevice else { continue }
+            let source = StudioAutoSamplerCapture.Source(
+                type: d.componentType, subtype: d.componentSubType,
+                manufacturer: d.componentManufacturer,
+                name: rack.pluginSlot.pluginID?.name ?? rack.name,
+                vendor: rack.pluginSlot.pluginID?.manufacturer ?? "Audio Unit")
+            items.append(LoadedSource(id: pluginID.uuidString,
+                                      title: "V-Rack: \(rack.name) — \(source.name)",
+                                      pluginID: pluginID, source: source))
+        }
+        return items.sorted { $0.title < $1.title }
+    }
+
+    private var selectedLoadedSource: LoadedSource? {
+        loadedSources.first { $0.id == selectedLoadedID }
+    }
+
     private var selectedSource: StudioAutoSamplerCapture.Source? {
         sources.first { $0.id == selectedSourceID }
+    }
+
+    private var captureSource: StudioAutoSamplerCapture.Source? {
+        soundSourceMode == .loaded ? selectedLoadedSource?.source : selectedSource
     }
 
     private var options: StudioSynthSamplerCapture.Options {
@@ -53,47 +113,70 @@ public struct StudioAutoSamplerView: View {
                 .foregroundStyle(.secondary)
             Divider()
 
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Picker("Audio Unit instrument", selection: $selectedSourceID) {
-                    Text("Choose an instrument…").tag("")
-                    ForEach(sources) { source in
-                        Text("\(source.vendor) — \(source.name)").tag(source.id)
-                    }
+            Picker("Sound source", selection: $soundSourceMode) {
+                ForEach(SoundSourceMode.allCases, id: \.self) { mode in
+                    Text(mode.rawValue).tag(mode)
                 }
-                .frame(maxWidth: .infinity)
-                .onChange(of: selectedSourceID) { _, _ in refreshPresets() }
-                Button {
-                    sources = StudioAutoSamplerCapture.availableSources()
-                    if selectedSource == nil { selectedSourceID = "" }
-                } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                }
-                .disabled(isCapturing)
             }
+            .pickerStyle(.segmented)
             .disabled(isCapturing)
 
-            if sources.isEmpty {
-                Label("No registered Audio Unit Music Device instruments found. Install and register a compatible Audio Unit to use this capture mode.",
-                      systemImage: "info.circle")
-                    .foregroundStyle(.secondary)
-                    .font(.caption)
-            }
-
-            HStack {
-                Picker("Factory preset", selection: $selectedPreset) {
-                    Text("Default sound").tag(nil as Int?)
-                    ForEach(presets) { preset in
-                        Text(preset.name).tag(preset.number as Int?)
+            if soundSourceMode == .loaded {
+                Picker("Loaded instrument", selection: $selectedLoadedID) {
+                    Text("Choose a loaded instrument…").tag("")
+                    ForEach(loadedSources) { item in
+                        Text(item.title).tag(item.id)
                     }
                 }
-                .disabled(isCapturing || isLoadingPresets || selectedSource == nil)
-                if isLoadingPresets { ProgressView().controlSize(.small) }
-                Spacer()
+                .disabled(isCapturing)
+                if loadedSources.isEmpty {
+                    Label("No Audio Unit instruments are currently loaded in a Studio track or V-Rack. Load and configure one first, or choose Installed Audio Unit.",
+                          systemImage: "info.circle")
+                        .font(.caption)
+                } else {
+                    Text("Samples the sound configured in the selected Studio plugin instance. Studio snapshots its current state and restores that state in a separate capture instance. The original stays untouched.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Picker("Audio Unit instrument", selection: $selectedSourceID) {
+                        Text("Choose an instrument…").tag("")
+                        ForEach(sources) { source in
+                            Text("\(source.vendor) — \(source.name)").tag(source.id)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .onChange(of: selectedSourceID) { _, _ in refreshPresets() }
+                    Button {
+                        sources = StudioAutoSamplerCapture.availableSources()
+                        if selectedSource == nil { selectedSourceID = "" }
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(isCapturing)
+                }
+                .disabled(isCapturing)
+                if sources.isEmpty {
+                    Label("No registered Audio Unit Music Device instruments found.",
+                          systemImage: "info.circle")
+                        .font(.caption)
+                }
+                HStack {
+                    Picker("Factory preset", selection: $selectedPreset) {
+                        Text("Default sound").tag(nil as Int?)
+                        ForEach(presets) { preset in
+                            Text(preset.name).tag(preset.number as Int?)
+                        }
+                    }
+                    .disabled(isCapturing || isLoadingPresets || selectedSource == nil)
+                    if isLoadingPresets { ProgressView().controlSize(.small) }
+                    Spacer()
+                }
+                Text("Installed Audio Unit mode captures the default or a published factory preset. For a custom sound, load and edit it on a Studio track or V-Rack first.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
-
-            Text("Only Audio Unit factory presets are selectable in this milestone. Plug-in editors, saved custom states, and real-time capture are planned separately.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
 
             TextField("New instrument name", text: $name)
                 .textFieldStyle(.roundedBorder)
@@ -169,7 +252,7 @@ public struct StudioAutoSamplerView: View {
                 Spacer()
                 Button("Capture to Instrument Library") { beginCapture() }
                     .buttonStyle(.borderedProminent)
-                    .disabled(isCapturing || selectedSource == nil ||
+                    .disabled(isCapturing || captureSource == nil ||
                               name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
                               !options.isValid)
             }
@@ -177,7 +260,14 @@ public struct StudioAutoSamplerView: View {
         .padding(22)
         .frame(minWidth: 670, minHeight: 510)
         .interactiveDismissDisabled(isCapturing)
-        .onAppear { sources = StudioAutoSamplerCapture.availableSources() }
+        .onAppear {
+            sources = StudioAutoSamplerCapture.availableSources()
+            if let first = loadedSources.first {
+                selectedLoadedID = first.id
+            } else {
+                soundSourceMode = .installed
+            }
+        }
         .onDisappear { captureTask?.cancel() }
     }
 
@@ -204,11 +294,27 @@ public struct StudioAutoSamplerView: View {
     }
 
     private func beginCapture() {
-        guard let source = selectedSource, options.isValid,
+        guard let source = captureSource, options.isValid,
               !isCapturing else { return }
+        // Copy the actual, most recent state while still on Studio's host
+        // control actor; no AU objects are passed into the detached capture.
+        let currentSound: Data?
+        if soundSourceMode == .loaded {
+            guard let loaded = selectedLoadedSource else { return }
+            do {
+                let data = try viewModel.pluginHost.savePreset(pluginID: loaded.pluginID)
+                _ = try StudioAutoSamplerCapture.validatedConfiguredState(data)
+                currentSound = data
+            } catch {
+                errorMessage = "Could not snapshot the configured instrument: \(error.localizedDescription)"
+                return
+            }
+        } else {
+            currentSound = nil
+        }
         let sourceName = name
         let captureOptions = options
-        let chosenPreset = selectedPreset
+        let chosenPreset = soundSourceMode == .installed ? selectedPreset : nil
         result = nil
         errorMessage = nil
         isCapturing = true
@@ -216,7 +322,7 @@ public struct StudioAutoSamplerView: View {
             do {
                 let output = try await StudioAutoSamplerCapture.capture(
                     source: source, name: sourceName, options: captureOptions,
-                    presetNumber: chosenPreset)
+                    presetNumber: chosenPreset, configuredState: currentSound)
                 await MainActor.run {
                     self.result = output
                     self.isCapturing = false
