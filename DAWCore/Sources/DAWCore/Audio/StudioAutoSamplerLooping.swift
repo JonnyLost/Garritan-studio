@@ -12,10 +12,13 @@ public enum StudioAutoSamplerLooping {
     public struct Key: Hashable, Sendable {
         public let note: UInt8
         public let velocity: UInt8
+        public let articulation: String
 
-        public init(note: UInt8, velocity: UInt8) {
+        public init(note: UInt8, velocity: UInt8,
+                    articulation: String = "Sustain") {
             self.note = note
             self.velocity = velocity
+            self.articulation = articulation
         }
     }
 
@@ -73,7 +76,8 @@ public enum StudioAutoSamplerLooping {
                       proposed.endFrame <= UInt32(heldFrames * 90 / 100),
                       proposed.startFrame < proposed.endFrame else { continue }
                 suggestions[Key(note: take.rootNote,
-                                velocity: take.velocity)] = proposed
+                                velocity: take.velocity,
+                                articulation: take.articulation)] = proposed
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
@@ -93,11 +97,16 @@ public enum StudioAutoSamplerLooping {
         var updated = patch
         var count = 0
         for take in takes {
-            let key = Key(note: take.rootNote, velocity: take.velocity)
+            let key = Key(note: take.rootNote, velocity: take.velocity,
+                          articulation: take.articulation)
             guard let suggestion = analysis.recommendations[key] else { continue }
             guard let zoneIndex = updated.zones.indices.first(where: {
                 let zone = updated.zones[$0]
+                let expectedID = updated.articulations?.first(where: {
+                    $0.name == take.normalizedArticulation
+                })?.id
                 return zone.rootNote == take.rootNote &&
+                    zone.articulationID == expectedID &&
                     zone.lowestVelocity <= take.velocity &&
                     zone.highestVelocity >= take.velocity &&
                     zone.isReleaseTrigger != true && !zone.hasSustainLoop
