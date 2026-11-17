@@ -377,4 +377,58 @@ final class StudioSamplerNKIImporterTests: XCTestCase {
             XCTAssertEqual(name, "tone.wav")
         }
     }
+
+    func testNKIRejectsGroupStartSelectorsInsteadOfAccidentallyStackingGroups() throws {
+        let root = try temp()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let selectors = [
+            "<GroupStartOptions><CycleRoundRobin position=\"1\"/></GroupStartOptions>",
+            "<StartCriteria><StartOnController cc=\"1\" low=\"0\" high=\"63\"/></StartCriteria>",
+            "<GroupStartOptions><StartOnKey note=\"24\"/></GroupStartOptions>",
+            "<Parameters><V name=\"roundRobinIndex\" value=\"1\"/></Parameters>"
+        ]
+        for selector in selectors {
+            let xml = document(zones: [zoneXML(loop: false)])
+                .replacingOccurrences(of: "<Zones>",
+                                      with: "\(selector)\n<Zones>")
+            let source = try nki(xml, in: root)
+            XCTAssertThrowsError(try StudioSamplerNKIReader.inspect(source)) { error in
+                guard case StudioSamplerNKIReader.NKIError.unsupportedMapping(let reason)
+                    = error else {
+                    XCTFail("Expected a group-start compatibility refusal, got \(error)")
+                    return
+                }
+                XCTAssertEqual(reason, "Kontakt group-start conditions")
+            }
+        }
+    }
+
+    func testNKIRejectsDetachedZonesAndDuplicateParameters() throws {
+        let root = try temp()
+        defer { try? FileManager.default.removeItem(at: root) }
+        // Well-formed XML with a Zone outside its owning K2_Group must
+        // fail, rather than quietly producing a partial instrument map.
+        let detached = document(zones: [zoneXML(loop: false)])
+            .replacingOccurrences(of: "</Groups>",
+                                  with: "\(zoneXML(loop: false))\n</Groups>")
+        let source = try nki(detached, in: root)
+        XCTAssertThrowsError(try StudioSamplerNKIReader.inspect(source))
+
+        // A duplicate key could otherwise override an earlier zone mapping.
+        let original = "<V name=\"rootKey\" value=\"60\"/>"
+        let duplicate = "\(original)\n<V name=\"rootKey\" value=\"72\"/>"
+        let duplicated = document(zones: [zoneXML(loop: false)
+            .replacingOccurrences(of: original, with: duplicate)])
+        _ = try nki(duplicated, in: root)
+        XCTAssertThrowsError(try StudioSamplerNKIReader.inspect(source))
+
+        // Duplicate group parameters can also change the velocity range
+        // without being visible in the converted sampler's report.
+        let groupParameter = "<V name=\"highVelocity\" value=\"127\"/>"
+        let groupDuplicate = document(zones: [zoneXML(loop: false)])
+            .replacingOccurrences(of: groupParameter,
+                                  with: "\(groupParameter)\n\(groupParameter)")
+        _ = try nki(groupDuplicate, in: root)
+        XCTAssertThrowsError(try StudioSamplerNKIReader.inspect(source))
+    }
 }

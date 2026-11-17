@@ -181,6 +181,12 @@ public enum StudioSamplerNKIReader {
         guard !collector.hasScript, !collector.hasModulator else {
             throw NKIError.unsupportedMapping("Kontakt scripting or advanced modulation")
         }
+        // Kontakt group-start conditions decide which groups should play on
+        // each MIDI event. Ignoring them would turn round-robin, keyswitch or
+        // controller-selected instruments into incorrect stacked layers.
+        guard !collector.hasUnsupportedGroupStart else {
+            throw NKIError.unsupportedMapping("Kontakt group-start conditions")
+        }
         guard !collector.rawZones.isEmpty else { throw NKIError.noZones }
         guard collector.rawZones.count <= 128 else {
             throw NKIError.oversizedInstrument
@@ -312,6 +318,7 @@ public enum StudioSamplerNKIReader {
         var rawZones: [RawZone] = []
         var hasScript = false
         var hasModulator = false
+        var hasUnsupportedGroupStart = false
         private var path: [String] = []
         private var currentGroup: Int?
         private var currentZone: RawZone?
@@ -327,22 +334,79 @@ public enum StudioSamplerNKIReader {
                 programName = attributes["name"] ?? ""
             }
             if element == "K2_Group" {
+                guard currentGroup == nil, currentZone == nil else {
+                    invalid = true
+                    parser.abortParsing()
+                    return
+                }
                 currentGroup = groupSequence
                 groupNames[groupSequence] = attributes["name"] ?? "Kontakt Group"
                 groupValues[groupSequence] = [:]
                 groupSequence += 1
             }
-            if element == "Zone", let group = currentGroup {
+            if element == "Zone" {
+                // Never discard a detached Zone or merge nested zones; doing
+                // so can silently leave playable notes or recordings out.
+                guard let group = currentGroup, currentZone == nil,
+                      path.contains("K2_Program") else {
+                    invalid = true
+                    parser.abortParsing()
+                    return
+                }
                 currentZone = RawZone(groupIndex: group)
             }
-            if element == "V", let name = attributes["name"],
-               let value = attributes["value"] {
+
+            // These are *recognizers*, not guesses about the proprietary
+            // serialization of Kontakt's selectors. Reject a clearly marked
+            // rule until the corresponding NKI layout is verified by a
+            // legitimately accessible source fixture.
+            if currentGroup != nil {
+                let label = element.lowercased()
+                if ["groupstart", "startcriterion", "startcriteria",
+                    "startoption", "roundrobin", "cyclerandom",
+                    "keyswitch", "startonkey", "startoncontroller"].contains(
+                        where: { label.contains($0) }) {
+                    hasUnsupportedGroupStart = true
+                }
+            }
+            if element == "V" {
+                guard let name = attributes["name"],
+                      let value = attributes["value"] else {
+                    invalid = true
+                    parser.abortParsing()
+                    return
+                }
+                if currentGroup != nil {
+                    let key = name.lowercased()
+                    if ["groupstart", "startcriterion", "startcriteria",
+                        "startoption", "roundrobin", "cyclerandom",
+                        "keyswitch", "startonkey", "startoncontroller"].contains(
+                            where: { key.contains($0) }) {
+                        hasUnsupportedGroupStart = true
+                    }
+                }
                 if currentZone != nil {
+                    guard path.suffix(2).elementsEqual(["Zone", "V"]),
+                          currentZone!.values[name] == nil else {
+                        invalid = true
+                        parser.abortParsing()
+                        return
+                    }
                     currentZone!.values[name] = value
                 } else if path.suffix(2).elementsEqual(["Parameters", "V"]) {
                     if let group = currentGroup {
+                        guard groupValues[group]?[name] == nil else {
+                            invalid = true
+                            parser.abortParsing()
+                            return
+                        }
                         groupValues[group]?[name] = value
                     } else if programCount == 1 && path.contains("K2_Program") {
+                        guard programValues[name] == nil else {
+                            invalid = true
+                            parser.abortParsing()
+                            return
+                        }
                         programValues[name] = value
                     }
                 }
