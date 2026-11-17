@@ -1,6 +1,6 @@
 # Studio Sampler — Milestone 4.14: Legacy Kontakt group-start safety
 
-**Branch:** `feature/studio-sampler-native`  
+**Original development branch:** `feature/studio-sampler-native`
 **Status:** Code and synthetic regression fixtures committed; macOS verification pending.
 
 ## Objective
