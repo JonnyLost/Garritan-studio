@@ -106,6 +106,58 @@ final class StudioAutoSamplerReleaseCaptureTests: XCTestCase {
         XCTAssertEqual(imported.0.zones.filter { $0.isReleaseTrigger == true }.count, 1)
     }
 
+    func testHeldPlaybackStopsAtNoteOffWithoutDeletingSourceAudio() throws {
+        let source = try makeCapturedWAV(heldFrames: 22_050,
+                                         tailFrames: 11_025,
+                                         tailIsAudible: true)
+        defer { try? FileManager.default.removeItem(at: source.folder) }
+        let original = try Data(contentsOf: source.url)
+        let take = StudioSamplerFactoryTake(source: source.url,
+                                             rootNote: 60, velocity: 100)
+        let release = try StudioAutoSamplerReleaseCapture.extract(
+            from: [take], sustainSeconds: 0.5,
+            sampleRate: sampleRate, into: source.folder)
+        let patch = try StudioSamplerInstrumentFactory.assemble(
+            [take] + release.takes)
+        let separated = try StudioAutoSamplerReleaseCapture
+            .separatingHeldAndReleasePlayback(
+                in: patch, sustainSeconds: 0.5, sampleRate: sampleRate)
+        XCTAssertTrue(separated.isValid)
+        let held = try XCTUnwrap(separated.zones.first {
+            $0.isReleaseTrigger != true
+        })
+        let tail = try XCTUnwrap(separated.zones.first {
+            $0.isReleaseTrigger == true
+        })
+        XCTAssertEqual(held.trimEndFrame, 22_050)
+        XCTAssertEqual(held.fadeOutFrames, 256)
+        XCTAssertNil(tail.trimEndFrame)
+        XCTAssertEqual(try Data(contentsOf: source.url), original)
+        // Ordinary capture remains untrimmed unless explicitly separated.
+        XCTAssertNil(patch.zones.first {
+            $0.isReleaseTrigger != true
+        }?.trimEndFrame)
+    }
+
+    func testHeldTrimPreservesExistingSustainLoopMarkers() throws {
+        let source = try makeCapturedWAV(heldFrames: 44_100,
+                                         tailFrames: 11_025,
+                                         tailIsAudible: true)
+        defer { try? FileManager.default.removeItem(at: source.folder) }
+        var zone = StudioSamplerZone(sampleURL: source.url, rootNote: 60)
+        zone.loopStartFrame = 15_000
+        zone.loopEndFrame = 30_000
+        zone.loopCrossfadeFrames = 256
+        let patch = StudioSamplerPatch(zones: [zone])
+        let separated = try StudioAutoSamplerReleaseCapture
+            .separatingHeldAndReleasePlayback(
+                in: patch, sustainSeconds: 1, sampleRate: sampleRate)
+        XCTAssertTrue(separated.isValid)
+        XCTAssertEqual(separated.zones[0].trimEndFrame, 44_100)
+        XCTAssertEqual(separated.zones[0].loopEndFrame, 30_000)
+        XCTAssertEqual(separated.zones[0].loopCrossfadeFrames, 256)
+    }
+
     func testSilentNoteOffDoesNotGenerateReleaseZone() throws {
         let source = try makeCapturedWAV(heldFrames: 22_050,
                                          tailFrames: 11_025,
