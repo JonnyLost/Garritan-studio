@@ -168,3 +168,59 @@ playback still determine note-off behavior; this needs listening tests.
 
 **Pending:** loop audition, automatic trimming/disk-size reduction, release
 sample extraction, and broader expression-aware capture.
+
+## Milestone 5 — optional recorded note-off release samples
+
+Auto Sampler can now capture **natural note-off tails** as independent
+`StudioSamplerFactoryTake(releaseTrigger: true)` recordings. The Sampler's
+existing release-trigger dispatch already plays the appropriate recording
+when MIDI note-off arrives, honoring the held note's root-key, velocity
+partition and articulation. No native DSP or live audio routing was changed.
+
+**Capture workflow:** select **Capture natural note-off release samples**
+(default OFF, to avoid doubling storage). Auto Sampler continues to record
+each MIDI note through its sustain and note-off duration in a temporary WAV.
+Only after the separate offline AU engine stops, a bounded, block-by-block
+extractor copies audio starting at the **exact sample frame where note-off
+occurred** into another WAV. This preserves the source plugin's actual
+released sound rather than applying a fabricated generic decay.
+
+- Preserves mono/stereo format and the current capture sample rate.
+- Tests the early 150 ms of each release for audible energy and skips
+  effectively silent tails; noncaptured releases remain ordinary sustain
+  zones. Composer can disable the feature entirely.
+- Maps successful release takes through the existing Instrument Factory,
+  which has separate key/velocity partitions for release triggers.
+- Leaves the original complete capture WAV untouched, including any existing
+  auto-loop crossfade markers on sustain zones. Release zones have no loops.
+- The native `.studioinstrument` package includes actual release PCM,
+  without embedding the source Audio Unit binary or serialized plugin state.
+- Reports accepted and skipped release recordings in the Auto Sampler sheet.
+
+**Bounded resources:** the maximum possible zone count is 128; when release
+capture is enabled Auto Sampler refuses plans with more than 64 held
+note/velocity recordings *before* instantiating any plugin. The option is
+opt-in, so previous capture behavior is preserved for existing composers.
+Temporary release WAVs are cleaned with the capture staging directory.
+
+**Added tests:** synthetic stereo recording extraction at the exact note-off
+frame, unchanged original WAV bytes, release-zone mapping through the native
+factory, save/reopen of a self-contained Studio instrument, silence rejection,
+and preflight rejection of a potentially oversized release-enabled capture.
+
+**Caveats and acceptance gates:**
+
+1. The macOS CI build and AVFoundation XCTest suites must pass.
+2. Confirm the extracted tail audibly blends with the Studio Sampler envelope's
+   note-off fade and doesn't double natural plugin release on held notes.
+3. Test Garritan ARIA multitimbral programs and realistic note-off transients;
+   some instruments have delayed key-release noises, which an early energy
+   gate may reject. Longer source releases may require the existing
+   Release Tail duration control (up to 3 seconds).
+4. Verify release zones on percussion, pizzicato and short percussive samples
+   do not add unwanted tails.
+5. Test cancellation, disk-space errors and packaging cleanup on macOS.
+
+**Not yet included:** custom note-off articulations/legato samples, recording
+CC1/CC11 expression dimensions, round robins, hardware/real-time capture,
+batch resume, or automatic memory/disk compaction.
