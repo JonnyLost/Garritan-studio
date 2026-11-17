@@ -47,10 +47,11 @@ public enum StudioAutoSamplerExpression {
         /// 8 discrete velocity bands for a single root/microphone group.
         public func canCaptureLayers(_ layers: [UInt8],
                                      captureReleaseTails: Bool) -> Bool {
-            isValid && !layers.isEmpty && layers.count <= 8 &&
+            isValid && !layers.isEmpty &&
             Set(layers).count == layers.count &&
             layers.allSatisfy { (1...127).contains($0) } &&
             (mode != .cc1Layers || (layers.count >= 2 &&
+                                   layers.count <= 8 &&
                                    !captureReleaseTails))
         }
 
